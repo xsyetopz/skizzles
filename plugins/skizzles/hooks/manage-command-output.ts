@@ -127,8 +127,7 @@ function isRecognized(words: string[] | undefined): boolean {
 
   const [program, subcommand, third] = normalized;
 
-  if (program === "codex-container-lab") return subcommand === "run";
-  if (program === "bun" && basename(subcommand ?? "") === "codex-container-lab") return third === "run";
+  if (isContainerLabRun(normalized)) return true;
   if (program === "bun") {
     return subcommand === "test" || (subcommand === "run" && third === "test");
   }
@@ -151,6 +150,31 @@ function isRecognized(words: string[] | undefined): boolean {
     return normalized.slice(1).some(isGradleBuildOrTestTask);
   }
   return false;
+}
+
+const containerLabGlobalOptions = new Set([
+  "--owner",
+  "--state-root",
+  "--runtime-root",
+  "--db",
+]);
+
+/**
+ * Container Lab accepts a small set of global options before its command.
+ * Recognize only that exact prefix and only a literal launcher invocation;
+ * variables, substitutions, quotes, and unknown flags remain passthrough.
+ */
+function isContainerLabRun(words: string[]): boolean {
+  let index: number;
+  if (words[0] === "codex-container-lab") index = 1;
+  else if (words[0] === "bun" && basename(words[1] ?? "") === "codex-container-lab") index = 2;
+  else return false;
+
+  while (index < words.length && containerLabGlobalOptions.has(words[index]!)) {
+    if (words[index + 1] === undefined || words[index + 1]!.startsWith("--")) return false;
+    index += 2;
+  }
+  return words[index] === "run";
 }
 
 function basename(program: string): string {

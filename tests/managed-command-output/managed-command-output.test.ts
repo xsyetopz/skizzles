@@ -102,10 +102,35 @@ describe("managed command output hook", () => {
 
   test("recognizes high-value build and test commands through common launchers", () => {
     for (const command of [
-      "cargo build --workspace", "cargo +nightly test --workspace", "cargo nextest run", "cargo llvm-cov --workspace", "cargo install cargo-insta", "RUST_LOG=debug cargo clippy --workspace", "env RUST_BACKTRACE=1 cargo check", "rustup run nightly cargo test", "xcodebuild -workspace App.xcworkspace -scheme App test", "xcrun --sdk iphonesimulator xcodebuild -scheme App build", "/usr/bin/xcodebuild -scheme App build", "swift build", "xcrun swift test", "gradle build", "./gradlew :app:testDebugUnitTest --no-daemon", "./gradlew connectedDebugAndroidTest", "fvm flutter test", "bun skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
+      "cargo build --workspace", "cargo +nightly test --workspace", "cargo nextest run", "cargo llvm-cov --workspace", "cargo install cargo-insta", "RUST_LOG=debug cargo clippy --workspace", "env RUST_BACKTRACE=1 cargo check", "rustup run nightly cargo test", "xcodebuild -workspace App.xcworkspace -scheme App test", "xcrun --sdk iphonesimulator xcodebuild -scheme App build", "/usr/bin/xcodebuild -scheme App build", "swift build", "xcrun swift test", "gradle build", "./gradlew :app:testDebugUnitTest --no-daemon", "./gradlew connectedDebugAndroidTest", "fvm flutter test",
     ]) {
       const result = invoke(hook, [], { stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_input: { command } }) });
       expect(text(result.stdout), command).not.toBe("");
+    }
+  });
+
+  test("recognizes literal Container Lab launchers with supported global options before run", () => {
+    for (const command of [
+      "codex-container-lab --owner thread-1 --state-root /tmp/state --runtime-root /tmp/runtime run --lab experiment -- echo hello",
+      "/tmp/source/skills/codex-container-lab/scripts/codex-container-lab --owner thread-1 run --lab experiment -- echo hello",
+      "/tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab --db /tmp/state.sqlite run --lab experiment -- echo hello",
+      "bun /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab --owner thread-1 run --lab experiment -- echo hello",
+    ]) {
+      const result = invoke(hook, [], { stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_input: { command } }) });
+      expect(text(result.stdout), command).not.toBe("");
+    }
+  });
+
+  test("does not mistake Container Lab lookalikes or unsupported global options for attached runs", () => {
+    for (const command of [
+      "echo /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab --owner thread run",
+      "'/tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab' run --lab experiment -- echo hello",
+      "# codex-container-lab --owner thread run --lab experiment -- echo hello\necho okay",
+      "codex-container-lab --unknown value run --lab experiment -- echo hello",
+      "codex-container-lab --owner thread health",
+    ]) {
+      const result = invoke(hook, [], { stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_input: { command } }) });
+      expect(text(result.stdout), command).toBe("");
     }
   });
 

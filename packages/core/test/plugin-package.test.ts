@@ -165,6 +165,66 @@ describe("deterministic plugin packaging", () => {
     }
   });
 
+  test("exercises bundled YAML manifest configuration with a fake Docker binary", async () => {
+    const repoRoot = resolve(import.meta.dir, "../../..");
+    const root = await mkdtemp(join(tmpdir(), "skizzles-container-lab-bundle-config-"));
+    temporaryRoots.push(root);
+    const plugin = join(root, "plugin");
+    const source = join(root, "source");
+    const stateRoot = join(root, "state");
+    const runtimeRoot = join(root, "runtime");
+    const bin = join(root, "bin");
+    await stagePlugin(repoRoot, plugin);
+    await mkdir(bin);
+    await writeFile(join(bin, "docker"), `#!${process.execPath}\nconst args = process.argv.slice(2);\nif (args.includes("config")) console.log(JSON.stringify({ services: { lab: { image: "ubuntu:24.04" } } }));\nprocess.exit(0);\n`);
+    await chmod(join(bin, "docker"), 0o755);
+    await mkdir(source);
+    await writeFile(join(source, ".codex-container-lab.yaml"), "image: { name: ubuntu:24.04, service: lab }\nruntime: { workspace: /workspace, shell: [/bin/sh, -lc] }\n");
+    Bun.spawnSync(["git", "init", "-q", source]);
+    Bun.spawnSync(["git", "-C", source, "add", "."]);
+    Bun.spawnSync(["git", "-C", source, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"]);
+
+    const result = Bun.spawnSync([
+      "bun", join(plugin, "packages/codex-container-lab/cli/src/cli.ts"),
+      "--owner", "bundle-yaml", "--state-root", stateRoot, "--runtime-root", runtimeRoot,
+      "lab", "create", "--name", "yaml", "--source", source,
+    ], { stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` } });
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr.toString()).toBe("");
+    const response = JSON.parse(result.stdout.toString()) as { labId: string; state: string };
+    if (response.state !== "ready") {
+      const stateFiles = await filesUnder(stateRoot);
+      const state = await Promise.all(stateFiles.map(async (path) => `${path}: ${await readFile(join(stateRoot, path), "utf8")}`));
+      throw new Error(`bundled configuration fixture failed: ${state.join("\\n")}`);
+    }
+    expect(response).toMatchObject({ labId: expect.stringMatching(/^yaml-/), state: "ready" });
+  });
+
+  test("rejects stale Container Lab descriptor metadata before staging", async () => {
+    const root = await fixture();
+    const descriptorPath = join(root, "integrations/container-lab.json");
+    const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+    descriptor.configuredRuntime = "9.9.9";
+    await writeFile(descriptorPath, JSON.stringify(descriptor));
+
+    expect(stagePlugin(root, join(root, "stage"))).rejects.toThrow(
+      "Container Lab descriptor must match the canonical package metadata and staged plugin inputs",
+    );
+  });
+
+  test("rejects stale Container Lab provenance and canonical ownership paths before staging", async () => {
+    const root = await fixture();
+    const descriptorPath = join(root, "integrations/container-lab.json");
+    const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+    descriptor.ownership.provenanceCommit = "0000000000000000000000000000000000000000";
+    descriptor.ownership.canonicalSource = "packages/other-container-lab";
+    await writeFile(descriptorPath, JSON.stringify(descriptor));
+
+    expect(stagePlugin(root, join(root, "stage"))).rejects.toThrow(
+      "Container Lab descriptor must match the canonical package metadata and staged plugin inputs",
+    );
+  });
+
   test("rejects Finder metadata in canonical package inputs", async () => {
     const root = await fixture();
     await write(root, "skills/.DS_Store", "local metadata");
@@ -288,6 +348,7 @@ async function fixture(): Promise<string> {
     "packages/codex-container-lab/cli/src/reaper-cli.ts",
     "#!/usr/bin/env bun\nif (import.meta.main) console.log(JSON.stringify({ help: 'fixture reaper' }));\n",
   );
+  await write(root, "packages/codex-container-lab/cli/package.json", JSON.stringify({ name: "codex-container-lab", version: "0.1.0" }));
   await write(
     root,
     "packages/codex-container-lab/cli/install/com.openai.codex-container-lab-reaper.plist",
@@ -297,6 +358,29 @@ async function fixture(): Promise<string> {
   for (const document of ["architecture", "completion-contract", "installation", "manifest", "safety"]) {
     await write(root, `packages/codex-container-lab/docs/${document}.md`, `# ${document}\n`);
   }
+  await write(root, "skills/codex-container-lab/scripts/codex-container-lab", "#!/usr/bin/env bun\nconsole.log('fixture');\n");
+  await chmod(join(root, "skills/codex-container-lab/scripts/codex-container-lab"), 0o755);
+  await write(root, "integrations/container-lab.json", JSON.stringify({
+    configuredRuntime: "0.1.0",
+    ownership: {
+      runtimeOwner: "skizzles",
+      canonicalSource: "packages/codex-container-lab",
+      provenanceCommit: "fba6ce29e96b663ba4ddb16b66e12992b9e62ba0",
+    },
+    bundled: {
+      operationalEntrypoint: "packages/codex-container-lab/cli/src/cli.ts",
+      reaperEntrypoint: "packages/codex-container-lab/cli/src/reaper-cli.ts",
+      launcher: "skills/codex-container-lab/scripts/codex-container-lab",
+      launchAgentTemplate: "packages/codex-container-lab/cli/install/com.openai.codex-container-lab-reaper.plist",
+      documentation: [
+        "packages/codex-container-lab/docs/architecture.md",
+        "packages/codex-container-lab/docs/completion-contract.md",
+        "packages/codex-container-lab/docs/installation.md",
+        "packages/codex-container-lab/docs/manifest.md",
+        "packages/codex-container-lab/docs/safety.md",
+      ],
+    },
+  }));
   return root;
 }
 

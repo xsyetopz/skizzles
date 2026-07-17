@@ -4,18 +4,19 @@ Container Lab is included in Skizzles. The canonical source package is `packages
 
 ## Use the bundled launcher now
 
-From a Skizzles source checkout, use the public skill launcher without touching `PATH`:
+From a Skizzles source checkout or installed full plugin, use its resolved public skill launcher without touching `PATH`. The literal outer launcher path lets the managed-output hook recognize attached `run` commands; do not hide it behind a shell variable:
 
 ```sh
-bun skills/codex-container-lab/scripts/codex-container-lab --help
-bun skills/codex-container-lab/scripts/codex-container-lab health
+/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab --help
+/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab health
+/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab --owner thread-id --state-root /tmp/ccl-state --runtime-root /tmp/ccl-runtime run --lab lab-id -- echo hello
 ```
 
 The launcher resolves `../../../packages/codex-container-lab/cli/src/cli.ts` from the skill's scripts directory. That relative contract is identical in a source checkout and an installed plugin: source uses the canonical workspace CLI; the plugin uses its bundled, self-contained CLI. For a plugin snapshot, invoke its own `skills/codex-container-lab/scripts/codex-container-lab` file.
 
 Run `bun install --frozen-lockfile` from the Skizzles root before source development. A stable plugin does not need Bun/npm dependency installation for the bundled entrypoints.
 
-The managed-output hook recognizes the launcher’s outer `run --lab ... -- COMMAND...` invocation. Do not match or wrap the inner container argv: `run` intentionally has no JSON footer, and the normal supervisor retains long attached output.
+The managed-output hook recognizes the launcher’s outer `run --lab ... -- COMMAND...` invocation, including the supported `--owner`, `--state-root`, `--runtime-root`, and `--db` globals before `run`. Do not match or wrap the inner container argv: `run` intentionally has no JSON footer, and the normal supervisor retains long attached output.
 
 ## Optional host wiring — not in this stage
 

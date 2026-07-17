@@ -41,7 +41,7 @@ cd skizzles
 bunx skills add ./skills --skill install-skizzles
 ```
 
-The linked skill is still skill-only. From a source checkout or stable plugin, the Container Lab skill's bundled launcher works before any PATH cutover; host PATH and LaunchAgent wiring stay explicit and reversible. Full-harness development uses the isolated installer and generated plugin; keep live Codex configuration out of scope until an explicit cutover is approved.
+The linked skill is still skill-only. Its Container Lab launcher uses an existing PATH binary when available, otherwise it clearly asks for the full plugin or a source checkout. From a source checkout or stable plugin, the same launcher has bundled tooling before any PATH cutover; host PATH and LaunchAgent wiring stay explicit and reversible. Full-harness development uses the isolated installer and generated plugin; keep live Codex configuration out of scope until an explicit cutover is approved.
 
 ## Keep the loop delightful
 

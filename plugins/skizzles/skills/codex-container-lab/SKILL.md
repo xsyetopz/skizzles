@@ -5,14 +5,13 @@ description: Use Skizzles' bundled Container Lab launcher to create, run attache
 
 # Codex Container Lab
 
-Skizzles includes the complete Container Lab source project and runnable operational/reaper tooling. A stable plugin carries dependency-self-contained Bun bundles; a source checkout runs the canonical workspace package. Use the launcher bundled beside this skill as the guaranteed invocation surface, even before any `PATH` wiring exists.
+Skizzles includes the complete Container Lab source project and runnable operational/reaper tooling. A stable plugin carries dependency-self-contained Bun bundles; a source checkout runs the canonical workspace package. Use the launcher bundled beside this skill as the guaranteed invocation surface, even before any `PATH` wiring exists. A skill-only install falls back to an existing distinct `codex-container-lab` PATH binary, or explains that the full plugin/source runtime is needed.
 
-Set `launcher` to this skill directory's `scripts/codex-container-lab` file, then use it directly:
+Resolve the skill directory, then send the literal launcher path as the outer Bash command. Do not put it in a shell variable: the managed-output hook deliberately does not expand variables. Replace `/absolute/path/to` with the resolved, unquoted path from the source checkout or installed plugin:
 
 ```sh
-launcher=/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab
-"$launcher" --help
-"$launcher" health
+/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab --help
+/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab health
 ```
 
 The `codex-container-lab` PATH command is an optional host-installed convenience. Host PATH and LaunchAgent activation remain explicit, reversible wiring; see the canonical [installation and cutover guide](../../packages/codex-container-lab/docs/installation.md) from a Skizzles checkout or plugin snapshot.
@@ -21,14 +20,14 @@ Use this skill when work benefits from an isolated Linux workspace or disposable
 
 ## Safe workflow
 
-1. Confirm the consuming repository commits `.codex-container-lab.yaml` in the intended checkout or Desktop worktree. Run `"$launcher" health` to verify Docker and owner state. The CLI uses the current `CODEX_THREAD_ID` automatically.
-2. Run `"$launcher" lab create --name NAME`. Provisioning stays attached and returns a compact `{labId,state}` result after durable state reaches `ready` or `failed`.
+1. Confirm the consuming repository commits `.codex-container-lab.yaml` in the intended checkout or Desktop worktree. Run `/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab health` to verify Docker and owner state. The CLI uses the current `CODEX_THREAD_ID` automatically.
+2. Run `/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab lab create --name NAME`. Provisioning stays attached and returns a compact `{labId,state}` result after durable state reaches `ready` or `failed`.
 3. Read `findings` before running code. They report trusted-project privilege surfaces such as host binds, sockets, devices, capabilities, host namespaces, secrets, configs, and exposed ports. They are review guidance, not policy rejections.
-4. Run work with `"$launcher" run --lab ID [--cwd PATH] [--env KEY=VALUE] [--timeout-seconds N] -- COMMAND...`. Arguments after `--` are an argv, not a shell-encoded command. The CLI remains attached while output streams; Codex unified execution owns backgrounding, polling, stdin, signals, and the final exit status. Put intentional persistent services in Compose.
-5. Read bounded service output with `"$launcher" logs --lab ID --service SERVICE`. Use only service names declared by the consuming project.
-6. Finish or cancel the attached run before synchronizing. Run `"$launcher" sync preview --lab ID --direction pull` to bring a result to the host, or use `push` to refresh the lab.
-7. Resolve every reported conflict and preview again. Apply exactly the returned token with `"$launcher" sync apply --lab ID --direction DIRECTION --token TOKEN`; tokens expire, are single-use, and fail if either side changed.
-8. Validate synchronized host changes normally, then run `"$launcher" lab destroy --lab ID`. Use `lab destroy-all` to remove every lab owned by the current thread.
+4. Run work with `/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab --owner THREAD_ID --state-root /tmp/ccl-state --runtime-root /tmp/ccl-runtime run --lab ID [--cwd PATH] [--env KEY=VALUE] [--timeout-seconds N] -- COMMAND...`. Arguments after `--` are an argv, not a shell-encoded command. The CLI remains attached while output streams; Codex unified execution owns backgrounding, polling, stdin, signals, and the final exit status. Put intentional persistent services in Compose.
+5. Read bounded service output with `/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab logs --lab ID --service SERVICE`. Use only service names declared by the consuming project.
+6. Finish or cancel the attached run before synchronizing. Run `/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab sync preview --lab ID --direction pull` to bring a result to the host, or use `push` to refresh the lab.
+7. Resolve every reported conflict and preview again. Apply exactly the returned token with `/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab sync apply --lab ID --direction DIRECTION --token TOKEN`; tokens expire, are single-use, and fail if either side changed.
+8. Validate synchronized host changes normally, then run `/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab lab destroy --lab ID`. Use `lab destroy-all` to remove every lab owned by the current thread.
 
 For intentional manual use outside Codex, place `--owner THREAD_ID` before the command. Never borrow another task's id or invent a shared owner.
 
@@ -64,7 +63,7 @@ Generate patches as files under `/tmp`; do not print or copy patch bodies throug
 shared_base=$(git rev-parse HEAD)
 patch=$(mktemp /tmp/codex-container-lab.patch.XXXXXX)
 
-"$launcher" run --lab "$lab" -- \
+/absolute/path/to/skills/codex-container-lab/scripts/codex-container-lab run --lab "$lab" -- \
   git diff --binary --full-index "$shared_base" -- path/to/file > "$patch"
 
 git apply --check --3way "$patch"

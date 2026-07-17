@@ -19,6 +19,7 @@ const TEMPLATE_PATH = "packages/core/plugin-template";
 const GENERATED_PATH = `plugins/${PLUGIN_NAME}`;
 const MARKETPLACE_PATH = ".agents/plugins/marketplace.json";
 const CONTAINER_LAB_SOURCE_PATH = "packages/codex-container-lab";
+const CONTAINER_LAB_PROVENANCE = "fba6ce29e96b663ba4ddb16b66e12992b9e62ba0";
 
 const CONTAINER_LAB_ENTRYPOINTS = [
   "cli/src/cli.ts",
@@ -34,6 +35,8 @@ const CONTAINER_LAB_STATIC_INPUTS = [
   "docs/manifest.md",
   "docs/safety.md",
 ] as const;
+
+const CONTAINER_LAB_LAUNCHER = "skills/codex-container-lab/scripts/codex-container-lab";
 
 const CANONICAL_INPUTS = [
   ["skills", "skills"],
@@ -204,6 +207,7 @@ async function validateGeneratedPlugin(
   }
 
   await validateContainerLabRuntime(pluginRoot);
+  await validateContainerLabDescriptor(repoRoot, pluginRoot);
   await rejectForbiddenDistributableContent(pluginRoot);
 }
 
@@ -267,6 +271,51 @@ async function validateContainerLabRuntime(pluginRoot: string): Promise<void> {
       throw new PackagingError(`Container Lab runtime ${path} must be an executable regular file.`);
     }
   }
+}
+
+async function validateContainerLabDescriptor(repoRoot: string, pluginRoot: string): Promise<void> {
+  const descriptor = await readJsonObject(join(repoRoot, "integrations/container-lab.json"), "Container Lab descriptor");
+  const packageMetadata = await readJsonObject(
+    join(repoRoot, CONTAINER_LAB_SOURCE_PATH, "cli/package.json"),
+    "Container Lab package metadata",
+  );
+  const bundled = descriptor.bundled;
+  const ownership = descriptor.ownership;
+  const expectedDocumentation = CONTAINER_LAB_STATIC_INPUTS
+    .filter((path) => path.startsWith("docs/"))
+    .map((path) => `${CONTAINER_LAB_SOURCE_PATH}/${path}`);
+  const expected = {
+    operationalEntrypoint: `${CONTAINER_LAB_SOURCE_PATH}/cli/src/cli.ts`,
+    reaperEntrypoint: `${CONTAINER_LAB_SOURCE_PATH}/cli/src/reaper-cli.ts`,
+    launcher: CONTAINER_LAB_LAUNCHER,
+    launchAgentTemplate: `${CONTAINER_LAB_SOURCE_PATH}/cli/install/com.openai.codex-container-lab-reaper.plist`,
+  };
+
+  if (
+    descriptor.configuredRuntime !== packageMetadata.version ||
+    !isObject(ownership) || ownership.runtimeOwner !== "skizzles" || ownership.canonicalSource !== CONTAINER_LAB_SOURCE_PATH ||
+    ownership.provenanceCommit !== CONTAINER_LAB_PROVENANCE ||
+    !isObject(bundled) || Object.entries(expected).some(([key, value]) => bundled[key] !== value) ||
+    !Array.isArray(bundled.documentation) || !sameStrings(bundled.documentation, expectedDocumentation)
+  ) {
+    throw new PackagingError("Container Lab descriptor must match the canonical package metadata and staged plugin inputs.");
+  }
+
+  for (const path of [
+    expected.operationalEntrypoint,
+    expected.reaperEntrypoint,
+    expected.launcher,
+    expected.launchAgentTemplate,
+    ...expectedDocumentation,
+  ]) {
+    if (!(await exists(join(repoRoot, path))) || !(await exists(join(pluginRoot, path)))) {
+      throw new PackagingError(`Container Lab descriptor path is not a canonical and staged input: ${path}.`);
+    }
+  }
+}
+
+function sameStrings(actual: unknown[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && actual.every((value, index) => value === expected[index]);
 }
 
 async function validateManifest(manifest: Record<string, unknown>, pluginRoot: string): Promise<void> {

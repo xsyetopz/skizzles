@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -53,6 +53,36 @@ describe("Container Lab bundled launcher", () => {
     expect(staged.exitCode).toBe(0);
     expect(typeof (JSON.parse(staged.stdout) as { help?: unknown }).help).toBe("string");
   });
+
+  test("uses a distinct PATH binary from a skill-only install without recursing", async () => {
+    const root = temporaryRoot();
+    const launcher = skillOnlyLauncher(root);
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    symlinkSync(launcher, join(bin, "codex-container-lab"));
+    const fallback = join(root, "fallback", "codex-container-lab");
+    mkdirSync(dirname(fallback), { recursive: true });
+    writeFileSync(fallback, `#!${process.execPath}\nconsole.log(JSON.stringify({ fallback: true, args: process.argv.slice(2) }));\n`);
+    chmodSync(fallback, 0o755);
+
+    const result = await invoke(launcher, ["run", "--lab", "demo", "--", "echo", "hello"], undefined, {
+      PATH: `${bin}:${dirname(fallback)}:${process.env.PATH ?? ""}`,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ fallback: true, args: ["run", "--lab", "demo", "--", "echo", "hello"] });
+    expect(result.stderr).toBe("");
+  });
+
+  test("explains the missing runtime for a skill-only install", async () => {
+    const root = temporaryRoot();
+    const launcher = skillOnlyLauncher(root);
+    const result = await invoke(launcher, ["health"], undefined, { PATH: join(root, "empty") });
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("skill-only install contains guidance");
+    expect(result.stderr).toContain("full Skizzles plugin");
+    expect(result.stderr).not.toContain("module");
+  });
 });
 
 function fixtureTarget(body: string): string {
@@ -68,8 +98,16 @@ function fixtureTarget(body: string): string {
   return launcher;
 }
 
+function skillOnlyLauncher(root: string): string {
+  const launcher = join(root, "skills/codex-container-lab/scripts/codex-container-lab");
+  mkdirSync(dirname(launcher), { recursive: true });
+  writeFileSync(launcher, readFileSync(canonicalLauncher));
+  chmodSync(launcher, 0o755);
+  return launcher;
+}
+
 async function invoke(path: string, args: string[], stdin?: string, environment: Record<string, string> = {}) {
-  const child = Bun.spawn(["bun", path, ...args], {
+  const child = Bun.spawn([process.execPath, path, ...args], {
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",

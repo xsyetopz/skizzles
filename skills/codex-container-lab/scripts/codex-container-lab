@@ -1,15 +1,48 @@
 #!/usr/bin/env bun
 
-import { resolve } from "node:path";
+import { accessSync, constants, lstatSync, realpathSync } from "node:fs";
+import { delimiter, resolve } from "node:path";
 
 const entrypoint = resolve(import.meta.dir, "../../../packages/codex-container-lab/cli/src/cli.ts");
+const launcherPath = realpathSync(import.meta.path);
 
 /**
  * Runs the canonical source CLI from a checkout or the dependency-self-contained
  * bundled CLI from the same relative location in a staged plugin.
  */
+function bundledRuntime(): string | undefined {
+  try {
+    return lstatSync(entrypoint).isFile() ? entrypoint : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function pathBinary(): string | undefined {
+  for (const directory of (process.env.PATH ?? "").split(delimiter)) {
+    if (!directory) continue;
+    const candidate = resolve(directory, "codex-container-lab");
+    try {
+      accessSync(candidate, constants.X_OK);
+      if (realpathSync(candidate) !== launcherPath) return candidate;
+    } catch {}
+  }
+}
+
+function command(): string[] | undefined {
+  const runtime = bundledRuntime();
+  if (runtime) return [process.execPath, runtime];
+  const binary = pathBinary();
+  return binary ? [binary] : undefined;
+}
+
 export async function runContainerLab(args = process.argv.slice(2)): Promise<number> {
-  const child = Bun.spawn([process.execPath, entrypoint, ...args], {
+  const resolvedCommand = command();
+  if (!resolvedCommand) {
+    console.error("Skizzles Container Lab runtime is unavailable: a skill-only install contains guidance. Install the full Skizzles plugin or use a Skizzles checkout, or install a codex-container-lab PATH binary.");
+    return 1;
+  }
+  const child = Bun.spawn([...resolvedCommand, ...args], {
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",
