@@ -58,6 +58,14 @@ Read the canonical [Container Lab installation and optional host-wiring guide](.
 
 An installed bundle with an unavailable Docker daemon is `installed-not-ready`, not proof that Container Lab is broken. The configured `0.1.0` compatibility is unverified until a release fingerprint is supplied.
 
+## Enable the optional Luna V2 catalog
+
+Skizzles includes `runtime/model-catalog.ts` and `assets/com.openai.skizzles-model-catalog.plist` for owners who have independently verified Luna with MultiAgentV2. This is explicit host wiring, not part of ordinary skill/plugin installation.
+
+Read `assets/model-catalog-installation.md` from the selected source checkout or plugin snapshot. The generator preserves the full upstream model catalog and changes only `gpt-5.6-luna.multi_agent_version` from `v1` to `v2`. It never reads or copies credentials. It accepts only a fresh, version-matched, complete `CODEX_HOME/models_cache.json`, otherwise uses the selected Codex binary's bundled catalog, and preflights the result through that binary before promotion.
+
+Render and validate the LaunchAgent before loading it, then set the global `model_catalog_json` to the generated absolute path. A generated catalog is applied only at app-server startup; restart app-server after a refresh reports `catalogChanged: true`. The status `generation` is the stable catalog identity, while `catalogChanged` describes only its most recent refresh. Do not restart Desktop or app-server automatically while tasks are active. If upstream already marks Luna V2, the overlay reports `upstream-v2` and leaves that field unchanged.
+
 ## Finish on a new task
 
 Tell the user what was installed, whether it was linked or copied, and where the receipt lives. Start a new Codex task after install or update so the selected skills and hooks are discovered cleanly; never claim the current task hot-reloaded them.

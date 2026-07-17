@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.openai.skizzles-model-catalog</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BUN_ABSOLUTE_PATH__</string>
+    <string>__SCRIPT_ABSOLUTE_PATH__</string>
+    <string>service</string>
+    <string>--codex-home</string>
+    <string>__CODEX_HOME_ABSOLUTE_PATH__</string>
+    <string>--codex-binary</string>
+    <string>__CODEX_BINARY_ABSOLUTE_PATH__</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>300</integer>
+  <key>WatchPaths</key>
+  <array>
+    <string>__MODELS_CACHE_ABSOLUTE_PATH__</string>
+    <string>__CODEX_BINARY_ABSOLUTE_PATH__</string>
+  </array>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+  <key>Umask</key>
+  <integer>63</integer>
+  <key>StandardOutPath</key>
+  <string>/dev/null</string>
+  <key>StandardErrorPath</key>
+  <string>/dev/null</string>
+</dict>
+</plist>

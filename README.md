@@ -10,6 +10,7 @@ Skizzles is a friendly, reviewable Codex harness: reusable skills, helpful hooks
 - **Fourth Wall orchestration** — guarded multi-agent dispatch with explicit roles, contracts, and follow-up boundaries.
 - **Usage analyzer** — privacy-conscious, read-only rollout analysis using an explicit `CODEX_HOME`.
 - **Container Lab, batteries included** — a skill, full canonical source project, bundled CLI/reaper, compatibility descriptor, and safe doctor boundary for disposable Docker Compose labs. 🔬
+- **Luna joins the V2 party** — an opt-in model-catalog overlay and tiny launchd refresher preserve the official catalog while enabling proven Luna workers in native MultiAgentV2. 🌙
 - **A practical skill shelf** — auth semantics, Cargo optimization, completion contracts, counterfactual engineering, design proof gates, legacy cleanup, Rinf boundaries, project tooling, and a gated designer runtime.
 - **Installation help** — the public `install-skizzles` skill guides an LLM through optional host wiring after a skill-only install.
 
@@ -42,6 +43,8 @@ bunx skills add ./skills --skill install-skizzles
 ```
 
 Container Lab is fully included in this repository—not merely documented here. A source-linked installation runs the canonical CLI and reaper directly from the checkout, while the stable plugin carries dependency-self-contained bundles. If you install only a copied skill, `install-skizzles` guides Codex through obtaining a selected Skizzles version and installing the complete surface; the launcher can also use an existing `codex-container-lab` PATH command. Host PATH and LaunchAgent wiring are optional, explicit, reversible, and machine-local. Full-harness development uses the isolated installer and generated plugin; keep live Codex configuration outside ordinary repository setup.
+
+The optional Luna V2 overlay lives in `runtime/model-catalog.ts`. It regenerates a complete static catalog from the newest valid normal cache or the installed Codex binary, changes only Luna's compatibility marker, and becomes a no-op when upstream enables V2 officially. Its launchd template watches both sources and runs every five minutes; catalog changes take effect after the next app-server restart. See `assets/model-catalog-installation.md` before activating it. 🚀
 
 ## Keep the loop delightful
 
