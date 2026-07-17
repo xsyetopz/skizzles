@@ -35,17 +35,6 @@ describe("deterministic plugin packaging", () => {
       hooks: {
         PreToolUse: [
           {
-            matcher: "spawn_agent|collaboration.spawn_agent|followup_task|collaboration.followup_task",
-            hooks: [
-              {
-                type: "command",
-                command: 'bun "${PLUGIN_ROOT}/hooks/guard-agent-spawn.ts"',
-                timeout: 5,
-                statusMessage: "checking subagent dispatch and lifecycle policy",
-              },
-            ],
-          },
-          {
             matcher: "Bash",
             hooks: [
               {
@@ -53,18 +42,6 @@ describe("deterministic plugin packaging", () => {
                 command: 'bun "${PLUGIN_ROOT}/hooks/manage-command-output.ts"',
                 timeout: 3,
                 statusMessage: "checking command output management",
-              },
-            ],
-          },
-        ],
-        SubagentStart: [
-          {
-            hooks: [
-              {
-                type: "command",
-                command: 'bun "${PLUGIN_ROOT}/hooks/guard-agent-spawn.ts"',
-                timeout: 5,
-                statusMessage: "applying subagent ownership and delegation policy",
               },
             ],
           },

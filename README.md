@@ -7,7 +7,7 @@ Skizzles is a friendly, reviewable Codex harness: reusable skills, helpful hooks
 ## What’s inside
 
 - **Command-output management** — classifies useful build/test commands, keeps output bounded, and leaves a useful artifact when a command gets noisy.
-- **Fourth Wall orchestration** — guarded multi-agent dispatch with explicit roles, contracts, and follow-up boundaries.
+- **Fourth Wall orchestration** — native multi-agent dispatch with explicit roles, capability routing, useful context forks, and reusable specialist tasks.
 - **Usage analyzer** — privacy-conscious, read-only rollout analysis using an explicit `CODEX_HOME`.
 - **Container Lab, batteries included** — a skill, full canonical source project, bundled CLI/reaper, compatibility descriptor, and safe doctor boundary for disposable Docker Compose labs. 🔬
 - **Luna joins the V2 party** — an opt-in model-catalog overlay and tiny launchd refresher preserve the official catalog while enabling proven Luna workers in native MultiAgentV2. 🌙

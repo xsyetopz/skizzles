@@ -32,7 +32,7 @@ probation state, and last independently accepted route.
 
 Do not include motivational framing, a chronological transcript, stable base instructions, or facts the successor can cheaply inspect.
 
-For a long root task, store this packet under `/tmp` and pass its path to fresh children together with a compact slice-specific assignment. Update it at ownership transfers, material routing changes, and acceptance checkpoints. Do not automate encrypted spawn-message rewriting or continuously append command output; hooks should enforce observable routing and graph safety only.
+For a long root task, store this packet under `/tmp` and pass its path to children together with a compact slice-specific assignment or follow-up. Update it at ownership transfers, material routing changes, and acceptance checkpoints. Do not automate encrypted spawn-message rewriting or continuously append command output.
 
 ## Worker Or Specialist Handoff
 
@@ -46,9 +46,9 @@ Use a parent-mediated sibling replacement so the root preserves the task graph a
 
 Prefer no-history forks. Quote the relevant completed decisions in the handoff packet or point to a durable artifact instead of relying on inherited execution history.
 
-## Replacement, Not Reactivation
+## Reactivation Or Replacement
 
-Treat a completed child as terminal. Reusing an unloaded task can replace its original model and reasoning settings with the caller's settings. Preserve useful context in the packet and spawn a fresh sibling at the same route, or one route higher when the earlier attempt exposed greater complexity.
+Use `followup_task` when a completed child remains the right owner and its accumulated context reduces rediscovery; current native MultiAgentV2 preserves its original model and reasoning settings. Spawn a fresh sibling when the next action benefits from independent judgment, a clean context, changed ownership, or a higher route. Preserve reusable state in the packet either way.
 
 ## Root Handoff Limitation
 

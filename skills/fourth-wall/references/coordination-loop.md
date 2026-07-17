@@ -6,8 +6,8 @@
 | --- | --- | --- |
 | `spawn_agent` | Create bounded work | Use `<role>__<objective>`, pass explicit model/effort, and choose the smallest useful `fork_turns` value. Below the root, only eligible Workers may dispatch one active bounded Worker. |
 | `list_agents` | Inspect the live tree | Can filter by task-path prefix. Use before intervention or reassignment. |
-| `send_message` | Deliver context or a correction to running work | Queues the message and does not trigger a new turn. Do not target completed children. |
-| `followup_task` | Reserved | The global hook blocks it because reloading a completed child can lose its model/effort assignment. Spawn a replacement. |
+| `send_message` | Deliver context or a correction to running work | Queues the message and does not trigger a new turn. |
+| `followup_task` | Continue prior ownership | Reactivates an idle or completed child while preserving its task identity, model, reasoning effort, and accumulated context. |
 | `wait_agent` | Synchronize on activity | Waits for any mailbox update, user steering, or timeout. It is an event wait, not a status dump. |
 | `interrupt_agent` | Stop current work | Leaves the task available for later messages and follow-up work. Cannot interrupt self or root. |
 
@@ -16,7 +16,7 @@
 1. Inspect the task graph with `list_agents` only at meaningful coordination points.
 2. Compare active ownership and status with the overall outcome.
 3. Use `send_message` for information the target should receive without waking it.
-4. Spawn a fresh replacement when completed work needs another concrete action; include the prior evidence and ownership boundary.
+4. Use `followup_task` when completed work needs another concrete action from the same owner. Spawn a fresh sibling when clean context, independence, changed ownership, or a different route is valuable.
 5. Continue high-leverage root decisions and integration inspection instead of duplicating child work.
 6. Use `wait_agent` only when mailbox activity is the next useful synchronization point. Prefer one appropriately long bounded wait over repeated short waits, and do not poll merely to narrate progress.
 7. Verify returned evidence before accepting or routing the result.
@@ -56,7 +56,7 @@ The root retains Git mutations, resolves cross-owner decisions, inspects the ret
 1. Worker returns its completion claim and evidence.
 2. Root inspects the diff and selects the relevant proof obligations.
 3. Spawn a `review` task for adversarial source/build/security/dead-code review, or `qa` for runnable product proof. Implementation-time QA proof complements rather than replaces a later independent product QA handoff.
-4. On failure, spawn a fresh Worker with the exact findings and relevant prior evidence.
+4. On failure, reactivate the owning Worker for a coherent correction or spawn a fresh Worker when independence, context reset, or escalation is useful.
 5. Re-review the corrected state when the risk warrants it.
 6. The root integrates and decides completion; the reviewer does not silently broaden scope or relax the owner outcome.
 
@@ -67,7 +67,7 @@ When orchestration drifts:
 1. `list_agents` and reconstruct owner, status, dependency, and next action for each live path.
 2. Resolve overlapping ownership before more edits land.
 3. Queue nonurgent corrections with `send_message`.
-4. Replace an idle or completed task that needs more work; do not reactivate it.
+4. Reactivate an idle or completed task when its role and ownership still fit; otherwise prepare a fresh replacement.
 5. Interrupt only obsolete, unsafe, or irreconcilably overlapping work.
 6. Spawn a replacement only after its role, handoff packet, and ownership boundary are ready.
 

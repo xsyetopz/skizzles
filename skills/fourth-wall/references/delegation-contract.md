@@ -43,7 +43,7 @@ A depth-1 Terra/Sol Worker may dispatch at most one active bounded Worker when a
 - The slice is small, disjoint from the parent's continuing edits, and comfortably short-context.
 - The child owns inspection, implementation, focused validation, in-scope fixes, and completion evidence together.
 - The parent has genuinely independent implementation to continue while the child works.
-- The child uses `fork_turns = "none"`, remains a leaf, and is retired after delivery.
+- The child uses `fork_turns = "none"`, remains a leaf, and may be reactivated only for coherent follow-on work within the same ownership boundary.
 
 Do not create a command runner by another name. If the parent must interpret every result or modify the same surface before validation is meaningful, keep that loop with the parent. Non-Worker roles return delegation proposals to the root.
 
@@ -84,6 +84,6 @@ Require the task to report:
 
 The root verifies this claim before integration or completion.
 
-Completion retires the child. Corrections after completion go to a fresh task with a compact handoff, normally at the same route for a narrow correction or one route higher when the prior attempt exposed greater complexity.
+Completion releases active ownership but does not destroy the child. Use `followup_task` for a narrow correction or coherent next action by the same owner. Use a fresh task with a compact handoff when independent judgment, context reset, changed ownership, or a higher route is more valuable.
 
 When a durable `/tmp` task packet exists, pass its path rather than repeating stable cross-task context. The spawn message must still contain the child's selected route, role, concrete objective, ownership, constraints, and expected proof so the packet supplements rather than hides the assignment. Do not put secrets, raw transcripts, or unbounded build logs in the packet.
