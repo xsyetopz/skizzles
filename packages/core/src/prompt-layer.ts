@@ -391,7 +391,7 @@ export async function rebasePrompt(
         replay = `old patch strict replay failed: ${errorMessage(error)}`;
       }
       throw new PromptLayerError(
-        `Fetched baseline ${sha256(baseline)} at ${commit}; ${replay}. No files were changed; review the fetched baseline and replay with --candidate <path>.`,
+        `Fetched baseline ${sha256(baseline)} at ${commit}; ${replay}. The newly fetched inputs were not applied. Recovery of a valid prior interrupted transaction and mutation-lock cleanup may have occurred; review the fetched baseline and replay with --candidate <path>.`,
       );
     }
 

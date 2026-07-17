@@ -32,7 +32,9 @@ const MACHINE_PATH =
 const PATCH_NEW_IDENTITY = /\.\.[0-9a-f]{40} 100644/;
 const PROVENANCE_ERROR = /provenance/i;
 const FAILED_OLD_REPLAY =
-  /old patch strict replay failed.*No files were changed/;
+  /old patch strict replay failed.*newly fetched inputs were not applied/i;
+const REBASE_PROBE_DIAGNOSTIC =
+  /newly fetched inputs were not applied.*Recovery of a valid prior interrupted transaction and mutation-lock cleanup may have occurred/i;
 const SYMLINK_ERROR = /symlink/i;
 const LIVE_PID_ERROR = /live pid/i;
 const ACTIVE_MUTATION_ERROR = /mutation is active/i;
@@ -530,7 +532,7 @@ describe("pinned Codex prompt layer", () => {
     };
     const before = await snapshot(root);
     await expect(rebasePrompt(root, commit, { fetcher })).rejects.toThrow(
-      "No files were changed",
+      REBASE_PROBE_DIAGNOSTIC,
     );
     expect(await snapshot(root)).toEqual(before);
     expect(fetched.sort()).toEqual(
@@ -555,6 +557,38 @@ describe("pinned Codex prompt layer", () => {
     expect(
       await readFile(join(root, "instructions/skizzles-base.md"), "utf8"),
     ).toContain(commit);
+  });
+
+  test("reports no-candidate rebase scope honestly after prior recovery", async () => {
+    const root = await fixture();
+    const candidatePath = await changedCandidate(root, "rebase recovery");
+    const beforeInterruptedAuthor = await snapshot(root);
+    await expect(
+      authorPromptPatch(root, candidatePath, {
+        transactionFault: { promotionIndex: 3, simulateCrash: true },
+      }),
+    ).rejects.toThrow("Simulated transaction crash");
+    expect(
+      await pathExistsForTest(
+        join(root, "packages/core/prompt-layer/.transaction/journal.json"),
+      ),
+    ).toBe(true);
+
+    const commit = "9".repeat(40);
+    const baseline = await readFile(
+      join(root, "packages/core/prompt-layer/upstream/default.md"),
+    );
+    await expect(
+      rebasePrompt(root, commit, {
+        fetcher: fixtureFetcher(root, baseline),
+      }),
+    ).rejects.toThrow(REBASE_PROBE_DIAGNOSTIC);
+
+    expect(await snapshot(root)).toEqual(beforeInterruptedAuthor);
+    const manifest = (await Bun.file(
+      join(root, "packages/core/prompt-layer/manifest.json"),
+    ).json()) as ManifestFixture;
+    expect(manifest.upstream.commit).toBe(currentCommit());
   });
 
   test("rebases a reviewed candidate when the old patch fails on a changed baseline", async () => {

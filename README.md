@@ -63,6 +63,10 @@ bun install --frozen-lockfile
 bun run verify
 ```
 
+Maintainers working on the Codex base-instruction derivation should read the
+[prompt-layer architecture](docs/prompt-layer-architecture.md) before changing
+its pinned baseline, patch, or generated artifacts.
+
 Plugins and new tasks use cached, versioned content, so start a fresh task after an update. For ownership, release rules, and safety details, see [AGENTS.md](AGENTS.md).
 
 > **Pre-release note:** the Git-based examples become runnable once the repository and a versioned release are published. Stable marketplace publication remains a separate release step; host wiring is optional machine-local setup.
