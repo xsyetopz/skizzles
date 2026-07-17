@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  watch,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -45,16 +46,17 @@ describe("Container Lab bundled launcher", () => {
     });
 
     const waiting = fixtureTarget(
-      "process.on('SIGTERM', () => { console.log('terminated'); process.exit(143); }); setInterval(() => {}, 1_000);",
+      "process.on('SIGTERM', () => { console.log('terminated'); process.exit(143); }); await Bun.write(process.env.FIXTURE_READY_PATH!, 'ready'); setInterval(() => {}, 1_000);",
     );
+    const readinessPath = join(dirname(waiting), "fixture-ready");
     const child = Bun.spawn(["bun", waiting], {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env },
+      env: { ...process.env, FIXTURE_READY_PATH: readinessPath },
     });
     child.stdin.end();
-    await Bun.sleep(50);
+    await waitForArtifact(readinessPath, child.exited);
     child.kill("SIGTERM");
     const [exitCode, stdout, stderr] = await Promise.all([
       child.exited,
@@ -64,6 +66,22 @@ describe("Container Lab bundled launcher", () => {
     expect(exitCode).toBe(143);
     expect(stdout).toContain("terminated");
     expect(stderr).toBe("");
+  });
+
+  test("rejects readiness when the inner fixture exits before signaling", async () => {
+    const failing = fixtureTarget("process.exit(17);");
+    const readinessPath = join(dirname(failing), "fixture-ready");
+    const child = Bun.spawn(["bun", failing], {
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+      env: { ...process.env, FIXTURE_READY_PATH: readinessPath },
+    });
+
+    await expect(waitForArtifact(readinessPath, child.exited)).rejects.toThrow(
+      "launcher exited before fixture readiness: 17",
+    );
+    expect(await child.exited).toBe(17);
   });
 
   test("resolves the canonical and copied-plugin runtime without node_modules", async () => {
@@ -186,4 +204,35 @@ function temporaryRoot(): string {
   const root = mkdtempSync(join(tmpdir(), "skizzles-container-lab-launcher-"));
   temporaryRoots.push(root);
   return root;
+}
+
+function waitForArtifact(path: string, exited: Promise<number>): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let observer: ReturnType<typeof watch> | undefined;
+    const settle = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      observer?.close();
+      if (error === undefined) resolve();
+      else reject(error);
+    };
+    try {
+      observer = watch(dirname(path), () => {
+        if (existsSync(path)) settle();
+      });
+      observer.on("error", settle);
+    } catch (error) {
+      settle(error);
+      return;
+    }
+    void exited.then((exitCode) => {
+      if (existsSync(path)) settle();
+      else
+        settle(
+          new Error(`launcher exited before fixture readiness: ${exitCode}`),
+        );
+    }, settle);
+    if (existsSync(path)) settle();
+  });
 }

@@ -40,6 +40,8 @@ class RecordingDocker implements DockerRunner {
   runCalls: Array<{ args: string[]; options?: RunOptions }> = [];
   spawnCalls: Array<{ args: string[]; options?: DockerSpawnOptions }> = [];
   child?: ChildProcessWithoutNullStreams;
+  private readonly childSpawned =
+    Promise.withResolvers<ChildProcessWithoutNullStreams>();
   model: unknown = { services: { dev: {} } };
   // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
   async run(args: string[], options?: RunOptions): Promise<CommandResult> {
@@ -71,7 +73,12 @@ class RecordingDocker implements DockerRunner {
       exitCode: null,
     });
     this.child = child;
+    this.childSpawned.resolve(child);
     return child;
+  }
+
+  async waitForChildSpawn(): Promise<ChildProcessWithoutNullStreams> {
+    return await this.childSpawned.promise;
   }
 }
 
@@ -475,19 +482,18 @@ describe("attached service lifecycle", () => {
         stdin: input,
       },
     );
-    await Bun.sleep(5);
-    docker.child!.stdin.on("data", (chunk) => {
+    const child = await docker.waitForChildSpawn();
+    child.stdin.on("data", (chunk) => {
       stdin += chunk;
     });
     input.write("interactive-input\n");
-    (docker.child!.stdout as PassThrough).write("early\n");
-    (docker.child!.stderr as PassThrough).write("warning\n");
-    await Bun.sleep(5);
+    (child.stdout as PassThrough).write("early\n");
+    (child.stderr as PassThrough).write("warning\n");
     expect(stdout).toBe("early\n");
     expect(stderr).toBe("warning\n");
     expect(stdin).toBe("interactive-input\n");
-    Object.assign(docker.child!, { exitCode: 23 });
-    docker.child!.emit("close", 23);
+    Object.assign(child, { exitCode: 23 });
+    child.emit("close", 23);
     expect(await running).toBe(23);
     expect(docker.calls.find((call) => call.includes("exec"))).toContain(
       "hello world",
@@ -529,7 +535,7 @@ describe("attached service lifecycle", () => {
       stdout: () => undefined,
       stderr: () => undefined,
     });
-    await Bun.sleep(5);
+    await docker.waitForChildSpawn();
     expect(await service.destroyLab(fixture.lab.id)).toEqual({
       labId: fixture.lab.id,
       destroyed: true,
