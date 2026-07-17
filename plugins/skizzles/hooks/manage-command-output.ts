@@ -234,6 +234,7 @@ function normalizeCommand(command: SimpleCommand): SimpleCommand | undefined {
         continue;
       }
       if (word.startsWith("--unset=") || word.startsWith("--chdir=")) {
+        if (word.endsWith("=")) return undefined;
         index += 1;
         continue;
       }

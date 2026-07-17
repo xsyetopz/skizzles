@@ -119,6 +119,10 @@ describe("managed command output hook", () => {
       "env -i A=1 /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
       "env -u FOO A=1 /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
       "env -C ./tmp A=1 /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
+      "env --unset=FOO A=1 /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
+      "env --chdir=./tmp A=1 /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
+      "A= /tmp/source/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
+      "env A= /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
     ]) {
       const result = invoke(hook, [], { stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_input: { command } }) });
       expect(text(result.stdout), command).not.toBe("");
@@ -144,6 +148,8 @@ describe("managed command output hook", () => {
       "env \"-i\" A=1 codex-container-lab run --lab experiment -- echo hello",
       "env -u \"FOO\" A=1 codex-container-lab run --lab experiment -- echo hello",
       "env -C \"./tmp\" A=1 codex-container-lab run --lab experiment -- echo hello",
+      "env --unset= A=1 codex-container-lab run --lab experiment -- echo hello",
+      "env --chdir= A=1 codex-container-lab run --lab experiment -- echo hello",
       "codex-container-lab --owner thread health",
     ]) {
       const result = invoke(hook, [], { stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_input: { command } }) });
