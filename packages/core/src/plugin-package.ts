@@ -23,6 +23,7 @@ const CANONICAL_INPUTS = [
   ["hooks", "hooks"],
   ["scripts", "scripts"],
   ["runtime", "runtime"],
+  ["integrations", "integrations"],
   ["assets", "assets"],
 ] as const;
 
