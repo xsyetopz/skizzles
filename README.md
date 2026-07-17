@@ -1,34 +1,39 @@
-# Skizzles
+# Skizzles ✨
 
 ![Skizzles logo](assets/logo.png)
 
-**A neat little harness for making Codex work feel less like re-packing a suitcase.** Skizzles keeps reusable skills, optional hooks, runtime helpers, and release tooling in one reviewable source tree.
+Skizzles is a friendly, reviewable Codex harness: reusable skills, helpful hooks, tiny runtime tools, and release packaging in one canonical source tree. It turns the fiddly parts of agent work into a tidy little toolkit. 🧰
 
-> **Pre-release:** this checkout is the canonical source and packaging project. No public Git remote or tagged stable release is configured yet, so the public install commands below become executable only after the repository and a versioned release are published.
+## What’s inside
 
-## Choose your ride
+- **Command-output management** — classifies useful build/test commands, keeps output bounded, and leaves a useful artifact when a command gets noisy.
+- **Fourth Wall orchestration** — guarded multi-agent dispatch with explicit roles, contracts, and follow-up boundaries.
+- **Usage analyzer** — privacy-conscious, read-only rollout analysis using an explicit `CODEX_HOME`.
+- **Container Lab integration** — a skill and compatibility doctor for the external `codex-container-lab` runtime. Skizzles documents and checks that boundary; it does not vendor or manage the runtime.
+- **A practical skill shelf** — auth semantics, Cargo optimization, completion contracts, counterfactual engineering, design proof gates, legacy cleanup, Rinf boundaries, project tooling, and a gated designer runtime.
+- **Installation help** — the public `install-skizzles` skill guides an LLM through optional host wiring after a skill-only install.
 
-### Stable distribution: the versioned plugin
+Everything is maintained once in the canonical roots (`skills/`, `hooks/`, `runtime/`, `scripts/`) and staged into a versioned plugin. No hand-maintained duplicate implementations. 🎯
 
-The stable distribution is the versioned `skizzles` plugin. It bundles the skills, hooks, runtime helpers, logo, and marketplace metadata as one compatible release. The generated plugin at `plugins/skizzles/` is an output: build it from a tagged source checkout, never hand-edit it.
+## Pick your ride
 
-Install stable releases through the supported Codex plugin/marketplace flow for the release you selected. A plugin installation may enable its bundled hooks; review the release and trust it before enabling project tooling.
+### Stable plugin
 
-Skizzles does not modify an existing Codex installation, `PATH`, launchd, or another live plugin as part of development or packaging. Live cutover is a separate, explicit, human-approved operation.
+Use the official Codex marketplace/plugin flow to install a released `skizzles` plugin. The plugin packages the skills, hooks, runtime helpers, branding, and marketplace metadata together.
 
-### Plain skills: pick exactly what you need
+### Individual skills
 
-After publication, use the Skills CLI when you want a single skill without the plugin runtime:
+After this repository is published, install just the skills you want with the Skills CLI:
 
 ```sh
 bunx skills add https://github.com/robertsale/skizzles --skill install-skizzles
 ```
 
-Add more `--skill <name>` flags to select individual skills, or omit `--skill` to choose interactively. The installer can link a canonical copy for easy updates; use a copy only when links are unsuitable. Plain-skill installs **do not install Skizzles hooks, runtime helpers, or live configuration**.
+Add `--skill <name>` for another public skill, or omit it to choose interactively. Skill-only installs do not activate Skizzles hooks or runtime helpers; [install-skizzles](skills/install-skizzles/SKILL.md) explains the optional next steps.
 
-### Develop against the source tree
+### Source-linked development
 
-From an owner-provided checkout (or from the public repository after publication), point the Skills CLI at the local canonical `skills/` directory and choose its symlink option:
+For maintainer work, use a local checkout and point the Skills CLI at its canonical `skills/` directory:
 
 ```sh
 git clone https://github.com/robertsale/skizzles.git
@@ -36,25 +41,17 @@ cd skizzles
 bunx skills add ./skills --skill install-skizzles
 ```
 
-`install-skizzles` is the LLM-facing, optional host-wiring guide. That source link is still a skill-only install and does not activate hooks or runtime helpers. The repo-local `package-skizzles` and `release-skizzles` skills are maintainer guidance, not public skill-install targets.
+The linked skill is still skill-only. Full-harness development uses the isolated installer and generated plugin; keep live Codex configuration out of scope until an explicit cutover is approved.
 
-Full-harness development is a separate, deliberate linked/copied installer mode for the versioned plugin. It may expose the plugin's hooks and runtime in an isolated target, so keep it out of live configuration until an explicit cutover is approved. Before sharing a plugin build, run:
+## Keep the loop delightful
+
+Build and verify the generated plugin from source with:
 
 ```sh
 bun install --frozen-lockfile
 bun run verify
 ```
 
-`bun run plugin:build` stages the plugin deterministically, and `bun run plugin:check` proves that the checked-in generated plugin still matches the canonical source and passes the local plugin checks.
+Plugins and new tasks use cached, versioned content, so start a fresh task after an update. For ownership, release rules, and safety details, see [AGENTS.md](AGENTS.md).
 
-## What stays outside
-
-Container Lab is an external runtime project. Skizzles may document compatibility, wrap its use in a skill, and diagnose it, but it never vendors, relocates, starts, or updates Container Lab. Its release tag/SHA and any runtime cutover must be chosen separately.
-
-## Updating and starting fresh tasks
-
-Plugins and new tasks intentionally use cached, versioned content. After installing or updating Skizzles, start a **new task** to pick up the selected version cleanly; do not expect an already-running task to reload skills or hooks. Keep a task on the version it started with, then update deliberately between tasks.
-
-## Maintainers
-
-Read [AGENTS.md](AGENTS.md) for source ownership, generated-file discipline, validation, Finder metadata, and checkpoint rules. The portable policy at [profiles/AGENTS.md](profiles/AGENTS.md) is opt-in; it is not copied or overwritten automatically.
+> **Pre-release note:** the Git-based examples become runnable once the repository and a versioned release are published. The live `~/.codex` cutover remains a separate, human-approved step.
