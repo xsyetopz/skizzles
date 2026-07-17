@@ -1,0 +1,16 @@
+packages/core/prompt-layer/upstream/default.md text eol=lf
+packages/core/prompt-layer/upstream/LICENSE text eol=lf
+packages/core/prompt-layer/upstream/NOTICE text eol=lf
+packages/core/prompt-layer/skizzles-base.patch text eol=lf
+packages/core/prompt-layer/manifest.json text eol=lf
+packages/core/prompt-layer/.transaction/journal.json text eol=lf
+packages/core/prompt-layer/.mutation-lock/owner.json text eol=lf
+packages/core/prompt-layer/.mutation-lock/reclaim.json text eol=lf
+instructions/skizzles-base.md text eol=lf
+instructions/skizzles-base.provenance.json text eol=lf
+
+# These checksum-locked upstream/derived bytes intentionally preserve upstream
+# trailing whitespace; Git whitespace diagnostics must accept their exact bytes.
+packages/core/prompt-layer/upstream/default.md whitespace=-trailing-space
+packages/core/prompt-layer/skizzles-base.patch whitespace=-trailing-space
+instructions/skizzles-base.md whitespace=-trailing-space
