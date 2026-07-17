@@ -1,9 +1,25 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { assertManagedParentsAreReal, pathEntryExists } from "./core";
 
 export type OrchestrationMode = "aggressive" | "passive";
-type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
+type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | {
+      [key: string]: JsonValue;
+    };
 
 export interface ConfigEdit {
   keyPath: string;
@@ -64,12 +80,17 @@ export interface ConfigureOptions {
 
 const aggressiveModeHint =
   "Proactive complexity-aware delegation is active. Follow $fourth-wall whenever orchestration would materially improve speed or quality.";
-const rootHint = "Fourth Wall applies. Read and follow $fourth-wall before this task's first orchestration action.";
+const rootHint =
+  "Fourth Wall applies. Read and follow $fourth-wall before this task's first orchestration action.";
 const subagentHint =
   "Fourth Wall applies. Read and follow $fourth-wall and the behavioral role resource named in your assignment.";
 
 export function configReceiptPath(codexHome: string): string {
-  return join(canonicalExistingPath(codexHome), ".skizzles", "config-receipt.json");
+  return join(
+    canonicalExistingPath(codexHome),
+    ".skizzles",
+    "config-receipt.json",
+  );
 }
 
 function canonicalExistingPath(path: string): string {
@@ -77,13 +98,19 @@ function canonicalExistingPath(path: string): string {
   return existsSync(absolute) ? realpathSync(absolute) : absolute;
 }
 
-export function desiredConfigEdits(orchestration: OrchestrationMode): ConfigEdit[] {
+export function desiredConfigEdits(
+  orchestration: OrchestrationMode,
+): ConfigEdit[] {
   const edits: ConfigEdit[] = [
     { keyPath: "features.hooks", value: true, mergeStrategy: "replace" },
   ];
   if (orchestration === "aggressive") {
     edits.push(
-      { keyPath: "features.multi_agent_v2.enabled", value: true, mergeStrategy: "replace" },
+      {
+        keyPath: "features.multi_agent_v2.enabled",
+        value: true,
+        mergeStrategy: "replace",
+      },
       {
         keyPath: "features.multi_agent_v2.max_concurrent_threads_per_session",
         value: 7,
@@ -109,10 +136,18 @@ export function desiredConfigEdits(orchestration: OrchestrationMode): ConfigEdit
   return edits;
 }
 
-function valueAt(root: JsonValue, keyPath: string): { present: boolean; value: JsonValue } {
+function valueAt(
+  root: JsonValue,
+  keyPath: string,
+): { present: boolean; value: JsonValue } {
   let current = root;
   for (const segment of keyPath.split(".")) {
-    if (current === null || Array.isArray(current) || typeof current !== "object" || !(segment in current)) {
+    if (
+      current === null ||
+      Array.isArray(current) ||
+      typeof current !== "object" ||
+      !(segment in current)
+    ) {
       return { present: false, value: null };
     }
     current = current[segment]!;
@@ -133,11 +168,19 @@ function userLayer(read: ConfigReadResponse, configPath: string): ConfigLayer {
       name.file &&
       canonicalExistingPath(name.file) === expected,
   );
-  if (!layer) throw new Error(`Codex did not report the selected user config layer: ${expected}`);
+  if (!layer) {
+    throw new Error(
+      `Codex did not report the selected user config layer: ${expected}`,
+    );
+  }
   return layer;
 }
 
-function writeReceipt(path: string, receipt: ConfigReceipt, exclusive = false): void {
+function writeReceipt(
+  path: string,
+  receipt: ConfigReceipt,
+  exclusive = false,
+): void {
   mkdirSync(dirname(path), { recursive: true });
   const contents = `${JSON.stringify(receipt, null, 2)}\n`;
   if (exclusive) {
@@ -156,8 +199,12 @@ function writeReceipt(path: string, receipt: ConfigReceipt, exclusive = false): 
 
 function readReceipt(codexHome: string): ConfigReceipt {
   const path = configReceiptPath(codexHome);
-  if (!existsSync(path)) throw new Error(`Skizzles config receipt is missing: ${path}`);
-  const receipt = JSON.parse(readFileSync(path, "utf8")) as Partial<ConfigReceipt>;
+  if (!existsSync(path)) {
+    throw new Error(`Skizzles config receipt is missing: ${path}`);
+  }
+  const receipt = JSON.parse(
+    readFileSync(path, "utf8"),
+  ) as Partial<ConfigReceipt>;
   if (
     receipt.version !== 1 ||
     !["pending", "active", "restoring"].includes(receipt.state ?? "") ||
@@ -170,27 +217,43 @@ function readReceipt(codexHome: string): ConfigReceipt {
 }
 
 function validateBinary(codexBinary: string): string {
-  if (!isAbsolute(codexBinary)) throw new Error("--codex-binary must be an absolute path");
+  if (!isAbsolute(codexBinary)) {
+    throw new Error("--codex-binary must be an absolute path");
+  }
   const binary = resolve(codexBinary);
-  if (!existsSync(binary)) throw new Error(`Codex binary is missing: ${binary}`);
+  if (!existsSync(binary)) {
+    throw new Error(`Codex binary is missing: ${binary}`);
+  }
   return binary;
 }
 
-export async function configureCodex(options: ConfigureOptions): Promise<ConfigReceipt> {
+export async function configureCodex(
+  options: ConfigureOptions,
+): Promise<ConfigReceipt> {
   const codexHome = canonicalExistingPath(options.codexHome);
   const codexBinary = validateBinary(options.codexBinary);
   assertManagedParentsAreReal(codexHome, [".skizzles"]);
   const receiptPath = configReceiptPath(codexHome);
-  if (pathEntryExists(receiptPath)) throw new Error(`Skizzles config receipt already exists: ${receiptPath}`);
+  if (pathEntryExists(receiptPath)) {
+    throw new Error(`Skizzles config receipt already exists: ${receiptPath}`);
+  }
 
   const configPath = join(codexHome, "config.toml");
-  const rpc = await (options.rpcFactory ?? AppServerRpc.create)(codexHome, codexBinary);
+  const rpc = await (options.rpcFactory ?? AppServerRpc.create)(
+    codexHome,
+    codexBinary,
+  );
   try {
     const layer = userLayer(await rpc.read(), configPath);
     const edits = desiredConfigEdits(options.orchestration);
     const values = edits.map(({ keyPath, value }) => {
       const before = valueAt(layer.config, keyPath);
-      return { keyPath, beforePresent: before.present, before: before.value, after: value };
+      return {
+        keyPath,
+        beforePresent: before.present,
+        before: before.value,
+        after: value,
+      };
     });
     const receipt: ConfigReceipt = {
       version: 1,
@@ -222,26 +285,38 @@ export async function configureCodex(options: ConfigureOptions): Promise<ConfigR
   }
 }
 
-export async function unconfigureCodex(options: Omit<ConfigureOptions, "orchestration">): Promise<ConfigReceipt> {
+export async function unconfigureCodex(
+  options: Omit<ConfigureOptions, "orchestration">,
+): Promise<ConfigReceipt> {
   const codexHome = canonicalExistingPath(options.codexHome);
   assertManagedParentsAreReal(codexHome, [".skizzles"]);
   const receiptPath = configReceiptPath(codexHome);
   const receipt = readReceipt(codexHome);
   const codexBinary = validateBinary(options.codexBinary);
   if (resolve(receipt.codexBinary) !== codexBinary) {
-    throw new Error(`use the Codex binary recorded by the config receipt: ${receipt.codexBinary}`);
+    throw new Error(
+      `use the Codex binary recorded by the config receipt: ${receipt.codexBinary}`,
+    );
   }
   if (resolve(receipt.configPath) !== join(codexHome, "config.toml")) {
     throw new Error("config receipt points outside the selected CODEX_HOME");
   }
 
-  const rpc = await (options.rpcFactory ?? AppServerRpc.create)(codexHome, codexBinary);
+  const rpc = await (options.rpcFactory ?? AppServerRpc.create)(
+    codexHome,
+    codexBinary,
+  );
   try {
     const layer = userLayer(await rpc.read(), receipt.configPath);
-    const atBefore = receipt.values.every(({ keyPath, beforePresent, before }) => {
-      const current = valueAt(layer.config, keyPath);
-      return current.present === beforePresent && (!beforePresent || sameValue(current.value, before));
-    });
+    const atBefore = receipt.values.every(
+      ({ keyPath, beforePresent, before }) => {
+        const current = valueAt(layer.config, keyPath);
+        return (
+          current.present === beforePresent &&
+          (!beforePresent || sameValue(current.value, before))
+        );
+      },
+    );
     if (receipt.state === "restoring" && atBefore) {
       if (!options.dryRun) rmSync(receiptPath);
       return receipt;
@@ -249,7 +324,9 @@ export async function unconfigureCodex(options: Omit<ConfigureOptions, "orchestr
     for (const value of receipt.values) {
       const current = valueAt(layer.config, value.keyPath);
       if (!current.present || !sameValue(current.value, value.after)) {
-        throw new Error(`refusing to restore drifted config key: ${value.keyPath}`);
+        throw new Error(
+          `refusing to restore drifted config key: ${value.keyPath}`,
+        );
       }
     }
     if (options.dryRun) return receipt;
@@ -274,16 +351,25 @@ export async function unconfigureCodex(options: Omit<ConfigureOptions, "orchestr
 }
 
 class AppServerRpc implements ConfigRpc {
+  private readonly process: Bun.Subprocess<"pipe", "pipe", "pipe">;
   private nextId = 1;
-  private readonly pending = new Map<number, {
-    resolve: (value: unknown) => void;
-    reject: (error: Error) => void;
-    timeout: ReturnType<typeof setTimeout>;
-  }>();
+  private readonly pending = new Map<
+    number,
+    {
+      resolve: (value: unknown) => void;
+      reject: (error: Error) => void;
+      timeout: ReturnType<typeof setTimeout>;
+    }
+  >();
   private readonly stderrChunks: string[] = [];
-  private constructor(private readonly process: Bun.Subprocess<"pipe", "pipe", "pipe">) {}
+  private constructor(process: Bun.Subprocess<"pipe", "pipe", "pipe">) {
+    this.process = process;
+  }
 
-  static async create(codexHome: string, codexBinary: string): Promise<AppServerRpc> {
+  static async create(
+    codexHome: string,
+    codexBinary: string,
+  ): Promise<AppServerRpc> {
     const process = Bun.spawn([codexBinary, "app-server"], {
       env: { ...Bun.env, CODEX_HOME: codexHome },
       stdin: "pipe",
@@ -295,7 +381,11 @@ class AppServerRpc implements ConfigRpc {
     rpc.consumeStderr();
     try {
       await rpc.request("initialize", {
-        clientInfo: { name: "skizzles_installer", title: "Skizzles Installer", version: "0.1.0" },
+        clientInfo: {
+          name: "skizzles_installer",
+          title: "Skizzles Installer",
+          version: "0.1.0",
+        },
         capabilities: { experimentalApi: true },
       });
       rpc.send({ method: "initialized" });
@@ -335,7 +425,11 @@ class AppServerRpc implements ConfigRpc {
         this.pending.delete(id);
         reject(new Error(`Codex app-server request timed out: ${method}`));
       }, 15_000);
-      this.pending.set(id, { resolve: (value) => resolve(value as T), reject, timeout });
+      this.pending.set(id, {
+        resolve: (value) => resolve(value as T),
+        reject,
+        timeout,
+      });
       this.send({ method, id, params });
     });
   }
@@ -358,7 +452,9 @@ class AppServerRpc implements ConfigRpc {
       for (const line of lines) this.receive(line);
     }
     const detail = this.stderrChunks.join("").slice(-8_000).trim();
-    const error = new Error(`Codex app-server closed unexpectedly${detail ? `: ${detail}` : ""}`);
+    const error = new Error(
+      `Codex app-server closed unexpectedly${detail ? `: ${detail}` : ""}`,
+    );
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
       pending.reject(error);
@@ -368,7 +464,11 @@ class AppServerRpc implements ConfigRpc {
 
   private receive(line: string): void {
     if (!line.trim()) return;
-    let message: { id?: number; result?: unknown; error?: { message?: string; data?: unknown } };
+    let message: {
+      id?: number;
+      result?: unknown;
+      error?: { message?: string; data?: unknown };
+    };
     try {
       message = JSON.parse(line);
     } catch {
@@ -380,7 +480,13 @@ class AppServerRpc implements ConfigRpc {
     this.pending.delete(message.id);
     clearTimeout(pending.timeout);
     if (message.error) {
-      pending.reject(new Error(`${message.error.message ?? "Codex app-server request failed"}: ${JSON.stringify(message.error.data ?? {})}`));
+      pending.reject(
+        new Error(
+          `${message.error.message ?? "Codex app-server request failed"}: ${JSON.stringify(
+            message.error.data ?? {},
+          )}`,
+        ),
+      );
     } else {
       pending.resolve(message.result);
     }
@@ -393,7 +499,9 @@ class AppServerRpc implements ConfigRpc {
       const { done, value } = await reader.read();
       if (done) break;
       this.stderrChunks.push(decoder.decode(value, { stream: true }));
-      if (this.stderrChunks.join("").length > 16_000) this.stderrChunks.splice(0, this.stderrChunks.length - 1);
+      if (this.stderrChunks.join("").length > 16_000) {
+        this.stderrChunks.splice(0, this.stderrChunks.length - 1);
+      }
     }
   }
 }

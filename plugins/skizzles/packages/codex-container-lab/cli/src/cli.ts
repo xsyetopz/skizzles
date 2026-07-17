@@ -6947,14 +6947,82 @@ var require_public_api = __commonJS((exports) => {
 // packages/codex-container-lab/cli/src/cli.ts
 import { StringDecoder } from "string_decoder";
 
+// packages/codex-container-lab/cli/src/public-json.ts
+var PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
+function serializePublicJson(value) {
+  let candidate = value;
+  let encoded = `${JSON.stringify(candidate)}
+`;
+  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET && isRecord(value) && isRecord(value["transcript"]) && typeof value["transcript"]["text"] === "string") {
+    const characters = Array.from(value["transcript"]["text"]);
+    let low = 0;
+    let high = characters.length;
+    while (low < high) {
+      const start = Math.floor((low + high) / 2);
+      const text2 = characters.slice(start).join("");
+      const transcript = {
+        ...value["transcript"],
+        text: text2,
+        bytes: Buffer.byteLength(text2),
+        lines: text2 ? text2.split(`
+`).length : 0,
+        truncated: true
+      };
+      const attempt = `${JSON.stringify({ ...value, transcript })}
+`;
+      if (Buffer.byteLength(attempt) <= PUBLIC_JSON_BYTE_BUDGET)
+        high = start;
+      else
+        low = start + 1;
+    }
+    const text = characters.slice(low).join("");
+    candidate = {
+      ...value,
+      transcript: {
+        ...value["transcript"],
+        text,
+        bytes: Buffer.byteLength(text),
+        lines: text ? text.split(`
+`).length : 0,
+        truncated: true
+      }
+    };
+    encoded = `${JSON.stringify(candidate)}
+`;
+  }
+  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET) {
+    throw new Error("public response exceeds the 16 KiB output budget");
+  }
+  return encoded;
+}
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// packages/codex-container-lab/cli/src/public-output.ts
+function redactPublicText(value, maxBytes = 2000, maxLines = 8) {
+  const redacted = value.replace(/\/(?:[^\s"'\\]|\\.)+/g, "[path]").replace(/\b[a-f0-9]{64}\b/gi, "[redacted]").replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[redacted]").replace(/\bcodex-container-lab:[A-Za-z0-9._-]+\b/g, "[redacted]").replace(/\bccl-[a-z0-9][a-z0-9-]*\b/gi, "[redacted]").replace(/io\.openai\.codex-container-lab\.owner=\S+/gi, "io.openai.codex-container-lab.owner=[redacted]").replace(/(?:ownerKey|runtimeRoot|stateRoot|composeArgs|managedImage)\s*[=:]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "[redacted]").split(`
+`).slice(-maxLines).join(`
+`);
+  return truncateUtf8(redacted, maxBytes);
+}
+function truncateUtf8(value, maxBytes) {
+  let bytes = 0;
+  let output = "";
+  for (const character of value) {
+    const size = Buffer.byteLength(character);
+    if (bytes + size > maxBytes)
+      return `${output}\u2026`;
+    output += character;
+    bytes += size;
+  }
+  return output;
+}
+
 // packages/codex-container-lab/cli/src/service.ts
 import { createHash as createHash3 } from "crypto";
 import { lstat as lstat6, mkdir as mkdir6, readdir as readdir2, realpath as realpath4, stat as stat2 } from "fs/promises";
 import { join as join3, resolve as resolve3 } from "path";
-
-// packages/codex-container-lab/cli/src/config.ts
-import { readFile, realpath, stat } from "fs/promises";
-import { isAbsolute, posix, relative, resolve } from "path";
 
 // node_modules/.bun/yaml@2.9.0/node_modules/yaml/dist/index.js
 var composer = require_composer();
@@ -7002,18 +7070,324 @@ var $stringify = publicApi.stringify;
 var $visit = visit.visit;
 var $visitAsync = visit.visitAsync;
 
+// packages/codex-container-lab/cli/src/compose.ts
+var labelPrefix = "io.openai.codex-container-lab";
+function generateBaseCompose(config) {
+  if (config.mode.kind === "compose")
+    return;
+  const service = {
+    working_dir: config.runtime.workspace,
+    command: [...config.runtime.shell, "while :; do sleep 2147483647; done"]
+  };
+  if (config.mode.kind === "image") {
+    service["image"] = config.mode.image;
+  } else {
+    service["build"] = {
+      context: config.mode.context,
+      dockerfile: config.mode.dockerfile
+    };
+  }
+  return $stringify({ services: { [config.mode.commandService]: service } });
+}
+function generateOverrideCompose(config, model, context) {
+  const labels = managementLabels(context);
+  const serviceNames = Object.keys(model.services ?? {});
+  if (!serviceNames.includes(config.mode.commandService)) {
+    throw new Error(`command service is absent from normalized Compose model: ${config.mode.commandService}`);
+  }
+  for (const port of config.ports) {
+    if (!serviceNames.includes(port.service)) {
+      throw new Error(`declared port ${port.name} references absent service: ${port.service}`);
+    }
+    const existing = asArray(model.services?.[port.service]?.["ports"]).some((published) => publishedTarget(published) === port.target);
+    if (existing) {
+      throw new Error(`declared port ${port.name} overlaps a project publication for ${port.service}:${port.target}`);
+    }
+  }
+  const services = Object.fromEntries(serviceNames.map((name) => {
+    const override = { labels };
+    if (name === config.mode.commandService) {
+      override["init"] = true;
+      override["working_dir"] = config.runtime.workspace;
+      override["volumes"] = [
+        {
+          type: "bind",
+          source: context.workspaceHostPath,
+          target: config.runtime.workspace
+        }
+      ];
+      if (config.forwardEnvironment.length > 0) {
+        override["environment"] = config.forwardEnvironment;
+      }
+      if (config.mode.kind === "dockerfile") {
+        override["image"] = internalImageTag(context.ownerKey, context.labId);
+        override["build"] = { labels };
+      }
+    }
+    const servicePorts = config.ports.filter((port) => port.service === name);
+    if (servicePorts.length > 0) {
+      override["ports"] = servicePorts.map(({ target }) => `127.0.0.1::${target}`);
+    }
+    return [name, override];
+  }));
+  const volumes = labelTopLevelResources(model.volumes, labels);
+  const networks = labelTopLevelResources(model.networks, labels);
+  return $stringify({
+    services,
+    ...Object.keys(volumes).length > 0 ? { volumes } : {},
+    ...Object.keys(networks).length > 0 ? { networks } : {}
+  });
+}
+function managementLabels(context) {
+  return {
+    [`${labelPrefix}.managed`]: "true",
+    [`${labelPrefix}.owner`]: context.owner,
+    [`${labelPrefix}.lab`]: context.labId
+  };
+}
+function labelTopLevelResources(resources, labels) {
+  return Object.fromEntries(Object.entries(resources ?? {}).filter(([, definition]) => !definition?.["external"]).map(([name]) => [name, { labels }]));
+}
+function composeCommandArgs(config, options) {
+  const sourceFiles = config.mode.kind === "compose" ? config.mode.files : options.baseFile ? [options.baseFile] : [];
+  if (sourceFiles.length === 0) {
+    throw new Error("an internal base Compose file is required for image and dockerfile modes");
+  }
+  return [
+    "compose",
+    "--project-directory",
+    config.repoRoot,
+    "--project-name",
+    options.projectName,
+    ...sourceFiles.flatMap((file) => ["-f", file]),
+    "-f",
+    options.overrideFile
+  ];
+}
+function internalImageTag(ownerKey, labId) {
+  return `codex-container-lab:${ownerKey.slice(0, 24)}-${labId}`;
+}
+function inspectComposeModel(model) {
+  const findings = [];
+  for (const [serviceName, service] of Object.entries(model.services ?? {})) {
+    if (service["use_api_socket"] === true) {
+      add(findings, serviceName, "socket-bind", "container engine API socket enabled; details redacted");
+    }
+    if (service["privileged"] === true) {
+      add(findings, serviceName, "privileged", "privileged mode enabled");
+    }
+    for (const key of [
+      "pid",
+      "ipc",
+      "network_mode",
+      "uts",
+      "userns_mode",
+      "cgroup"
+    ]) {
+      if (service[key] === "host") {
+        add(findings, serviceName, "host-namespace", `${key} uses host namespace`);
+      }
+    }
+    const capabilities = asArray(service["cap_add"]);
+    if (capabilities.length > 0) {
+      add(findings, serviceName, "capability", `${capabilities.length} added capability(s)`);
+    }
+    const devices = asArray(service["devices"]);
+    if (devices.length > 0) {
+      add(findings, serviceName, "device", `${devices.length} host device mapping(s); paths redacted`);
+    }
+    for (const volume of asArray(service["volumes"])) {
+      inspectVolume(findings, serviceName, volume);
+    }
+    for (const port of asArray(service["ports"])) {
+      inspectPort(findings, serviceName, port);
+    }
+    const secrets = asArray(service["secrets"]);
+    if (secrets.length > 0) {
+      add(findings, serviceName, "secret", `${secrets.length} secret attachment(s); names redacted`);
+    }
+    const configs = asArray(service["configs"]);
+    if (configs.length > 0) {
+      add(findings, serviceName, "config", `${configs.length} config attachment(s); names redacted`);
+    }
+    if (isRecord2(service["build"])) {
+      const ssh = service["build"]["ssh"];
+      if (Array.isArray(ssh) && ssh.length > 0 || isRecord2(ssh) && Object.keys(ssh).length > 0 || typeof ssh === "string") {
+        add(findings, serviceName, "secret", "build SSH forwarding enabled; identities redacted");
+      }
+      const buildSecrets = asArray(service["build"]["secrets"]);
+      if (buildSecrets.length > 0) {
+        add(findings, serviceName, "secret", `${buildSecrets.length} build secret attachment(s); names redacted`);
+      }
+    }
+  }
+  const topSecrets = Object.keys(model.secrets ?? {}).length;
+  if (topSecrets > 0) {
+    findings.push({
+      surface: "secret",
+      detail: `${topSecrets} top-level secret definition(s); names redacted`
+    });
+  }
+  const topConfigs = Object.keys(model.configs ?? {}).length;
+  if (topConfigs > 0) {
+    findings.push({
+      surface: "config",
+      detail: `${topConfigs} top-level config definition(s); names redacted`
+    });
+  }
+  return findings;
+}
+function validateSecretEnvironmentModel(model, declaredNames, environment) {
+  const declared = new Set(declaredNames);
+  for (const definition of Object.values(model.secrets ?? {})) {
+    if (!isRecord2(definition) || typeof definition["environment"] !== "string") {
+      continue;
+    }
+    const source = definition["environment"];
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(source)) {
+      throw new Error("Compose secret environment source is invalid or undeclared");
+    }
+    if (!declared.has(source)) {
+      throw new Error(`Compose secret environment source is not declared: ${source}`);
+    }
+    if (!Object.hasOwn(environment, source) || typeof environment[source] !== "string") {
+      throw new Error(`Compose secret environment source is unavailable: ${source}`);
+    }
+  }
+  for (const [serviceName, service] of Object.entries(model.services ?? {})) {
+    const serviceEnvironment = service["environment"];
+    if (Array.isArray(serviceEnvironment)) {
+      for (const entry of serviceEnvironment) {
+        if (typeof entry !== "string")
+          continue;
+        const separator = entry.indexOf("=");
+        const key = separator < 0 ? entry : entry.slice(0, separator);
+        const value = separator < 0 ? "" : entry.slice(separator + 1);
+        const referenced2 = declared.has(key) ? key : referencedSecretName(value, declaredNames);
+        if (referenced2) {
+          throw plaintextSecretEnvironmentError(serviceName, referenced2);
+        }
+      }
+    } else if (isRecord2(serviceEnvironment)) {
+      for (const [key, value] of Object.entries(serviceEnvironment)) {
+        const referenced2 = declared.has(key) ? key : referencedSecretName(value, declaredNames);
+        if (referenced2) {
+          throw plaintextSecretEnvironmentError(serviceName, referenced2);
+        }
+      }
+    }
+  }
+  const referenced = referencedSecretNameInModel(model, declaredNames);
+  if (referenced) {
+    throw new Error(`Compose model references declared secret environment source: ${referenced}`);
+  }
+}
+function referencedSecretName(value, names) {
+  if (typeof value !== "string")
+    return;
+  return names.find((name) => {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`\\$${escaped}(?![A-Za-z0-9_])|\\$\\{${escaped}(?![A-Za-z0-9_])`).test(value);
+  });
+}
+function referencedSecretNameInModel(model, names) {
+  const pending = [model];
+  while (pending.length > 0) {
+    const value = pending.pop();
+    const direct = referencedSecretName(value, names);
+    if (direct)
+      return direct;
+    if (Array.isArray(value)) {
+      for (const nested of value)
+        pending.push(nested);
+    } else if (isRecord2(value)) {
+      for (const [key, nested] of Object.entries(value)) {
+        const keyReference = referencedSecretName(key, names);
+        if (keyReference)
+          return keyReference;
+        pending.push(nested);
+      }
+    }
+  }
+  return;
+}
+function plaintextSecretEnvironmentError(service, source) {
+  return new Error(`Compose service plaintext environment references declared secret source: ${service}:${source}`);
+}
+function inspectVolume(findings, service, volume) {
+  let isBind = false;
+  let source = "";
+  if (typeof volume === "string") {
+    source = volume.split(":", 1)[0] ?? "";
+    isBind = source.startsWith("/") || source.startsWith(".") || source.startsWith("~");
+  } else if (isRecord2(volume)) {
+    isBind = volume["type"] === "bind";
+    source = typeof volume["source"] === "string" ? volume["source"] : "";
+  }
+  if (!isBind)
+    return;
+  add(findings, service, "host-bind", "host bind mount; path redacted");
+  if (/(?:^|\/)docker\.sock$|(?:^|\/)podman\.sock$|\.sock$/i.test(source)) {
+    add(findings, service, "socket-bind", "host socket bind mount; path redacted");
+  }
+}
+function inspectPort(findings, service, port) {
+  let hostIp;
+  let published;
+  if (typeof port === "string") {
+    const raw = port.split("/")[0] ?? "";
+    const parts = raw.split(":");
+    if (parts.length === 3)
+      [hostIp, published] = parts;
+    else if (parts.length === 2)
+      published = parts[0];
+  } else if (isRecord2(port)) {
+    hostIp = typeof port["host_ip"] === "string" ? port["host_ip"] : undefined;
+    published = port["published"] === undefined ? undefined : String(port["published"]);
+  }
+  if (published && published !== "0") {
+    add(findings, service, "fixed-port", "fixed host port publication; port redacted");
+  }
+  if (published !== undefined && hostIp !== "127.0.0.1" && hostIp !== "::1" && hostIp !== "localhost") {
+    add(findings, service, "non-loopback-port", "port is published beyond explicit loopback; address redacted");
+  }
+}
+function publishedTarget(port) {
+  if (typeof port === "string") {
+    const target = (port.split("/")[0] ?? "").split(":").at(-1);
+    const parsed = Number(target);
+    return Number.isInteger(parsed) ? parsed : undefined;
+  }
+  if (isRecord2(port)) {
+    const parsed = Number(port["target"]);
+    return Number.isInteger(parsed) ? parsed : undefined;
+  }
+  return;
+}
+function add(findings, service, surface, detail) {
+  findings.push({ service, surface, detail });
+}
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // packages/codex-container-lab/cli/src/config.ts
+import { readFile, realpath, stat } from "fs/promises";
+import { isAbsolute, posix, relative, resolve } from "path";
 var manifestName = ".codex-container-lab.yaml";
 function isValidContainerPath(value, allowRoot) {
   if (!value.startsWith("/") || value.includes("\x00") || !allowRoot && value === "/")
     return false;
   return posix.normalize(value) === value && value.split("/").every((part) => part !== "." && part !== "..");
 }
-function isRecord(value) {
+function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function hasOwn(value, key) {
-  return Object.prototype.hasOwnProperty.call(value, key);
+  return Object.hasOwn(value, key);
 }
 function addIssue(issues, path, message) {
   issues.push({ path, message });
@@ -7026,7 +7400,7 @@ function rejectUnknownKeys(value, allowed, path, issues) {
   }
 }
 function asObject(value, path, issues) {
-  if (!isRecord(value)) {
+  if (!isRecord3(value)) {
     addIssue(issues, path, "must be an object");
     return;
   }
@@ -7069,8 +7443,9 @@ function parseEnvironmentName(value) {
   return typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value) ? value : undefined;
 }
 function parseShellArgument(value) {
-  if (typeof value !== "string" || value.length === 0 || value.includes("\x00"))
+  if (typeof value !== "string" || value.length === 0 || value.includes("\x00")) {
     return;
+  }
   return value;
 }
 function parseNonEmptyTrimmedString(value) {
@@ -7084,14 +7459,15 @@ function parseStringArray(value, path, issues, itemParser, itemMessage, minimumL
     addIssue(issues, path, "must be an array");
     return [];
   }
-  if (value.length < minimumLength)
+  if (value.length < minimumLength) {
     addIssue(issues, path, `must contain at least ${minimumLength} item${minimumLength === 1 ? "" : "s"}`);
+  }
   const parsed = [];
   for (const [index, item] of value.entries()) {
     const candidate = itemParser(item);
-    if (candidate === undefined)
+    if (candidate === undefined) {
       addIssue(issues, [...path, index], itemMessage);
-    else
+    } else
       parsed.push(candidate);
   }
   return parsed;
@@ -7101,7 +7477,7 @@ function parseCompose(value, path, issues) {
   if (!record)
     return;
   rejectUnknownKeys(record, ["files", "command_service"], path, issues);
-  const files = hasOwn(record, "files") ? parseStringArray(record.files, [...path, "files"], issues, parseRelativePath, "must be a non-empty relative path", 1) : (addIssue(issues, [...path, "files"], "is required"), []);
+  const files = hasOwn(record, "files") ? parseStringArray(record["files"], [...path, "files"], issues, parseRelativePath, "must be a non-empty relative path", 1) : (addIssue(issues, [...path, "files"], "is required"), []);
   const commandService = requiredString(record, "command_service", path, issues, parseServiceName, "must be a Compose service name");
   return commandService === undefined ? undefined : { files, command_service: commandService };
 }
@@ -7125,14 +7501,15 @@ function parseImage(value, path, issues) {
   return name === undefined || service === undefined ? undefined : { name, service };
 }
 function parseRuntime(value, path, issues) {
-  if (value === undefined)
+  if (value === undefined) {
     return { workspace: "/workspace", shell: ["/bin/sh", "-lc"] };
+  }
   const record = asObject(value, path, issues);
   if (!record)
     return { workspace: "/workspace", shell: ["/bin/sh", "-lc"] };
   rejectUnknownKeys(record, ["workspace", "shell"], path, issues);
   const workspace = optionalString(record, "workspace", path, issues, (candidate) => typeof candidate === "string" ? candidate : undefined, "must be a string", "/workspace");
-  const shell = hasOwn(record, "shell") ? parseStringArray(record.shell, [...path, "shell"], issues, parseShellArgument, "must be a non-empty shell argument without NUL", 1) : ["/bin/sh", "-lc"];
+  const shell = hasOwn(record, "shell") ? parseStringArray(record["shell"], [...path, "shell"], issues, parseShellArgument, "must be a non-empty shell argument without NUL", 1) : ["/bin/sh", "-lc"];
   return { workspace, shell };
 }
 function parsePort(value, path, issues) {
@@ -7144,17 +7521,17 @@ function parsePort(value, path, issues) {
   let target;
   if (!hasOwn(record, "target")) {
     addIssue(issues, [...path, "target"], "is required");
-  } else if (typeof record.target !== "number" || !Number.isInteger(record.target) || record.target < 1 || record.target > 65535) {
+  } else if (typeof record["target"] !== "number" || !Number.isInteger(record["target"]) || record["target"] < 1 || record["target"] > 65535) {
     addIssue(issues, [...path, "target"], "must be an integer between 1 and 65535");
   } else {
-    target = record.target;
+    target = record["target"];
   }
   let scheme;
   if (hasOwn(record, "scheme")) {
-    if (typeof record.scheme !== "string" || !/^[a-z][a-z0-9+.-]*$/.test(record.scheme)) {
+    if (typeof record["scheme"] !== "string" || !/^[a-z][a-z0-9+.-]*$/.test(record["scheme"])) {
       addIssue(issues, [...path, "scheme"], "must be a URI scheme");
     } else {
-      scheme = record.scheme;
+      scheme = record["scheme"];
     }
   }
   return service === undefined || target === undefined ? undefined : { service, target, ...scheme === undefined ? {} : { scheme } };
@@ -7168,8 +7545,9 @@ function parsePorts(value, path, issues) {
   const parsed = {};
   for (const [name, port] of Object.entries(record)) {
     const parsedName = parseServiceName(name);
-    if (parsedName === undefined)
+    if (parsedName === undefined) {
       addIssue(issues, [...path, name], "must be a Compose service name");
+    }
     const parsedPort = parsePort(port, [...path, name], issues);
     if (parsedPort && parsedName !== undefined)
       parsed[parsedName] = parsedPort;
@@ -7184,16 +7562,26 @@ function parseEnvironment(value, path, issues) {
 function validateManifest(document) {
   const issues = [];
   const manifest = asObject(document, [], issues);
-  if (!manifest)
+  if (!manifest) {
     throw new Error(`invalid ${manifestName}: ${issues.map(formatIssue).join("; ")}`);
-  rejectUnknownKeys(manifest, ["compose", "dockerfile", "image", "runtime", "ports", "environment", "secret_environment"], [], issues);
-  const compose = hasOwn(manifest, "compose") ? parseCompose(manifest.compose, ["compose"], issues) : undefined;
-  const dockerfile = hasOwn(manifest, "dockerfile") ? parseDockerfile(manifest.dockerfile, ["dockerfile"], issues) : undefined;
-  const image = hasOwn(manifest, "image") ? parseImage(manifest.image, ["image"], issues) : undefined;
+  }
+  rejectUnknownKeys(manifest, [
+    "compose",
+    "dockerfile",
+    "image",
+    "runtime",
+    "ports",
+    "environment",
+    "secret_environment"
+  ], [], issues);
+  const compose = hasOwn(manifest, "compose") ? parseCompose(manifest["compose"], ["compose"], issues) : undefined;
+  const dockerfile = hasOwn(manifest, "dockerfile") ? parseDockerfile(manifest["dockerfile"], ["dockerfile"], issues) : undefined;
+  const image = hasOwn(manifest, "image") ? parseImage(manifest["image"], ["image"], issues) : undefined;
   const modeCount = ["compose", "dockerfile", "image"].filter((key) => hasOwn(manifest, key)).length;
-  if (modeCount !== 1)
+  if (modeCount !== 1) {
     addIssue(issues, [], "exactly one of compose, dockerfile, or image must be configured");
-  const runtime = parseRuntime(manifest.runtime, ["runtime"], issues);
+  }
+  const runtime = parseRuntime(manifest["runtime"], ["runtime"], issues);
   if (!isValidContainerPath(runtime.workspace, false)) {
     addIssue(issues, ["runtime", "workspace"], "must be a normalized absolute container path other than /");
   }
@@ -7201,12 +7589,12 @@ function validateManifest(document) {
   if (shellExecutable === undefined || !isValidContainerPath(shellExecutable, false)) {
     addIssue(issues, ["runtime", "shell"], "first argv item must be a normalized absolute executable path");
   }
-  const ports = parsePorts(manifest.ports, ["ports"], issues);
-  const environment = parseEnvironment(manifest.environment, ["environment"], issues);
+  const ports = parsePorts(manifest["ports"], ["ports"], issues);
+  const environment = parseEnvironment(manifest["environment"], ["environment"], issues);
   if (new Set(environment).size !== environment.length) {
     addIssue(issues, ["environment"], "environment forwarding names must be unique");
   }
-  const secretEnvironment = parseEnvironment(manifest.secret_environment, ["secret_environment"], issues);
+  const secretEnvironment = parseEnvironment(manifest["secret_environment"], ["secret_environment"], issues);
   if (new Set(secretEnvironment).size !== secretEnvironment.length) {
     addIssue(issues, ["secret_environment"], "secret environment names must be unique");
   }
@@ -7218,9 +7606,18 @@ function validateManifest(document) {
   if (new Set(portTargets).size !== portTargets.length) {
     addIssue(issues, ["ports"], "service and target pairs must be unique");
   }
-  if (issues.length > 0)
+  if (issues.length > 0) {
     throw new Error(`invalid ${manifestName}: ${issues.map(formatIssue).join("; ")}`);
-  return { compose, dockerfile, image, runtime, ports, environment, secret_environment: secretEnvironment };
+  }
+  return {
+    ...compose === undefined ? {} : { compose },
+    ...dockerfile === undefined ? {} : { dockerfile },
+    ...image === undefined ? {} : { image },
+    runtime,
+    ports,
+    environment,
+    secret_environment: secretEnvironment
+  };
 }
 function resolveRepoPath(repoRoot, candidate) {
   if (isAbsolute(candidate)) {
@@ -7258,7 +7655,11 @@ function parseLabConfig(source, repoRoot, sourcePath = resolve(repoRoot, manifes
       commandService: value.dockerfile.service
     };
   } else if (value.image) {
-    mode = { kind: "image", image: value.image.name, commandService: value.image.service };
+    mode = {
+      kind: "image",
+      image: value.image.name,
+      commandService: value.image.service
+    };
   } else {
     throw new Error(`invalid ${manifestName}: no mode configured`);
   }
@@ -7267,7 +7668,10 @@ function parseLabConfig(source, repoRoot, sourcePath = resolve(repoRoot, manifes
     manifestPath: resolve(sourcePath),
     mode,
     runtime: value.runtime,
-    ports: Object.entries(value.ports).map(([name, port]) => ({ name, ...port })),
+    ports: Object.entries(value.ports).map(([name, port]) => ({
+      name,
+      ...port
+    })),
     forwardEnvironment: [...value.environment],
     secretEnvironment: [...value.secret_environment]
   };
@@ -7276,22 +7680,29 @@ async function loadLabConfig(repoRoot, sourcePath = resolve(repoRoot, manifestNa
   const root = resolve(repoRoot);
   const manifestPath = resolveRepoPath(root, relative(root, resolve(sourcePath)));
   await assertRealPathInside(root, manifestPath);
-  if (!(await stat(manifestPath)).isFile())
+  if (!(await stat(manifestPath)).isFile()) {
     throw new Error("lab manifest must be a regular file");
+  }
   const config = parseLabConfig(await readFile(manifestPath, "utf8"), root, manifestPath);
   const paths = config.mode.kind === "compose" ? config.mode.files : config.mode.kind === "dockerfile" ? [config.mode.dockerfile, config.mode.context] : [];
-  for (const projectPath of paths)
+  for (const projectPath of paths) {
     await assertRealPathInside(root, projectPath);
+  }
   if (config.mode.kind === "dockerfile") {
-    if (!(await stat(config.mode.context)).isDirectory())
+    if (!(await stat(config.mode.context)).isDirectory()) {
       throw new Error("dockerfile context must be a directory");
-    if (!(await stat(config.mode.dockerfile)).isFile())
+    }
+    if (!(await stat(config.mode.dockerfile)).isFile()) {
       throw new Error("dockerfile path must be a regular file");
+    }
   }
   return config;
 }
 async function assertRealPathInside(repoRoot, projectPath) {
-  const [realRoot, realProjectPath] = await Promise.all([realpath(repoRoot), realpath(projectPath)]);
+  const [realRoot, realProjectPath] = await Promise.all([
+    realpath(repoRoot),
+    realpath(projectPath)
+  ]);
   const fromRoot = relative(realRoot, realProjectPath);
   if (fromRoot === ".." || fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(fromRoot)) {
     throw new Error(`project path resolves outside repository: ${projectPath}`);
@@ -7300,274 +7711,6 @@ async function assertRealPathInside(repoRoot, projectPath) {
 function formatIssue(issue) {
   const location = issue.path.length > 0 ? `${issue.path.join(".")}: ` : "";
   return `${location}${issue.message}`;
-}
-
-// packages/codex-container-lab/cli/src/compose.ts
-var labelPrefix = "io.openai.codex-container-lab";
-function generateBaseCompose(config) {
-  if (config.mode.kind === "compose")
-    return;
-  const service = {
-    working_dir: config.runtime.workspace,
-    command: [...config.runtime.shell, "while :; do sleep 2147483647; done"]
-  };
-  if (config.mode.kind === "image") {
-    service.image = config.mode.image;
-  } else {
-    service.build = {
-      context: config.mode.context,
-      dockerfile: config.mode.dockerfile
-    };
-  }
-  return $stringify({ services: { [config.mode.commandService]: service } });
-}
-function generateOverrideCompose(config, model, context) {
-  const labels = managementLabels(context);
-  const serviceNames = Object.keys(model.services ?? {});
-  if (!serviceNames.includes(config.mode.commandService)) {
-    throw new Error(`command service is absent from normalized Compose model: ${config.mode.commandService}`);
-  }
-  for (const port of config.ports) {
-    if (!serviceNames.includes(port.service)) {
-      throw new Error(`declared port ${port.name} references absent service: ${port.service}`);
-    }
-    const existing = asArray(model.services?.[port.service]?.ports).some((published) => publishedTarget(published) === port.target);
-    if (existing)
-      throw new Error(`declared port ${port.name} overlaps a project publication for ${port.service}:${port.target}`);
-  }
-  const services = Object.fromEntries(serviceNames.map((name) => {
-    const override = { labels };
-    if (name === config.mode.commandService) {
-      override.init = true;
-      override.working_dir = config.runtime.workspace;
-      override.volumes = [
-        { type: "bind", source: context.workspaceHostPath, target: config.runtime.workspace }
-      ];
-      if (config.forwardEnvironment.length > 0) {
-        override.environment = config.forwardEnvironment;
-      }
-      if (config.mode.kind === "dockerfile") {
-        override.image = internalImageTag(context.ownerKey, context.labId);
-        override.build = { labels };
-      }
-    }
-    const servicePorts = config.ports.filter((port) => port.service === name);
-    if (servicePorts.length > 0) {
-      override.ports = servicePorts.map(({ target }) => `127.0.0.1::${target}`);
-    }
-    return [name, override];
-  }));
-  const volumes = labelTopLevelResources(model.volumes, labels);
-  const networks = labelTopLevelResources(model.networks, labels);
-  return $stringify({
-    services,
-    ...Object.keys(volumes).length > 0 ? { volumes } : {},
-    ...Object.keys(networks).length > 0 ? { networks } : {}
-  });
-}
-function managementLabels(context) {
-  return {
-    [`${labelPrefix}.managed`]: "true",
-    [`${labelPrefix}.owner`]: context.owner,
-    [`${labelPrefix}.lab`]: context.labId
-  };
-}
-function labelTopLevelResources(resources, labels) {
-  return Object.fromEntries(Object.entries(resources ?? {}).filter(([, definition]) => !definition?.external).map(([name]) => [name, { labels }]));
-}
-function composeCommandArgs(config, options) {
-  const sourceFiles = config.mode.kind === "compose" ? config.mode.files : options.baseFile ? [options.baseFile] : [];
-  if (sourceFiles.length === 0) {
-    throw new Error("an internal base Compose file is required for image and dockerfile modes");
-  }
-  return [
-    "compose",
-    "--project-directory",
-    config.repoRoot,
-    "--project-name",
-    options.projectName,
-    ...sourceFiles.flatMap((file) => ["-f", file]),
-    "-f",
-    options.overrideFile
-  ];
-}
-function internalImageTag(ownerKey, labId) {
-  return `codex-container-lab:${ownerKey.slice(0, 24)}-${labId}`;
-}
-function inspectComposeModel(model) {
-  const findings = [];
-  for (const [serviceName, service] of Object.entries(model.services ?? {})) {
-    if (service.use_api_socket === true)
-      add(findings, serviceName, "socket-bind", "container engine API socket enabled; details redacted");
-    if (service.privileged === true)
-      add(findings, serviceName, "privileged", "privileged mode enabled");
-    for (const key of ["pid", "ipc", "network_mode", "uts", "userns_mode", "cgroup"]) {
-      if (service[key] === "host")
-        add(findings, serviceName, "host-namespace", `${key} uses host namespace`);
-    }
-    const capabilities = asArray(service.cap_add);
-    if (capabilities.length > 0)
-      add(findings, serviceName, "capability", `${capabilities.length} added capability(s)`);
-    const devices = asArray(service.devices);
-    if (devices.length > 0)
-      add(findings, serviceName, "device", `${devices.length} host device mapping(s); paths redacted`);
-    for (const volume of asArray(service.volumes))
-      inspectVolume(findings, serviceName, volume);
-    for (const port of asArray(service.ports))
-      inspectPort(findings, serviceName, port);
-    const secrets = asArray(service.secrets);
-    if (secrets.length > 0)
-      add(findings, serviceName, "secret", `${secrets.length} secret attachment(s); names redacted`);
-    const configs = asArray(service.configs);
-    if (configs.length > 0)
-      add(findings, serviceName, "config", `${configs.length} config attachment(s); names redacted`);
-    if (isRecord2(service.build)) {
-      const ssh = service.build.ssh;
-      if (Array.isArray(ssh) && ssh.length > 0 || isRecord2(ssh) && Object.keys(ssh).length > 0 || typeof ssh === "string") {
-        add(findings, serviceName, "secret", "build SSH forwarding enabled; identities redacted");
-      }
-      const buildSecrets = asArray(service.build.secrets);
-      if (buildSecrets.length > 0)
-        add(findings, serviceName, "secret", `${buildSecrets.length} build secret attachment(s); names redacted`);
-    }
-  }
-  const topSecrets = Object.keys(model.secrets ?? {}).length;
-  if (topSecrets > 0)
-    findings.push({ surface: "secret", detail: `${topSecrets} top-level secret definition(s); names redacted` });
-  const topConfigs = Object.keys(model.configs ?? {}).length;
-  if (topConfigs > 0)
-    findings.push({ surface: "config", detail: `${topConfigs} top-level config definition(s); names redacted` });
-  return findings;
-}
-function validateSecretEnvironmentModel(model, declaredNames, environment) {
-  const declared = new Set(declaredNames);
-  for (const definition of Object.values(model.secrets ?? {})) {
-    if (!isRecord2(definition) || typeof definition.environment !== "string")
-      continue;
-    const source = definition.environment;
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(source)) {
-      throw new Error("Compose secret environment source is invalid or undeclared");
-    }
-    if (!declared.has(source))
-      throw new Error(`Compose secret environment source is not declared: ${source}`);
-    if (!Object.hasOwn(environment, source) || typeof environment[source] !== "string") {
-      throw new Error(`Compose secret environment source is unavailable: ${source}`);
-    }
-  }
-  for (const [serviceName, service] of Object.entries(model.services ?? {})) {
-    const serviceEnvironment = service.environment;
-    if (Array.isArray(serviceEnvironment)) {
-      for (const entry of serviceEnvironment) {
-        if (typeof entry !== "string")
-          continue;
-        const separator = entry.indexOf("=");
-        const key = separator < 0 ? entry : entry.slice(0, separator);
-        const value = separator < 0 ? "" : entry.slice(separator + 1);
-        const referenced2 = declared.has(key) ? key : referencedSecretName(value, declaredNames);
-        if (referenced2)
-          throw plaintextSecretEnvironmentError(serviceName, referenced2);
-      }
-    } else if (isRecord2(serviceEnvironment)) {
-      for (const [key, value] of Object.entries(serviceEnvironment)) {
-        const referenced2 = declared.has(key) ? key : referencedSecretName(value, declaredNames);
-        if (referenced2)
-          throw plaintextSecretEnvironmentError(serviceName, referenced2);
-      }
-    }
-  }
-  const referenced = referencedSecretNameInModel(model, declaredNames);
-  if (referenced)
-    throw new Error(`Compose model references declared secret environment source: ${referenced}`);
-}
-function referencedSecretName(value, names) {
-  if (typeof value !== "string")
-    return;
-  return names.find((name) => {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`\\$${escaped}(?![A-Za-z0-9_])|\\$\\{${escaped}(?![A-Za-z0-9_])`).test(value);
-  });
-}
-function referencedSecretNameInModel(model, names) {
-  const pending = [model];
-  while (pending.length > 0) {
-    const value = pending.pop();
-    const direct = referencedSecretName(value, names);
-    if (direct)
-      return direct;
-    if (Array.isArray(value)) {
-      for (const nested of value)
-        pending.push(nested);
-    } else if (isRecord2(value)) {
-      for (const [key, nested] of Object.entries(value)) {
-        const keyReference = referencedSecretName(key, names);
-        if (keyReference)
-          return keyReference;
-        pending.push(nested);
-      }
-    }
-  }
-  return;
-}
-function plaintextSecretEnvironmentError(service, source) {
-  return new Error(`Compose service plaintext environment references declared secret source: ${service}:${source}`);
-}
-function inspectVolume(findings, service, volume) {
-  let isBind = false;
-  let source = "";
-  if (typeof volume === "string") {
-    source = volume.split(":", 1)[0] ?? "";
-    isBind = source.startsWith("/") || source.startsWith(".") || source.startsWith("~");
-  } else if (isRecord2(volume)) {
-    isBind = volume.type === "bind";
-    source = typeof volume.source === "string" ? volume.source : "";
-  }
-  if (!isBind)
-    return;
-  add(findings, service, "host-bind", "host bind mount; path redacted");
-  if (/(?:^|\/)docker\.sock$|(?:^|\/)podman\.sock$|\.sock$/i.test(source)) {
-    add(findings, service, "socket-bind", "host socket bind mount; path redacted");
-  }
-}
-function inspectPort(findings, service, port) {
-  let hostIp;
-  let published;
-  if (typeof port === "string") {
-    const raw = port.split("/")[0] ?? "";
-    const parts = raw.split(":");
-    if (parts.length === 3)
-      [hostIp, published] = parts;
-    else if (parts.length === 2)
-      published = parts[0];
-  } else if (isRecord2(port)) {
-    hostIp = typeof port.host_ip === "string" ? port.host_ip : undefined;
-    published = port.published === undefined ? undefined : String(port.published);
-  }
-  if (published && published !== "0")
-    add(findings, service, "fixed-port", "fixed host port publication; port redacted");
-  if (published !== undefined && hostIp !== "127.0.0.1" && hostIp !== "::1" && hostIp !== "localhost") {
-    add(findings, service, "non-loopback-port", "port is published beyond explicit loopback; address redacted");
-  }
-}
-function publishedTarget(port) {
-  if (typeof port === "string") {
-    const target = (port.split("/")[0] ?? "").split(":").at(-1);
-    const parsed = Number(target);
-    return Number.isInteger(parsed) ? parsed : undefined;
-  }
-  if (isRecord2(port)) {
-    const parsed = Number(port.target);
-    return Number.isInteger(parsed) ? parsed : undefined;
-  }
-  return;
-}
-function add(findings, service, surface, detail) {
-  findings.push({ service, surface, detail });
-}
-function asArray(value) {
-  return Array.isArray(value) ? value : [];
-}
-function isRecord2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // packages/codex-container-lab/cli/src/docker.ts
@@ -7613,35 +7756,20 @@ async function runCommand(command, args, options = {}) {
       if (timeout)
         clearTimeout(timeout);
       options.signal?.removeEventListener("abort", abort);
-      const result = { code: code ?? (timedOut ? 124 : 1), stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) };
-      if (options.signal?.aborted)
+      const result = {
+        code: code ?? (timedOut ? 124 : 1),
+        stdout: Buffer.concat(stdout),
+        stderr: Buffer.concat(stderr)
+      };
+      if (options.signal?.aborted) {
         return reject(new Error(`${command} aborted`));
+      }
       if (result.code !== 0 && !options.allowFailure) {
         return reject(new Error(`${command} ${args.join(" ")} failed (${result.code}): ${result.stderr.toString().trim()}`));
       }
       resolve2(result);
     });
   });
-}
-
-// packages/codex-container-lab/cli/src/public-output.ts
-function redactPublicText(value, maxBytes = 2000, maxLines = 8) {
-  const redacted = value.replace(/\/(?:[^\s"'\\]|\\.)+/g, "[path]").replace(/\b[a-f0-9]{64}\b/gi, "[redacted]").replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[redacted]").replace(/\bcodex-container-lab:[A-Za-z0-9._-]+\b/g, "[redacted]").replace(/\bccl-[a-z0-9][a-z0-9-]*\b/gi, "[redacted]").replace(/io\.openai\.codex-container-lab\.owner=\S+/gi, "io.openai.codex-container-lab.owner=[redacted]").replace(/(?:ownerKey|runtimeRoot|stateRoot|composeArgs|managedImage)\s*[=:]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "[redacted]").split(`
-`).slice(-maxLines).join(`
-`);
-  return truncateUtf8(redacted, maxBytes);
-}
-function truncateUtf8(value, maxBytes) {
-  let bytes = 0;
-  let output = "";
-  for (const character of value) {
-    const size = Buffer.byteLength(character);
-    if (bytes + size > maxBytes)
-      return `${output}\u2026`;
-    output += character;
-    bytes += size;
-  }
-  return output;
 }
 
 // packages/codex-container-lab/cli/src/docker.ts
@@ -7663,12 +7791,17 @@ async function prepareLabRuntime(metadata, config, runner = defaultDockerRunner,
   await mkdir(metadata.runtimeRoot, { recursive: true, mode: 448 });
   const base = generateBaseCompose(config);
   const baseFile = base === undefined ? undefined : join(metadata.runtimeRoot, "base.compose.yaml");
-  if (baseFile && base !== undefined)
+  if (baseFile && base !== undefined) {
     await writeFile(baseFile, base, { mode: 384 });
+  }
   const overrideFile = join(metadata.runtimeRoot, "override.compose.yaml");
   await writeFile(overrideFile, `{}
 `, { mode: 384 });
-  const composeArgs = composeCommandArgs(config, { projectName: metadata.composeProject, overrideFile, baseFile });
+  const composeArgs = composeCommandArgs(config, {
+    projectName: metadata.composeProject,
+    overrideFile,
+    ...baseFile === undefined ? {} : { baseFile }
+  });
   const composeEnvironment = secretComposeEnvironment(config.secretEnvironment, environment);
   const sourceModel = await normalizedModel(composeArgs, runner, composeEnvironment);
   validateSecretEnvironmentModel(sourceModel, config.secretEnvironment, composeEnvironment);
@@ -7682,7 +7815,14 @@ async function prepareLabRuntime(metadata, config, runner = defaultDockerRunner,
   await writeFile(overrideFile, override, { mode: 384 });
   const finalModel = await normalizedModel(composeArgs, runner, composeEnvironment);
   validateSecretEnvironmentModel(finalModel, config.secretEnvironment, composeEnvironment);
-  return { metadata, config, composeArgs, baseFile, overrideFile, findings };
+  return {
+    metadata,
+    config,
+    composeArgs,
+    ...baseFile === undefined ? {} : { baseFile },
+    overrideFile,
+    findings
+  };
 }
 async function normalizedModel(composeArgs, runner, environment = process.env) {
   let result;
@@ -7712,16 +7852,17 @@ async function normalizedModel(composeArgs, runner, environment = process.env) {
   } catch {
     throw new Error("Docker Compose configuration failed; secret-bearing diagnostics redacted");
   }
-  if (yaml.code !== 0)
+  if (yaml.code !== 0) {
     throw new Error("Docker Compose configuration failed; secret-bearing diagnostics redacted");
+  }
   return $parse(yaml.stdout.toString());
 }
 async function composeCommand(runtime, args, options = {}, runner = defaultDockerRunner) {
   return await runner.run([...runtime.composeArgs, ...args], {
-    timeoutMs: options.timeoutMs,
-    allowFailure: options.allowFailure,
+    ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
+    ...options.allowFailure === undefined ? {} : { allowFailure: options.allowFailure },
     maxOutputBytes: 4 * 1024 * 1024,
-    signal: options.signal,
+    ...options.signal === undefined ? {} : { signal: options.signal },
     env: scrubSecretEnvironment(runtime.config.secretEnvironment, process.env)
   });
 }
@@ -7730,7 +7871,7 @@ async function provisionLabStack(runtime, signal, runner = defaultDockerRunner, 
   try {
     provisioned = await runner.run([...runtime.composeArgs, "up", "-d", "--wait", "--wait-timeout", "180"], {
       timeoutMs: 30 * 60000,
-      signal,
+      ...signal === undefined ? {} : { signal },
       allowFailure: true,
       maxOutputBytes: 4 * 1024 * 1024,
       env: secretComposeEnvironment(runtime.config.secretEnvironment, environment)
@@ -7738,8 +7879,9 @@ async function provisionLabStack(runtime, signal, runner = defaultDockerRunner, 
   } catch {
     throw new Error(signal?.aborted ? "Docker Compose up aborted; secret-bearing diagnostics redacted" : "Docker Compose up failed; secret-bearing diagnostics redacted");
   }
-  if (provisioned.code !== 0)
+  if (provisioned.code !== 0) {
     throw new Error("Docker Compose up failed; secret-bearing diagnostics redacted");
+  }
   const compatibility = [
     `test -d ${shellQuote(runtime.config.runtime.workspace)}`,
     `test -w ${shellQuote(runtime.config.runtime.workspace)}`,
@@ -7751,7 +7893,11 @@ async function provisionLabStack(runtime, signal, runner = defaultDockerRunner, 
     runtime.config.mode.commandService,
     ...runtime.config.runtime.shell,
     compatibility
-  ], { allowFailure: true, timeoutMs: 20000, signal }, runner);
+  ], {
+    allowFailure: true,
+    timeoutMs: 20000,
+    ...signal === undefined ? {} : { signal }
+  }, runner);
   if (verified.code !== 0) {
     throw new Error("command service compatibility check failed: configured shell, writable workspace, and setsid are required");
   }
@@ -7760,8 +7906,9 @@ async function provisionLabStack(runtime, signal, runner = defaultDockerRunner, 
     const result = await composeCommand(runtime, ["port", port.service, String(port.target)], { timeoutMs: 20000 }, runner);
     const loopback = result.stdout.toString().trim().split(`
 `).map((line) => line.trim().match(/^127\.0\.0\.1:(\d+)$/)?.[1]).filter((value) => value !== undefined);
-    if (loopback.length !== 1)
+    if (loopback.length !== 1) {
       throw new Error(`unable to uniquely resolve declared loopback port ${port.name}`);
+    }
     endpoints.push({
       name: port.name,
       service: port.service,
@@ -7772,30 +7919,45 @@ async function provisionLabStack(runtime, signal, runner = defaultDockerRunner, 
   return endpoints;
 }
 async function stackStatus(runtime, runner = defaultDockerRunner) {
-  const result = await composeCommand(runtime, ["ps", "--format", "json"], { allowFailure: true, timeoutMs: 20000 }, runner);
-  if (result.code !== 0)
+  const result = await composeCommand(runtime, ["ps", "--format", "json"], {
+    allowFailure: true,
+    timeoutMs: 20000
+  }, runner);
+  if (result.code !== 0) {
     return { available: false, error: compactError(result.stderr.toString()) };
+  }
   const raw = result.stdout.toString().trim();
   if (!raw)
     return { available: true, services: [] };
   try {
     const parsed = JSON.parse(raw);
-    return { available: true, services: summarizeServices(Array.isArray(parsed) ? parsed : [parsed]) };
+    return {
+      available: true,
+      services: summarizeServices(Array.isArray(parsed) ? parsed : [parsed])
+    };
   } catch {
     try {
-      return { available: true, services: summarizeServices(raw.split(`
-`).filter(Boolean).map((line) => JSON.parse(line))) };
+      return {
+        available: true,
+        services: summarizeServices(raw.split(`
+`).filter(Boolean).map((line) => JSON.parse(line)))
+      };
     } catch {
-      return { available: false, error: "Docker returned an invalid bounded status response" };
+      return {
+        available: false,
+        error: "Docker returned an invalid bounded status response"
+      };
     }
   }
 }
 async function stackLogs(runtime, service, tailLines, runner = defaultDockerRunner) {
-  if (tailLines < 1 || tailLines > 500)
+  if (tailLines < 1 || tailLines > 500) {
     throw new Error("tail-lines must be 1..500");
+  }
   const model = await normalizedModel(runtime.composeArgs, runner, scrubSecretEnvironment(runtime.config.secretEnvironment, process.env));
-  if (!Object.hasOwn(model.services ?? {}, service))
+  if (!Object.hasOwn(model.services ?? {}, service)) {
     throw new Error(`unknown Compose service: ${service}`);
+  }
   const result = await composeCommand(runtime, ["logs", "--no-color", "--tail", String(tailLines), service], {
     allowFailure: true,
     timeoutMs: 20000
@@ -7816,7 +7978,11 @@ async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultD
     `label=io.openai.codex-container-lab.lab=${metadata.id}`
   ];
   const resources = [
-    { kind: "container", list: ["ps", "-aq", ...exactFilters], remove: ["rm", "-f", "-v"] },
+    {
+      kind: "container",
+      list: ["ps", "-aq", ...exactFilters],
+      remove: ["rm", "-f", "-v"]
+    },
     {
       kind: "volume",
       list: [
@@ -7851,8 +8017,9 @@ async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultD
   for (const resource of resources) {
     const ids = await listBounded(resource.kind, resource.list, runner);
     if (resource.ownership && resource.kind !== "container") {
-      for (const id of ids)
+      for (const id of ids) {
         await verifyComposeResource(metadata, resource.kind, id, resource.ownership, runner);
+      }
     }
     if (ids.length) {
       const removed = await runner.run([...resource.remove, ...ids], {
@@ -7860,12 +8027,14 @@ async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultD
         timeoutMs: 30000,
         maxOutputBytes: 1024 * 1024
       });
-      if (removed.code !== 0)
+      if (removed.code !== 0) {
         throw new Error(`failed to remove managed lab ${resource.kind}s`);
+      }
     }
     const remaining = await listBounded(resource.kind, resource.list, runner);
-    if (remaining.length)
+    if (remaining.length) {
       throw new Error(`managed lab ${resource.kind}s remain after cleanup`);
+    }
   }
   if (removeInternalImage) {
     await removeManagedInternalImage(metadata, runner);
@@ -7891,19 +8060,20 @@ async function removeManagedInternalImage(metadata, runner) {
   } catch {
     throw new Error("invalid managed Dockerfile image ownership inspection");
   }
-  if (!isRecord3(image) || typeof image.id !== "string" || !/^sha256:[0-9a-f]{64}$/.test(image.id) || !isRecord3(image.labels)) {
+  if (!isRecord4(image) || typeof image["id"] !== "string" || !/^sha256:[0-9a-f]{64}$/.test(image["id"]) || !isRecord4(image["labels"])) {
     throw new Error("invalid managed Dockerfile image ownership inspection");
   }
-  if (image.labels["io.openai.codex-container-lab.managed"] !== "true" || image.labels["io.openai.codex-container-lab.owner"] !== metadata.owner || image.labels["io.openai.codex-container-lab.lab"] !== metadata.id) {
+  if (image["labels"]["io.openai.codex-container-lab.managed"] !== "true" || image["labels"]["io.openai.codex-container-lab.owner"] !== metadata.owner || image["labels"]["io.openai.codex-container-lab.lab"] !== metadata.id) {
     throw new Error("refusing to remove Dockerfile image without exact ownership labels");
   }
-  const removed = await runner.run(["image", "rm", image.id], {
+  const removed = await runner.run(["image", "rm", image["id"]], {
     allowFailure: true,
     timeoutMs: 30000,
     maxOutputBytes: 1024 * 1024
   });
-  if (removed.code !== 0)
+  if (removed.code !== 0) {
     throw new Error("failed to remove managed Dockerfile image");
+  }
 }
 function isExactMissingImage(result, tag) {
   if (result.stdout.toString().trim() !== "")
@@ -7912,13 +8082,18 @@ function isExactMissingImage(result, tag) {
   return diagnostic === `Error: No such image: ${tag}` || diagnostic === `Error response from daemon: No such image: ${tag}`;
 }
 async function listBounded(kind, args, runner) {
-  const listed = await runner.run(args, { allowFailure: true, timeoutMs: 15000, maxOutputBytes: 1024 * 1024 });
+  const listed = await runner.run(args, {
+    allowFailure: true,
+    timeoutMs: 15000,
+    maxOutputBytes: 1024 * 1024
+  });
   if (listed.code !== 0)
     throw new Error(`failed to list managed lab ${kind}s`);
   const ids = listed.stdout.toString().trim().split(`
 `).filter(Boolean);
-  if (ids.length > 1000)
+  if (ids.length > 1000) {
     throw new Error(`managed lab ${kind}s exceed cleanup bound`);
+  }
   return ids;
 }
 async function verifyComposeResource(metadata, kind, id, ownershipLabel, runner) {
@@ -7927,8 +8102,9 @@ async function verifyComposeResource(metadata, kind, id, ownershipLabel, runner)
     timeoutMs: 1e4,
     maxOutputBytes: 64 * 1024
   });
-  if (inspected.code !== 0)
+  if (inspected.code !== 0) {
     throw new Error(`unable to verify managed ${kind} ownership`);
+  }
   let labels;
   try {
     labels = JSON.parse(inspected.stdout.toString());
@@ -7962,14 +8138,19 @@ function launchDockerRun(runtime, invocation, runner = defaultDockerRunner, envi
     "-T",
     "--workdir",
     workdir,
-    ...Object.entries(invocation.environment).flatMap(([key, value]) => ["--env", `${key}=${value}`]),
+    ...Object.entries(invocation.environment).flatMap(([key, value]) => [
+      "--env",
+      `${key}=${value}`
+    ]),
     runtime.config.mode.commandService,
     ...runtime.config.runtime.shell,
     wrapper,
     "codex-container-lab-run",
     ...invocation.argv
   ];
-  return runner.spawn(args, { env: scrubSecretEnvironment(runtime.config.secretEnvironment, environment) });
+  return runner.spawn(args, {
+    env: scrubSecretEnvironment(runtime.config.secretEnvironment, environment)
+  });
 }
 async function terminateDockerRun(runtime, identity2, signal, runner = defaultDockerRunner) {
   const pidFile = `/tmp/.codex-container-lab-run-${identity2.runId}.pid`;
@@ -8018,19 +8199,20 @@ async function terminateDockerRun(runtime, identity2, signal, runner = defaultDo
 }
 function summarizeServices(values) {
   return values.slice(0, 16).flatMap((value) => {
-    if (!isRecord3(value))
+    if (!isRecord4(value))
       return [];
-    const service = typeof value.Service === "string" ? value.Service : typeof value.Name === "string" ? value.Name : undefined;
-    const state = typeof value.State === "string" ? value.State : undefined;
+    const service = typeof value["Service"] === "string" ? value["Service"] : typeof value["Name"] === "string" ? value["Name"] : undefined;
+    const state = typeof value["State"] === "string" ? value["State"] : undefined;
     if (!service || !state)
       return [];
     const summary = {
       service: service.slice(0, 128),
       state: state.slice(0, 64)
     };
-    if (typeof value.Health === "string" && value.Health)
-      summary.health = value.Health.slice(0, 64);
-    const exitCode = typeof value.ExitCode === "number" ? value.ExitCode : Number(value.ExitCode);
+    if (typeof value["Health"] === "string" && value["Health"]) {
+      summary.health = value["Health"].slice(0, 64);
+    }
+    const exitCode = typeof value["ExitCode"] === "number" ? value["ExitCode"] : Number(value["ExitCode"]);
     if (Number.isInteger(exitCode))
       summary.exitCode = exitCode;
     return [summary];
@@ -8052,8 +8234,9 @@ function boundedLogTail(value, maxLines, maxBytes) {
   return { text: selected, truncated };
 }
 function runtimeFromLab(metadata) {
-  if (!metadata.runtime)
+  if (!metadata.runtime) {
     throw new Error(`lab runtime is unavailable: ${metadata.id}`);
+  }
   return { metadata, ...metadata.runtime };
 }
 function shellQuote(value) {
@@ -8090,14 +8273,23 @@ function scrubDockerRunnerEnvironment(runner, names, environment) {
     })
   };
 }
-function isRecord3(value) {
+function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // packages/codex-container-lab/cli/src/files.ts
 import { createHash, randomUUID } from "crypto";
 import { createReadStream } from "fs";
-import { lstat, mkdir as mkdir2, readFile as readFile2, readlink, realpath as realpath2, rename, rm, writeFile as writeFile2 } from "fs/promises";
+import {
+  lstat,
+  mkdir as mkdir2,
+  readFile as readFile2,
+  readlink,
+  realpath as realpath2,
+  rename,
+  rm,
+  writeFile as writeFile2
+} from "fs/promises";
 import path from "path";
 var MAX_SYNC_FILE_BYTES = 64 * 1024 * 1024;
 function safeRelativePath(value) {
@@ -8119,8 +8311,9 @@ function safeStateName(value, label = "identifier") {
 async function canonicalRoot(root) {
   const resolved = await realpath2(root);
   const stat2 = await lstat(resolved);
-  if (!stat2.isDirectory())
+  if (!stat2.isDirectory()) {
     throw new Error(`Synchronization root is not a directory: ${root}`);
+  }
   return resolved;
 }
 async function guardedPath(root, relative2, createParents = false) {
@@ -8156,16 +8349,31 @@ async function describeSyncFile(root, relative2) {
   if (stat2.isSymbolicLink()) {
     const target = await readlink(absolute);
     const bytes = Buffer.from(target);
-    return { path: relative2, kind: "symlink", sha256: sha256(bytes), size: bytes.byteLength, mode };
+    return {
+      path: relative2,
+      kind: "symlink",
+      sha256: sha256(bytes),
+      size: bytes.byteLength,
+      mode
+    };
   }
-  if (!stat2.isFile())
+  if (!stat2.isFile()) {
     throw new Error(`Eligible Git path is not a regular file or symlink: ${relative2}`);
-  if (stat2.size > MAX_SYNC_FILE_BYTES)
+  }
+  if (stat2.size > MAX_SYNC_FILE_BYTES) {
     throw new Error(`Eligible Git file exceeds 64 MiB synchronization limit: ${relative2}`);
+  }
   const hash = createHash("sha256");
-  for await (const chunk of createReadStream(absolute))
+  for await (const chunk of createReadStream(absolute)) {
     hash.update(chunk);
-  return { path: relative2, kind: "file", sha256: hash.digest("hex"), size: stat2.size, mode };
+  }
+  return {
+    path: relative2,
+    kind: "file",
+    sha256: hash.digest("hex"),
+    size: stat2.size,
+    mode
+  };
 }
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -8185,7 +8393,15 @@ async function removeIfPresent(file, options = {}) {
 }
 
 // packages/codex-container-lab/cli/src/locks.ts
-import { link, lstat as lstat2, mkdir as mkdir3, open, readFile as readFile3, rm as rm2, writeFile as writeFile3 } from "fs/promises";
+import {
+  link,
+  lstat as lstat2,
+  mkdir as mkdir3,
+  open,
+  readFile as readFile3,
+  rm as rm2,
+  writeFile as writeFile3
+} from "fs/promises";
 import { dirname } from "path";
 async function withFileLock(path2, operation, options = {}) {
   const attempts = options.attempts ?? 100;
@@ -8193,8 +8409,9 @@ async function withFileLock(path2, operation, options = {}) {
   const staleMs = options.staleMs ?? 5 * 60000;
   await mkdir3(dirname(path2), { recursive: true, mode: 448 });
   for (let attempt = 0;attempt < attempts; attempt++) {
-    if (options.signal?.aborted)
+    if (options.signal?.aborted) {
       throw new Error("operation was cancelled while waiting for a state lock");
+    }
     const candidate = `${path2}.candidate-${process.pid}-${crypto.randomUUID()}`;
     let acquired = false;
     try {
@@ -8223,8 +8440,9 @@ async function withFileLock(path2, operation, options = {}) {
     }
     await removeConfirmedStaleLock(path2, staleMs, options.processProbe ?? probeProcess);
     if (attempt + 1 < attempts) {
-      if (options.signal?.aborted)
+      if (options.signal?.aborted) {
         throw new Error("operation was cancelled while waiting for a state lock");
+      }
       await Bun.sleep(delayMs);
     }
   }
@@ -8248,7 +8466,7 @@ async function removeConfirmedStaleLock(path2, staleMs, processProbe) {
     try {
       const contents = info.isDirectory() ? await readFile3(`${path2}/owner.json`, "utf8") : await handle.readFile({ encoding: "utf8" });
       const value = JSON.parse(contents);
-      if (isRecord4(value) && typeof value.pid === "number" && Number.isInteger(value.pid) && value.pid > 0 && typeof value.createdAt === "string") {
+      if (isRecord5(value) && typeof value["pid"] === "number" && Number.isInteger(value["pid"]) && value["pid"] > 0 && typeof value["createdAt"] === "string") {
         record = value;
       }
     } catch {}
@@ -8334,13 +8552,13 @@ async function removeConfirmedOrphanClaim(claimPath, staleMs, processProbe) {
     } catch {
       return false;
     }
-    if (!isRecord4(value) || typeof value.pid !== "number" || !Number.isInteger(value.pid) || value.pid <= 0 || typeof value.createdAt !== "string")
+    if (!isRecord5(value) || typeof value["pid"] !== "number" || !Number.isInteger(value["pid"]) || value["pid"] <= 0 || typeof value["createdAt"] !== "string")
       return false;
-    const age = Date.now() - Date.parse(value.createdAt);
+    const age = Date.now() - Date.parse(value["createdAt"]);
     if (!Number.isFinite(age) || age < staleMs)
       return false;
     try {
-      processProbe(value.pid);
+      processProbe(value["pid"]);
       return false;
     } catch (error) {
       if (error.code !== "ESRCH")
@@ -8379,15 +8597,24 @@ function identity2(info) {
 function probeProcess(pid) {
   process.kill(pid, 0);
 }
-function isRecord4(value) {
+function isRecord5(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // packages/codex-container-lab/cli/src/state.ts
 import { createHash as createHash2 } from "crypto";
-import { homedir, tmpdir } from "os";
-import { basename, isAbsolute as isAbsolute2, join as join2, parse, posix as posix3, relative as relative2, resolve as resolve2, sep } from "path";
 import { lstat as lstat3, mkdir as mkdir4, readdir, realpath as realpath3, rm as rm3 } from "fs/promises";
+import { homedir, tmpdir } from "os";
+import {
+  basename,
+  isAbsolute as isAbsolute2,
+  join as join2,
+  parse,
+  posix as posix3,
+  relative as relative2,
+  resolve as resolve2,
+  sep
+} from "path";
 var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
 var FINDING_SURFACES = new Set([
   "host-bind",
@@ -8409,19 +8636,20 @@ function defaultRuntimeRoot() {
 }
 function resolveRoots(options = {}) {
   return {
-    stateRoot: resolve2(options.stateRoot ?? process.env.CODEX_CONTAINER_LAB_STATE_ROOT ?? defaultStateRoot()),
-    runtimeRoot: resolve2(options.runtimeRoot ?? process.env.CODEX_CONTAINER_LAB_RUNTIME_ROOT ?? defaultRuntimeRoot())
+    stateRoot: resolve2(options.stateRoot ?? process.env["CODEX_CONTAINER_LAB_STATE_ROOT"] ?? defaultStateRoot()),
+    runtimeRoot: resolve2(options.runtimeRoot ?? process.env["CODEX_CONTAINER_LAB_RUNTIME_ROOT"] ?? defaultRuntimeRoot())
   };
 }
 function resolveOwner(explicit, environment = process.env) {
-  const owner = explicit ?? environment.CODEX_THREAD_ID;
+  const owner = explicit ?? environment["CODEX_THREAD_ID"];
   if (owner === undefined || owner.length === 0) {
     throw new Error("owner is required: pass --owner THREAD_ID or set CODEX_THREAD_ID");
   }
   if (owner.includes("\x00"))
     throw new Error("owner must not contain NUL");
-  if (Buffer.byteLength(owner, "utf8") > 4096)
+  if (Buffer.byteLength(owner, "utf8") > 4096) {
     throw new Error("owner must be at most 4096 UTF-8 bytes");
+  }
   return owner;
 }
 function ownerKey(owner) {
@@ -8451,7 +8679,7 @@ async function readReapedOwner(stateRoot, owner) {
       return;
     throw error;
   }
-  if (!isRecord5(value) || value.version !== 1 || value.owner !== owner || value.ownerKey !== ownerKey(owner) || !isTimestamp(value.reapedAt)) {
+  if (!isRecord6(value) || value["version"] !== 1 || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner) || !isTimestamp(value["reapedAt"])) {
     throw new Error("invalid reaped owner manifest");
   }
   return value;
@@ -8493,11 +8721,11 @@ async function ensureOwner(stateRoot, owner) {
 }
 async function readOwnerManifest(path2) {
   const value = await readJson(path2);
-  if (!isRecord5(value) || value.version !== 1 || typeof value.owner !== "string" || typeof value.ownerKey !== "string" || !isTimestamp(value.createdAt)) {
+  if (!isRecord6(value) || value["version"] !== 1 || typeof value["owner"] !== "string" || typeof value["ownerKey"] !== "string" || !isTimestamp(value["createdAt"])) {
     throw new Error(`invalid owner manifest: ${path2}`);
   }
-  resolveOwner(value.owner, {});
-  if (value.ownerKey !== ownerKey(value.owner) || basename(resolve2(path2, "..")) !== value.ownerKey) {
+  resolveOwner(value["owner"], {});
+  if (value["ownerKey"] !== ownerKey(value["owner"]) || basename(resolve2(path2, "..")) !== value["ownerKey"]) {
     throw new Error(`owner manifest hash mismatch: ${path2}`);
   }
   return value;
@@ -8523,8 +8751,9 @@ async function listLabs(roots, owner) {
   }
   const labs = [];
   for (const name of names.sort()) {
-    if (!name.endsWith(".json"))
+    if (!name.endsWith(".json")) {
       throw new Error(`unexpected lab state entry: ${name}`);
+    }
     labs.push(await readLab(roots, owner, name.slice(0, -5)));
   }
   return labs;
@@ -8533,8 +8762,9 @@ async function removeLabState(stateRoot, owner, labId) {
   await rm3(labManifestPath(stateRoot, owner, labId), { force: true });
 }
 async function assertReadyLabFilesystem(roots, lab) {
-  if (lab.state !== "ready" || !lab.runtime)
+  if (lab.state !== "ready" || !lab.runtime) {
     throw new Error(`lab is not ready: ${lab.state}`);
+  }
   const configuredRuntime = await realDirectory(roots.runtimeRoot, "configured runtime root");
   const ownerRuntime = await realDirectory(join2(roots.runtimeRoot, lab.ownerKey), "owner runtime root");
   const runtime = await realDirectory(lab.runtimeRoot, "lab runtime root");
@@ -8545,12 +8775,14 @@ async function assertReadyLabFilesystem(roots, lab) {
   const source = await realDirectory(lab.sourceRoot, "lab source root");
   await realFileInside(source, lab.manifestPath, "lab manifest");
   await realFileInside(runtime, lab.runtime.overrideFile, "Compose override");
-  if (lab.runtime.baseFile)
+  if (lab.runtime.baseFile) {
     await realFileInside(runtime, lab.runtime.baseFile, "internal Compose base");
+  }
   const mode = lab.runtime.config.mode;
   if (mode.kind === "compose") {
-    for (const path2 of mode.files)
+    for (const path2 of mode.files) {
       await realFileInside(source, path2, "project Compose file");
+    }
   } else if (mode.kind === "dockerfile") {
     await realFileInside(source, mode.dockerfile, "project Dockerfile");
     await realDirectoryInside(source, mode.context, "Dockerfile context");
@@ -8560,50 +8792,61 @@ function assertLabMetadata(value, roots, owner, labId) {
   try {
     safeStateName(labId, "lab id");
     resolveOwner(owner, {});
-    if (!isRecord5(value) || value.version !== 1 || value.id !== labId || value.owner !== owner || value.ownerKey !== ownerKey(owner))
+    if (!isRecord6(value) || value["version"] !== 1 || value["id"] !== labId || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner))
       throw new Error("identity mismatch");
     normalizeSecretEnvironment(value);
-    if (typeof value.name !== "string" || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(value.name))
+    if (typeof value["name"] !== "string" || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(value["name"]))
       throw new Error("invalid name");
-    if (typeof value.repoHash !== "string" || !/^[a-f0-9]{12}$/.test(value.repoHash))
+    if (typeof value["repoHash"] !== "string" || !/^[a-f0-9]{12}$/.test(value["repoHash"]))
       throw new Error("invalid repository hash");
-    if (typeof value.composeProject !== "string" || !/^ccl-[a-z0-9][a-z0-9-]{0,62}$/.test(value.composeProject))
+    if (typeof value["composeProject"] !== "string" || !/^ccl-[a-z0-9][a-z0-9-]{0,62}$/.test(value["composeProject"]))
       throw new Error("invalid Compose project");
-    if (typeof value.state !== "string" || !LAB_STATES.has(value.state))
+    if (typeof value["state"] !== "string" || !LAB_STATES.has(value["state"])) {
       throw new Error("invalid lifecycle state");
+    }
     const expectedRuntime = expectedLabRuntimeRoot(roots, owner, labId);
-    if (!isNormalizedAbsolute(value.runtimeRoot) || value.runtimeRoot !== expectedRuntime)
+    if (!isNormalizedAbsolute(value["runtimeRoot"]) || value["runtimeRoot"] !== expectedRuntime)
       throw new Error("invalid runtime root");
-    if (value.workspace !== join2(expectedRuntime, "workspace"))
+    if (value["workspace"] !== join2(expectedRuntime, "workspace")) {
       throw new Error("invalid workspace root");
-    if (!isNormalizedAbsolute(value.sourceRoot) || value.sourceRoot === parse(value.sourceRoot).root)
+    }
+    if (!isNormalizedAbsolute(value["sourceRoot"]) || value["sourceRoot"] === parse(value["sourceRoot"]).root)
       throw new Error("invalid source root");
-    if (value.manifestPath !== join2(value.sourceRoot, manifestName))
+    if (value["manifestPath"] !== join2(value["sourceRoot"], manifestName)) {
       throw new Error("invalid source manifest relationship");
-    if (typeof value.commandService !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value.commandService)) {
+    }
+    if (typeof value["commandService"] !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["commandService"])) {
       throw new Error("invalid command service");
     }
-    if (!isTimestamp(value.createdAt) || !isTimestamp(value.updatedAt))
+    if (!isTimestamp(value["createdAt"]) || !isTimestamp(value["updatedAt"])) {
       throw new Error("invalid timestamps");
-    if (!Array.isArray(value.endpoints) || !value.endpoints.every(isEndpoint))
+    }
+    if (!Array.isArray(value["endpoints"]) || !value["endpoints"].every(isEndpoint)) {
       throw new Error("invalid endpoints");
-    if (!Array.isArray(value.findings) || !value.findings.every(isFinding))
+    }
+    if (!Array.isArray(value["findings"]) || !value["findings"].every(isFinding)) {
       throw new Error("invalid findings");
-    if (!isEnvironmentNames(value.secretEnvironment))
+    }
+    if (!isEnvironmentNames(value["secretEnvironment"])) {
       throw new Error("invalid secret environment metadata");
-    if (value.modeKind !== undefined && value.modeKind !== "compose" && value.modeKind !== "dockerfile" && value.modeKind !== "image") {
+    }
+    if (value["modeKind"] !== undefined && value["modeKind"] !== "compose" && value["modeKind"] !== "dockerfile" && value["modeKind"] !== "image") {
       throw new Error("invalid mode kind");
     }
-    if (value.error !== undefined && !isBoundedString(value.error, 4000))
+    if (value["error"] !== undefined && !isBoundedString(value["error"], 4000)) {
       throw new Error("invalid error");
-    if (value.runtime !== undefined)
-      validatePersistedRuntime(value, value.runtime);
-    if (value.state === "ready" && value.runtime === undefined)
+    }
+    if (value["runtime"] !== undefined) {
+      validatePersistedRuntime(value, value["runtime"]);
+    }
+    if (value["state"] === "ready" && value["runtime"] === undefined) {
       throw new Error("ready lab has no runtime");
-    if (value.modeKind === "dockerfile") {
-      if (value.managedImage !== internalImageTag(value.ownerKey, value.id))
+    }
+    if (value["modeKind"] === "dockerfile") {
+      if (value["managedImage"] !== internalImageTag(value["ownerKey"], value["id"])) {
         throw new Error("invalid managed image");
-    } else if (value.managedImage !== undefined) {
+      }
+    } else if (value["managedImage"] !== undefined) {
       throw new Error("unexpected managed image");
     }
   } catch (error) {
@@ -8611,74 +8854,78 @@ function assertLabMetadata(value, roots, owner, labId) {
   }
 }
 function validatePersistedRuntime(lab, runtime) {
-  if (!isRecord5(runtime) || !isRecord5(runtime.config))
+  if (!isRecord6(runtime) || !isRecord6(runtime["config"])) {
     throw new Error("invalid persisted runtime");
-  const config = runtime.config;
-  if (config.repoRoot !== lab.sourceRoot || config.manifestPath !== lab.manifestPath || !isRecord5(config.mode) || !isRecord5(config.runtime)) {
+  }
+  const config = runtime["config"];
+  if (config["repoRoot"] !== lab["sourceRoot"] || config["manifestPath"] !== lab["manifestPath"] || !isRecord6(config["mode"]) || !isRecord6(config["runtime"])) {
     throw new Error("runtime source identity mismatch");
   }
-  const mode = config.mode;
-  if (mode.kind !== lab.modeKind || mode.commandService !== lab.commandService || typeof mode.commandService !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(mode.commandService)) {
+  const mode = config["mode"];
+  if (mode["kind"] !== lab["modeKind"] || mode["commandService"] !== lab["commandService"] || typeof mode["commandService"] !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(mode["commandService"])) {
     throw new Error("runtime mode identity mismatch");
   }
-  if (mode.kind === "compose") {
-    if (!Array.isArray(mode.files) || mode.files.length === 0 || !mode.files.every((path2) => isPathInside(lab.sourceRoot, path2))) {
+  if (mode["kind"] === "compose") {
+    if (!Array.isArray(mode["files"]) || mode["files"].length === 0 || !mode["files"].every((path2) => isPathInside(lab["sourceRoot"], path2))) {
       throw new Error("invalid Compose source files");
     }
-  } else if (mode.kind === "dockerfile") {
-    if (!isPathInside(lab.sourceRoot, mode.dockerfile) || !isPathInside(lab.sourceRoot, mode.context, true)) {
+  } else if (mode["kind"] === "dockerfile") {
+    if (!isPathInside(lab["sourceRoot"], mode["dockerfile"]) || !isPathInside(lab["sourceRoot"], mode["context"], true)) {
       throw new Error("invalid Dockerfile source paths");
     }
-  } else if (mode.kind === "image") {
-    if (!isBoundedString(mode.image, 1024) || mode.image.includes("\x00") || mode.image.trim() !== mode.image)
+  } else if (mode["kind"] === "image") {
+    if (!isBoundedString(mode["image"], 1024) || mode["image"].includes("\x00") || mode["image"].trim() !== mode["image"])
       throw new Error("invalid image name");
   } else {
     throw new Error("invalid runtime mode");
   }
-  if (!isBoundedString(config.runtime.workspace, 1024) || !posix3.isAbsolute(config.runtime.workspace) || posix3.normalize(config.runtime.workspace) !== config.runtime.workspace || config.runtime.workspace === "/" || !Array.isArray(config.runtime.shell) || config.runtime.shell.length === 0 || config.runtime.shell.length > 64 || !config.runtime.shell.every((part) => isBoundedString(part, 4096) && !part.includes("\x00")) || !posix3.isAbsolute(config.runtime.shell[0]) || posix3.normalize(config.runtime.shell[0]) !== config.runtime.shell[0])
+  if (!isBoundedString(config["runtime"]["workspace"], 1024) || !posix3.isAbsolute(config["runtime"]["workspace"]) || posix3.normalize(config["runtime"]["workspace"]) !== config["runtime"]["workspace"] || config["runtime"]["workspace"] === "/" || !Array.isArray(config["runtime"]["shell"]) || config["runtime"]["shell"].length === 0 || config["runtime"]["shell"].length > 64 || !config["runtime"]["shell"].every((part) => isBoundedString(part, 4096) && !part.includes("\x00")) || !posix3.isAbsolute(config["runtime"]["shell"][0]) || posix3.normalize(config["runtime"]["shell"][0]) !== config["runtime"]["shell"][0])
     throw new Error("invalid container runtime");
-  if (!Array.isArray(config.ports) || !config.ports.every(isDeclaredPort))
+  if (!Array.isArray(config["ports"]) || !config["ports"].every(isDeclaredPort)) {
     throw new Error("invalid declared ports");
-  if (!Array.isArray(config.forwardEnvironment) || config.forwardEnvironment.length > 64 || !config.forwardEnvironment.every((key) => typeof key === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) || new Set(config.forwardEnvironment).size !== config.forwardEnvironment.length) {
+  }
+  if (!Array.isArray(config["forwardEnvironment"]) || config["forwardEnvironment"].length > 64 || !config["forwardEnvironment"].every((key) => typeof key === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) || new Set(config["forwardEnvironment"]).size !== config["forwardEnvironment"].length) {
     throw new Error("invalid forwarded environment");
   }
-  const forwardedEnvironment = new Set(config.forwardEnvironment);
-  if (!isEnvironmentNames(config.secretEnvironment) || config.secretEnvironment.some((key) => forwardedEnvironment.has(key))) {
+  const forwardedEnvironment = new Set(config["forwardEnvironment"]);
+  if (!isEnvironmentNames(config["secretEnvironment"]) || config["secretEnvironment"].some((key) => forwardedEnvironment.has(key))) {
     throw new Error("invalid secret environment");
   }
-  if (JSON.stringify(config.secretEnvironment) !== JSON.stringify(lab.secretEnvironment)) {
+  if (JSON.stringify(config["secretEnvironment"]) !== JSON.stringify(lab["secretEnvironment"])) {
     throw new Error("secret environment metadata mismatch");
   }
-  const runtimeRoot = lab.runtimeRoot;
+  const runtimeRoot = lab["runtimeRoot"];
   const expectedOverride = join2(runtimeRoot, "override.compose.yaml");
-  const expectedBase = mode.kind === "compose" ? undefined : join2(runtimeRoot, "base.compose.yaml");
-  if (runtime.overrideFile !== expectedOverride || runtime.baseFile !== expectedBase || !Array.isArray(runtime.findings) || !runtime.findings.every(isFinding) || JSON.stringify(runtime.findings) !== JSON.stringify(lab.findings))
+  const expectedBase = mode["kind"] === "compose" ? undefined : join2(runtimeRoot, "base.compose.yaml");
+  if (runtime["overrideFile"] !== expectedOverride || runtime["baseFile"] !== expectedBase || !Array.isArray(runtime["findings"]) || !runtime["findings"].every(isFinding) || JSON.stringify(runtime["findings"]) !== JSON.stringify(lab["findings"]))
     throw new Error("invalid runtime files or findings");
   const expectedArgs = composeCommandArgs(config, {
-    projectName: lab.composeProject,
+    projectName: lab["composeProject"],
     overrideFile: expectedOverride,
-    baseFile: expectedBase
+    ...expectedBase === undefined ? {} : { baseFile: expectedBase }
   });
-  if (!Array.isArray(runtime.composeArgs) || runtime.composeArgs.length !== expectedArgs.length || !runtime.composeArgs.every((arg, index) => arg === expectedArgs[index]))
+  if (!Array.isArray(runtime["composeArgs"]) || runtime["composeArgs"].length !== expectedArgs.length || !runtime["composeArgs"].every((arg, index) => arg === expectedArgs[index]))
     throw new Error("invalid Compose arguments");
 }
 function normalizeSecretEnvironment(lab) {
   let runtimeNames;
-  if (isRecord5(lab.runtime) && isRecord5(lab.runtime.config)) {
-    if (lab.runtime.config.secretEnvironment === undefined)
-      lab.runtime.config.secretEnvironment = [];
-    runtimeNames = lab.runtime.config.secretEnvironment;
+  if (isRecord6(lab["runtime"]) && isRecord6(lab["runtime"]["config"])) {
+    if (lab["runtime"]["config"]["secretEnvironment"] === undefined) {
+      lab["runtime"]["config"]["secretEnvironment"] = [];
+    }
+    runtimeNames = lab["runtime"]["config"]["secretEnvironment"];
   }
-  if (lab.secretEnvironment === undefined) {
-    lab.secretEnvironment = Array.isArray(runtimeNames) ? [...runtimeNames] : [];
+  if (lab["secretEnvironment"] === undefined) {
+    lab["secretEnvironment"] = Array.isArray(runtimeNames) ? [...runtimeNames] : [];
   }
 }
 function isEnvironmentNames(value) {
   return Array.isArray(value) && value.length <= 64 && value.every((key) => typeof key === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) && new Set(value).size === value.length;
 }
 function isPathInside(root, candidate, allowRoot = false) {
-  if (typeof candidate !== "string" || !isNormalizedAbsolute(candidate))
+  if (typeof candidate !== "string" || !isNormalizedAbsolute(candidate)) {
     return false;
+  }
   const fromRoot = relative2(root, candidate);
   return (allowRoot || fromRoot !== "") && fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute2(fromRoot);
 }
@@ -8686,24 +8933,26 @@ function isNormalizedAbsolute(value) {
   return typeof value === "string" && !value.includes("\x00") && isAbsolute2(value) && resolve2(value) === value;
 }
 function isEndpoint(value) {
-  return isRecord5(value) && typeof value.name === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value.name) && typeof value.service === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value.service) && typeof value.target === "number" && Number.isInteger(value.target) && value.target >= 1 && value.target <= 65535 && isBoundedString(value.url, 2048);
+  return isRecord6(value) && typeof value["name"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["name"]) && typeof value["service"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && isBoundedString(value["url"], 2048);
 }
 function isDeclaredPort(value) {
-  return isRecord5(value) && typeof value.name === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value.name) && typeof value.service === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value.service) && typeof value.target === "number" && Number.isInteger(value.target) && value.target >= 1 && value.target <= 65535 && (value.scheme === undefined || typeof value.scheme === "string" && /^[a-z][a-z0-9+.-]*$/.test(value.scheme));
+  return isRecord6(value) && typeof value["name"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["name"]) && typeof value["service"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && (value["scheme"] === undefined || typeof value["scheme"] === "string" && /^[a-z][a-z0-9+.-]*$/.test(value["scheme"]));
 }
 function isFinding(value) {
-  return isRecord5(value) && (value.service === undefined || isBoundedString(value.service, 128)) && typeof value.surface === "string" && FINDING_SURFACES.has(value.surface) && isBoundedString(value.detail, 1024);
+  return isRecord6(value) && (value["service"] === undefined || isBoundedString(value["service"], 128)) && typeof value["surface"] === "string" && FINDING_SURFACES.has(value["surface"]) && isBoundedString(value["detail"], 1024);
 }
 async function realDirectory(path2, label) {
   const info = await lstat3(path2);
-  if (!info.isDirectory() || info.isSymbolicLink())
+  if (!info.isDirectory() || info.isSymbolicLink()) {
     throw new Error(`${label} is not a real directory`);
+  }
   return await realpath3(path2);
 }
 async function realFileInside(root, path2, label) {
   const info = await lstat3(path2);
-  if (!info.isFile() || info.isSymbolicLink())
+  if (!info.isFile() || info.isSymbolicLink()) {
     throw new Error(`${label} is not a real file`);
+  }
   assertCanonicalInside(root, await realpath3(path2), label, false);
 }
 async function realDirectoryInside(root, path2, label) {
@@ -8731,13 +8980,22 @@ function isBoundedString(value, maximum) {
 function message(error) {
   return error instanceof Error ? error.message : String(error);
 }
-function isRecord5(value) {
+function isRecord6(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // packages/codex-container-lab/cli/src/sync.ts
 import { randomBytes, randomUUID as randomUUID2 } from "crypto";
-import { chmod, copyFile, lstat as lstat5, mkdir as mkdir5, readlink as readlink2, rename as rename2, rm as rm4, symlink } from "fs/promises";
+import {
+  chmod,
+  copyFile,
+  lstat as lstat5,
+  mkdir as mkdir5,
+  readlink as readlink2,
+  rename as rename2,
+  rm as rm4,
+  symlink
+} from "fs/promises";
 import path2 from "path";
 
 // packages/codex-container-lab/cli/src/git-manifest.ts
@@ -8749,11 +9007,20 @@ var MAX_SYNC_FILES = 20000;
 var MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
 async function eligibleGitPaths(root) {
   const canonical = await canonicalRoot(root);
-  const { stdout } = await execFileAsync("git", ["-C", canonical, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 });
+  const { stdout } = await execFileAsync("git", [
+    "-C",
+    canonical,
+    "ls-files",
+    "-z",
+    "--cached",
+    "--others",
+    "--exclude-standard"
+  ], { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 });
   const values = stdout.toString("utf8").split("\x00").filter(Boolean).map(safeRelativePath);
   const unique = [...new Set(values)].sort((a, b) => a.localeCompare(b));
-  if (unique.length > MAX_SYNC_FILES)
+  if (unique.length > MAX_SYNC_FILES) {
     throw new Error(`Git workspace exceeds ${MAX_SYNC_FILES} synchronized paths`);
+  }
   return unique;
 }
 async function buildGitManifest(root) {
@@ -8767,8 +9034,9 @@ async function buildGitManifest(root) {
         continue;
       const file = await describeSyncFile(canonical, relative3);
       totalBytes += file.size;
-      if (totalBytes > MAX_SYNC_TOTAL_BYTES)
+      if (totalBytes > MAX_SYNC_TOTAL_BYTES) {
         throw new Error("Git workspace exceeds 512 MiB synchronization limit");
+      }
       files[relative3] = file;
     } catch (error) {
       if (error.code !== "ENOENT")
@@ -8785,61 +9053,16 @@ function manifestDigest(files) {
   return sha256(JSON.stringify(compact));
 }
 
-// packages/codex-container-lab/cli/src/public-json.ts
-var PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
-function serializePublicJson(value) {
-  let candidate = value;
-  let encoded = `${JSON.stringify(candidate)}
-`;
-  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET && isRecord6(value) && isRecord6(value.transcript) && typeof value.transcript.text === "string") {
-    const characters = Array.from(value.transcript.text);
-    let low = 0;
-    let high = characters.length;
-    while (low < high) {
-      const start = Math.floor((low + high) / 2);
-      const text2 = characters.slice(start).join("");
-      const transcript = {
-        ...value.transcript,
-        text: text2,
-        bytes: Buffer.byteLength(text2),
-        lines: text2 ? text2.split(`
-`).length : 0,
-        truncated: true
-      };
-      const attempt = `${JSON.stringify({ ...value, transcript })}
-`;
-      if (Buffer.byteLength(attempt) <= PUBLIC_JSON_BYTE_BUDGET)
-        high = start;
-      else
-        low = start + 1;
-    }
-    const text = characters.slice(low).join("");
-    candidate = { ...value, transcript: {
-      ...value.transcript,
-      text,
-      bytes: Buffer.byteLength(text),
-      lines: text ? text.split(`
-`).length : 0,
-      truncated: true
-    } };
-    encoded = `${JSON.stringify(candidate)}
-`;
-  }
-  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET) {
-    throw new Error("public response exceeds the 16 KiB output budget");
-  }
-  return encoded;
-}
-function isRecord6(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 // packages/codex-container-lab/cli/src/sync.ts
 var DEFAULT_TTL_MS = 5 * 60 * 1000;
 function compareManifests(baseline, source, target) {
   const changes = [];
   const conflicts = [];
-  const names = new Set([...Object.keys(baseline), ...Object.keys(source), ...Object.keys(target)]);
+  const names = new Set([
+    ...Object.keys(baseline),
+    ...Object.keys(source),
+    ...Object.keys(target)
+  ]);
   for (const name of [...names].sort()) {
     const before = baseline[name];
     const from = source[name];
@@ -8849,7 +9072,12 @@ function compareManifests(baseline, source, target) {
     const sourceChanged = !sameFile(from, before);
     const targetChanged = !sameFile(to, before);
     if (sourceChanged && targetChanged) {
-      conflicts.push({ path: name, baseline: before, source: from, target: to });
+      conflicts.push({
+        path: name,
+        ...before === undefined ? {} : { baseline: before },
+        ...from === undefined ? {} : { source: from },
+        ...to === undefined ? {} : { target: to }
+      });
     } else if (sourceChanged) {
       changes.push(from ? { path: name, action: "upsert", file: from } : { path: name, action: "delete" });
     }
@@ -8859,7 +9087,10 @@ function compareManifests(baseline, source, target) {
 async function initializeSyncBaseline(identity3, root) {
   const state = await statePaths(identity3);
   const manifest = await buildGitManifest(root);
-  await writeJsonAtomic(state.baseline, { version: 1, files: manifest.files });
+  await writeJsonAtomic(state.baseline, {
+    version: 1,
+    files: manifest.files
+  });
 }
 async function previewSync(options) {
   const state = await statePaths(options);
@@ -8886,10 +9117,14 @@ async function previewSync(options) {
     sourceRoot: source.root,
     targetRoot: target.root,
     binding: previewBinding(options, source, target, expiresAt, token),
-    expectedTargets: Object.fromEntries(comparison.changes.map((change) => [change.path, target.files[change.path] ?? null]))
+    expectedTargets: Object.fromEntries(comparison.changes.map((change) => [
+      change.path,
+      target.files[change.path] ?? null
+    ]))
   };
-  if (options.maxEntries !== undefined)
+  if (options.maxEntries !== undefined) {
     assertPublicPreviewFitsBudget(publicPreview(stored), options);
+  }
   await writeJsonAtomic(path2.join(state.previews, `${token}.json`), stored);
   return publicPreview(stored);
 }
@@ -8897,14 +9132,21 @@ async function applySync(options) {
   const state = await statePaths(options);
   const previewPath = path2.join(state.previews, `${safeStateName(options.token, "preview token")}.json`);
   const preview = await readRequiredJson(previewPath, "Unknown or already-used synchronization preview token");
-  const [sourceRoot, targetRoot] = await Promise.all([canonicalRoot(options.sourceRoot), canonicalRoot(options.targetRoot)]);
+  const [sourceRoot, targetRoot] = await Promise.all([
+    canonicalRoot(options.sourceRoot),
+    canonicalRoot(options.targetRoot)
+  ]);
   assertPreviewBinding(preview, options, sourceRoot, targetRoot);
   if ((options.now ?? new Date).getTime() >= Date.parse(preview.expiresAt)) {
     throw new Error("Synchronization preview token has expired");
   }
-  if (preview.conflicts.length)
+  if (preview.conflicts.length) {
     throw new Error("Synchronization preview contains conflicts");
-  const [source, target] = await Promise.all([buildGitManifest(sourceRoot), buildGitManifest(targetRoot)]);
+  }
+  const [source, target] = await Promise.all([
+    buildGitManifest(sourceRoot),
+    buildGitManifest(targetRoot)
+  ]);
   if (source.digest !== preview.sourceDigest || target.digest !== preview.targetDigest) {
     throw new Error("Synchronization preview is stale; source or target changed");
   }
@@ -8912,8 +9154,9 @@ async function applySync(options) {
     throw new Error("Synchronization preview binding is invalid");
   }
   const idle = await options.idleGuard();
-  if (idle === false)
+  if (idle === false) {
     throw new Error("Synchronization apply requires an idle lab");
+  }
   const claimed = path2.join(state.used, `${options.token}.json`);
   await rename2(previewPath, claimed).catch(() => {
     throw new Error("Unknown or already-used synchronization preview token");
@@ -8946,15 +9189,20 @@ async function applySync(options) {
   };
   await writeJsonAtomic(journalPath, journal);
   try {
-    const [freshSource, freshTarget] = await Promise.all([buildGitManifest(sourceRoot), buildGitManifest(targetRoot)]);
+    const [freshSource, freshTarget] = await Promise.all([
+      buildGitManifest(sourceRoot),
+      buildGitManifest(targetRoot)
+    ]);
     if (freshSource.digest !== preview.sourceDigest || freshTarget.digest !== preview.targetDigest) {
       throw new Error("Synchronization preview became stale before mutation");
     }
     const idleImmediatelyBeforeMutation = await options.idleGuard();
-    if (idleImmediatelyBeforeMutation === false)
+    if (idleImmediatelyBeforeMutation === false) {
       throw new Error("Synchronization apply requires an idle lab");
-    for (const change of preview.changes)
+    }
+    for (const change of preview.changes) {
       await assertExpectedEntry(targetRoot, change.path, preview.expectedTargets[change.path] ?? null, "target");
+    }
     for (const change of preview.changes) {
       await assertExpectedEntry(targetRoot, change.path, preview.expectedTargets[change.path] ?? null, "target");
       journal.mutatedPaths.push(change.path);
@@ -8983,23 +9231,30 @@ async function recoverSyncTransactions(options) {
   const allowedTargets = new Set(await Promise.all(options.allowedTargetRoots.map(canonicalRoot)));
   const glob = new Bun.Glob("*.json");
   let recovered = 0;
-  for await (const name of glob.scan({ cwd: state.journals, onlyFiles: true })) {
+  for await (const name of glob.scan({
+    cwd: state.journals,
+    onlyFiles: true
+  })) {
     const journalPath = path2.join(state.journals, name);
     const journal = await readRequiredJson(journalPath, `Invalid synchronization journal ${name}`);
     const targetRoot = await canonicalRoot(journal.targetRoot);
-    if (!allowedTargets.has(targetRoot))
+    if (!allowedTargets.has(targetRoot)) {
       throw new Error(`Synchronization journal targets a root not owned by this lab: ${targetRoot}`);
+    }
     const journalBaseline = path2.join(await canonicalRoot(path2.dirname(journal.baselinePath)), path2.basename(journal.baselinePath));
     const expectedBaseline = path2.join(await canonicalRoot(path2.dirname(state.baseline)), path2.basename(state.baseline));
     if (journalBaseline !== expectedBaseline) {
       throw new Error("Synchronization journal baseline does not belong to this lab");
     }
-    if (journal.state === "applied")
+    if (journal.state === "applied") {
       await writeJsonAtomic(state.baseline, journal.newBaseline);
-    else
+    } else
       await rollbackJournalSafely(targetRoot, journal);
     await rm4(journalPath, { force: true });
-    await rm4(path2.join(state.backups, path2.basename(name, ".json")), { recursive: true, force: true });
+    await rm4(path2.join(state.backups, path2.basename(name, ".json")), {
+      recursive: true,
+      force: true
+    });
     recovered++;
   }
   return recovered;
@@ -9016,10 +9271,24 @@ async function statePaths(identity3) {
   const used = path2.join(root, "used");
   const journals = path2.join(root, "journals");
   const backups = path2.join(root, "backups");
-  for (const relative3 of ["sync", `sync/${identity3.labId}`, `sync/${identity3.labId}/previews`, `sync/${identity3.labId}/used`, `sync/${identity3.labId}/journals`, `sync/${identity3.labId}/backups`]) {
+  for (const relative3 of [
+    "sync",
+    `sync/${identity3.labId}`,
+    `sync/${identity3.labId}/previews`,
+    `sync/${identity3.labId}/used`,
+    `sync/${identity3.labId}/journals`,
+    `sync/${identity3.labId}/backups`
+  ]) {
     await ensureStateDirectory(stateRoot, relative3);
   }
-  return { root, previews, used, journals, backups, baseline: path2.join(root, "baseline.json") };
+  return {
+    root,
+    previews,
+    used,
+    journals,
+    backups,
+    baseline: path2.join(root, "baseline.json")
+  };
 }
 async function ensureStateDirectory(stateRoot, relative3) {
   const directory = await guardedPath(stateRoot, relative3, true);
@@ -9028,11 +9297,21 @@ async function ensureStateDirectory(stateRoot, relative3) {
       throw error;
   });
   const stat2 = await lstat5(directory);
-  if (stat2.isSymbolicLink() || !stat2.isDirectory())
+  if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
     throw new Error(`Unsafe synchronization state directory: ${relative3}`);
+  }
 }
 function previewBinding(options, source, target, expiresAt, token) {
-  return sha256(JSON.stringify([token, options.labId, options.direction, source.root, target.root, source.digest, target.digest, expiresAt]));
+  return sha256(JSON.stringify([
+    token,
+    options.labId,
+    options.direction,
+    source.root,
+    target.root,
+    source.digest,
+    target.digest,
+    expiresAt
+  ]));
 }
 function assertPreviewBinding(preview, options, sourceRoot, targetRoot) {
   if (preview.token !== options.token || preview.labId !== options.labId || preview.direction !== options.direction || preview.sourceRoot !== sourceRoot || preview.targetRoot !== targetRoot) {
@@ -9040,7 +9319,14 @@ function assertPreviewBinding(preview, options, sourceRoot, targetRoot) {
   }
 }
 function publicPreview(value) {
-  return { token: value.token, expiresAt: value.expiresAt, sourceDigest: value.sourceDigest, targetDigest: value.targetDigest, changes: value.changes, conflicts: value.conflicts };
+  return {
+    token: value.token,
+    expiresAt: value.expiresAt,
+    sourceDigest: value.sourceDigest,
+    targetDigest: value.targetDigest,
+    changes: value.changes,
+    conflicts: value.conflicts
+  };
 }
 function publicSyncPreview(preview, labId, direction) {
   return {
@@ -9073,10 +9359,24 @@ async function backupTargets(targetRoot, changes, expected, backupDir) {
       const backup = path2.join(backupDir, String(index));
       if (stat2.isSymbolicLink()) {
         await symlink(await readlink2(target), backup);
-        records.push({ path: change.path, existed: true, kind: "symlink", mode: stat2.mode & 511, backup, original: expected[change.path] ?? null });
+        records.push({
+          path: change.path,
+          existed: true,
+          kind: "symlink",
+          mode: stat2.mode & 511,
+          backup,
+          original: expected[change.path] ?? null
+        });
       } else if (stat2.isFile()) {
         await copyFile(target, backup);
-        records.push({ path: change.path, existed: true, kind: "file", mode: stat2.mode & 511, backup, original: expected[change.path] ?? null });
+        records.push({
+          path: change.path,
+          existed: true,
+          kind: "file",
+          mode: stat2.mode & 511,
+          backup,
+          original: expected[change.path] ?? null
+        });
       } else {
         throw new Error(`Synchronization target is not a regular file or symlink: ${change.path}`);
       }
@@ -9092,8 +9392,9 @@ async function stageSources(sourceRoot, changes, stagedRoot) {
   for (const change of changes) {
     if (change.action === "delete")
       continue;
-    if (!change.file)
+    if (!change.file) {
       throw new Error(`Synchronization preview is missing file details for ${change.path}`);
+    }
     const source = await guardedPath(sourceRoot, change.path);
     const target = await guardedPath(stagedRoot, change.path, true);
     const stat2 = await lstat5(source);
@@ -9107,8 +9408,9 @@ async function stageSources(sourceRoot, changes, stagedRoot) {
       await copyFile(source, target);
       await chmod(target, change.file.mode);
       const staged = await describeSyncFile(stagedRoot, change.path);
-      if (!sameFile(staged, change.file))
+      if (!sameFile(staged, change.file)) {
         throw new Error("Synchronization preview is stale; source changed");
+      }
     } else {
       throw new Error(`Synchronization source changed type during apply: ${change.path}`);
     }
@@ -9138,8 +9440,9 @@ async function assertExpectedEntry(root, relative3, expected, side) {
     if (error.code !== "ENOENT")
       throw error;
   }
-  if (!sameFile(actual ?? undefined, expected ?? undefined))
+  if (!sameFile(actual ?? undefined, expected ?? undefined)) {
     throw new Error(`Synchronization ${side} changed after preview: ${relative3}`);
+  }
 }
 async function restoreBackups(targetRoot, backups) {
   for (const record of backups) {
@@ -9147,11 +9450,12 @@ async function restoreBackups(targetRoot, backups) {
     await rm4(target, { force: true, recursive: false });
     if (!record.existed)
       continue;
-    if (!record.backup)
+    if (!record.backup) {
       throw new Error(`Missing synchronization backup for ${record.path}`);
-    if (record.kind === "symlink")
+    }
+    if (record.kind === "symlink") {
       await symlink(await readlink2(record.backup), target);
-    else {
+    } else {
       await copyFile(record.backup, target);
       if (record.mode !== undefined)
         await chmod(target, record.mode);
@@ -9169,9 +9473,9 @@ async function rollbackJournalSafely(targetRoot, journal) {
         throw error;
     }
     const intended = journal.appliedStates[backup.path] ?? null;
-    if (sameFile(actual ?? undefined, intended ?? undefined))
+    if (sameFile(actual ?? undefined, intended ?? undefined)) {
       restorations.push(backup);
-    else if (!sameFile(actual ?? undefined, backup.original ?? undefined)) {
+    } else if (!sameFile(actual ?? undefined, backup.original ?? undefined)) {
       throw new Error(`recovery conflict at ${backup.path}; divergent target preserved`);
     }
   }
@@ -9181,28 +9485,31 @@ async function readRequiredJson(file, message2) {
   try {
     return await readJson(file);
   } catch (error) {
-    if (error.code === "ENOENT")
+    if (error.code === "ENOENT") {
       throw new Error(message2);
+    }
     throw error;
   }
 }
 
 // packages/codex-container-lab/cli/src/service.ts
 class ContainerLabService {
-  docker;
-  environment;
   owner;
   roots;
+  docker;
+  environment;
   constructor(owner, roots = resolveRoots(), docker = defaultDockerRunner, environment = process.env) {
-    this.docker = docker;
-    this.environment = environment;
     this.owner = owner;
     this.roots = roots;
+    this.docker = docker;
+    this.environment = environment;
   }
   async health() {
     await this.reconcileOwner();
     const labs = await listLabs(this.roots, this.owner);
-    const secretEnvironment = [...new Set(labs.flatMap((lab) => lab.secretEnvironment))];
+    const secretEnvironment = [
+      ...new Set(labs.flatMap((lab) => lab.secretEnvironment))
+    ];
     return {
       ok: true,
       dockerAvailable: await dockerAvailable(this.docker, secretEnvironment, this.environment).catch(() => false),
@@ -9221,10 +9528,17 @@ class ContainerLabService {
       await ensureOwner(this.roots.stateRoot, this.owner);
       await this.reconcileOwner();
       const existing = await listLabs(this.roots, this.owner);
-      if (existing.length >= 8)
+      if (existing.length >= 8) {
         throw new Error("an owner may have at most 8 labs");
+      }
       const sourceRoot = (await runCommand("git", ["-C", source, "rev-parse", "--show-toplevel"], { timeoutMs: 1e4 })).stdout.toString().trim();
-      const commonGit = (await runCommand("git", ["-C", sourceRoot, "rev-parse", "--path-format=absolute", "--git-common-dir"], { timeoutMs: 1e4 })).stdout.toString().trim();
+      const commonGit = (await runCommand("git", [
+        "-C",
+        sourceRoot,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir"
+      ], { timeoutMs: 1e4 })).stdout.toString().trim();
       const repoHash = createHash3("sha256").update(await realpath4(commonGit)).digest("hex").slice(0, 12);
       const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
       const id = `${requested}-${suffix}`;
@@ -9258,7 +9572,14 @@ class ContainerLabService {
   async listLabs() {
     await this.reconcileOwner();
     const labs = await listLabs(this.roots, this.owner);
-    return { labs: labs.map((lab) => ({ labId: lab.id, name: lab.name, state: lab.state, updatedAt: lab.updatedAt })) };
+    return {
+      labs: labs.map((lab) => ({
+        labId: lab.id,
+        name: lab.name,
+        state: lab.state,
+        updatedAt: lab.updatedAt
+      }))
+    };
   }
   async labStatus(id) {
     await this.reconcileOwner();
@@ -9270,15 +9591,22 @@ class ContainerLabService {
     await this.reconcileOwner();
     try {
       return await withFileLock(this.activityLock(id), async () => {
-        if (signal?.aborted)
+        if (signal?.aborted) {
           return signal.reason === "SIGINT" ? 130 : signal.reason === "SIGTERM" ? 143 : 124;
+        }
         const lab = await this.requireReady(id);
         const runtime = runtimeFromLab(lab);
         for (const key of Object.keys(environment)) {
-          if (!runtime.config.forwardEnvironment.includes(key))
+          if (!runtime.config.forwardEnvironment.includes(key)) {
             throw new Error(`run environment is not declared by the manifest: ${key}`);
+          }
         }
-        const identity3 = { runId: crypto.randomUUID(), cwd, argv, environment };
+        const identity3 = {
+          runId: crypto.randomUUID(),
+          cwd,
+          argv,
+          environment
+        };
         const child = launchDockerRun(runtime, identity3, this.docker, this.environment);
         child.stdout.on("data", output.stdout);
         child.stderr.on("data", output.stderr);
@@ -9287,7 +9615,7 @@ class ContainerLabService {
         let stopping;
         const stop = (exitCode, first) => {
           requestedExit ??= exitCode;
-          if (!stopping)
+          if (!stopping) {
             stopping = (async () => {
               for (let attempt = 0;attempt < 20; attempt++) {
                 const result = await terminateDockerRun(runtime, identity3, first, this.docker);
@@ -9318,6 +9646,7 @@ class ContainerLabService {
                 }
               }
             })();
+          }
         };
         const onAbort = () => stop(signal?.reason === "SIGINT" ? 130 : signal?.reason === "SIGTERM" ? 143 : 124, signal?.reason === "SIGINT" ? "INT" : "TERM");
         signal?.addEventListener("abort", onAbort, { once: true });
@@ -9335,10 +9664,15 @@ class ContainerLabService {
           signal?.removeEventListener("abort", onAbort);
           output.stdin?.unpipe(child.stdin);
         }
-      }, { attempts: 600, delayMs: 50, signal });
+      }, {
+        attempts: 600,
+        delayMs: 50,
+        ...signal === undefined ? {} : { signal }
+      });
     } catch (error) {
-      if (signal?.aborted)
+      if (signal?.aborted) {
         return signal.reason === "SIGINT" ? 130 : signal.reason === "SIGTERM" ? 143 : 124;
+      }
       throw error;
     }
   }
@@ -9346,8 +9680,16 @@ class ContainerLabService {
     await this.reconcileOwner();
     const lab = await this.requireReady(id);
     const transcript = await stackLogs(runtimeFromLab(lab), service, tailLines, this.docker);
-    return { labId: id, service, transcript: { ...transcript, bytes: Buffer.byteLength(transcript.text), lines: transcript.text ? transcript.text.split(`
-`).length : 0 } };
+    return {
+      labId: id,
+      service,
+      transcript: {
+        ...transcript,
+        bytes: Buffer.byteLength(transcript.text),
+        lines: transcript.text ? transcript.text.split(`
+`).length : 0
+      }
+    };
   }
   async preview(id, direction) {
     await this.reconcileOwner();
@@ -9356,7 +9698,14 @@ class ContainerLabService {
       await assertSourceRepositoryIdentity(lab);
       const sourceRoot = direction === "push" ? lab.sourceRoot : lab.workspace;
       const targetRoot = direction === "push" ? lab.workspace : lab.sourceRoot;
-      const preview = await previewSync({ stateRoot: lab.runtimeRoot, labId: lab.id, direction, sourceRoot, targetRoot, maxEntries: 100 });
+      const preview = await previewSync({
+        stateRoot: lab.runtimeRoot,
+        labId: lab.id,
+        direction,
+        sourceRoot,
+        targetRoot,
+        maxEntries: 100
+      });
       return publicSyncPreview(preview, id, direction);
     }, { attempts: 600, delayMs: 50 });
   }
@@ -9401,25 +9750,28 @@ class ContainerLabService {
     }, { attempts: 600, delayMs: 50 });
     if (!exists || !claimed)
       return { labId: id, destroyed: false };
-    if (claimed.runtime)
+    if (claimed.runtime) {
       await destroyLabStack(runtimeFromLab(claimed), this.docker);
-    else
+    } else {
       await cleanupLabLabels(claimed, claimed.modeKind === "dockerfile", this.docker, this.environment);
+    }
     return await withFileLock(this.activityLock(id), async () => await withFileLock(this.labLock(id), async () => {
       let lab;
       try {
         lab = await readLab(this.roots, this.owner, id);
       } catch (error) {
-        if (error.code === "ENOENT")
+        if (error.code === "ENOENT") {
           return { labId: id, destroyed: false };
+        }
         throw error;
       }
       const runtimePresent = await this.assertDestroyFilesystem(lab);
       await recoverLabSync(this.roots, lab);
-      if (lab.runtime)
+      if (lab.runtime) {
         await destroyLabStack(runtimeFromLab(lab), this.docker);
-      else
+      } else {
         await cleanupLabLabels(lab, lab.modeKind === "dockerfile", this.docker, this.environment);
+      }
       if (runtimePresent) {
         if (!await exactDirectoryChain(this.roots.runtimeRoot, [lab.ownerKey, lab.id], "lab runtime directory")) {
           throw new Error("lab runtime directory changed during cleanup");
@@ -9436,9 +9788,10 @@ class ContainerLabService {
   async destroyAll() {
     const ids = (await listLabs(this.roots, this.owner)).map((lab) => lab.id);
     let destroyed = 0;
-    for (const id of ids)
+    for (const id of ids) {
       if ((await this.destroyLab(id)).destroyed)
         destroyed++;
+    }
     return { destroyed };
   }
   async provisionLab(id, signal) {
@@ -9457,21 +9810,44 @@ class ContainerLabService {
       lab.commandService = config.mode.commandService;
       lab.modeKind = config.mode.kind;
       lab.secretEnvironment = secretEnvironmentNames;
-      if (config.mode.kind === "dockerfile")
+      if (config.mode.kind === "dockerfile") {
         lab.managedImage = internalImageTag(lab.ownerKey, lab.id);
+      }
       lab = await this.updateProvisioning(id, (current) => {
         current.manifestPath = lab.manifestPath;
         current.commandService = lab.commandService;
-        current.modeKind = lab.modeKind;
+        current.modeKind = config.mode.kind;
         current.secretEnvironment = [...lab.secretEnvironment];
-        current.managedImage = lab.managedImage;
+        if (lab.managedImage === undefined)
+          delete current.managedImage;
+        else
+          current.managedImage = lab.managedImage;
       });
       provisioningEnvironment = resolveProvisioningEnvironment(secretEnvironmentNames, this.environment);
       await this.assertProvisioning(id, signal);
-      const head = (await runCommand("git", ["-C", lab.sourceRoot, "rev-parse", "HEAD"], { timeoutMs: 1e4, signal })).stdout.toString().trim();
-      await runCommand("git", ["clone", "--no-checkout", "--no-tags", "--no-hardlinks", lab.sourceRoot, lab.workspace], { timeoutMs: 120000, signal });
-      await runCommand("git", ["-C", lab.workspace, "remote", "remove", "origin"], { timeoutMs: 1e4, signal });
-      await runCommand("git", ["-C", lab.workspace, "checkout", "--detach", head], { timeoutMs: 120000, signal });
+      const head = (await runCommand("git", ["-C", lab.sourceRoot, "rev-parse", "HEAD"], {
+        timeoutMs: 1e4,
+        ...signal === undefined ? {} : { signal }
+      })).stdout.toString().trim();
+      await runCommand("git", [
+        "clone",
+        "--no-checkout",
+        "--no-tags",
+        "--no-hardlinks",
+        lab.sourceRoot,
+        lab.workspace
+      ], {
+        timeoutMs: 120000,
+        ...signal === undefined ? {} : { signal }
+      });
+      await runCommand("git", ["-C", lab.workspace, "remote", "remove", "origin"], {
+        timeoutMs: 1e4,
+        ...signal === undefined ? {} : { signal }
+      });
+      await runCommand("git", ["-C", lab.workspace, "checkout", "--detach", head], {
+        timeoutMs: 120000,
+        ...signal === undefined ? {} : { signal }
+      });
       await this.assertProvisioning(id, signal);
       const identity3 = { stateRoot: lab.runtimeRoot, labId: lab.id };
       await initializeSyncBaseline(identity3, lab.workspace);
@@ -9481,8 +9857,9 @@ class ContainerLabService {
         sourceRoot: lab.sourceRoot,
         targetRoot: lab.workspace
       });
-      if (seed.conflicts.length)
+      if (seed.conflicts.length) {
         throw new Error("initial workspace synchronization unexpectedly conflicted");
+      }
       await applySync({
         ...identity3,
         direction: "push",
@@ -9499,30 +9876,32 @@ class ContainerLabService {
       dockerMaterializationStarted = true;
       runtime = await prepareLabRuntime(lab, config, this.docker, provisioningEnvironment);
       lab.findings = runtime.findings;
-      lab.runtime = {
+      const persistedRuntime = {
         config: runtime.config,
         composeArgs: runtime.composeArgs,
-        baseFile: runtime.baseFile,
+        ...runtime.baseFile === undefined ? {} : { baseFile: runtime.baseFile },
         overrideFile: runtime.overrideFile,
         findings: runtime.findings
       };
+      lab.runtime = persistedRuntime;
       lab = await this.updateProvisioning(id, (current) => {
         current.findings = lab.findings;
-        current.runtime = lab.runtime;
+        current.runtime = persistedRuntime;
       });
       await this.assertProvisioning(id, signal);
       lab.endpoints = await provisionLabStack(runtime, signal, this.docker, provisioningEnvironment);
       await this.assertProvisioning(id, signal);
     } catch (error) {
       failure = error;
-      if (runtime)
+      if (runtime) {
         await destroyLabStack(runtime, this.docker).catch(() => {
           return;
         });
-      else if (dockerMaterializationStarted)
+      } else if (dockerMaterializationStarted) {
         await cleanupLabLabels(lab, lab.modeKind === "dockerfile", this.docker, provisioningEnvironment).catch(() => {
           return;
         });
+      }
     }
     await withFileLock(this.labLock(id), async () => {
       let current;
@@ -9537,29 +9916,35 @@ class ContainerLabService {
         return;
       current = { ...current, ...lab };
       current.state = failure ? "failed" : "ready";
-      current.error = failure ? compactError2(failure) : undefined;
+      if (failure)
+        current.error = compactError2(failure);
+      else
+        delete current.error;
       current.updatedAt = new Date().toISOString();
       await writeLab(this.roots, current);
     }, { attempts: 600, delayMs: 50 });
   }
   async requireReady(id) {
     const lab = await readLab(this.roots, this.owner, id);
-    if (lab.state !== "ready")
+    if (lab.state !== "ready") {
       throw new Error(`lab is not ready: ${lab.state}`);
+    }
     return lab;
   }
   async assertProvisioning(id, signal) {
     if (signal?.aborted)
       throw new Error("lab provisioning was cancelled");
     const current = await readLab(this.roots, this.owner, id);
-    if (current.state !== "provisioning")
+    if (current.state !== "provisioning") {
       throw new Error("lab provisioning was cancelled");
+    }
   }
   async updateProvisioning(id, mutate) {
     return await withFileLock(this.labLock(id), async () => {
       const current = await readLab(this.roots, this.owner, id);
-      if (current.state !== "provisioning")
+      if (current.state !== "provisioning") {
         throw new Error("lab provisioning was cancelled");
+      }
       mutate(current);
       current.updatedAt = new Date().toISOString();
       await writeLab(this.roots, current);
@@ -9622,8 +10007,9 @@ async function exactDirectoryChain(root, segments, label) {
       return false;
     throw error;
   }
-  if (!info.isDirectory() || info.isSymbolicLink())
+  if (!info.isDirectory() || info.isSymbolicLink()) {
     throw new Error(`configured ${label} contains unsafe indirection`);
+  }
   let expected = await realpath4(path3);
   for (const segment of segments) {
     path3 = join3(path3, segment);
@@ -9676,8 +10062,9 @@ async function readyRuntimeProblem(roots, lab) {
     await assertReadyLabFilesystem(roots, lab);
     return;
   } catch (error) {
-    if (error.code === "ENOENT")
+    if (error.code === "ENOENT") {
       return "runtime or workspace is missing";
+    }
     return error instanceof Error ? error.message : String(error);
   }
 }
@@ -9690,8 +10077,9 @@ async function assertSourceRepositoryIdentity(lab) {
     "--git-common-dir"
   ], { timeoutMs: 1e4 })).stdout.toString().trim();
   const actual = createHash3("sha256").update(await realpath4(commonGit)).digest("hex").slice(0, 12);
-  if (actual !== lab.repoHash)
+  if (actual !== lab.repoHash) {
     throw new Error("lab source repository identity no longer matches durable state");
+  }
 }
 function compactError2(error) {
   return (error instanceof Error ? error.message : String(error)).split(`
@@ -9884,13 +10272,13 @@ function parseGlobal(args) {
     const arg = args[index];
     if (arg === "--help" || arg === "-h")
       parsed.help = true;
-    else if (arg === "--owner")
+    else if (arg === "--owner") {
       parsed.owner = requiredValue(args, ++index, arg);
-    else if (arg === "--state-root")
+    } else if (arg === "--state-root") {
       parsed.stateRoot = requiredValue(args, ++index, arg);
-    else if (arg === "--runtime-root")
+    } else if (arg === "--runtime-root") {
       parsed.runtimeRoot = requiredValue(args, ++index, arg);
-    else
+    } else
       break;
   }
   parsed.rest = args.slice(index);
@@ -9904,8 +10292,9 @@ function parseFlags(args, allowed, repeatable = new Set) {
       throw new UsageError(`unknown argument: ${flag}`);
     const value = requiredValue(args, ++index, flag);
     const existing = values.get(flag) ?? [];
-    if (existing.length && !repeatable.has(flag))
+    if (existing.length && !repeatable.has(flag)) {
       throw new UsageError(`${flag} may be provided only once`);
+    }
     existing.push(value);
     values.set(flag, existing);
   }
@@ -9922,8 +10311,9 @@ function parseFlags(args, allowed, repeatable = new Set) {
 }
 function requiredValue(args, index, flag) {
   const value = args[index];
-  if (value === undefined || value.startsWith("--"))
+  if (value === undefined || value.startsWith("--")) {
     throw new UsageError(`${flag} requires a value`);
+  }
   return value;
 }
 function requireNoArgs(args) {
@@ -9938,12 +10328,14 @@ function parseEnvironment2(value) {
 }
 function parseRun(args) {
   const separator = args.indexOf("--");
-  if (separator < 0)
+  if (separator < 0) {
     throw new UsageError("run requires -- before the command argv");
+  }
   const flags = parseFlags(args.slice(0, separator), new Set(["--lab", "--cwd", "--env", "--timeout-seconds"]), new Set(["--env"]));
   const argv = args.slice(separator + 1);
-  if (argv.length === 0)
+  if (argv.length === 0) {
     throw new UsageError("run requires a command after --");
+  }
   return {
     lab: flags.required("--lab"),
     cwd: flags.one("--cwd") ?? ".",
@@ -9955,13 +10347,15 @@ function parseRun(args) {
 function integerFlag(value, flag, fallback) {
   if (value === undefined)
     return fallback;
-  if (!/^[0-9]+$/.test(value))
+  if (!/^[0-9]+$/.test(value)) {
     throw new UsageError(`${flag} must be an integer`);
+  }
   return Number(value);
 }
 function direction(value) {
-  if (value !== "push" && value !== "pull")
+  if (value !== "push" && value !== "pull") {
     throw new UsageError("--direction must be push or pull");
+  }
   return value;
 }
 function boundedError(error) {

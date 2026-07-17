@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
-import { join } from "node:path";
 import { homedir } from "node:os";
-import { reapArchivedOwners, type ReaperResult } from "./archive-reaper";
+import { join } from "node:path";
+import { type ReaperResult, reapArchivedOwners } from "./archive-reaper";
 import { redactPublicText } from "./public-output";
 import { resolveRoots } from "./state";
 
@@ -14,7 +14,9 @@ export type ReaperCliOutput = {
   issues?: string[];
 };
 
-export async function reaperMain(args = process.argv.slice(2)): Promise<number> {
+export async function reaperMain(
+  args = process.argv.slice(2),
+): Promise<number> {
   try {
     const parsed = parseArgs(args);
     if (parsed.help) {
@@ -23,7 +25,14 @@ export async function reaperMain(args = process.argv.slice(2)): Promise<number> 
     }
     const result = await reapArchivedOwners({
       dbPath: parsed.dbPath ?? join(homedir(), ".codex", "state_5.sqlite"),
-      roots: resolveRoots({ stateRoot: parsed.stateRoot, runtimeRoot: parsed.runtimeRoot }),
+      roots: resolveRoots({
+        ...(parsed.stateRoot === undefined
+          ? {}
+          : { stateRoot: parsed.stateRoot }),
+        ...(parsed.runtimeRoot === undefined
+          ? {}
+          : { runtimeRoot: parsed.runtimeRoot }),
+      }),
     });
     const output = reaperOutput(result);
     if (output) writeOutput(output);
@@ -38,10 +47,19 @@ export async function reaperMain(args = process.argv.slice(2)): Promise<number> 
  * Converts internal reaper state to the deliberately small public CLI contract.
  * Owner identifiers and internal paths must never cross this boundary.
  */
-export function reaperOutput(result: ReaperResult): ReaperCliOutput | undefined {
-  const exceptionalRetentions = result.retainedOwners.filter((item) => item.reason !== "thread is active");
-  if (result.ok && result.archivedOwnersCleaned.length === 0 && result.errors.length === 0 &&
-      exceptionalRetentions.length === 0) return undefined;
+export function reaperOutput(
+  result: ReaperResult,
+): ReaperCliOutput | undefined {
+  const exceptionalRetentions = result.retainedOwners.filter(
+    (item) => item.reason !== "thread is active",
+  );
+  if (
+    result.ok &&
+    result.archivedOwnersCleaned.length === 0 &&
+    result.errors.length === 0 &&
+    exceptionalRetentions.length === 0
+  )
+    return undefined;
 
   const issues = distinctBounded([
     ...exceptionalRetentions.map((item) => `retained: ${item.reason}`),
@@ -56,13 +74,32 @@ export function reaperOutput(result: ReaperResult): ReaperCliOutput | undefined 
 }
 
 function writeError(code: "USAGE", error: unknown): void {
-  writeOutput({ error: { code, message: boundedRedacted(error instanceof Error ? error.message : String(error), 240) } }, process.stderr);
+  writeOutput(
+    {
+      error: {
+        code,
+        message: boundedRedacted(
+          error instanceof Error ? error.message : String(error),
+          240,
+        ),
+      },
+    },
+    process.stderr,
+  );
 }
 
-function writeOutput(value: unknown, stream: NodeJS.WriteStream = process.stdout): void {
+function writeOutput(
+  value: unknown,
+  stream: NodeJS.WriteStream = process.stdout,
+): void {
   let serialized = JSON.stringify(value);
   if (Buffer.byteLength(`${serialized}\n`, "utf8") > REAPER_OUTPUT_MAX_BYTES) {
-    serialized = JSON.stringify({ ok: false, cleaned: 0, retained: 0, issues: ["details truncated"] });
+    serialized = JSON.stringify({
+      ok: false,
+      cleaned: 0,
+      retained: 0,
+      issues: ["details truncated"],
+    });
   }
   stream.write(`${serialized}\n`);
 }
@@ -81,15 +118,27 @@ function boundedRedacted(value: string, maxBytes: number): string {
   return redactPublicText(value, maxBytes, 6);
 }
 
-function parseArgs(args: string[]): { dbPath?: string; stateRoot?: string; runtimeRoot?: string; help: boolean } {
-  const parsed: { dbPath?: string; stateRoot?: string; runtimeRoot?: string; help: boolean } = { help: false };
+function parseArgs(args: string[]): {
+  dbPath?: string;
+  stateRoot?: string;
+  runtimeRoot?: string;
+  help: boolean;
+} {
+  const parsed: {
+    dbPath?: string;
+    stateRoot?: string;
+    runtimeRoot?: string;
+    help: boolean;
+  } = { help: false };
   for (let index = 0; index < args.length; index++) {
     const arg = args[index]!;
     if (arg === "--help" || arg === "-h") parsed.help = true;
     else if (arg === "--db") parsed.dbPath = requiredValue(args, ++index, arg);
-    else if (arg === "--state-root") parsed.stateRoot = requiredValue(args, ++index, arg);
-    else if (arg === "--runtime-root") parsed.runtimeRoot = requiredValue(args, ++index, arg);
-    else throw new Error(`unknown argument: ${arg}`);
+    else if (arg === "--state-root") {
+      parsed.stateRoot = requiredValue(args, ++index, arg);
+    } else if (arg === "--runtime-root") {
+      parsed.runtimeRoot = requiredValue(args, ++index, arg);
+    } else throw new Error(`unknown argument: ${arg}`);
   }
   return parsed;
 }

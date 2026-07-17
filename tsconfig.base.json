@@ -1,11 +1,14 @@
 {
   "compilerOptions": {
+    "allowArbitraryExtensions": true,
     "allowImportingTsExtensions": true,
+    "allowUmdGlobalAccess": true,
     "allowUnreachableCode": false,
     "allowUnusedLabels": false,
+    "checkJs": true,
     "erasableSyntaxOnly": true,
     "exactOptionalPropertyTypes": true,
-    "lib": ["ES2023", "DOM"],
+    "lib": ["ES2023"],
     "module": "preserve",
     "moduleDetection": "force",
     "moduleResolution": "bundler",
@@ -22,6 +25,5 @@
     "strict": true,
     "target": "ES2023",
     "types": ["bun", "node"]
-  },
-  "include": ["src/**/*.ts"]
+  }
 }

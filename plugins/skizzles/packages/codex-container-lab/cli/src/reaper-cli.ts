@@ -6945,16 +6945,13 @@ var require_public_api = __commonJS((exports) => {
 });
 
 // packages/codex-container-lab/cli/src/reaper-cli.ts
-import { join as join4 } from "path";
 import { homedir as homedir2 } from "os";
+import { join as join4 } from "path";
 
 // packages/codex-container-lab/cli/src/archive-reaper.ts
 import { Database } from "bun:sqlite";
-import { lstat as lstat6, readdir as readdir3, realpath as realpath4, rm as rm6 } from "fs/promises";
+import { lstat as lstat6, readdir as readdir3, realpath as realpath4, rm as rm5 } from "fs/promises";
 import { join as join3, resolve as resolve3 } from "path";
-
-// packages/codex-container-lab/cli/src/docker.ts
-import { spawn as spawn2 } from "child_process";
 
 // node_modules/.bun/yaml@2.9.0/node_modules/yaml/dist/index.js
 var composer = require_composer();
@@ -7023,6 +7020,9 @@ function internalImageTag(ownerKey, labId) {
   return `codex-container-lab:${ownerKey.slice(0, 24)}-${labId}`;
 }
 
+// packages/codex-container-lab/cli/src/docker.ts
+import { spawn as spawn2 } from "child_process";
+
 // packages/codex-container-lab/cli/src/process.ts
 import { spawn } from "child_process";
 async function runCommand(command, args, options = {}) {
@@ -7061,9 +7061,14 @@ async function runCommand(command, args, options = {}) {
       if (timeout)
         clearTimeout(timeout);
       options.signal?.removeEventListener("abort", abort);
-      const result = { code: code ?? (timedOut ? 124 : 1), stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr) };
-      if (options.signal?.aborted)
+      const result = {
+        code: code ?? (timedOut ? 124 : 1),
+        stdout: Buffer.concat(stdout),
+        stderr: Buffer.concat(stderr)
+      };
+      if (options.signal?.aborted) {
         return reject(new Error(`${command} aborted`));
+      }
       if (result.code !== 0 && !options.allowFailure) {
         return reject(new Error(`${command} ${args.join(" ")} failed (${result.code}): ${result.stderr.toString().trim()}`));
       }
@@ -7111,7 +7116,11 @@ async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultD
     `label=io.openai.codex-container-lab.lab=${metadata.id}`
   ];
   const resources = [
-    { kind: "container", list: ["ps", "-aq", ...exactFilters], remove: ["rm", "-f", "-v"] },
+    {
+      kind: "container",
+      list: ["ps", "-aq", ...exactFilters],
+      remove: ["rm", "-f", "-v"]
+    },
     {
       kind: "volume",
       list: [
@@ -7146,8 +7155,9 @@ async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultD
   for (const resource of resources) {
     const ids = await listBounded(resource.kind, resource.list, runner);
     if (resource.ownership && resource.kind !== "container") {
-      for (const id of ids)
+      for (const id of ids) {
         await verifyComposeResource(metadata, resource.kind, id, resource.ownership, runner);
+      }
     }
     if (ids.length) {
       const removed = await runner.run([...resource.remove, ...ids], {
@@ -7155,12 +7165,14 @@ async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultD
         timeoutMs: 30000,
         maxOutputBytes: 1024 * 1024
       });
-      if (removed.code !== 0)
+      if (removed.code !== 0) {
         throw new Error(`failed to remove managed lab ${resource.kind}s`);
+      }
     }
     const remaining = await listBounded(resource.kind, resource.list, runner);
-    if (remaining.length)
+    if (remaining.length) {
       throw new Error(`managed lab ${resource.kind}s remain after cleanup`);
+    }
   }
   if (removeInternalImage) {
     await removeManagedInternalImage(metadata, runner);
@@ -7186,19 +7198,20 @@ async function removeManagedInternalImage(metadata, runner) {
   } catch {
     throw new Error("invalid managed Dockerfile image ownership inspection");
   }
-  if (!isRecord(image) || typeof image.id !== "string" || !/^sha256:[0-9a-f]{64}$/.test(image.id) || !isRecord(image.labels)) {
+  if (!isRecord(image) || typeof image["id"] !== "string" || !/^sha256:[0-9a-f]{64}$/.test(image["id"]) || !isRecord(image["labels"])) {
     throw new Error("invalid managed Dockerfile image ownership inspection");
   }
-  if (image.labels["io.openai.codex-container-lab.managed"] !== "true" || image.labels["io.openai.codex-container-lab.owner"] !== metadata.owner || image.labels["io.openai.codex-container-lab.lab"] !== metadata.id) {
+  if (image["labels"]["io.openai.codex-container-lab.managed"] !== "true" || image["labels"]["io.openai.codex-container-lab.owner"] !== metadata.owner || image["labels"]["io.openai.codex-container-lab.lab"] !== metadata.id) {
     throw new Error("refusing to remove Dockerfile image without exact ownership labels");
   }
-  const removed = await runner.run(["image", "rm", image.id], {
+  const removed = await runner.run(["image", "rm", image["id"]], {
     allowFailure: true,
     timeoutMs: 30000,
     maxOutputBytes: 1024 * 1024
   });
-  if (removed.code !== 0)
+  if (removed.code !== 0) {
     throw new Error("failed to remove managed Dockerfile image");
+  }
 }
 function isExactMissingImage(result, tag) {
   if (result.stdout.toString().trim() !== "")
@@ -7207,13 +7220,18 @@ function isExactMissingImage(result, tag) {
   return diagnostic === `Error: No such image: ${tag}` || diagnostic === `Error response from daemon: No such image: ${tag}`;
 }
 async function listBounded(kind, args, runner) {
-  const listed = await runner.run(args, { allowFailure: true, timeoutMs: 15000, maxOutputBytes: 1024 * 1024 });
+  const listed = await runner.run(args, {
+    allowFailure: true,
+    timeoutMs: 15000,
+    maxOutputBytes: 1024 * 1024
+  });
   if (listed.code !== 0)
     throw new Error(`failed to list managed lab ${kind}s`);
   const ids = listed.stdout.toString().trim().split(`
 `).filter(Boolean);
-  if (ids.length > 1000)
+  if (ids.length > 1000) {
     throw new Error(`managed lab ${kind}s exceed cleanup bound`);
+  }
   return ids;
 }
 async function verifyComposeResource(metadata, kind, id, ownershipLabel, runner) {
@@ -7222,8 +7240,9 @@ async function verifyComposeResource(metadata, kind, id, ownershipLabel, runner)
     timeoutMs: 1e4,
     maxOutputBytes: 64 * 1024
   });
-  if (inspected.code !== 0)
+  if (inspected.code !== 0) {
     throw new Error(`unable to verify managed ${kind} ownership`);
+  }
   let labels;
   try {
     labels = JSON.parse(inspected.stdout.toString());
@@ -7259,7 +7278,15 @@ function isRecord(value) {
 }
 
 // packages/codex-container-lab/cli/src/locks.ts
-import { link, lstat, mkdir, open, readFile, rm, writeFile } from "fs/promises";
+import {
+  link,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  rm,
+  writeFile
+} from "fs/promises";
 import { dirname } from "path";
 async function withFileLock(path, operation, options = {}) {
   const attempts = options.attempts ?? 100;
@@ -7267,8 +7294,9 @@ async function withFileLock(path, operation, options = {}) {
   const staleMs = options.staleMs ?? 5 * 60000;
   await mkdir(dirname(path), { recursive: true, mode: 448 });
   for (let attempt = 0;attempt < attempts; attempt++) {
-    if (options.signal?.aborted)
+    if (options.signal?.aborted) {
       throw new Error("operation was cancelled while waiting for a state lock");
+    }
     const candidate = `${path}.candidate-${process.pid}-${crypto.randomUUID()}`;
     let acquired = false;
     try {
@@ -7297,8 +7325,9 @@ async function withFileLock(path, operation, options = {}) {
     }
     await removeConfirmedStaleLock(path, staleMs, options.processProbe ?? probeProcess);
     if (attempt + 1 < attempts) {
-      if (options.signal?.aborted)
+      if (options.signal?.aborted) {
         throw new Error("operation was cancelled while waiting for a state lock");
+      }
       await Bun.sleep(delayMs);
     }
   }
@@ -7322,7 +7351,7 @@ async function removeConfirmedStaleLock(path, staleMs, processProbe) {
     try {
       const contents = info.isDirectory() ? await readFile(`${path}/owner.json`, "utf8") : await handle.readFile({ encoding: "utf8" });
       const value = JSON.parse(contents);
-      if (isRecord2(value) && typeof value.pid === "number" && Number.isInteger(value.pid) && value.pid > 0 && typeof value.createdAt === "string") {
+      if (isRecord2(value) && typeof value["pid"] === "number" && Number.isInteger(value["pid"]) && value["pid"] > 0 && typeof value["createdAt"] === "string") {
         record = value;
       }
     } catch {}
@@ -7408,13 +7437,13 @@ async function removeConfirmedOrphanClaim(claimPath, staleMs, processProbe) {
     } catch {
       return false;
     }
-    if (!isRecord2(value) || typeof value.pid !== "number" || !Number.isInteger(value.pid) || value.pid <= 0 || typeof value.createdAt !== "string")
+    if (!isRecord2(value) || typeof value["pid"] !== "number" || !Number.isInteger(value["pid"]) || value["pid"] <= 0 || typeof value["createdAt"] !== "string")
       return false;
-    const age = Date.now() - Date.parse(value.createdAt);
+    const age = Date.now() - Date.parse(value["createdAt"]);
     if (!Number.isFinite(age) || age < staleMs)
       return false;
     try {
-      processProbe(value.pid);
+      processProbe(value["pid"]);
       return false;
     } catch (error) {
       if (error.code !== "ESRCH")
@@ -7468,7 +7497,16 @@ var manifestName = ".codex-container-lab.yaml";
 // packages/codex-container-lab/cli/src/files.ts
 import { createHash, randomUUID } from "crypto";
 import { createReadStream } from "fs";
-import { lstat as lstat2, mkdir as mkdir2, readFile as readFile2, readlink, realpath, rename, rm as rm2, writeFile as writeFile2 } from "fs/promises";
+import {
+  lstat as lstat2,
+  mkdir as mkdir2,
+  readFile as readFile2,
+  readlink,
+  realpath,
+  rename,
+  rm as rm2,
+  writeFile as writeFile2
+} from "fs/promises";
 import path from "path";
 var MAX_SYNC_FILE_BYTES = 64 * 1024 * 1024;
 function safeRelativePath(value) {
@@ -7490,8 +7528,9 @@ function safeStateName(value, label = "identifier") {
 async function canonicalRoot(root) {
   const resolved = await realpath(root);
   const stat = await lstat2(resolved);
-  if (!stat.isDirectory())
+  if (!stat.isDirectory()) {
     throw new Error(`Synchronization root is not a directory: ${root}`);
+  }
   return resolved;
 }
 async function guardedPath(root, relative, createParents = false) {
@@ -7527,16 +7566,31 @@ async function describeSyncFile(root, relative) {
   if (stat.isSymbolicLink()) {
     const target = await readlink(absolute);
     const bytes = Buffer.from(target);
-    return { path: relative, kind: "symlink", sha256: sha256(bytes), size: bytes.byteLength, mode };
+    return {
+      path: relative,
+      kind: "symlink",
+      sha256: sha256(bytes),
+      size: bytes.byteLength,
+      mode
+    };
   }
-  if (!stat.isFile())
+  if (!stat.isFile()) {
     throw new Error(`Eligible Git path is not a regular file or symlink: ${relative}`);
-  if (stat.size > MAX_SYNC_FILE_BYTES)
+  }
+  if (stat.size > MAX_SYNC_FILE_BYTES) {
     throw new Error(`Eligible Git file exceeds 64 MiB synchronization limit: ${relative}`);
+  }
   const hash = createHash("sha256");
-  for await (const chunk of createReadStream(absolute))
+  for await (const chunk of createReadStream(absolute)) {
     hash.update(chunk);
-  return { path: relative, kind: "file", sha256: hash.digest("hex"), size: stat.size, mode };
+  }
+  return {
+    path: relative,
+    kind: "file",
+    sha256: hash.digest("hex"),
+    size: stat.size,
+    mode
+  };
 }
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -7554,9 +7608,18 @@ async function writeJsonAtomic(file, value) {
 
 // packages/codex-container-lab/cli/src/state.ts
 import { createHash as createHash2 } from "crypto";
-import { homedir, tmpdir } from "os";
-import { basename, isAbsolute, join, parse, posix, relative, resolve, sep } from "path";
 import { lstat as lstat3, mkdir as mkdir3, readdir, realpath as realpath2, rm as rm3 } from "fs/promises";
+import { homedir, tmpdir } from "os";
+import {
+  basename,
+  isAbsolute,
+  join,
+  parse,
+  posix,
+  relative,
+  resolve,
+  sep
+} from "path";
 var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
 var FINDING_SURFACES = new Set([
   "host-bind",
@@ -7578,19 +7641,20 @@ function defaultRuntimeRoot() {
 }
 function resolveRoots(options = {}) {
   return {
-    stateRoot: resolve(options.stateRoot ?? process.env.CODEX_CONTAINER_LAB_STATE_ROOT ?? defaultStateRoot()),
-    runtimeRoot: resolve(options.runtimeRoot ?? process.env.CODEX_CONTAINER_LAB_RUNTIME_ROOT ?? defaultRuntimeRoot())
+    stateRoot: resolve(options.stateRoot ?? process.env["CODEX_CONTAINER_LAB_STATE_ROOT"] ?? defaultStateRoot()),
+    runtimeRoot: resolve(options.runtimeRoot ?? process.env["CODEX_CONTAINER_LAB_RUNTIME_ROOT"] ?? defaultRuntimeRoot())
   };
 }
 function resolveOwner(explicit, environment = process.env) {
-  const owner = explicit ?? environment.CODEX_THREAD_ID;
+  const owner = explicit ?? environment["CODEX_THREAD_ID"];
   if (owner === undefined || owner.length === 0) {
     throw new Error("owner is required: pass --owner THREAD_ID or set CODEX_THREAD_ID");
   }
   if (owner.includes("\x00"))
     throw new Error("owner must not contain NUL");
-  if (Buffer.byteLength(owner, "utf8") > 4096)
+  if (Buffer.byteLength(owner, "utf8") > 4096) {
     throw new Error("owner must be at most 4096 UTF-8 bytes");
+  }
   return owner;
 }
 function ownerKey(owner) {
@@ -7614,7 +7678,7 @@ async function readReapedOwner(stateRoot, owner) {
       return;
     throw error;
   }
-  if (!isRecord3(value) || value.version !== 1 || value.owner !== owner || value.ownerKey !== ownerKey(owner) || !isTimestamp(value.reapedAt)) {
+  if (!isRecord3(value) || value["version"] !== 1 || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner) || !isTimestamp(value["reapedAt"])) {
     throw new Error("invalid reaped owner manifest");
   }
   return value;
@@ -7645,11 +7709,11 @@ function expectedLabRuntimeRoot(roots, owner, labId) {
 }
 async function readOwnerManifest(path2) {
   const value = await readJson(path2);
-  if (!isRecord3(value) || value.version !== 1 || typeof value.owner !== "string" || typeof value.ownerKey !== "string" || !isTimestamp(value.createdAt)) {
+  if (!isRecord3(value) || value["version"] !== 1 || typeof value["owner"] !== "string" || typeof value["ownerKey"] !== "string" || !isTimestamp(value["createdAt"])) {
     throw new Error(`invalid owner manifest: ${path2}`);
   }
-  resolveOwner(value.owner, {});
-  if (value.ownerKey !== ownerKey(value.owner) || basename(resolve(path2, "..")) !== value.ownerKey) {
+  resolveOwner(value["owner"], {});
+  if (value["ownerKey"] !== ownerKey(value["owner"]) || basename(resolve(path2, "..")) !== value["ownerKey"]) {
     throw new Error(`owner manifest hash mismatch: ${path2}`);
   }
   return value;
@@ -7675,8 +7739,9 @@ async function listLabs(roots, owner) {
   }
   const labs = [];
   for (const name of names.sort()) {
-    if (!name.endsWith(".json"))
+    if (!name.endsWith(".json")) {
       throw new Error(`unexpected lab state entry: ${name}`);
+    }
     labs.push(await readLab(roots, owner, name.slice(0, -5)));
   }
   return labs;
@@ -7688,50 +7753,61 @@ function assertLabMetadata(value, roots, owner, labId) {
   try {
     safeStateName(labId, "lab id");
     resolveOwner(owner, {});
-    if (!isRecord3(value) || value.version !== 1 || value.id !== labId || value.owner !== owner || value.ownerKey !== ownerKey(owner))
+    if (!isRecord3(value) || value["version"] !== 1 || value["id"] !== labId || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner))
       throw new Error("identity mismatch");
     normalizeSecretEnvironment(value);
-    if (typeof value.name !== "string" || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(value.name))
+    if (typeof value["name"] !== "string" || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(value["name"]))
       throw new Error("invalid name");
-    if (typeof value.repoHash !== "string" || !/^[a-f0-9]{12}$/.test(value.repoHash))
+    if (typeof value["repoHash"] !== "string" || !/^[a-f0-9]{12}$/.test(value["repoHash"]))
       throw new Error("invalid repository hash");
-    if (typeof value.composeProject !== "string" || !/^ccl-[a-z0-9][a-z0-9-]{0,62}$/.test(value.composeProject))
+    if (typeof value["composeProject"] !== "string" || !/^ccl-[a-z0-9][a-z0-9-]{0,62}$/.test(value["composeProject"]))
       throw new Error("invalid Compose project");
-    if (typeof value.state !== "string" || !LAB_STATES.has(value.state))
+    if (typeof value["state"] !== "string" || !LAB_STATES.has(value["state"])) {
       throw new Error("invalid lifecycle state");
+    }
     const expectedRuntime = expectedLabRuntimeRoot(roots, owner, labId);
-    if (!isNormalizedAbsolute(value.runtimeRoot) || value.runtimeRoot !== expectedRuntime)
+    if (!isNormalizedAbsolute(value["runtimeRoot"]) || value["runtimeRoot"] !== expectedRuntime)
       throw new Error("invalid runtime root");
-    if (value.workspace !== join(expectedRuntime, "workspace"))
+    if (value["workspace"] !== join(expectedRuntime, "workspace")) {
       throw new Error("invalid workspace root");
-    if (!isNormalizedAbsolute(value.sourceRoot) || value.sourceRoot === parse(value.sourceRoot).root)
+    }
+    if (!isNormalizedAbsolute(value["sourceRoot"]) || value["sourceRoot"] === parse(value["sourceRoot"]).root)
       throw new Error("invalid source root");
-    if (value.manifestPath !== join(value.sourceRoot, manifestName))
+    if (value["manifestPath"] !== join(value["sourceRoot"], manifestName)) {
       throw new Error("invalid source manifest relationship");
-    if (typeof value.commandService !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value.commandService)) {
+    }
+    if (typeof value["commandService"] !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["commandService"])) {
       throw new Error("invalid command service");
     }
-    if (!isTimestamp(value.createdAt) || !isTimestamp(value.updatedAt))
+    if (!isTimestamp(value["createdAt"]) || !isTimestamp(value["updatedAt"])) {
       throw new Error("invalid timestamps");
-    if (!Array.isArray(value.endpoints) || !value.endpoints.every(isEndpoint))
+    }
+    if (!Array.isArray(value["endpoints"]) || !value["endpoints"].every(isEndpoint)) {
       throw new Error("invalid endpoints");
-    if (!Array.isArray(value.findings) || !value.findings.every(isFinding))
+    }
+    if (!Array.isArray(value["findings"]) || !value["findings"].every(isFinding)) {
       throw new Error("invalid findings");
-    if (!isEnvironmentNames(value.secretEnvironment))
+    }
+    if (!isEnvironmentNames(value["secretEnvironment"])) {
       throw new Error("invalid secret environment metadata");
-    if (value.modeKind !== undefined && value.modeKind !== "compose" && value.modeKind !== "dockerfile" && value.modeKind !== "image") {
+    }
+    if (value["modeKind"] !== undefined && value["modeKind"] !== "compose" && value["modeKind"] !== "dockerfile" && value["modeKind"] !== "image") {
       throw new Error("invalid mode kind");
     }
-    if (value.error !== undefined && !isBoundedString(value.error, 4000))
+    if (value["error"] !== undefined && !isBoundedString(value["error"], 4000)) {
       throw new Error("invalid error");
-    if (value.runtime !== undefined)
-      validatePersistedRuntime(value, value.runtime);
-    if (value.state === "ready" && value.runtime === undefined)
+    }
+    if (value["runtime"] !== undefined) {
+      validatePersistedRuntime(value, value["runtime"]);
+    }
+    if (value["state"] === "ready" && value["runtime"] === undefined) {
       throw new Error("ready lab has no runtime");
-    if (value.modeKind === "dockerfile") {
-      if (value.managedImage !== internalImageTag(value.ownerKey, value.id))
+    }
+    if (value["modeKind"] === "dockerfile") {
+      if (value["managedImage"] !== internalImageTag(value["ownerKey"], value["id"])) {
         throw new Error("invalid managed image");
-    } else if (value.managedImage !== undefined) {
+      }
+    } else if (value["managedImage"] !== undefined) {
       throw new Error("unexpected managed image");
     }
   } catch (error) {
@@ -7739,74 +7815,78 @@ function assertLabMetadata(value, roots, owner, labId) {
   }
 }
 function validatePersistedRuntime(lab, runtime) {
-  if (!isRecord3(runtime) || !isRecord3(runtime.config))
+  if (!isRecord3(runtime) || !isRecord3(runtime["config"])) {
     throw new Error("invalid persisted runtime");
-  const config = runtime.config;
-  if (config.repoRoot !== lab.sourceRoot || config.manifestPath !== lab.manifestPath || !isRecord3(config.mode) || !isRecord3(config.runtime)) {
+  }
+  const config = runtime["config"];
+  if (config["repoRoot"] !== lab["sourceRoot"] || config["manifestPath"] !== lab["manifestPath"] || !isRecord3(config["mode"]) || !isRecord3(config["runtime"])) {
     throw new Error("runtime source identity mismatch");
   }
-  const mode = config.mode;
-  if (mode.kind !== lab.modeKind || mode.commandService !== lab.commandService || typeof mode.commandService !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(mode.commandService)) {
+  const mode = config["mode"];
+  if (mode["kind"] !== lab["modeKind"] || mode["commandService"] !== lab["commandService"] || typeof mode["commandService"] !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(mode["commandService"])) {
     throw new Error("runtime mode identity mismatch");
   }
-  if (mode.kind === "compose") {
-    if (!Array.isArray(mode.files) || mode.files.length === 0 || !mode.files.every((path2) => isPathInside(lab.sourceRoot, path2))) {
+  if (mode["kind"] === "compose") {
+    if (!Array.isArray(mode["files"]) || mode["files"].length === 0 || !mode["files"].every((path2) => isPathInside(lab["sourceRoot"], path2))) {
       throw new Error("invalid Compose source files");
     }
-  } else if (mode.kind === "dockerfile") {
-    if (!isPathInside(lab.sourceRoot, mode.dockerfile) || !isPathInside(lab.sourceRoot, mode.context, true)) {
+  } else if (mode["kind"] === "dockerfile") {
+    if (!isPathInside(lab["sourceRoot"], mode["dockerfile"]) || !isPathInside(lab["sourceRoot"], mode["context"], true)) {
       throw new Error("invalid Dockerfile source paths");
     }
-  } else if (mode.kind === "image") {
-    if (!isBoundedString(mode.image, 1024) || mode.image.includes("\x00") || mode.image.trim() !== mode.image)
+  } else if (mode["kind"] === "image") {
+    if (!isBoundedString(mode["image"], 1024) || mode["image"].includes("\x00") || mode["image"].trim() !== mode["image"])
       throw new Error("invalid image name");
   } else {
     throw new Error("invalid runtime mode");
   }
-  if (!isBoundedString(config.runtime.workspace, 1024) || !posix.isAbsolute(config.runtime.workspace) || posix.normalize(config.runtime.workspace) !== config.runtime.workspace || config.runtime.workspace === "/" || !Array.isArray(config.runtime.shell) || config.runtime.shell.length === 0 || config.runtime.shell.length > 64 || !config.runtime.shell.every((part) => isBoundedString(part, 4096) && !part.includes("\x00")) || !posix.isAbsolute(config.runtime.shell[0]) || posix.normalize(config.runtime.shell[0]) !== config.runtime.shell[0])
+  if (!isBoundedString(config["runtime"]["workspace"], 1024) || !posix.isAbsolute(config["runtime"]["workspace"]) || posix.normalize(config["runtime"]["workspace"]) !== config["runtime"]["workspace"] || config["runtime"]["workspace"] === "/" || !Array.isArray(config["runtime"]["shell"]) || config["runtime"]["shell"].length === 0 || config["runtime"]["shell"].length > 64 || !config["runtime"]["shell"].every((part) => isBoundedString(part, 4096) && !part.includes("\x00")) || !posix.isAbsolute(config["runtime"]["shell"][0]) || posix.normalize(config["runtime"]["shell"][0]) !== config["runtime"]["shell"][0])
     throw new Error("invalid container runtime");
-  if (!Array.isArray(config.ports) || !config.ports.every(isDeclaredPort))
+  if (!Array.isArray(config["ports"]) || !config["ports"].every(isDeclaredPort)) {
     throw new Error("invalid declared ports");
-  if (!Array.isArray(config.forwardEnvironment) || config.forwardEnvironment.length > 64 || !config.forwardEnvironment.every((key) => typeof key === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) || new Set(config.forwardEnvironment).size !== config.forwardEnvironment.length) {
+  }
+  if (!Array.isArray(config["forwardEnvironment"]) || config["forwardEnvironment"].length > 64 || !config["forwardEnvironment"].every((key) => typeof key === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) || new Set(config["forwardEnvironment"]).size !== config["forwardEnvironment"].length) {
     throw new Error("invalid forwarded environment");
   }
-  const forwardedEnvironment = new Set(config.forwardEnvironment);
-  if (!isEnvironmentNames(config.secretEnvironment) || config.secretEnvironment.some((key) => forwardedEnvironment.has(key))) {
+  const forwardedEnvironment = new Set(config["forwardEnvironment"]);
+  if (!isEnvironmentNames(config["secretEnvironment"]) || config["secretEnvironment"].some((key) => forwardedEnvironment.has(key))) {
     throw new Error("invalid secret environment");
   }
-  if (JSON.stringify(config.secretEnvironment) !== JSON.stringify(lab.secretEnvironment)) {
+  if (JSON.stringify(config["secretEnvironment"]) !== JSON.stringify(lab["secretEnvironment"])) {
     throw new Error("secret environment metadata mismatch");
   }
-  const runtimeRoot = lab.runtimeRoot;
+  const runtimeRoot = lab["runtimeRoot"];
   const expectedOverride = join(runtimeRoot, "override.compose.yaml");
-  const expectedBase = mode.kind === "compose" ? undefined : join(runtimeRoot, "base.compose.yaml");
-  if (runtime.overrideFile !== expectedOverride || runtime.baseFile !== expectedBase || !Array.isArray(runtime.findings) || !runtime.findings.every(isFinding) || JSON.stringify(runtime.findings) !== JSON.stringify(lab.findings))
+  const expectedBase = mode["kind"] === "compose" ? undefined : join(runtimeRoot, "base.compose.yaml");
+  if (runtime["overrideFile"] !== expectedOverride || runtime["baseFile"] !== expectedBase || !Array.isArray(runtime["findings"]) || !runtime["findings"].every(isFinding) || JSON.stringify(runtime["findings"]) !== JSON.stringify(lab["findings"]))
     throw new Error("invalid runtime files or findings");
   const expectedArgs = composeCommandArgs(config, {
-    projectName: lab.composeProject,
+    projectName: lab["composeProject"],
     overrideFile: expectedOverride,
-    baseFile: expectedBase
+    ...expectedBase === undefined ? {} : { baseFile: expectedBase }
   });
-  if (!Array.isArray(runtime.composeArgs) || runtime.composeArgs.length !== expectedArgs.length || !runtime.composeArgs.every((arg, index) => arg === expectedArgs[index]))
+  if (!Array.isArray(runtime["composeArgs"]) || runtime["composeArgs"].length !== expectedArgs.length || !runtime["composeArgs"].every((arg, index) => arg === expectedArgs[index]))
     throw new Error("invalid Compose arguments");
 }
 function normalizeSecretEnvironment(lab) {
   let runtimeNames;
-  if (isRecord3(lab.runtime) && isRecord3(lab.runtime.config)) {
-    if (lab.runtime.config.secretEnvironment === undefined)
-      lab.runtime.config.secretEnvironment = [];
-    runtimeNames = lab.runtime.config.secretEnvironment;
+  if (isRecord3(lab["runtime"]) && isRecord3(lab["runtime"]["config"])) {
+    if (lab["runtime"]["config"]["secretEnvironment"] === undefined) {
+      lab["runtime"]["config"]["secretEnvironment"] = [];
+    }
+    runtimeNames = lab["runtime"]["config"]["secretEnvironment"];
   }
-  if (lab.secretEnvironment === undefined) {
-    lab.secretEnvironment = Array.isArray(runtimeNames) ? [...runtimeNames] : [];
+  if (lab["secretEnvironment"] === undefined) {
+    lab["secretEnvironment"] = Array.isArray(runtimeNames) ? [...runtimeNames] : [];
   }
 }
 function isEnvironmentNames(value) {
   return Array.isArray(value) && value.length <= 64 && value.every((key) => typeof key === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) && new Set(value).size === value.length;
 }
 function isPathInside(root, candidate, allowRoot = false) {
-  if (typeof candidate !== "string" || !isNormalizedAbsolute(candidate))
+  if (typeof candidate !== "string" || !isNormalizedAbsolute(candidate)) {
     return false;
+  }
   const fromRoot = relative(root, candidate);
   return (allowRoot || fromRoot !== "") && fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot);
 }
@@ -7814,13 +7894,13 @@ function isNormalizedAbsolute(value) {
   return typeof value === "string" && !value.includes("\x00") && isAbsolute(value) && resolve(value) === value;
 }
 function isEndpoint(value) {
-  return isRecord3(value) && typeof value.name === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value.name) && typeof value.service === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value.service) && typeof value.target === "number" && Number.isInteger(value.target) && value.target >= 1 && value.target <= 65535 && isBoundedString(value.url, 2048);
+  return isRecord3(value) && typeof value["name"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["name"]) && typeof value["service"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && isBoundedString(value["url"], 2048);
 }
 function isDeclaredPort(value) {
-  return isRecord3(value) && typeof value.name === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value.name) && typeof value.service === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value.service) && typeof value.target === "number" && Number.isInteger(value.target) && value.target >= 1 && value.target <= 65535 && (value.scheme === undefined || typeof value.scheme === "string" && /^[a-z][a-z0-9+.-]*$/.test(value.scheme));
+  return isRecord3(value) && typeof value["name"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["name"]) && typeof value["service"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && (value["scheme"] === undefined || typeof value["scheme"] === "string" && /^[a-z][a-z0-9+.-]*$/.test(value["scheme"]));
 }
 function isFinding(value) {
-  return isRecord3(value) && (value.service === undefined || isBoundedString(value.service, 128)) && typeof value.surface === "string" && FINDING_SURFACES.has(value.surface) && isBoundedString(value.detail, 1024);
+  return isRecord3(value) && (value["service"] === undefined || isBoundedString(value["service"], 128)) && typeof value["surface"] === "string" && FINDING_SURFACES.has(value["surface"]) && isBoundedString(value["detail"], 1024);
 }
 function isTimestamp(value) {
   if (typeof value !== "string")
@@ -7842,7 +7922,16 @@ function isRecord3(value) {
 }
 
 // packages/codex-container-lab/cli/src/sync.ts
-import { chmod, copyFile, lstat as lstat4, mkdir as mkdir4, readlink as readlink2, rename as rename2, rm as rm4, symlink } from "fs/promises";
+import {
+  chmod,
+  copyFile,
+  lstat as lstat4,
+  mkdir as mkdir4,
+  readlink as readlink2,
+  rename as rename2,
+  rm as rm4,
+  symlink
+} from "fs/promises";
 import path2 from "path";
 
 // packages/codex-container-lab/cli/src/git-manifest.ts
@@ -7861,23 +7950,30 @@ async function recoverSyncTransactions(options) {
   const allowedTargets = new Set(await Promise.all(options.allowedTargetRoots.map(canonicalRoot)));
   const glob = new Bun.Glob("*.json");
   let recovered = 0;
-  for await (const name of glob.scan({ cwd: state.journals, onlyFiles: true })) {
+  for await (const name of glob.scan({
+    cwd: state.journals,
+    onlyFiles: true
+  })) {
     const journalPath = path2.join(state.journals, name);
     const journal = await readRequiredJson(journalPath, `Invalid synchronization journal ${name}`);
     const targetRoot = await canonicalRoot(journal.targetRoot);
-    if (!allowedTargets.has(targetRoot))
+    if (!allowedTargets.has(targetRoot)) {
       throw new Error(`Synchronization journal targets a root not owned by this lab: ${targetRoot}`);
+    }
     const journalBaseline = path2.join(await canonicalRoot(path2.dirname(journal.baselinePath)), path2.basename(journal.baselinePath));
     const expectedBaseline = path2.join(await canonicalRoot(path2.dirname(state.baseline)), path2.basename(state.baseline));
     if (journalBaseline !== expectedBaseline) {
       throw new Error("Synchronization journal baseline does not belong to this lab");
     }
-    if (journal.state === "applied")
+    if (journal.state === "applied") {
       await writeJsonAtomic(state.baseline, journal.newBaseline);
-    else
+    } else
       await rollbackJournalSafely(targetRoot, journal);
     await rm4(journalPath, { force: true });
-    await rm4(path2.join(state.backups, path2.basename(name, ".json")), { recursive: true, force: true });
+    await rm4(path2.join(state.backups, path2.basename(name, ".json")), {
+      recursive: true,
+      force: true
+    });
     recovered++;
   }
   return recovered;
@@ -7894,10 +7990,24 @@ async function statePaths(identity3) {
   const used = path2.join(root, "used");
   const journals = path2.join(root, "journals");
   const backups = path2.join(root, "backups");
-  for (const relative2 of ["sync", `sync/${identity3.labId}`, `sync/${identity3.labId}/previews`, `sync/${identity3.labId}/used`, `sync/${identity3.labId}/journals`, `sync/${identity3.labId}/backups`]) {
+  for (const relative2 of [
+    "sync",
+    `sync/${identity3.labId}`,
+    `sync/${identity3.labId}/previews`,
+    `sync/${identity3.labId}/used`,
+    `sync/${identity3.labId}/journals`,
+    `sync/${identity3.labId}/backups`
+  ]) {
     await ensureStateDirectory(stateRoot, relative2);
   }
-  return { root, previews, used, journals, backups, baseline: path2.join(root, "baseline.json") };
+  return {
+    root,
+    previews,
+    used,
+    journals,
+    backups,
+    baseline: path2.join(root, "baseline.json")
+  };
 }
 async function ensureStateDirectory(stateRoot, relative2) {
   const directory = await guardedPath(stateRoot, relative2, true);
@@ -7906,8 +8016,9 @@ async function ensureStateDirectory(stateRoot, relative2) {
       throw error;
   });
   const stat = await lstat4(directory);
-  if (stat.isSymbolicLink() || !stat.isDirectory())
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
     throw new Error(`Unsafe synchronization state directory: ${relative2}`);
+  }
 }
 async function restoreBackups(targetRoot, backups) {
   for (const record of backups) {
@@ -7915,11 +8026,12 @@ async function restoreBackups(targetRoot, backups) {
     await rm4(target, { force: true, recursive: false });
     if (!record.existed)
       continue;
-    if (!record.backup)
+    if (!record.backup) {
       throw new Error(`Missing synchronization backup for ${record.path}`);
-    if (record.kind === "symlink")
+    }
+    if (record.kind === "symlink") {
       await symlink(await readlink2(record.backup), target);
-    else {
+    } else {
       await copyFile(record.backup, target);
       if (record.mode !== undefined)
         await chmod(target, record.mode);
@@ -7937,9 +8049,9 @@ async function rollbackJournalSafely(targetRoot, journal) {
         throw error;
     }
     const intended = journal.appliedStates[backup.path] ?? null;
-    if (sameFile(actual ?? undefined, intended ?? undefined))
+    if (sameFile(actual ?? undefined, intended ?? undefined)) {
       restorations.push(backup);
-    else if (!sameFile(actual ?? undefined, backup.original ?? undefined)) {
+    } else if (!sameFile(actual ?? undefined, backup.original ?? undefined)) {
       throw new Error(`recovery conflict at ${backup.path}; divergent target preserved`);
     }
   }
@@ -7949,8 +8061,9 @@ async function readRequiredJson(file, message2) {
   try {
     return await readJson(file);
   } catch (error) {
-    if (error.code === "ENOENT")
+    if (error.code === "ENOENT") {
       throw new Error(message2);
+    }
     throw error;
   }
 }
@@ -7995,17 +8108,27 @@ async function assertSourceRepositoryIdentity(lab) {
     "--git-common-dir"
   ], { timeoutMs: 1e4 })).stdout.toString().trim();
   const actual = createHash3("sha256").update(await realpath3(commonGit)).digest("hex").slice(0, 12);
-  if (actual !== lab.repoHash)
+  if (actual !== lab.repoHash) {
     throw new Error("lab source repository identity no longer matches durable state");
+  }
 }
 
 // packages/codex-container-lab/cli/src/archive-reaper.ts
 async function reapArchivedOwners(options) {
   const roots = options.roots ?? resolveRoots();
-  const result = { ok: true, archivedOwnersCleaned: [], retainedOwners: [], errors: [] };
+  const result = {
+    ok: true,
+    archivedOwnersCleaned: [],
+    retainedOwners: [],
+    errors: []
+  };
   let database;
   try {
-    database = new Database(options.dbPath, { readonly: true, strict: true, safeIntegers: true });
+    database = new Database(options.dbPath, {
+      readonly: true,
+      strict: true,
+      safeIntegers: true
+    });
     validateThreadsSchema(database);
   } catch (error) {
     database?.close();
@@ -8013,7 +8136,9 @@ async function reapArchivedOwners(options) {
       ok: false,
       archivedOwnersCleaned: [],
       retainedOwners: [],
-      errors: [boundedMessage("Codex state database unavailable or incompatible", error)]
+      errors: [
+        boundedMessage("Codex state database unavailable or incompatible", error)
+      ]
     };
   }
   try {
@@ -8028,13 +8153,17 @@ async function reapArchivedOwners(options) {
         return result;
       throw error;
     }
-    if (entries.length > 1e4)
+    if (entries.length > 1e4) {
       throw new Error("owner state exceeds bounded scan limit");
+    }
     const preflight = [];
     for (const entry of entries) {
       const fallbackKey = /^[a-f0-9]{64}$/.test(entry.name) ? entry.name : "invalid";
       if (!entry.isDirectory()) {
-        result.retainedOwners.push({ ownerKey: fallbackKey, reason: "invalid owner state entry" });
+        result.retainedOwners.push({
+          ownerKey: fallbackKey,
+          reason: "invalid owner state entry"
+        });
         result.ok = false;
         continue;
       }
@@ -8044,8 +8173,11 @@ async function reapArchivedOwners(options) {
           throw new Error("owner state directory disappeared");
         }
         owner = await readOwnerManifest(join3(ownerRoot, entry.name, "owner.json"));
-      } catch (error) {
-        result.retainedOwners.push({ ownerKey: fallbackKey, reason: "invalid owner manifest" });
+      } catch {
+        result.retainedOwners.push({
+          ownerKey: fallbackKey,
+          reason: "invalid owner manifest"
+        });
         result.ok = false;
         continue;
       }
@@ -8057,7 +8189,9 @@ async function reapArchivedOwners(options) {
           ok: false,
           archivedOwnersCleaned: [],
           retainedOwners: [],
-          errors: [boundedMessage("Codex state database query failed; no cleanup performed", error)]
+          errors: [
+            boundedMessage("Codex state database query failed; no cleanup performed", error)
+          ]
         };
       }
       preflight.push({ owner, state: initial });
@@ -8081,8 +8215,9 @@ async function reapArchivedOwners(options) {
             throw new Error("owner state changed before archive cleanup");
           }
           const labs = await listLabs(roots, owner.owner);
-          for (const lab of labs)
+          for (const lab of labs) {
             await validateReaperLab(roots, owner.owner, owner.ownerKey, lab);
+          }
           for (const lab of labs) {
             await prepareExactLab(roots, lab, async (claimed) => {
               await cleanupExactLab(roots, claimed, options.docker ?? defaultDockerRunner, async () => {
@@ -8093,13 +8228,15 @@ async function reapArchivedOwners(options) {
                 } catch {
                   throw new Error("thread row could not be rechecked immediately before cleanup");
                 }
-                if (rechecked !== "archived")
+                if (rechecked !== "archived") {
                   throw new Error("thread archival changed or became uncertain before cleanup");
+                }
               });
             });
           }
-          if (labs.length === 0)
+          if (labs.length === 0) {
             await options.beforeRecheck?.(owner.ownerKey);
+          }
           let finalState;
           try {
             finalState = (options.stateReader ?? queryThreadState)(database, owner.owner);
@@ -8120,7 +8257,10 @@ async function reapArchivedOwners(options) {
         }, { attempts: 600, delayMs: 50 });
       } catch (error) {
         result.ok = false;
-        result.retainedOwners.push({ ownerKey: owner.ownerKey, reason: boundedMessage("cleanup retained", error) });
+        result.retainedOwners.push({
+          ownerKey: owner.ownerKey,
+          reason: boundedMessage("cleanup retained", error)
+        });
       }
     }
   } catch (error) {
@@ -8138,12 +8278,12 @@ function validateThreadsSchema(database) {
   const rows = database.query("PRAGMA table_info(threads)").all();
   if (rows.length === 0)
     throw new Error("required threads table is absent");
-  const columns = new Map(rows.map((row) => [String(row.name), row]));
+  const columns = new Map(rows.map((row) => [String(row["name"]), row]));
   const id = columns.get("id");
   const archived = columns.get("archived");
   const archivedAt = columns.get("archived_at");
-  const defaultValue = String(archived?.dflt_value ?? "").replace(/[()'"]/g, "");
-  if (String(id?.type).toUpperCase() !== "TEXT" || Number(id?.pk) !== 1 || String(archived?.type).toUpperCase() !== "INTEGER" || Number(archived?.notnull) !== 1 || defaultValue !== "0" || String(archivedAt?.type).toUpperCase() !== "INTEGER" || Number(archivedAt?.notnull) !== 0) {
+  const defaultValue = String(archived?.["dflt_value"] ?? "").replace(/[()'"]/g, "");
+  if (String(id?.["type"]).toUpperCase() !== "TEXT" || Number(id?.["pk"]) !== 1 || String(archived?.["type"]).toUpperCase() !== "INTEGER" || Number(archived?.["notnull"]) !== 1 || defaultValue !== "0" || String(archivedAt?.["type"]).toUpperCase() !== "INTEGER" || Number(archivedAt?.["notnull"]) !== 0) {
     throw new Error("required threads schema columns are absent or incompatible");
   }
 }
@@ -8176,7 +8316,11 @@ async function cleanupExactLab(roots, lab, docker, authorize) {
   await withFileLock(labLock, async () => {
     const current = await readLab(roots, lab.owner, lab.id);
     await validateReaperLab(roots, current.owner, current.ownerKey, current);
-    previous = { state: current.state, updatedAt: current.updatedAt, error: current.error };
+    previous = {
+      state: current.state,
+      updatedAt: current.updatedAt,
+      ...current.error === undefined ? {} : { error: current.error }
+    };
     current.state = "destroying";
     current.updatedAt = new Date().toISOString();
     await writeLab(roots, current);
@@ -8190,7 +8334,10 @@ async function cleanupExactLab(roots, lab, docker, authorize) {
       if (current.state === "destroying" && previous) {
         current.state = previous.state;
         current.updatedAt = previous.updatedAt;
-        current.error = previous.error;
+        if (previous.error === undefined)
+          delete current.error;
+        else
+          current.error = previous.error;
         await writeLab(roots, current);
       }
     }, { attempts: 600, delayMs: 50 });
@@ -8239,8 +8386,9 @@ async function exactDirectoryChain(root, segments, label) {
       return false;
     throw error;
   }
-  if (!info.isDirectory() || info.isSymbolicLink())
+  if (!info.isDirectory() || info.isSymbolicLink()) {
     throw new Error(`configured ${label} contains unsafe indirection`);
+  }
   let expected = await realpath4(path3);
   for (const segment of segments) {
     path3 = join3(path3, segment);
@@ -8259,8 +8407,9 @@ async function exactDirectory(path3, expected, label) {
       return false;
     throw error;
   }
-  if (!info.isDirectory() || info.isSymbolicLink())
+  if (!info.isDirectory() || info.isSymbolicLink()) {
     throw new Error(`${label} contains unsafe indirection`);
+  }
   let canonical;
   try {
     canonical = await realpath4(path3);
@@ -8269,8 +8418,9 @@ async function exactDirectory(path3, expected, label) {
       return false;
     throw error;
   }
-  if (canonical !== expected)
+  if (canonical !== expected) {
     throw new Error(`${label} is not exactly contained in its configured root`);
+  }
   return true;
 }
 async function boundedRemove(root, maxEntries) {
@@ -8288,13 +8438,14 @@ async function boundedRemove(root, maxEntries) {
       return;
     }
     for (const name of await readdir3(path3)) {
-      if (++count > maxEntries)
+      if (++count > maxEntries) {
         throw new Error("cleanup path exceeds bounded entry limit");
+      }
       await scan(join3(path3, name));
     }
   }
   await scan(root);
-  await rm6(root, { recursive: true, force: true });
+  await rm5(root, { recursive: true, force: true });
 }
 function boundedMessage(prefix, error) {
   const message2 = error instanceof Error ? error.message : String(error);
@@ -8313,7 +8464,10 @@ async function reaperMain(args = process.argv.slice(2)) {
     }
     const result = await reapArchivedOwners({
       dbPath: parsed.dbPath ?? join4(homedir2(), ".codex", "state_5.sqlite"),
-      roots: resolveRoots({ stateRoot: parsed.stateRoot, runtimeRoot: parsed.runtimeRoot })
+      roots: resolveRoots({
+        ...parsed.stateRoot === undefined ? {} : { stateRoot: parsed.stateRoot },
+        ...parsed.runtimeRoot === undefined ? {} : { runtimeRoot: parsed.runtimeRoot }
+      })
     });
     const output = reaperOutput(result);
     if (output)
@@ -8340,13 +8494,23 @@ function reaperOutput(result) {
   };
 }
 function writeError(code, error) {
-  writeOutput({ error: { code, message: boundedRedacted(error instanceof Error ? error.message : String(error), 240) } }, process.stderr);
+  writeOutput({
+    error: {
+      code,
+      message: boundedRedacted(error instanceof Error ? error.message : String(error), 240)
+    }
+  }, process.stderr);
 }
 function writeOutput(value, stream = process.stdout) {
   let serialized = JSON.stringify(value);
   if (Buffer.byteLength(`${serialized}
 `, "utf8") > REAPER_OUTPUT_MAX_BYTES) {
-    serialized = JSON.stringify({ ok: false, cleaned: 0, retained: 0, issues: ["details truncated"] });
+    serialized = JSON.stringify({
+      ok: false,
+      cleaned: 0,
+      retained: 0,
+      issues: ["details truncated"]
+    });
   }
   stream.write(`${serialized}
 `);
@@ -8373,11 +8537,11 @@ function parseArgs(args) {
       parsed.help = true;
     else if (arg === "--db")
       parsed.dbPath = requiredValue(args, ++index, arg);
-    else if (arg === "--state-root")
+    else if (arg === "--state-root") {
       parsed.stateRoot = requiredValue(args, ++index, arg);
-    else if (arg === "--runtime-root")
+    } else if (arg === "--runtime-root") {
       parsed.runtimeRoot = requiredValue(args, ++index, arg);
-    else
+    } else
       throw new Error(`unknown argument: ${arg}`);
   }
   return parsed;

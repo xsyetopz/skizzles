@@ -4,23 +4,40 @@ export const PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
 export function serializePublicJson(value: unknown): string {
   let candidate = value;
   let encoded = `${JSON.stringify(candidate)}\n`;
-  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET && isRecord(value) && isRecord(value.transcript) &&
-      typeof value.transcript.text === "string") {
-    const characters = Array.from(value.transcript.text);
+  if (
+    Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET &&
+    isRecord(value) &&
+    isRecord(value["transcript"]) &&
+    typeof value["transcript"]["text"] === "string"
+  ) {
+    const characters = Array.from(value["transcript"]["text"]);
     let low = 0;
     let high = characters.length;
     while (low < high) {
       const start = Math.floor((low + high) / 2);
       const text = characters.slice(start).join("");
-      const transcript = { ...value.transcript, text, bytes: Buffer.byteLength(text),
-        lines: text ? text.split("\n").length : 0, truncated: true };
+      const transcript = {
+        ...value["transcript"],
+        text,
+        bytes: Buffer.byteLength(text),
+        lines: text ? text.split("\n").length : 0,
+        truncated: true,
+      };
       const attempt = `${JSON.stringify({ ...value, transcript })}\n`;
       if (Buffer.byteLength(attempt) <= PUBLIC_JSON_BYTE_BUDGET) high = start;
       else low = start + 1;
     }
     const text = characters.slice(low).join("");
-    candidate = { ...value, transcript: { ...value.transcript, text, bytes: Buffer.byteLength(text),
-      lines: text ? text.split("\n").length : 0, truncated: true } };
+    candidate = {
+      ...value,
+      transcript: {
+        ...value["transcript"],
+        text,
+        bytes: Buffer.byteLength(text),
+        lines: text ? text.split("\n").length : 0,
+        truncated: true,
+      },
+    };
     encoded = `${JSON.stringify(candidate)}\n`;
   }
   if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET) {

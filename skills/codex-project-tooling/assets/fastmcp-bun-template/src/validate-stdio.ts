@@ -48,7 +48,9 @@ async function waitForResponse(id: number): Promise<JsonRpcResponse> {
     const response = responses.get(id);
     if (response) {
       if (response.error) {
-        throw new Error(`JSON-RPC ${id} failed: ${JSON.stringify(response.error)}`);
+        throw new Error(
+          `JSON-RPC ${id} failed: ${JSON.stringify(response.error)}`,
+        );
       }
       return response;
     }
@@ -58,17 +60,25 @@ async function waitForResponse(id: number): Promise<JsonRpcResponse> {
 }
 
 function assertHasHealthTool(response: JsonRpcResponse): void {
-  const tools = (response.result as { tools?: Array<{ name?: string }> } | undefined)?.tools;
+  const tools = (
+    response.result as { tools?: Array<{ name?: string }> } | undefined
+  )?.tools;
   if (!tools?.some((tool) => tool.name === "health")) {
-    throw new Error(`tools/list did not include health: ${JSON.stringify(response.result)}`);
+    throw new Error(
+      `tools/list did not include health: ${JSON.stringify(response.result)}`,
+    );
   }
 }
 
 function assertHealthOk(response: JsonRpcResponse): void {
-  const content = (response.result as { content?: Array<{ text?: string }> } | undefined)?.content;
+  const content = (
+    response.result as { content?: Array<{ text?: string }> } | undefined
+  )?.content;
   const text = content?.find((item) => typeof item.text === "string")?.text;
   if (!text) {
-    throw new Error(`health returned no text content: ${JSON.stringify(response.result)}`);
+    throw new Error(
+      `health returned no text content: ${JSON.stringify(response.result)}`,
+    );
   }
   const health = JSON.parse(text) as { ok?: boolean };
   if (health.ok !== true) {
@@ -104,7 +114,9 @@ try {
 
   console.error("[validate-stdio] ok");
 } catch (error) {
-  console.error(`[validate-stdio] failed: ${error instanceof Error ? error.message : error}`);
+  console.error(
+    `[validate-stdio] failed: ${error instanceof Error ? error.message : error}`,
+  );
   if (stderr.trim()) {
     console.error(`[validate-stdio] server stderr:\n${stderr.trim()}`);
   }

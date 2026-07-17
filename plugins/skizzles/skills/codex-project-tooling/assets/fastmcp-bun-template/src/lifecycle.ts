@@ -56,7 +56,7 @@ export function createLifecycle(options: LifecycleOptions): ProjectLifecycle {
     }
     started = true;
 
-    const startCommand = process.env.MCP_STACK_START;
+    const startCommand = process.env["MCP_STACK_START"];
     if (!startCommand) {
       return;
     }
@@ -78,7 +78,7 @@ export function createLifecycle(options: LifecycleOptions): ProjectLifecycle {
     }
     cleaned = true;
 
-    const stopCommand = process.env.MCP_STACK_STOP;
+    const stopCommand = process.env["MCP_STACK_STOP"];
     if (!stopCommand) {
       return;
     }

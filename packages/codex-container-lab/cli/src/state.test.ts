@@ -14,12 +14,22 @@ import {
 import type { LabMetadata } from "./types";
 
 const temporary: string[] = [];
-afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
+afterEach(async () => {
+  await Promise.all(
+    temporary
+      .splice(0)
+      .map((path) => rm(path, { recursive: true, force: true })),
+  );
+});
 
 describe("owner resolution and durable state", () => {
   test("uses an explicit exact owner before CODEX_THREAD_ID and never invents one", () => {
-    expect(resolveOwner("explicit/owner", { CODEX_THREAD_ID: "environment" })).toBe("explicit/owner");
-    expect(resolveOwner(undefined, { CODEX_THREAD_ID: "environment owner" })).toBe("environment owner");
+    expect(
+      resolveOwner("explicit/owner", { CODEX_THREAD_ID: "environment" }),
+    ).toBe("explicit/owner");
+    expect(
+      resolveOwner(undefined, { CODEX_THREAD_ID: "environment owner" }),
+    ).toBe("environment owner");
     expect(() => resolveOwner(undefined, {})).toThrow("owner is required");
     expect(() => resolveOwner("", {})).toThrow("owner is required");
   });
@@ -29,7 +39,9 @@ describe("owner resolution and durable state", () => {
     temporary.push(root);
     const owner = "thread/with spaces:and?characters";
     await ensureOwner(root, owner);
-    expect(ownerDirectory(root, owner)).toBe(join(root, "owners", ownerKey(owner)));
+    expect(ownerDirectory(root, owner)).toBe(
+      join(root, "owners", ownerKey(owner)),
+    );
     expect(ownerKey(owner)).toHaveLength(64);
     const lab = fixtureLab(root, owner);
     const roots = { stateRoot: root, runtimeRoot: join(root, "runtime") };
@@ -45,7 +57,10 @@ describe("owner resolution and durable state", () => {
 
     await ensureOwner(root, owner);
 
-    expect((await readdir(ownerDirectory(root, owner))).sort()).toEqual(["labs", "owner.json"]);
+    expect((await readdir(ownerDirectory(root, owner))).sort()).toEqual([
+      "labs",
+      "owner.json",
+    ]);
   });
 
   test("accepts synchronous provisioning manifests without worker identity", async () => {

@@ -1,6 +1,15 @@
 #!/usr/bin/env bun
 import { createHash } from "node:crypto";
-import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -54,38 +63,63 @@ function commandEnvironment(codexHome?: string): Record<string, string> {
     const value = globalThis.process.env[name];
     if (value) environment[name] = value;
   }
-  if (codexHome) environment.CODEX_HOME = codexHome;
+  if (codexHome) environment["CODEX_HOME"] = codexHome;
   return environment;
 }
 
 function object(value: unknown, label: string): JsonObject {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${label} must be an object`);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
   return value as JsonObject;
 }
 
 function catalog(value: unknown): JsonObject {
   const root = object(value, "model catalog");
-  if (!Array.isArray(root.models) || root.models.length === 0) throw new Error("model catalog must contain models");
-  root.models.forEach((model, index) => object(model, `model ${index}`));
+  if (!Array.isArray(root["models"]) || root["models"].length === 0) {
+    throw new Error("model catalog must contain models");
+  }
+  root["models"].forEach((model, index) => {
+    object(model, `model ${index}`);
+  });
   return root;
 }
 
 function assertCompleteCatalog(value: unknown): JsonObject {
   const root = catalog(value);
-  const slugs = new Set((root.models as JsonObject[]).map((model) => model.slug));
+  const slugs = new Set(
+    (root["models"] as JsonObject[]).map((model) => model["slug"]),
+  );
   const missing = REQUIRED_MODELS.filter((slug) => !slugs.has(slug));
-  if (missing.length > 0) throw new Error(`model catalog is incomplete; missing ${missing.join(", ")}`);
+  if (missing.length > 0) {
+    throw new Error(
+      `model catalog is incomplete; missing ${missing.join(", ")}`,
+    );
+  }
   return root;
 }
 
-export function applyLunaV2Overlay(value: unknown): { catalog: JsonObject; overlay: "applied" | "upstream-v2" } {
+export function applyLunaV2Overlay(value: unknown): {
+  catalog: JsonObject;
+  overlay: "applied" | "upstream-v2";
+} {
   const cloned = assertCompleteCatalog(structuredClone(value));
-  const matches = (cloned.models as JsonObject[]).filter((model) => model.slug === LUNA_MODEL);
-  if (matches.length !== 1) throw new Error(`expected exactly one ${LUNA_MODEL} model, found ${matches.length}`);
+  const matches = (cloned["models"] as JsonObject[]).filter(
+    (model) => model["slug"] === LUNA_MODEL,
+  );
+  if (matches.length !== 1) {
+    throw new Error(
+      `expected exactly one ${LUNA_MODEL} model, found ${matches.length}`,
+    );
+  }
   const luna = matches[0]!;
-  if (luna.multi_agent_version === "v2") return { catalog: cloned, overlay: "upstream-v2" };
-  if (luna.multi_agent_version !== "v1") throw new Error(`${LUNA_MODEL} has unexpected multi_agent_version`);
-  luna.multi_agent_version = "v2";
+  if (luna["multi_agent_version"] === "v2") {
+    return { catalog: cloned, overlay: "upstream-v2" };
+  }
+  if (luna["multi_agent_version"] !== "v1") {
+    throw new Error(`${LUNA_MODEL} has unexpected multi_agent_version`);
+  }
+  luna["multi_agent_version"] = "v2";
   return { catalog: cloned, overlay: "applied" };
 }
 
@@ -127,66 +161,129 @@ async function collectBounded(
   return output;
 }
 
-async function runCodex(codexBinary: string, args: string[], limits: CommandLimits, codexHome?: string): Promise<CommandResult> {
+async function runCodex(
+  codexBinary: string,
+  args: string[],
+  limits: CommandLimits,
+  codexHome?: string,
+): Promise<CommandResult> {
   const child = Bun.spawn([codexBinary, ...args], {
     stdout: "pipe",
     stderr: "pipe",
     env: commandEnvironment(codexHome),
   });
   let timedOut = false;
-  const terminate = (): void => { child.kill("SIGKILL"); };
+  const terminate = (): void => {
+    child.kill("SIGKILL");
+  };
   const timer = setTimeout(() => {
     timedOut = true;
     terminate();
   }, limits.timeoutMs);
   try {
     const [stdout, stderrBytes, exitCode] = await Promise.all([
-      collectBounded(child.stdout, limits.maxStdoutBytes, "codex stdout", terminate),
-      collectBounded(child.stderr, limits.maxStderrBytes, "codex stderr", terminate),
+      collectBounded(
+        child.stdout,
+        limits.maxStdoutBytes,
+        "codex stdout",
+        terminate,
+      ),
+      collectBounded(
+        child.stderr,
+        limits.maxStderrBytes,
+        "codex stderr",
+        terminate,
+      ),
       child.exited,
     ]);
-    if (timedOut) throw new Error(`codex command timed out after ${limits.timeoutMs}ms`);
+    if (timedOut) {
+      throw new Error(`codex command timed out after ${limits.timeoutMs}ms`);
+    }
     return { stdout, stderr: new TextDecoder().decode(stderrBytes), exitCode };
   } catch (error) {
     terminate();
     await child.exited.catch(() => undefined);
-    if (timedOut) throw new Error(`codex command timed out after ${limits.timeoutMs}ms`);
+    if (timedOut) {
+      throw new Error(`codex command timed out after ${limits.timeoutMs}ms`);
+    }
     throw error;
   } finally {
     clearTimeout(timer);
   }
 }
 
-async function clientVersion(codexBinary: string, limits: CommandLimits): Promise<string> {
-  const result = await runCodex(codexBinary, ["--version"], { ...limits, maxStdoutBytes: 1024 });
-  if (result.exitCode !== 0) throw new Error(`codex version failed (${result.exitCode}): ${result.stderr.trim().slice(0, 240)}`);
-  const match = new TextDecoder().decode(result.stdout).match(/\b(\d+\.\d+\.\d+)(?:[-+\s]|$)/);
-  if (!match) throw new Error("codex version did not contain a whole semantic version");
+async function clientVersion(
+  codexBinary: string,
+  limits: CommandLimits,
+): Promise<string> {
+  const result = await runCodex(codexBinary, ["--version"], {
+    ...limits,
+    maxStdoutBytes: 1024,
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `codex version failed (${result.exitCode}): ${result.stderr
+        .trim()
+        .slice(0, 240)}`,
+    );
+  }
+  const match = new TextDecoder()
+    .decode(result.stdout)
+    .match(/\b(\d+\.\d+\.\d+)(?:[-+\s]|$)/);
+  if (!match) {
+    throw new Error("codex version did not contain a whole semantic version");
+  }
   return match[1]!;
 }
 
-async function cachedCatalog(path: string, expectedVersion: string, now: Date, maxBytes: number): Promise<JsonObject | undefined> {
+async function cachedCatalog(
+  path: string,
+  expectedVersion: string,
+  now: Date,
+  maxBytes: number,
+): Promise<JsonObject | undefined> {
   try {
     const root = object(await parseJsonFile(path, maxBytes), "models cache");
-    if (root.client_version !== expectedVersion) return undefined;
-    if (typeof root.fetched_at !== "string") return undefined;
-    const fetchedAt = Date.parse(root.fetched_at);
-    if (!Number.isFinite(fetchedAt) || now.getTime() - fetchedAt > MODEL_CACHE_TTL_MS) return undefined;
-    return assertCompleteCatalog({ models: root.models });
+    if (root["client_version"] !== expectedVersion) return undefined;
+    if (typeof root["fetched_at"] !== "string") return undefined;
+    const fetchedAt = Date.parse(root["fetched_at"]);
+    if (
+      !Number.isFinite(fetchedAt) ||
+      now.getTime() - fetchedAt > MODEL_CACHE_TTL_MS
+    )
+      return undefined;
+    return assertCompleteCatalog({ models: root["models"] });
   } catch {
     return undefined;
   }
 }
 
-async function bundledCatalog(codexBinary: string, limits: CommandLimits): Promise<JsonObject> {
-  const result = await runCodex(codexBinary, ["debug", "models", "--bundled"], limits);
-  if (result.exitCode !== 0) throw new Error(`codex bundled catalog failed (${result.exitCode}): ${result.stderr.trim().slice(0, 240)}`);
-  return assertCompleteCatalog(JSON.parse(new TextDecoder().decode(result.stdout)));
+async function bundledCatalog(
+  codexBinary: string,
+  limits: CommandLimits,
+): Promise<JsonObject> {
+  const result = await runCodex(
+    codexBinary,
+    ["debug", "models", "--bundled"],
+    limits,
+  );
+  if (result.exitCode !== 0) {
+    throw new Error(
+      `codex bundled catalog failed (${result.exitCode}): ${result.stderr
+        .trim()
+        .slice(0, 240)}`,
+    );
+  }
+  return assertCompleteCatalog(
+    JSON.parse(new TextDecoder().decode(result.stdout)),
+  );
 }
 
 async function ensurePrivateRegularFile(path: string): Promise<void> {
   const metadata = await lstat(path);
-  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error(`${path} must be a regular file`);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error(`${path} must be a regular file`);
+  }
   await chmod(path, 0o600);
 }
 
@@ -194,30 +291,59 @@ async function writeAtomic(path: string, contents: string): Promise<boolean> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   try {
     await ensurePrivateRegularFile(path);
-    if (await readFile(path, "utf8") === contents) {
+    if ((await readFile(path, "utf8")) === contents) {
       return false;
     }
   } catch (error) {
-    if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
+    if (!(error instanceof Error && "code" in error && error.code === "ENOENT"))
+      throw error;
   }
-  const temporary = join(dirname(path), `.${globalThis.crypto.randomUUID()}.tmp`);
+  const temporary = join(
+    dirname(path),
+    `.${globalThis.crypto.randomUUID()}.tmp`,
+  );
   await writeFile(temporary, contents, { mode: 0o600, flag: "wx" });
   await chmod(temporary, 0o600);
   await rename(temporary, path);
   return true;
 }
 
-async function preflightCatalog(codexBinary: string, contents: string, limits: CommandLimits): Promise<void> {
-  const home = await mkdtemp(join(tmpdir(), "skizzles-model-catalog-preflight-"));
+async function preflightCatalog(
+  codexBinary: string,
+  contents: string,
+  limits: CommandLimits,
+): Promise<void> {
+  const home = await mkdtemp(
+    join(tmpdir(), "skizzles-model-catalog-preflight-"),
+  );
   const candidate = join(home, "candidate.json");
   try {
     await writeFile(candidate, contents, { mode: 0o600, flag: "wx" });
     const override = `model_catalog_json=${JSON.stringify(candidate)}`;
-    const result = await runCodex(codexBinary, ["debug", "models", "-c", override], limits, home);
-    if (result.exitCode !== 0) throw new Error(`catalog preflight failed (${result.exitCode}): ${result.stderr.trim().slice(0, 240)}`);
-    const loaded = assertCompleteCatalog(JSON.parse(new TextDecoder().decode(result.stdout)));
-    const loadedLuna = (loaded.models as JsonObject[]).filter((entry) => entry.slug === LUNA_MODEL);
-    if (loadedLuna.length !== 1 || loadedLuna[0]!.multi_agent_version !== "v2") throw new Error("catalog preflight did not load Luna V2");
+    const result = await runCodex(
+      codexBinary,
+      ["debug", "models", "-c", override],
+      limits,
+      home,
+    );
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `catalog preflight failed (${result.exitCode}): ${result.stderr
+          .trim()
+          .slice(0, 240)}`,
+      );
+    }
+    const loaded = assertCompleteCatalog(
+      JSON.parse(new TextDecoder().decode(result.stdout)),
+    );
+    const loadedLuna = (loaded["models"] as JsonObject[]).filter(
+      (entry) => entry["slug"] === LUNA_MODEL,
+    );
+    if (
+      loadedLuna.length !== 1 ||
+      loadedLuna[0]!["multi_agent_version"] !== "v2"
+    )
+      throw new Error("catalog preflight did not load Luna V2");
   } finally {
     await rm(home, { recursive: true, force: true });
   }
@@ -227,11 +353,17 @@ function digest(contents: string): string {
   return createHash("sha256").update(contents).digest("hex");
 }
 
-export async function refreshCatalog(options: CatalogRefreshOptions): Promise<CatalogRefreshResult> {
+export async function refreshCatalog(
+  options: CatalogRefreshOptions,
+): Promise<CatalogRefreshResult> {
   const codexHome = resolve(options.codexHome);
   const codexBinary = resolve(options.codexBinary);
-  const output = resolve(options.output ?? join(codexHome, "skizzles", "model-catalog.json"));
-  const status = resolve(options.status ?? join(codexHome, "skizzles", "model-catalog-status.json"));
+  const output = resolve(
+    options.output ?? join(codexHome, "skizzles", "model-catalog.json"),
+  );
+  const status = resolve(
+    options.status ?? join(codexHome, "skizzles", "model-catalog-status.json"),
+  );
   const cache = resolve(options.cache ?? join(codexHome, "models_cache.json"));
   const limits: CommandLimits = {
     timeoutMs: options.commandTimeoutMs ?? DEFAULT_TIMEOUT_MS,
@@ -239,9 +371,14 @@ export async function refreshCatalog(options: CatalogRefreshOptions): Promise<Ca
     maxStderrBytes: options.maxStderrBytes ?? DEFAULT_MAX_STDERR_BYTES,
   };
   const version = await clientVersion(codexBinary, limits);
-  const cached = await cachedCatalog(cache, version, options.now ?? new Date(), limits.maxStdoutBytes);
+  const cached = await cachedCatalog(
+    cache,
+    version,
+    options.now ?? new Date(),
+    limits.maxStdoutBytes,
+  );
   let source: CatalogSource = cached ? "cache" : "bundled";
-  let sourceCatalog = cached ?? await bundledCatalog(codexBinary, limits);
+  let sourceCatalog = cached ?? (await bundledCatalog(codexBinary, limits));
   let overlaid = applyLunaV2Overlay(sourceCatalog);
   let contents = `${JSON.stringify(overlaid.catalog, null, 2)}\n`;
   try {
@@ -264,12 +401,24 @@ export async function refreshCatalog(options: CatalogRefreshOptions): Promise<Ca
     generation: digest(contents),
     output,
   };
-  await writeAtomic(status, `${JSON.stringify({ ...result, checkedAt: new Date().toISOString() }, null, 2)}\n`);
+  await writeAtomic(
+    status,
+    `${JSON.stringify(
+      { ...result, checkedAt: new Date().toISOString() },
+      null,
+      2,
+    )}\n`,
+  );
   return result;
 }
 
 function xml(value: string): string {
-  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
 }
 
 export interface LaunchAgentValues {
@@ -279,7 +428,10 @@ export interface LaunchAgentValues {
   codexBinary: string;
 }
 
-export function renderLaunchAgent(template: string, values: LaunchAgentValues): string {
+export function renderLaunchAgent(
+  template: string,
+  values: LaunchAgentValues,
+): string {
   const replacements: Record<string, string> = {
     __BUN_ABSOLUTE_PATH__: values.bun,
     __SCRIPT_ABSOLUTE_PATH__: values.script,
@@ -292,7 +444,9 @@ export function renderLaunchAgent(template: string, values: LaunchAgentValues): 
     if (!isAbsolute(value)) throw new Error(`${placeholder} must be absolute`);
     rendered = rendered.replaceAll(placeholder, xml(resolve(value)));
   }
-  if (/__[A-Z0-9_]+__/.test(rendered)) throw new Error("launch agent template contains unresolved placeholders");
+  if (/__[A-Z0-9_]+__/.test(rendered)) {
+    throw new Error("launch agent template contains unresolved placeholders");
+  }
   return rendered;
 }
 
@@ -307,28 +461,51 @@ function required(args: string[], flag: string): string {
   return found;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 async function main(args: string[]): Promise<void> {
   const command = args.shift();
   if (command === "refresh" || command === "service") {
     const codexHome = required(args, "--codex-home");
-    const status = value(args, "--status") ?? join(resolve(codexHome), "skizzles", "model-catalog-status.json");
+    const status =
+      value(args, "--status") ??
+      join(resolve(codexHome), "skizzles", "model-catalog-status.json");
+    const output = value(args, "--output");
+    const cache = value(args, "--cache");
     let result: CatalogRefreshResult;
     try {
       result = await refreshCatalog({
         codexHome,
         codexBinary: required(args, "--codex-binary"),
-        output: value(args, "--output"),
         status,
-        cache: value(args, "--cache"),
+        ...(output !== undefined ? { output } : {}),
+        ...(cache !== undefined ? { cache } : {}),
       });
     } catch (error) {
       if (command === "service") {
-        const message = error instanceof Error ? error.message.slice(0, 240) : "model catalog refresh failed";
-        await writeAtomic(resolve(status), `${JSON.stringify({ ok: false, error: message, checkedAt: new Date().toISOString() }, null, 2)}\n`);
+        const message =
+          error instanceof Error
+            ? error.message.slice(0, 240)
+            : "model catalog refresh failed";
+        await writeAtomic(
+          resolve(status),
+          `${JSON.stringify(
+            {
+              ok: false,
+              error: message,
+              checkedAt: new Date().toISOString(),
+            },
+            null,
+            2,
+          )}\n`,
+        );
       }
       throw error;
     }
-    if (command === "refresh" && (result.updated || !args.includes("--quiet-unchanged"))) console.log(JSON.stringify(result));
+    if (
+      command === "refresh" &&
+      (result.updated || !args.includes("--quiet-unchanged"))
+    )
+      console.log(JSON.stringify(result));
     return;
   }
   if (command === "render-launch-agent") {
@@ -344,14 +521,18 @@ async function main(args: string[]): Promise<void> {
     console.log(JSON.stringify({ ok: true, output: resolve(output) }));
     return;
   }
-  throw new Error("usage: model-catalog.ts <refresh|service|render-launch-agent> [options]");
+  throw new Error(
+    "usage: model-catalog.ts <refresh|service|render-launch-agent> [options]",
+  );
 }
 
 if (import.meta.main) {
   try {
     await main(process.argv.slice(2));
   } catch (error) {
-    console.error(error instanceof Error ? error.message : "model catalog operation failed");
+    console.error(
+      error instanceof Error ? error.message : "model catalog operation failed",
+    );
     process.exit(1);
   }
 }

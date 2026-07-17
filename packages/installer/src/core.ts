@@ -40,7 +40,9 @@ export function pathEntryExists(path: string): boolean {
     lstatSync(path);
     return true;
   } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") return false;
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return false;
+    }
     throw error;
   }
 }
@@ -48,7 +50,8 @@ export function pathEntryExists(path: string): boolean {
 export function copyDirectoryExclusive(
   source: string,
   target: string,
-  copyEntry: (source: string, target: string) => void = (from, to) => cpSync(from, to, { recursive: true }),
+  copyEntry: (source: string, target: string) => void = (from, to) =>
+    cpSync(from, to, { recursive: true }),
 ): void {
   mkdirSync(target);
   try {
@@ -62,20 +65,33 @@ export function copyDirectoryExclusive(
   }
 }
 
-export function assertManagedParentsAreReal(rootInput: string, managedParents: string[]): void {
+export function assertManagedParentsAreReal(
+  rootInput: string,
+  managedParents: string[],
+): void {
   const root = resolve(rootInput);
-  for (const path of [root, ...managedParents.map((parent) => join(root, parent))]) {
+  for (const path of [
+    root,
+    ...managedParents.map((parent) => join(root, parent)),
+  ]) {
     if (pathEntryExists(path) && lstatSync(path).isSymbolicLink()) {
       throw new Error(`refusing to manage through a symlinked parent: ${path}`);
     }
   }
 }
 
-function publicSkills(sourceRoot: string): Array<{ name: string; source: string }> {
+function publicSkills(
+  sourceRoot: string,
+): Array<{ name: string; source: string }> {
   const root = join(resolve(sourceRoot), "skills");
-  if (!existsSync(root)) throw new Error(`canonical skills directory is missing: ${root}`);
+  if (!existsSync(root)) {
+    throw new Error(`canonical skills directory is missing: ${root}`);
+  }
   return readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && existsSync(join(root, entry.name, "SKILL.md")))
+    .filter(
+      (entry) =>
+        entry.isDirectory() && existsSync(join(root, entry.name, "SKILL.md")),
+    )
     .map((entry) => ({ name: entry.name, source: join(root, entry.name) }))
     .sort((left, right) => left.name.localeCompare(right.name));
 }
@@ -87,19 +103,33 @@ export function sameTree(left: string, right: string): boolean {
   if (leftStat.isSymbolicLink() || rightStat.isSymbolicLink()) return false;
   if (leftStat.isDirectory() !== rightStat.isDirectory()) return false;
   if (leftStat.isDirectory()) {
-    const leftNames = readdirSync(left).filter((name) => name !== ".DS_Store").sort();
-    const rightNames = readdirSync(right).filter((name) => name !== ".DS_Store").sort();
+    const leftNames = readdirSync(left)
+      .filter((name) => name !== ".DS_Store")
+      .sort();
+    const rightNames = readdirSync(right)
+      .filter((name) => name !== ".DS_Store")
+      .sort();
     if (leftNames.join("\0") !== rightNames.join("\0")) return false;
-    return leftNames.every((name) => sameTree(join(left, name), join(right, name)));
+    return leftNames.every((name) =>
+      sameTree(join(left, name), join(right, name)),
+    );
   }
   return readFileSync(left).equals(readFileSync(right));
 }
 
 function readReceipt(codexHome: string): SkillsReceipt {
   const path = skillsReceiptPath(codexHome);
-  if (!existsSync(path)) throw new Error(`Skizzles skills receipt is missing: ${path}`);
-  const value = JSON.parse(readFileSync(path, "utf8")) as Partial<SkillsReceipt>;
-  if (value.version !== 1 || (value.transfer !== "link" && value.transfer !== "copy") || !Array.isArray(value.skills)) {
+  if (!existsSync(path)) {
+    throw new Error(`Skizzles skills receipt is missing: ${path}`);
+  }
+  const value = JSON.parse(
+    readFileSync(path, "utf8"),
+  ) as Partial<SkillsReceipt>;
+  if (
+    value.version !== 1 ||
+    (value.transfer !== "link" && value.transfer !== "copy") ||
+    !Array.isArray(value.skills)
+  ) {
     throw new Error(`invalid Skizzles skills receipt: ${path}`);
   }
   return value as SkillsReceipt;
@@ -110,7 +140,9 @@ export function installSkills(options: SkillsOptions): SkillsReceipt {
   const sourceRoot = resolve(options.sourceRoot);
   assertManagedParentsAreReal(codexHome, ["skills", ".skizzles"]);
   const receiptPath = skillsReceiptPath(codexHome);
-  if (pathEntryExists(receiptPath)) throw new Error(`Skizzles skills receipt already exists: ${receiptPath}`);
+  if (pathEntryExists(receiptPath)) {
+    throw new Error(`Skizzles skills receipt already exists: ${receiptPath}`);
+  }
 
   const skills = publicSkills(sourceRoot).map(({ name, source }) => ({
     name,
@@ -119,7 +151,9 @@ export function installSkills(options: SkillsOptions): SkillsReceipt {
   }));
   if (skills.length === 0) throw new Error("no public skills were found");
   const conflict = skills.find(({ target }) => pathEntryExists(target));
-  if (conflict) throw new Error(`refusing to replace existing skill: ${conflict.target}`);
+  if (conflict) {
+    throw new Error(`refusing to replace existing skill: ${conflict.target}`);
+  }
 
   const receipt: SkillsReceipt = {
     version: 1,
@@ -133,19 +167,25 @@ export function installSkills(options: SkillsOptions): SkillsReceipt {
   const created: string[] = [];
   try {
     for (const skill of skills) {
-      if (options.transfer === "link") symlinkSync(skill.source, skill.target, "dir");
-      else copyDirectoryExclusive(skill.source, skill.target);
+      if (options.transfer === "link") {
+        symlinkSync(skill.source, skill.target, "dir");
+      } else copyDirectoryExclusive(skill.source, skill.target);
       created.push(skill.target);
     }
     mkdirSync(dirname(receiptPath), { recursive: true });
-    writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" });
+    writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, {
+      flag: "wx",
+    });
   } catch (error) {
-    for (const target of created.reverse()) rmSync(target, { recursive: true, force: true });
+    for (const target of created.reverse()) {
+      rmSync(target, { recursive: true, force: true });
+    }
     throw error;
   }
   return receipt;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 export function uninstallSkills(
   codexHomeInput: string,
   dryRun = false,
@@ -158,19 +198,29 @@ export function uninstallSkills(
     const target = resolve(skill.target);
     const expectedParent = join(codexHome, "skills");
     if (dirname(target) !== expectedParent || !pathEntryExists(target)) {
-      throw new Error(`owned skill target is missing or outside CODEX_HOME: ${target}`);
+      throw new Error(
+        `owned skill target is missing or outside CODEX_HOME: ${target}`,
+      );
     }
     const source = join(receipt.sourceRoot, "skills", skill.name);
     if (receipt.transfer === "link") {
-      if (!lstatSync(target).isSymbolicLink()) throw new Error(`owned link changed type: ${target}`);
+      if (!lstatSync(target).isSymbolicLink()) {
+        throw new Error(`owned link changed type: ${target}`);
+      }
       const actual = resolve(dirname(target), readlinkSync(target));
-      if (actual !== resolve(source)) throw new Error(`owned link target drifted: ${target}`);
+      if (actual !== resolve(source)) {
+        throw new Error(`owned link target drifted: ${target}`);
+      }
     } else if (!sameTree(source, target)) {
       throw new Error(`owned copied skill drifted: ${target}`);
     }
   }
   if (dryRun) return receipt;
-  const quarantine = join(codexHome, ".skizzles", `uninstall-${crypto.randomUUID()}`);
+  const quarantine = join(
+    codexHome,
+    ".skizzles",
+    `uninstall-${crypto.randomUUID()}`,
+  );
   mkdirSync(quarantine);
   const moved: Array<{ from: string; to: string }> = [];
   try {
@@ -185,20 +235,30 @@ export function uninstallSkills(
     moved.push({ from: receiptPath, to: receiptDestination });
   } catch (error) {
     for (const item of moved.reverse()) {
-      if (pathEntryExists(item.to) && !pathEntryExists(item.from)) renameSync(item.to, item.from);
+      if (pathEntryExists(item.to) && !pathEntryExists(item.from)) {
+        renameSync(item.to, item.from);
+      }
     }
     rmSync(quarantine, { recursive: true, force: true });
     throw error;
   }
-  try { rmSync(quarantine, { recursive: true, force: true }); } catch {}
+  try {
+    rmSync(quarantine, { recursive: true, force: true });
+    // biome-ignore lint/suspicious/noEmptyBlockStatements: The operation intentionally ignores this best-effort failure.
+  } catch {}
   return receipt;
 }
 
-export function receiptSummary(receipt: SkillsReceipt): Record<string, unknown> {
+export function receiptSummary(
+  receipt: SkillsReceipt,
+): Record<string, unknown> {
   return {
     surface: "skills",
     transfer: receipt.transfer,
     sourceRoot: receipt.sourceRoot,
-    skills: receipt.skills.map(({ name, target }) => ({ name, target: relative(process.cwd(), target) || target })),
+    skills: receipt.skills.map(({ name, target }) => ({
+      name,
+      target: relative(process.cwd(), target) || target,
+    })),
   };
 }

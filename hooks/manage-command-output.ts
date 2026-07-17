@@ -24,14 +24,15 @@ function runner(): string {
   return 'bun "${PLUGIN_ROOT}/runtime/codex-command.ts"';
 }
 
-function commandFrom(input: Record<string, unknown> | undefined):
-  | { key: "cmd" | "command"; value: string }
-  | undefined {
+function commandFrom(
+  input: Record<string, unknown> | undefined,
+): { key: "cmd" | "command"; value: string } | undefined {
   if (!input) return undefined;
   for (const key of ["cmd", "command"] as const) {
     const value = input[key];
     if (typeof value === "string") return { key, value };
   }
+  return undefined;
 }
 
 /**
@@ -42,6 +43,7 @@ function commandFrom(input: Record<string, unknown> | undefined):
  */
 type SimpleCommand = { words: string[]; uncertain: boolean[] };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 function simpleCommands(script: string): SimpleCommand[] | undefined {
   const commands: SimpleCommand[] = [];
   let words: string[] = [];
@@ -88,7 +90,14 @@ function simpleCommands(script: string): SimpleCommand[] | undefined {
       else word += character;
       continue;
     }
-    if (character === "\\" || character === "`" || character === "$" || character === "(" || character === ")") return undefined;
+    if (
+      character === "\\" ||
+      character === "`" ||
+      character === "$" ||
+      character === "(" ||
+      character === ")"
+    )
+      return undefined;
     if (character === "'") {
       wordStarted = true;
       wordUncertain = true;
@@ -102,7 +111,9 @@ function simpleCommands(script: string): SimpleCommand[] | undefined {
       continue;
     }
     if (character === "#" && atWordStart) {
-      while (index + 1 < script.length && script[index + 1] !== "\n") index += 1;
+      while (index + 1 < script.length && script[index + 1] !== "\n") {
+        index += 1;
+      }
       atWordStart = true;
       continue;
     }
@@ -119,7 +130,9 @@ function simpleCommands(script: string): SimpleCommand[] | undefined {
     }
     if (character === "<" || character === ">") {
       finishWord();
-      if (skipRedirectionTarget || script[index + 1] === character) return undefined;
+      if (skipRedirectionTarget || script[index + 1] === character) {
+        return undefined;
+      }
       skipRedirectionTarget = true;
       atWordStart = true;
       continue;
@@ -138,11 +151,12 @@ function simpleCommands(script: string): SimpleCommand[] | undefined {
   return commands.length > 0 ? commands : undefined;
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 function isRecognized(command: SimpleCommand | undefined): boolean {
   if (!command || command.words.length < 2) return false;
   const normalized = normalizeCommand(command);
   if (!normalized || normalized.words.length === 0) return false;
-  const { words, uncertain } = normalized;
+  const { words } = normalized;
 
   const [program, subcommand, third] = words;
 
@@ -161,7 +175,19 @@ function isRecognized(command: SimpleCommand | undefined): boolean {
     const action = subcommand?.startsWith("+") ? third : subcommand;
     return action === "nextest"
       ? words[words.indexOf(action) + 1] === "run"
-      : ["build", "b", "check", "c", "test", "t", "clippy", "bench", "doc", "install", "llvm-cov"].includes(action!);
+      : [
+          "build",
+          "b",
+          "check",
+          "c",
+          "test",
+          "t",
+          "clippy",
+          "bench",
+          "doc",
+          "install",
+          "llvm-cov",
+        ].includes(action!);
   }
   if (program === "xcodebuild") return true;
   if (program === "swift") return ["build", "test"].includes(subcommand!);
@@ -186,11 +212,23 @@ function isContainerLabRun(command: SimpleCommand): boolean {
   const { words, uncertain } = command;
   let index: number;
   if (words[0] === "codex-container-lab" && !uncertain[0]) index = 1;
-  else if (words[0] === "bun" && !uncertain[0] && basename(words[1] ?? "") === "codex-container-lab" && !uncertain[1]) index = 2;
+  else if (
+    words[0] === "bun" &&
+    !uncertain[0] &&
+    basename(words[1] ?? "") === "codex-container-lab" &&
+    !uncertain[1]
+  )
+    index = 2;
   else return false;
 
   while (index < words.length && containerLabGlobalOptions.has(words[index]!)) {
-    if (uncertain[index] || words[index + 1] === undefined || words[index + 1]!.startsWith("--") || uncertain[index + 1]) return false;
+    if (
+      uncertain[index] ||
+      words[index + 1] === undefined ||
+      words[index + 1]!.startsWith("--") ||
+      uncertain[index + 1]
+    )
+      return false;
     index += 2;
   }
   return words[index] === "run" && !uncertain[index];
@@ -204,6 +242,7 @@ function isAssignment(word: string): boolean {
   return /^[A-Za-z_][A-Za-z0-9_]*=/.test(word);
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 function normalizeCommand(command: SimpleCommand): SimpleCommand | undefined {
   const { words, uncertain } = command;
   let index = 0;
@@ -229,7 +268,9 @@ function normalizeCommand(command: SimpleCommand): SimpleCommand | undefined {
         continue;
       }
       if (["-u", "--unset", "-C", "--chdir"].includes(word)) {
-        if (words[index + 1] === undefined || !isCertain(index + 1)) return undefined;
+        if (words[index + 1] === undefined || !isCertain(index + 1)) {
+          return undefined;
+        }
         index += 2;
         continue;
       }
@@ -249,7 +290,12 @@ function normalizeCommand(command: SimpleCommand): SimpleCommand | undefined {
 
   const launcher = basename(words[index] ?? "");
   if (launcher === "fvm") index += 1;
-  else if (launcher === "rustup" && words[index + 1] === "run" && words[index + 2]) index += 3;
+  else if (
+    launcher === "rustup" &&
+    words[index + 1] === "run" &&
+    words[index + 2]
+  )
+    index += 3;
   else if (launcher === "xcrun") {
     index += 1;
     while (index < words.length) {
@@ -262,7 +308,11 @@ function normalizeCommand(command: SimpleCommand): SimpleCommand | undefined {
         index += 2;
         continue;
       }
-      if (["--log", "-log", "--verbose", "-v", "--no-cache", "--run"].includes(option)) {
+      if (
+        ["--log", "-log", "--verbose", "-v", "--no-cache", "--run"].includes(
+          option,
+        )
+      ) {
         index += 1;
         continue;
       }
@@ -281,9 +331,15 @@ function normalizeCommand(command: SimpleCommand): SimpleCommand | undefined {
 function isGradleBuildOrTestTask(word: string): boolean {
   if (word.startsWith("-")) return false;
   const task = word.split(":").at(-1)?.toLowerCase() ?? "";
-  return ["build", "assemble", "bundle", "check", "test", "connected", "lint"].some(
-    (prefix) => task === prefix || task.startsWith(prefix),
-  );
+  return [
+    "build",
+    "assemble",
+    "bundle",
+    "check",
+    "test",
+    "connected",
+    "lint",
+  ].some((prefix) => task === prefix || task.startsWith(prefix));
 }
 
 function base64Url(value: string): string {

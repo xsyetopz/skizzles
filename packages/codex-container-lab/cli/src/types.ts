@@ -1,5 +1,5 @@
-import type { LabConfig } from "./config";
 import type { ComposeInspectionFinding } from "./compose";
+import type { LabConfig } from "./config";
 
 export type LabState = "provisioning" | "ready" | "failed" | "destroying";
 

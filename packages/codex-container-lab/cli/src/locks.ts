@@ -1,10 +1,19 @@
-import { link, lstat, mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
+import {
+  link,
+  lstat,
+  mkdir,
+  open,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { dirname } from "node:path";
 
 type LockRecord = { pid: number; createdAt: string };
 type LockIdentity = { dev: bigint; ino: bigint };
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 export async function withFileLock<T>(
   path: string,
   operation: () => Promise<T>,
@@ -21,46 +30,69 @@ export async function withFileLock<T>(
   const staleMs = options.staleMs ?? 5 * 60_000;
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   for (let attempt = 0; attempt < attempts; attempt++) {
-    if (options.signal?.aborted) throw new Error("operation was cancelled while waiting for a state lock");
+    if (options.signal?.aborted) {
+      throw new Error("operation was cancelled while waiting for a state lock");
+    }
     const candidate = `${path}.candidate-${process.pid}-${crypto.randomUUID()}`;
     let acquired = false;
     try {
-      await writeFile(candidate, JSON.stringify({
-        pid: process.pid,
-        createdAt: new Date().toISOString(),
-      } satisfies LockRecord), { mode: 0o600, flag: "wx" });
+      await writeFile(
+        candidate,
+        JSON.stringify({
+          pid: process.pid,
+          createdAt: new Date().toISOString(),
+        } satisfies LockRecord),
+        { mode: 0o600, flag: "wx" },
+      );
       try {
         // Linking a complete candidate record is atomic and never replaces an
         // existing lock, eliminating the mkdir-before-owner-record crash gap.
         await link(candidate, path);
         acquired = true;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST" &&
-            (error as NodeJS.ErrnoException).code !== "ENOTEMPTY") throw error;
+        if (
+          (error as NodeJS.ErrnoException).code !== "EEXIST" &&
+          (error as NodeJS.ErrnoException).code !== "ENOTEMPTY"
+        )
+          throw error;
       }
       if (acquired) {
         const candidateInfo = await lstat(candidate, { bigint: true });
         const candidateIdentity = identity(candidateInfo);
-        try { return await operation(); }
-        finally {
+        try {
+          return await operation();
+        } finally {
           await claimAndRemoveLock(
-            path, candidateIdentity, candidate, candidateIdentity,
-            staleMs, options.processProbe ?? probeProcess,
+            path,
+            candidateIdentity,
+            candidate,
+            candidateIdentity,
+            staleMs,
+            options.processProbe ?? probeProcess,
           );
         }
       }
     } finally {
       await rm(candidate, { force: true });
     }
-    await removeConfirmedStaleLock(path, staleMs, options.processProbe ?? probeProcess);
+    await removeConfirmedStaleLock(
+      path,
+      staleMs,
+      options.processProbe ?? probeProcess,
+    );
     if (attempt + 1 < attempts) {
-      if (options.signal?.aborted) throw new Error("operation was cancelled while waiting for a state lock");
+      if (options.signal?.aborted) {
+        throw new Error(
+          "operation was cancelled while waiting for a state lock",
+        );
+      }
       await Bun.sleep(delayMs);
     }
   }
   throw new Error("state is busy; another process holds the operation lock");
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 async function removeConfirmedStaleLock(
   path: string,
   staleMs: number,
@@ -68,8 +100,9 @@ async function removeConfirmedStaleLock(
 ): Promise<void> {
   let handle: FileHandle | undefined;
   try {
-    try { handle = await open(path, "r"); }
-    catch (error) {
+    try {
+      handle = await open(path, "r");
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
       throw error;
     }
@@ -82,8 +115,13 @@ async function removeConfirmedStaleLock(
         ? await readFile(`${path}/owner.json`, "utf8")
         : await handle.readFile({ encoding: "utf8" });
       const value = JSON.parse(contents) as unknown;
-      if (isRecord(value) && typeof value.pid === "number" && Number.isInteger(value.pid) &&
-          value.pid > 0 && typeof value.createdAt === "string") {
+      if (
+        isRecord(value) &&
+        typeof value["pid"] === "number" &&
+        Number.isInteger(value["pid"]) &&
+        value["pid"] > 0 &&
+        typeof value["createdAt"] === "string"
+      ) {
         record = value as LockRecord;
       }
     } catch {
@@ -117,17 +155,31 @@ async function reclaimSameLock(
 ): Promise<void> {
   const candidate = `${path}.reclaim-candidate-${process.pid}-${crypto.randomUUID()}`;
   try {
-    await writeFile(candidate, JSON.stringify({
-      pid: process.pid,
-      createdAt: new Date().toISOString(),
-    } satisfies LockRecord), { mode: 0o600, flag: "wx" });
-    const candidateIdentity = identity(await lstat(candidate, { bigint: true }));
-    await claimAndRemoveLock(path, inspected, candidate, candidateIdentity, staleMs, processProbe);
+    await writeFile(
+      candidate,
+      JSON.stringify({
+        pid: process.pid,
+        createdAt: new Date().toISOString(),
+      } satisfies LockRecord),
+      { mode: 0o600, flag: "wx" },
+    );
+    const candidateIdentity = identity(
+      await lstat(candidate, { bigint: true }),
+    );
+    await claimAndRemoveLock(
+      path,
+      inspected,
+      candidate,
+      candidateIdentity,
+      staleMs,
+      processProbe,
+    );
   } finally {
     await rm(candidate, { force: true });
   }
 }
 
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 async function claimAndRemoveLock(
   path: string,
   inspected: LockIdentity | undefined,
@@ -148,13 +200,24 @@ async function claimAndRemoveLock(
         claimed = true;
         break;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST" &&
-            (error as NodeJS.ErrnoException).code !== "ENOTEMPTY") throw error;
-        if (attempt > 0 || !await removeConfirmedOrphanClaim(claimPath, staleMs, processProbe)) return;
+        if (
+          (error as NodeJS.ErrnoException).code !== "EEXIST" &&
+          (error as NodeJS.ErrnoException).code !== "ENOTEMPTY"
+        )
+          throw error;
+        if (
+          attempt > 0 ||
+          !(await removeConfirmedOrphanClaim(claimPath, staleMs, processProbe))
+        )
+          return;
       }
     }
     if (!claimed) return;
-    if (!await hasIdentity(claimPath, claimIdentity) || !await hasIdentity(path, inspected)) return;
+    if (
+      !(await hasIdentity(claimPath, claimIdentity)) ||
+      !(await hasIdentity(path, inspected))
+    )
+      return;
     await rm(path, { recursive: true, force: true });
   } finally {
     // A crashed claimant fails closed. Cleanup here is limited to this exact
@@ -170,8 +233,9 @@ async function removeConfirmedOrphanClaim(
 ): Promise<boolean> {
   let handle: FileHandle | undefined;
   try {
-    try { handle = await open(claimPath, "r"); }
-    catch (error) {
+    try {
+      handle = await open(claimPath, "r");
+    } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
       throw error;
     }
@@ -179,14 +243,23 @@ async function removeConfirmedOrphanClaim(
     const inspected = identity(info);
     if (inspected === undefined || info.isDirectory()) return false;
     let value: unknown;
-    try { value = JSON.parse(await handle.readFile({ encoding: "utf8" })); }
-    catch { return false; }
-    if (!isRecord(value) || typeof value.pid !== "number" || !Number.isInteger(value.pid) || value.pid <= 0 ||
-        typeof value.createdAt !== "string") return false;
-    const age = Date.now() - Date.parse(value.createdAt);
+    try {
+      value = JSON.parse(await handle.readFile({ encoding: "utf8" }));
+    } catch {
+      return false;
+    }
+    if (
+      !isRecord(value) ||
+      typeof value["pid"] !== "number" ||
+      !Number.isInteger(value["pid"]) ||
+      value["pid"] <= 0 ||
+      typeof value["createdAt"] !== "string"
+    )
+      return false;
+    const age = Date.now() - Date.parse(value["createdAt"]);
     if (!Number.isFinite(age) || age < staleMs) return false;
     try {
-      processProbe(value.pid);
+      processProbe(value["pid"]);
       return false;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ESRCH") return false;
@@ -194,14 +267,17 @@ async function removeConfirmedOrphanClaim(
     await handle.close();
     handle = undefined;
     await removeIfSamePath(claimPath, inspected);
-    return !await hasIdentity(claimPath, inspected);
+    return !(await hasIdentity(claimPath, inspected));
   } finally {
     await handle?.close();
   }
 }
 
-async function hasIdentity(path: string, expected: LockIdentity): Promise<boolean> {
-  let current;
+async function hasIdentity(
+  path: string,
+  expected: LockIdentity,
+): Promise<boolean> {
+  let current: import("node:fs").BigIntStats;
   try {
     current = await lstat(path, { bigint: true });
   } catch (error) {
@@ -209,15 +285,25 @@ async function hasIdentity(path: string, expected: LockIdentity): Promise<boolea
     throw error;
   }
   const currentIdentity = identity(current);
-  return currentIdentity !== undefined && currentIdentity.dev === expected.dev && currentIdentity.ino === expected.ino;
+  return (
+    currentIdentity !== undefined &&
+    currentIdentity.dev === expected.dev &&
+    currentIdentity.ino === expected.ino
+  );
 }
 
-async function removeIfSamePath(path: string, inspected: LockIdentity): Promise<void> {
-  if (!await hasIdentity(path, inspected)) return;
+async function removeIfSamePath(
+  path: string,
+  inspected: LockIdentity,
+): Promise<void> {
+  if (!(await hasIdentity(path, inspected))) return;
   await rm(path, { recursive: true, force: true });
 }
 
-function identity(info: { dev: bigint; ino: bigint }): LockIdentity | undefined {
+function identity(info: {
+  dev: bigint;
+  ino: bigint;
+}): LockIdentity | undefined {
   if (info.dev < 0n || info.ino <= 0n) return undefined;
   return { dev: info.dev, ino: info.ino };
 }

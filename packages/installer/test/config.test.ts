@@ -2,34 +2,65 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  configureCodex,
-  configReceiptPath,
-  desiredConfigEdits,
-  unconfigureCodex,
   type ConfigEdit,
   type ConfigRpc,
+  configReceiptPath,
+  configureCodex,
+  desiredConfigEdits,
+  unconfigureCodex,
 } from "../src/config";
 
-type Value = null | boolean | number | string | Value[] | { [key: string]: Value };
+type Value =
+  | null
+  | boolean
+  | number
+  | string
+  | Value[]
+  | {
+      [key: string]: Value;
+    };
 
 const roots: string[] = [];
 
-function fixture(initial: Value = {}): { codexHome: string; codexBinary: string; rpc: FakeRpc } {
-  const codexHome = `${process.env.TMPDIR ?? "/tmp"}/skizzles-config-${crypto.randomUUID()}`;
+function fixture(initial: Value = {}): {
+  codexHome: string;
+  codexBinary: string;
+  rpc: FakeRpc;
+} {
+  const codexHome = `${
+    process.env["TMPDIR"] ?? "/tmp"
+  }/skizzles-config-${crypto.randomUUID()}`;
   roots.push(codexHome);
   mkdirSync(codexHome, { recursive: true });
-  writeFileSync(join(codexHome, "config.toml"), "# preserved by native Codex config editing\n");
-  return { codexHome, codexBinary: process.execPath, rpc: new FakeRpc(codexHome, initial) };
+  writeFileSync(
+    join(codexHome, "config.toml"),
+    "# preserved by native Codex config editing\n",
+  );
+  return {
+    codexHome,
+    codexBinary: process.execPath,
+    rpc: new FakeRpc(codexHome, initial),
+  };
 }
 
-afterEach(() => roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })));
+afterEach(() =>
+  roots.splice(0).forEach((root) => {
+    rmSync(root, { recursive: true, force: true });
+  }),
+);
 
-function setValue(root: { [key: string]: Value }, keyPath: string, value: Value): void {
+function setValue(
+  root: { [key: string]: Value },
+  keyPath: string,
+  value: Value,
+): void {
   const segments = keyPath.split(".");
   let current = root;
   for (const segment of segments.slice(0, -1)) {
     const child = current[segment];
-    if (!child || Array.isArray(child) || typeof child !== "object") current[segment] = {};
+    if (!child || Array.isArray(child) || typeof child !== "object") {
+      current[segment] = {};
+    }
     current = current[segment] as { [key: string]: Value };
   }
   const final = segments.at(-1)!;
@@ -38,26 +69,36 @@ function setValue(root: { [key: string]: Value }, keyPath: string, value: Value)
 }
 
 class FakeRpc implements ConfigRpc {
+  private readonly codexHome: string;
   config: { [key: string]: Value };
   version = "sha256:1";
   writes = 0;
   closed = false;
   mutateBeforeWrite = false;
 
-  constructor(private readonly codexHome: string, initial: Value) {
+  constructor(codexHome: string, initial: Value) {
+    this.codexHome = codexHome;
     this.config = structuredClone(initial) as { [key: string]: Value };
   }
 
+  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
   async read() {
     return {
-      layers: [{
-        name: { type: "user", file: join(this.codexHome, "config.toml"), profile: null },
-        version: this.version,
-        config: structuredClone(this.config),
-      }],
+      layers: [
+        {
+          name: {
+            type: "user",
+            file: join(this.codexHome, "config.toml"),
+            profile: null,
+          },
+          version: this.version,
+          config: structuredClone(this.config),
+        },
+      ],
     };
   }
 
+  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
   async batchWrite(params: {
     edits: ConfigEdit[];
     filePath: string;
@@ -65,14 +106,20 @@ class FakeRpc implements ConfigRpc {
     reloadUserConfig: boolean;
   }) {
     if (this.mutateBeforeWrite) this.version = "sha256:external";
-    if (params.expectedVersion !== this.version) throw new Error("configVersionConflict");
+    if (params.expectedVersion !== this.version) {
+      throw new Error("configVersionConflict");
+    }
+    // biome-ignore lint/suspicious/noMisplacedAssertion: This helper is invoked only from test cases and centralizes their assertion.
     expect(params.reloadUserConfig).toBe(true);
-    for (const edit of params.edits) setValue(this.config, edit.keyPath, edit.value);
+    for (const edit of params.edits) {
+      setValue(this.config, edit.keyPath, edit.value);
+    }
     this.writes += 1;
     this.version = `sha256:${this.writes + 1}`;
     return { status: "ok", version: this.version, filePath: params.filePath };
   }
 
+  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
   async close() {
     this.closed = true;
   }
@@ -110,7 +157,11 @@ describe("Codex configuration lifecycle", () => {
       features: { hooks: false, goals: true },
       developer_instructions: "personal guidance",
     });
-    await configureCodex({ ...f, orchestration: "aggressive", rpcFactory: factory(f.rpc) });
+    await configureCodex({
+      ...f,
+      orchestration: "aggressive",
+      rpcFactory: factory(f.rpc),
+    });
     expect(f.rpc.config).toMatchObject({
       model: "personal-model",
       developer_instructions: "personal guidance",
@@ -137,18 +188,33 @@ describe("Codex configuration lifecycle", () => {
       dryRun: true,
       rpcFactory: factory(f.rpc),
     });
-    expect(receipt.values).toEqual([{ keyPath: "features.hooks", beforePresent: true, before: false, after: true }]);
+    expect(receipt.values).toEqual([
+      {
+        keyPath: "features.hooks",
+        beforePresent: true,
+        before: false,
+        after: true,
+      },
+    ]);
     expect(f.rpc.writes).toBe(0);
     expect(existsSync(configReceiptPath(f.codexHome))).toBe(false);
   });
 
   test("fails closed when an owned key drifts", async () => {
     const f = fixture({});
-    await configureCodex({ ...f, orchestration: "aggressive", rpcFactory: factory(f.rpc) });
-    setValue(f.rpc.config, "features.multi_agent_v2.max_concurrent_threads_per_session", 3);
-    await expect(unconfigureCodex({ ...f, rpcFactory: factory(f.rpc) })).rejects.toThrow(
-      "refusing to restore drifted config key",
+    await configureCodex({
+      ...f,
+      orchestration: "aggressive",
+      rpcFactory: factory(f.rpc),
+    });
+    setValue(
+      f.rpc.config,
+      "features.multi_agent_v2.max_concurrent_threads_per_session",
+      3,
     );
+    await expect(
+      unconfigureCodex({ ...f, rpcFactory: factory(f.rpc) }),
+    ).rejects.toThrow("refusing to restore drifted config key");
     expect(existsSync(configReceiptPath(f.codexHome))).toBe(true);
   });
 
@@ -156,7 +222,11 @@ describe("Codex configuration lifecycle", () => {
     const f = fixture({});
     f.rpc.mutateBeforeWrite = true;
     await expect(
-      configureCodex({ ...f, orchestration: "passive", rpcFactory: factory(f.rpc) }),
+      configureCodex({
+        ...f,
+        orchestration: "passive",
+        rpcFactory: factory(f.rpc),
+      }),
     ).rejects.toThrow("configVersionConflict");
     expect(existsSync(configReceiptPath(f.codexHome))).toBe(false);
   });

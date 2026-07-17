@@ -28,7 +28,7 @@ Everything is maintained once in the canonical roots and workspace packages, the
 Install just the skills you want with the Skills CLI:
 
 ```sh
-bunx skills add https://github.com/robertsale/skizzles --skill install-skizzles
+bunx skills add https://github.com/robertmsale/skizzles --skill install-skizzles
 ```
 
 Add `--skill <name>` for another public skill, or omit it to choose interactively. Skill-only installs do not activate Skizzles hooks or runtime helpers; [install-skizzles](skills/install-skizzles/SKILL.md) explains the optional next steps.
@@ -38,7 +38,7 @@ Add `--skill <name>` for another public skill, or omit it to choose interactivel
 For maintainer work, use a local checkout and point the Skills CLI at its canonical `skills/` directory:
 
 ```sh
-git clone https://github.com/robertsale/skizzles.git
+git clone https://github.com/robertmsale/skizzles.git
 cd skizzles
 bunx skills add ./skills --skill install-skizzles
 ```

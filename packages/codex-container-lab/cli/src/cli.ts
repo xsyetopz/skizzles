@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 import { StringDecoder } from "node:string_decoder";
-import { ContainerLabService } from "./service";
 import { serializePublicJson } from "./public-json";
 import { redactPublicText } from "./public-output";
+import { ContainerLabService } from "./service";
 import { resolveOwner, resolveRoots } from "./state";
 
 export { serializePublicJson } from "./public-json";
@@ -31,11 +31,22 @@ export async function cliMain(
       return 0;
     }
     const owner = resolveOwner(global.owner, environment);
-    const service = new ContainerLabService(owner, resolveRoots(global), undefined, environment);
+    const service = new ContainerLabService(
+      owner,
+      resolveRoots(global),
+      undefined,
+      environment,
+    );
     const controller = new AbortController();
     let signalExit: number | undefined;
-    const interrupt = () => { signalExit = 130; if (!controller.signal.aborted) controller.abort("SIGINT"); };
-    const terminate = () => { signalExit = 143; if (!controller.signal.aborted) controller.abort("SIGTERM"); };
+    const interrupt = () => {
+      signalExit = 130;
+      if (!controller.signal.aborted) controller.abort("SIGINT");
+    };
+    const terminate = () => {
+      signalExit = 143;
+      if (!controller.signal.aborted) controller.abort("SIGTERM");
+    };
     process.on("SIGINT", interrupt);
     process.on("SIGTERM", terminate);
     try {
@@ -43,11 +54,19 @@ export async function cliMain(
         const run = parseRun(global.rest.slice(1));
         const stdoutDecoder = new StringDecoder("utf8");
         const stderrDecoder = new StringDecoder("utf8");
-        const exitCode = await service.run(run.lab, run.argv, run.cwd, run.environment, run.timeoutSeconds, {
-          stdout: (chunk) => io.stdout(stdoutDecoder.write(chunk)),
-          stderr: (chunk) => io.stderr(stderrDecoder.write(chunk)),
-          stdin: process.stdin,
-        }, controller.signal);
+        const exitCode = await service.run(
+          run.lab,
+          run.argv,
+          run.cwd,
+          run.environment,
+          run.timeoutSeconds,
+          {
+            stdout: (chunk) => io.stdout(stdoutDecoder.write(chunk)),
+            stderr: (chunk) => io.stderr(stderrDecoder.write(chunk)),
+            stdin: process.stdin,
+          },
+          controller.signal,
+        );
         const stdoutTail = stdoutDecoder.end();
         const stderrTail = stderrDecoder.end();
         if (stdoutTail) io.stdout(stdoutTail);
@@ -63,27 +82,40 @@ export async function cliMain(
     }
   } catch (error) {
     const usage = error instanceof UsageError;
-    io.stderr(`${JSON.stringify({
-      error: {
-        code: usage ? "USAGE" : "OPERATION_FAILED",
-        message: boundedError(error),
-      },
-    })}\n`);
+    io.stderr(
+      `${JSON.stringify({
+        error: {
+          code: usage ? "USAGE" : "OPERATION_FAILED",
+          message: boundedError(error),
+        },
+      })}\n`,
+    );
     return usage ? 2 : 1;
   }
 }
 
-async function dispatch(service: ContainerLabService, args: string[], signal?: AbortSignal): Promise<unknown> {
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
+async function dispatch(
+  service: ContainerLabService,
+  args: string[],
+  signal?: AbortSignal,
+): Promise<unknown> {
   const [noun, verb, ...rest] = args;
   if (!noun) throw new UsageError("a command is required; use --help");
   if (noun === "health") {
-    requireNoArgs([verb, ...rest].filter((value): value is string => value !== undefined));
+    requireNoArgs(
+      [verb, ...rest].filter((value): value is string => value !== undefined),
+    );
     return await service.health();
   }
   if (noun === "lab") {
     if (verb === "create") {
       const flags = parseFlags(rest, new Set(["--name", "--source"]));
-      return await service.createLab(flags.one("--name") ?? "lab", flags.one("--source") ?? process.cwd(), signal);
+      return await service.createLab(
+        flags.one("--name") ?? "lab",
+        flags.one("--source") ?? process.cwd(),
+        signal,
+      );
     }
     if (verb === "list") {
       requireNoArgs(rest);
@@ -101,11 +133,16 @@ async function dispatch(service: ContainerLabService, args: string[], signal?: A
       requireNoArgs(rest);
       return await service.destroyAll();
     }
-    throw new UsageError("lab requires create, list, status, destroy, or destroy-all");
+    throw new UsageError(
+      "lab requires create, list, status, destroy, or destroy-all",
+    );
   }
   if (noun === "logs") {
     const remaining = verb === undefined ? rest : [verb, ...rest];
-    const flags = parseFlags(remaining, new Set(["--lab", "--service", "--tail-lines"]));
+    const flags = parseFlags(
+      remaining,
+      new Set(["--lab", "--service", "--tail-lines"]),
+    );
     return await service.logs(
       flags.required("--lab"),
       flags.required("--service"),
@@ -115,10 +152,16 @@ async function dispatch(service: ContainerLabService, args: string[], signal?: A
   if (noun === "sync") {
     if (verb === "preview") {
       const flags = parseFlags(rest, new Set(["--lab", "--direction"]));
-      return await service.preview(flags.required("--lab"), direction(flags.required("--direction")));
+      return await service.preview(
+        flags.required("--lab"),
+        direction(flags.required("--direction")),
+      );
     }
     if (verb === "apply") {
-      const flags = parseFlags(rest, new Set(["--lab", "--direction", "--token"]));
+      const flags = parseFlags(
+        rest,
+        new Set(["--lab", "--direction", "--token"]),
+      );
       return await service.apply(
         flags.required("--lab"),
         direction(flags.required("--direction")),
@@ -137,7 +180,13 @@ function parseGlobal(args: string[]): {
   help: boolean;
   rest: string[];
 } {
-  const parsed: { owner?: string; stateRoot?: string; runtimeRoot?: string; help: boolean; rest: string[] } = {
+  const parsed: {
+    owner?: string;
+    stateRoot?: string;
+    runtimeRoot?: string;
+    help: boolean;
+    rest: string[];
+  } = {
     help: false,
     rest: [],
   };
@@ -145,23 +194,32 @@ function parseGlobal(args: string[]): {
   for (; index < args.length; index++) {
     const arg = args[index]!;
     if (arg === "--help" || arg === "-h") parsed.help = true;
-    else if (arg === "--owner") parsed.owner = requiredValue(args, ++index, arg);
-    else if (arg === "--state-root") parsed.stateRoot = requiredValue(args, ++index, arg);
-    else if (arg === "--runtime-root") parsed.runtimeRoot = requiredValue(args, ++index, arg);
-    else break;
+    else if (arg === "--owner") {
+      parsed.owner = requiredValue(args, ++index, arg);
+    } else if (arg === "--state-root") {
+      parsed.stateRoot = requiredValue(args, ++index, arg);
+    } else if (arg === "--runtime-root") {
+      parsed.runtimeRoot = requiredValue(args, ++index, arg);
+    } else break;
   }
   parsed.rest = args.slice(index);
   return parsed;
 }
 
-function parseFlags(args: string[], allowed: Set<string>, repeatable = new Set<string>()) {
+function parseFlags(
+  args: string[],
+  allowed: Set<string>,
+  repeatable = new Set<string>(),
+) {
   const values = new Map<string, string[]>();
   for (let index = 0; index < args.length; index++) {
     const flag = args[index]!;
     if (!allowed.has(flag)) throw new UsageError(`unknown argument: ${flag}`);
     const value = requiredValue(args, ++index, flag);
     const existing = values.get(flag) ?? [];
-    if (existing.length && !repeatable.has(flag)) throw new UsageError(`${flag} may be provided only once`);
+    if (existing.length && !repeatable.has(flag)) {
+      throw new UsageError(`${flag} may be provided only once`);
+    }
     existing.push(value);
     values.set(flag, existing);
   }
@@ -178,7 +236,9 @@ function parseFlags(args: string[], allowed: Set<string>, repeatable = new Set<s
 
 function requiredValue(args: string[], index: number, flag: string): string {
   const value = args[index];
-  if (value === undefined || value.startsWith("--")) throw new UsageError(`${flag} requires a value`);
+  if (value === undefined || value.startsWith("--")) {
+    throw new UsageError(`${flag} requires a value`);
+  }
   return value;
 }
 
@@ -200,32 +260,56 @@ function parseRun(args: string[]): {
   argv: string[];
 } {
   const separator = args.indexOf("--");
-  if (separator < 0) throw new UsageError("run requires -- before the command argv");
-  const flags = parseFlags(args.slice(0, separator), new Set(["--lab", "--cwd", "--env", "--timeout-seconds"]), new Set(["--env"]));
+  if (separator < 0) {
+    throw new UsageError("run requires -- before the command argv");
+  }
+  const flags = parseFlags(
+    args.slice(0, separator),
+    new Set(["--lab", "--cwd", "--env", "--timeout-seconds"]),
+    new Set(["--env"]),
+  );
   const argv = args.slice(separator + 1);
-  if (argv.length === 0) throw new UsageError("run requires a command after --");
+  if (argv.length === 0) {
+    throw new UsageError("run requires a command after --");
+  }
   return {
     lab: flags.required("--lab"),
     cwd: flags.one("--cwd") ?? ".",
     environment: Object.fromEntries(flags.many("--env").map(parseEnvironment)),
-    timeoutSeconds: integerFlag(flags.one("--timeout-seconds"), "--timeout-seconds", 1800),
+    timeoutSeconds: integerFlag(
+      flags.one("--timeout-seconds"),
+      "--timeout-seconds",
+      1800,
+    ),
     argv,
   };
 }
 
-function integerFlag(value: string | undefined, flag: string, fallback: number): number {
+function integerFlag(
+  value: string | undefined,
+  flag: string,
+  fallback: number,
+): number {
   if (value === undefined) return fallback;
-  if (!/^[0-9]+$/.test(value)) throw new UsageError(`${flag} must be an integer`);
+  if (!/^[0-9]+$/.test(value)) {
+    throw new UsageError(`${flag} must be an integer`);
+  }
   return Number(value);
 }
 
 function direction(value: string): "push" | "pull" {
-  if (value !== "push" && value !== "pull") throw new UsageError("--direction must be push or pull");
+  if (value !== "push" && value !== "pull") {
+    throw new UsageError("--direction must be push or pull");
+  }
   return value;
 }
 
 function boundedError(error: unknown): string {
-  return redactPublicText(error instanceof Error ? error.message : String(error), 4_000, 8);
+  return redactPublicText(
+    error instanceof Error ? error.message : String(error),
+    4_000,
+    8,
+  );
 }
 
 function writePublicJson(io: CliIO, value: unknown): void {

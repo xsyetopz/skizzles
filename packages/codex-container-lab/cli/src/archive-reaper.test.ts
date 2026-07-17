@@ -1,28 +1,37 @@
-import { afterEach, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
+import { afterEach, describe, expect, test } from "bun:test";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { reapArchivedOwners, validateThreadsSchema } from "./archive-reaper";
 import type { DockerRunner } from "./docker";
+import { withFileLock } from "./locks";
 import type { CommandResult, RunOptions } from "./process";
 import { ensureOwner, ownerKey, writeLab } from "./state";
 import type { LabMetadata } from "./types";
-import { withFileLock } from "./locks";
 
 const temporary: string[] = [];
-afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
+afterEach(async () => {
+  await Promise.all(
+    temporary
+      .splice(0)
+      .map((path) => rm(path, { recursive: true, force: true })),
+  );
+});
 
 class EmptyDocker implements DockerRunner {
   calls: string[][] = [];
   runCalls: Array<{ args: string[]; options?: RunOptions }> = [];
+  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
   async run(args: string[], options?: RunOptions): Promise<CommandResult> {
     this.calls.push(args);
-    this.runCalls.push({ args, options });
+    this.runCalls.push({ args, ...(options === undefined ? {} : { options }) });
     return { code: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
   }
-  spawn(): ChildProcessWithoutNullStreams { throw new Error("reaper never spawns"); }
+  spawn(): ChildProcessWithoutNullStreams {
+    throw new Error("reaper never spawns");
+  }
 }
 
 describe("archive reaper", () => {
@@ -51,8 +60,19 @@ describe("archive reaper", () => {
     db.run("CREATE TABLE threads (id TEXT PRIMARY KEY)");
     db.close();
     const docker = new EmptyDocker();
-    expect((await reapArchivedOwners({ dbPath: malformed, roots: fixture, docker })).ok).toBe(false);
-    expect((await reapArchivedOwners({ dbPath: join(fixture.root, "missing.sqlite"), roots: fixture, docker })).ok).toBe(false);
+    expect(
+      (await reapArchivedOwners({ dbPath: malformed, roots: fixture, docker }))
+        .ok,
+    ).toBe(false);
+    expect(
+      (
+        await reapArchivedOwners({
+          dbPath: join(fixture.root, "missing.sqlite"),
+          roots: fixture,
+          docker,
+        })
+      ).ok,
+    ).toBe(false);
     expect(docker.calls).toEqual([]);
   });
 
@@ -60,12 +80,15 @@ describe("archive reaper", () => {
     const fixture = await roots();
     const lab = await createLabFixture(fixture, "thread-flip");
     const dbPath = join(fixture.root, "state.sqlite");
-    const db = createDatabase(dbPath); db.close();
+    const db = createDatabase(dbPath);
+    db.close();
     let reads = 0;
     const docker = new EmptyDocker();
     const result = await reapArchivedOwners({
-      dbPath, roots: fixture, docker,
-      stateReader: () => ++reads === 1 ? "archived" : "active",
+      dbPath,
+      roots: fixture,
+      docker,
+      stateReader: () => (++reads === 1 ? "archived" : "active"),
     });
     expect(result.archivedOwnersCleaned).toEqual([]);
     expect(result.retainedOwners[0]?.ownerKey).toBe(lab.ownerKey);
@@ -81,7 +104,8 @@ describe("archive reaper", () => {
     const reader = new Database(dbPath, { readonly: true, strict: true });
     expect(() => validateThreadsSchema(reader)).not.toThrow();
     expect(() => reader.run("UPDATE threads SET archived=1")).toThrow();
-    reader.close(); writer.close();
+    reader.close();
+    writer.close();
   });
 
   test("a symlinked runtime owner is retained without outside deletion or Docker", async () => {
@@ -94,7 +118,9 @@ describe("archive reaper", () => {
     await writeFile(join(outside, "sentinel"), "keep");
     await symlink(outside, ownerRuntime, "dir");
     const dbPath = join(fixture.root, "state.sqlite");
-    const db = createDatabase(dbPath); db.run("INSERT INTO threads VALUES (?, 1, 10)", [lab.owner]); db.close();
+    const db = createDatabase(dbPath);
+    db.run("INSERT INTO threads VALUES (?, 1, 10)", [lab.owner]);
+    db.close();
     const docker = new EmptyDocker();
     const result = await reapArchivedOwners({ dbPath, roots: fixture, docker });
     expect(result.ok).toBe(false);
@@ -106,9 +132,17 @@ describe("archive reaper", () => {
     const fixture = await roots();
     await createLabFixture(fixture, "thread-query-error");
     const dbPath = join(fixture.root, "state.sqlite");
-    const db = createDatabase(dbPath); db.close();
+    const db = createDatabase(dbPath);
+    db.close();
     const docker = new EmptyDocker();
-    const result = await reapArchivedOwners({ dbPath, roots: fixture, docker, stateReader: () => { throw new Error("busy"); } });
+    const result = await reapArchivedOwners({
+      dbPath,
+      roots: fixture,
+      docker,
+      stateReader: () => {
+        throw new Error("busy");
+      },
+    });
     expect(result.ok).toBe(false);
     expect(result.archivedOwnersCleaned).toEqual([]);
     expect(docker.calls).toEqual([]);
@@ -118,15 +152,35 @@ describe("archive reaper", () => {
     const fixture = await roots();
     const lab = await createLabFixture(fixture, "thread-active-cleanup");
     const dbPath = join(fixture.root, "state.sqlite");
-    const db = createDatabase(dbPath); db.run("INSERT INTO threads VALUES (?, 1, 10)", [lab.owner]); db.close();
-    const activity = join(fixture.stateRoot, "owners", lab.ownerKey, ".locks", `activity-${lab.id}`);
+    const db = createDatabase(dbPath);
+    db.run("INSERT INTO threads VALUES (?, 1, 10)", [lab.owner]);
+    db.close();
+    const activity = join(
+      fixture.stateRoot,
+      "owners",
+      lab.ownerKey,
+      ".locks",
+      `activity-${lab.id}`,
+    );
     let release!: () => void;
-    const held = withFileLock(activity, async () => await new Promise<void>((resolve) => { release = resolve; }));
+    const held = withFileLock(
+      activity,
+      async () =>
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
     await Bun.sleep(20);
     const docker = new EmptyDocker();
     let finished = false;
-    const reaping = reapArchivedOwners({ dbPath, roots: fixture, docker }).then((result) => { finished = true; return result; });
-    for (let attempt = 0; attempt < 100 && docker.calls.length === 0; attempt++) await Bun.sleep(10);
+    const reaping = reapArchivedOwners({ dbPath, roots: fixture, docker }).then(
+      (result) => {
+        finished = true;
+        return result;
+      },
+    );
+    for (let attempt = 0; attempt < 100 && docker.calls.length === 0; attempt++)
+      await Bun.sleep(10);
     expect(docker.calls.length).toBeGreaterThan(0);
     expect(finished).toBe(false);
     release();
@@ -140,16 +194,25 @@ describe("archive reaper", () => {
     const previous = process.env[secretName];
     process.env[secretName] = "sentinel-reaper-token";
     try {
-      const lab = await createLabFixture(fixture, "thread-secret-reaper", [secretName]);
+      const lab = await createLabFixture(fixture, "thread-secret-reaper", [
+        secretName,
+      ]);
       const dbPath = join(fixture.root, "state.sqlite");
       const db = createDatabase(dbPath);
       db.run("INSERT INTO threads VALUES (?, 1, 10)", [lab.owner]);
       db.close();
       const docker = new EmptyDocker();
 
-      expect((await reapArchivedOwners({ dbPath, roots: fixture, docker })).archivedOwnersCleaned).toEqual([lab.ownerKey]);
+      expect(
+        (await reapArchivedOwners({ dbPath, roots: fixture, docker }))
+          .archivedOwnersCleaned,
+      ).toEqual([lab.ownerKey]);
       expect(docker.runCalls.length).toBeGreaterThan(0);
-      expect(docker.runCalls.every((call) => !Object.hasOwn(call.options?.env ?? {}, secretName))).toBe(true);
+      expect(
+        docker.runCalls.every(
+          (call) => !Object.hasOwn(call.options?.env ?? {}, secretName),
+        ),
+      ).toBe(true);
     } finally {
       if (previous === undefined) delete process.env[secretName];
       else process.env[secretName] = previous;
@@ -159,14 +222,20 @@ describe("archive reaper", () => {
 
 function createDatabase(path: string): Database {
   const db = new Database(path);
-  db.run("CREATE TABLE threads (id TEXT PRIMARY KEY, archived INTEGER NOT NULL DEFAULT 0, archived_at INTEGER)");
+  db.run(
+    "CREATE TABLE threads (id TEXT PRIMARY KEY, archived INTEGER NOT NULL DEFAULT 0, archived_at INTEGER)",
+  );
   return db;
 }
 
 async function roots() {
   const root = await mkdtemp(join(tmpdir(), "container-lab-reaper-"));
   temporary.push(root);
-  return { root, stateRoot: join(root, "state"), runtimeRoot: join(root, "runtime") };
+  return {
+    root,
+    stateRoot: join(root, "state"),
+    runtimeRoot: join(root, "runtime"),
+  };
 }
 
 async function createLabFixture(
@@ -181,10 +250,24 @@ async function createLabFixture(
   await mkdir(join(runtimeRoot, "workspace"), { recursive: true });
   await mkdir(sourceRoot, { recursive: true });
   const lab: LabMetadata = {
-    version: 1, id: "lab-1", name: "lab", owner, ownerKey: key, repoHash: "123456789abc",
-    composeProject: "ccl-reaper", state: "failed", sourceRoot, runtimeRoot, workspace: join(runtimeRoot, "workspace"),
-    manifestPath: join(sourceRoot, ".codex-container-lab.yaml"), commandService: "dev", modeKind: "image",
-    createdAt: new Date(0).toISOString(), updatedAt: new Date(0).toISOString(), endpoints: [], findings: [],
+    version: 1,
+    id: "lab-1",
+    name: "lab",
+    owner,
+    ownerKey: key,
+    repoHash: "123456789abc",
+    composeProject: "ccl-reaper",
+    state: "failed",
+    sourceRoot,
+    runtimeRoot,
+    workspace: join(runtimeRoot, "workspace"),
+    manifestPath: join(sourceRoot, ".codex-container-lab.yaml"),
+    commandService: "dev",
+    modeKind: "image",
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+    endpoints: [],
+    findings: [],
     secretEnvironment,
   };
   await writeLab(rootsValue, lab);
