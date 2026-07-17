@@ -16,7 +16,7 @@ The launcher resolves `../../../packages/codex-container-lab/cli/src/cli.ts` fro
 
 Run `bun install --frozen-lockfile` from the Skizzles root before source development. A stable plugin does not need Bun/npm dependency installation for the bundled entrypoints.
 
-The managed-output hook recognizes the launcher’s outer `run --lab ... -- COMMAND...` invocation, including the supported `--owner`, `--state-root`, `--runtime-root`, and `--db` globals before `run`. Do not match or wrap the inner container argv: `run` intentionally has no JSON footer, and the normal supervisor retains long attached output.
+The managed-output hook recognizes the launcher’s outer `run --lab ... -- COMMAND...` invocation, including the supported `--owner`, `--state-root`, and `--runtime-root` globals before `run`. Keep the launcher and its pre-run globals literal and unquoted so the hook can classify them; do not match or wrap the inner container argv: `run` intentionally has no JSON footer, and the normal supervisor retains long attached output.
 
 ## Optional host wiring — not in this stage
 

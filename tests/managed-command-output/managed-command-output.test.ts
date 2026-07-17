@@ -113,7 +113,6 @@ describe("managed command output hook", () => {
     for (const command of [
       "codex-container-lab --owner thread-1 --state-root /tmp/state --runtime-root /tmp/runtime run --lab experiment -- echo hello",
       "/tmp/source/skills/codex-container-lab/scripts/codex-container-lab --owner thread-1 run --lab experiment -- echo hello",
-      "/tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab --db /tmp/state.sqlite run --lab experiment -- echo hello",
       "bun /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab --owner thread-1 run --lab experiment -- echo hello",
     ]) {
       const result = invoke(hook, [], { stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_input: { command } }) });
@@ -127,6 +126,9 @@ describe("managed command output hook", () => {
       "'/tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab' run --lab experiment -- echo hello",
       "# codex-container-lab --owner thread run --lab experiment -- echo hello\necho okay",
       "codex-container-lab --unknown value run --lab experiment -- echo hello",
+      "codex-container-lab --db /tmp/state.sqlite run --lab experiment -- echo hello",
+      "codex-container-lab --owner review --state-root /tmp/state --runtime-root /tmp/runtime \"health\" run --lab experiment -- echo hello",
+      "codex-container-lab --owner \"review\" --state-root /tmp/state --runtime-root /tmp/runtime run --lab experiment -- echo hello",
       "codex-container-lab --owner thread health",
     ]) {
       const result = invoke(hook, [], { stdin: JSON.stringify({ hook_event_name: "PreToolUse", tool_input: { command } }) });

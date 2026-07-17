@@ -40,10 +40,14 @@ function commandFrom(input: Record<string, unknown> | undefined):
  * skipped, ordinary command separators split commands, and constructs such as
  * substitutions, grouping, or heredocs make the whole script ineligible.
  */
-function simpleCommands(script: string): string[][] | undefined {
-  const commands: string[][] = [];
+type SimpleCommand = { words: string[]; uncertain: boolean[] };
+
+function simpleCommands(script: string): SimpleCommand[] | undefined {
+  const commands: SimpleCommand[] = [];
   let words: string[] = [];
+  let uncertainty: boolean[] = [];
   let word = "";
+  let wordUncertain = false;
   let inSingle = false;
   let inDouble = false;
   let atWordStart = true;
@@ -52,15 +56,20 @@ function simpleCommands(script: string): string[][] | undefined {
   const finishWord = () => {
     if (word) {
       if (skipRedirectionTarget) skipRedirectionTarget = false;
-      else words.push(word);
+      else {
+        words.push(word);
+        uncertainty.push(wordUncertain);
+      }
     }
     word = "";
+    wordUncertain = false;
   };
   const finishCommand = () => {
     finishWord();
     if (skipRedirectionTarget) return false;
-    if (words.length > 0) commands.push(words);
+    if (words.length > 0) commands.push({ words, uncertain: uncertainty });
     words = [];
+    uncertainty = [];
     return true;
   };
 
@@ -69,18 +78,22 @@ function simpleCommands(script: string): string[][] | undefined {
 
     if (inSingle) {
       if (character === "'") inSingle = false;
+      else word += character;
       continue;
     }
     if (inDouble) {
       if (character === '"') inDouble = false;
+      else word += character;
       continue;
     }
     if (character === "\\" || character === "`" || character === "$" || character === "(" || character === ")") return undefined;
     if (character === "'") {
+      wordUncertain = true;
       inSingle = true;
       continue;
     }
     if (character === '"') {
+      wordUncertain = true;
       inDouble = true;
       continue;
     }
@@ -120,14 +133,15 @@ function simpleCommands(script: string): string[][] | undefined {
   return commands.length > 0 ? commands : undefined;
 }
 
-function isRecognized(words: string[] | undefined): boolean {
-  if (!words || words.length < 2) return false;
+function isRecognized(command: SimpleCommand | undefined): boolean {
+  if (!command || command.words.length < 2) return false;
+  const { words, uncertain } = command;
   const normalized = normalizeCommand(words);
   if (!normalized || normalized.length === 0) return false;
 
   const [program, subcommand, third] = normalized;
 
-  if (isContainerLabRun(normalized)) return true;
+  if (isContainerLabRun({ words: normalized, uncertain: normalized.map((_, index) => uncertain[index] ?? false) })) return true;
   if (program === "bun") {
     return subcommand === "test" || (subcommand === "run" && third === "test");
   }
@@ -156,7 +170,6 @@ const containerLabGlobalOptions = new Set([
   "--owner",
   "--state-root",
   "--runtime-root",
-  "--db",
 ]);
 
 /**
@@ -164,17 +177,18 @@ const containerLabGlobalOptions = new Set([
  * Recognize only that exact prefix and only a literal launcher invocation;
  * variables, substitutions, quotes, and unknown flags remain passthrough.
  */
-function isContainerLabRun(words: string[]): boolean {
+function isContainerLabRun(command: SimpleCommand): boolean {
+  const { words, uncertain } = command;
   let index: number;
-  if (words[0] === "codex-container-lab") index = 1;
-  else if (words[0] === "bun" && basename(words[1] ?? "") === "codex-container-lab") index = 2;
+  if (words[0] === "codex-container-lab" && !uncertain[0]) index = 1;
+  else if (words[0] === "bun" && !uncertain[0] && basename(words[1] ?? "") === "codex-container-lab" && !uncertain[1]) index = 2;
   else return false;
 
   while (index < words.length && containerLabGlobalOptions.has(words[index]!)) {
-    if (words[index + 1] === undefined || words[index + 1]!.startsWith("--")) return false;
+    if (uncertain[index] || words[index + 1] === undefined || words[index + 1]!.startsWith("--") || uncertain[index + 1]) return false;
     index += 2;
   }
-  return words[index] === "run";
+  return words[index] === "run" && !uncertain[index];
 }
 
 function basename(program: string): string {
