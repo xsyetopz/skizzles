@@ -30,7 +30,10 @@ import {
   valuesMatchBefore,
   writePrivateJson,
 } from "./codex-config.ts";
-import { assertManagedParentsAreReal, pathEntryExists } from "./core.ts";
+import {
+  assertManagedParentsAreReal,
+  pathEntryExists,
+} from "./managed-files.ts";
 import {
   type PromptPolicyLockOptions,
   withPromptPolicyLock,

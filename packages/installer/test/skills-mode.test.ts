@@ -11,11 +11,11 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import {
-  copyDirectoryExclusive,
   installSkills,
   skillsReceiptPath,
   uninstallSkills,
-} from "../src/core";
+} from "../src/core.ts";
+import { copyDirectoryExclusive } from "../src/managed-files.ts";
 
 const roots: string[] = [];
 

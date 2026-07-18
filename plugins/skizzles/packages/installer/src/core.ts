@@ -1,5 +1,4 @@
 import {
-  cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -12,6 +11,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import {
+  assertManagedParentsAreReal as assertManagedParentsAreRealImpl,
+  copyDirectoryExclusive as copyDirectoryExclusiveImpl,
+  pathEntryExists as pathEntryExistsImpl,
+  rollbackStagedMoves,
+  sameTree as sameTreeImpl,
+} from "./managed-files.ts";
 
 export type Transfer = "link" | "copy";
 
@@ -35,49 +41,31 @@ export function skillsReceiptPath(codexHome: string): string {
   return join(resolve(codexHome), ".skizzles", receiptName);
 }
 
+/** @deprecated Import from `managed-files.ts` for new installer code. */
 export function pathEntryExists(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return false;
-    }
-    throw error;
-  }
+  return pathEntryExistsImpl(path);
 }
 
+/** @deprecated Import from `managed-files.ts` for new installer code. */
 export function copyDirectoryExclusive(
   source: string,
   target: string,
-  copyEntry: (source: string, target: string) => void = (from, to) =>
-    cpSync(from, to, { recursive: true }),
+  copyEntry: ((source: string, target: string) => void) | undefined = undefined,
 ): void {
-  mkdirSync(target);
-  try {
-    for (const name of readdirSync(source)) {
-      if (name === ".DS_Store") continue;
-      copyEntry(join(source, name), join(target, name));
-    }
-  } catch (error) {
-    rmSync(target, { recursive: true, force: true });
-    throw error;
-  }
+  copyDirectoryExclusiveImpl(source, target, copyEntry);
 }
 
+/** @deprecated Import from `managed-files.ts` for new installer code. */
 export function assertManagedParentsAreReal(
   rootInput: string,
   managedParents: string[],
 ): void {
-  const root = resolve(rootInput);
-  for (const path of [
-    root,
-    ...managedParents.map((parent) => join(root, parent)),
-  ]) {
-    if (pathEntryExists(path) && lstatSync(path).isSymbolicLink()) {
-      throw new Error(`refusing to manage through a symlinked parent: ${path}`);
-    }
-  }
+  assertManagedParentsAreRealImpl(rootInput, managedParents);
+}
+
+/** @deprecated Import from `managed-files.ts` for new installer code. */
+export function sameTree(left: string, right: string): boolean {
+  return sameTreeImpl(left, right);
 }
 
 function publicSkills(
@@ -94,27 +82,6 @@ function publicSkills(
     )
     .map((entry) => ({ name: entry.name, source: join(root, entry.name) }))
     .sort((left, right) => left.name.localeCompare(right.name));
-}
-
-export function sameTree(left: string, right: string): boolean {
-  if (!existsSync(left) || !existsSync(right)) return false;
-  const leftStat = lstatSync(left);
-  const rightStat = lstatSync(right);
-  if (leftStat.isSymbolicLink() || rightStat.isSymbolicLink()) return false;
-  if (leftStat.isDirectory() !== rightStat.isDirectory()) return false;
-  if (leftStat.isDirectory()) {
-    const leftNames = readdirSync(left)
-      .filter((name) => name !== ".DS_Store")
-      .sort();
-    const rightNames = readdirSync(right)
-      .filter((name) => name !== ".DS_Store")
-      .sort();
-    if (leftNames.join("\0") !== rightNames.join("\0")) return false;
-    return leftNames.every((name) =>
-      sameTree(join(left, name), join(right, name)),
-    );
-  }
-  return readFileSync(left).equals(readFileSync(right));
 }
 
 function readReceipt(codexHome: string): SkillsReceipt {
@@ -234,11 +201,7 @@ export function uninstallSkills(
     move(receiptPath, receiptDestination);
     moved.push({ from: receiptPath, to: receiptDestination });
   } catch (error) {
-    for (const item of moved.reverse()) {
-      if (pathEntryExists(item.to) && !pathEntryExists(item.from)) {
-        renameSync(item.to, item.from);
-      }
-    }
+    rollbackStagedMoves(moved);
     rmSync(quarantine, { recursive: true, force: true });
     throw error;
   }

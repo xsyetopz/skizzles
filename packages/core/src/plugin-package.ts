@@ -6,6 +6,7 @@ import {
   mkdtemp,
   readdir,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
@@ -13,31 +14,17 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  ContainerLabPackageError,
+  stageContainerLabRuntime,
+  validateContainerLabDescriptor,
+  validateContainerLabRuntime,
+} from "./container-lab-package.ts";
 
 const PLUGIN_NAME = "skizzles";
 const TEMPLATE_PATH = "packages/core/plugin-template";
 const GENERATED_PATH = `plugins/${PLUGIN_NAME}`;
 const MARKETPLACE_PATH = ".agents/plugins/marketplace.json";
-const CONTAINER_LAB_SOURCE_PATH = "packages/codex-container-lab";
-const CONTAINER_LAB_PROVENANCE = "a2f44416ef467d9f54b3cb228e3bd050987a3c4c";
-
-const CONTAINER_LAB_ENTRYPOINTS = [
-  "cli/src/cli.ts",
-  "cli/src/reaper-cli.ts",
-] as const;
-
-const CONTAINER_LAB_STATIC_INPUTS = [
-  "LICENSE",
-  "cli/install/com.openai.codex-container-lab-reaper.plist",
-  "docs/architecture.md",
-  "docs/completion-contract.md",
-  "docs/installation.md",
-  "docs/manifest.md",
-  "docs/safety.md",
-] as const;
-
-const CONTAINER_LAB_LAUNCHER =
-  "skills/codex-container-lab/scripts/codex-container-lab";
 const INSTALLER_INPUTS = [
   "package.json",
   "src/codex-config.ts",
@@ -46,10 +33,10 @@ const INSTALLER_INPUTS = [
   "src/core.ts",
   "src/doctor.ts",
   "src/harness.ts",
+  "src/managed-files.ts",
   "src/prompt-policy-lock.ts",
   "src/prompt-policy.ts",
 ] as const;
-
 const PROMPT_POLICY_DESCRIPTOR = "integrations/prompt-policy.json";
 const PROMPT_POLICY_INSTRUCTION_PATHS = [
   "instructions/skizzles-base.md",
@@ -96,6 +83,10 @@ const MACHINE_PATH_PATTERNS = [
 ];
 const IMMUTABLE_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+const RELATIVE_MODULE_PATTERN = /^\.\.?\//;
+const INSTALLER_SMOKE_TIMEOUT_MS = 1_000;
+const INSTALLER_SMOKE_TERM_GRACE_MS = 150;
+const INSTALLER_SMOKE_OUTPUT_LIMIT = 8_192;
 
 export class PackagingError extends Error {}
 
@@ -143,6 +134,7 @@ export async function stagePlugin(
       `packages/installer/${path}`,
     );
   }
+  await validateInstallerImportClosure(destination);
 
   for (const path of PROMPT_POLICY_INSTRUCTION_PATHS) {
     await copyCanonicalFile(
@@ -159,7 +151,9 @@ export async function stagePlugin(
     );
   }
 
-  await stageContainerLabRuntime(paths.repoRoot, destination);
+  await asPackagingError(() =>
+    stageContainerLabRuntime(paths.repoRoot, destination),
+  );
 
   await validateGeneratedPlugin(
     paths.repoRoot,
@@ -282,165 +276,223 @@ async function validateGeneratedPlugin(
     validateHookCommands(hooks, "hooks/hooks.json");
   }
 
-  await validateContainerLabRuntime(pluginRoot);
-  await validateContainerLabDescriptor(repoRoot, pluginRoot);
+  await asPackagingError(() => validateContainerLabRuntime(pluginRoot));
+  await asPackagingError(() =>
+    validateContainerLabDescriptor(repoRoot, pluginRoot),
+  );
   await validatePromptPolicy(pluginRoot, "packaged");
   await rejectForbiddenDistributableContent(pluginRoot);
 }
 
-async function stageContainerLabRuntime(
-  repoRoot: string,
-  pluginRoot: string,
-): Promise<void> {
-  const sourceRoot = join(repoRoot, CONTAINER_LAB_SOURCE_PATH);
-  const destinationRoot = join(pluginRoot, CONTAINER_LAB_SOURCE_PATH);
-  const bundleRoot = join(destinationRoot, "cli", "src");
-  await mkdir(bundleRoot, { recursive: true });
-
-  for (const path of CONTAINER_LAB_ENTRYPOINTS) {
-    const destination = join(bundleRoot, path.split("/").at(-1)!);
-    const build = Bun.spawnSync(
-      [
-        process.execPath,
-        "build",
-        join(CONTAINER_LAB_SOURCE_PATH, path),
-        "--target=bun",
-        "--format=esm",
-        `--outfile=${destination}`,
-      ],
-      {
-        cwd: repoRoot,
-        env: { PATH: process.env["PATH"] ?? "" },
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    );
-    if (build.exitCode !== 0) {
-      const details = Buffer.concat([
-        Buffer.from(build.stdout),
-        Buffer.from(build.stderr),
-      ])
-        .toString("utf8")
-        .trim();
-      throw new PackagingError(
-        `Unable to bundle Container Lab runtime ${path}:\n${details}`,
-      );
+async function asPackagingError<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof ContainerLabPackageError) {
+      throw new PackagingError(error.message);
     }
-  }
-
-  const bundledFiles = await listFiles(bundleRoot);
-  const expectedFiles = CONTAINER_LAB_ENTRYPOINTS.map(
-    (path) => path.split("/").at(-1)!,
-  );
-  if (
-    bundledFiles.length !== expectedFiles.length ||
-    expectedFiles.some((path) => !bundledFiles.includes(path))
-  ) {
-    throw new PackagingError(
-      `Container Lab bundling produced unexpected files: ${bundledFiles.join(
-        ", ",
-      )}.`,
-    );
-  }
-  await Promise.all(
-    expectedFiles.map((path) => chmod(join(bundleRoot, path), 0o755)),
-  );
-
-  for (const path of CONTAINER_LAB_STATIC_INPUTS) {
-    await copyCanonicalFile(
-      join(sourceRoot, path),
-      join(destinationRoot, path),
-      `${CONTAINER_LAB_SOURCE_PATH}/${path}`,
-    );
+    throw error;
   }
 }
 
-async function validateContainerLabRuntime(pluginRoot: string): Promise<void> {
-  const runtimeRoot = join(pluginRoot, CONTAINER_LAB_SOURCE_PATH);
-  for (const path of CONTAINER_LAB_ENTRYPOINTS) {
-    const bundledPath = join(runtimeRoot, path);
-    let metadata: Awaited<ReturnType<typeof lstat>>;
-    try {
-      metadata = await lstat(bundledPath);
-    } catch (error) {
-      if (isNodeError(error) && error.code === "ENOENT") {
-        throw new PackagingError(`Container Lab runtime is missing ${path}.`);
-      }
-      throw error;
-    }
-    if (!metadata.isFile() || (metadata.mode & 0o111) === 0) {
-      throw new PackagingError(
-        `Container Lab runtime ${path} must be an executable regular file.`,
-      );
-    }
-  }
-}
-
-async function validateContainerLabDescriptor(
-  repoRoot: string,
+async function validateInstallerImportClosure(
   pluginRoot: string,
 ): Promise<void> {
-  const descriptor = await readJsonObject(
-    join(repoRoot, "integrations/container-lab.json"),
-    "Container Lab descriptor",
-  );
-  const packageMetadata = await readJsonObject(
-    join(repoRoot, CONTAINER_LAB_SOURCE_PATH, "cli/package.json"),
-    "Container Lab package metadata",
-  );
-  const bundled = descriptor["bundled"];
-  const ownership = descriptor["ownership"];
-  const expectedDocumentation = CONTAINER_LAB_STATIC_INPUTS.filter((path) =>
-    path.startsWith("docs/"),
-  ).map((path) => `${CONTAINER_LAB_SOURCE_PATH}/${path}`);
-  const expected = {
-    operationalEntrypoint: `${CONTAINER_LAB_SOURCE_PATH}/cli/src/cli.ts`,
-    reaperEntrypoint: `${CONTAINER_LAB_SOURCE_PATH}/cli/src/reaper-cli.ts`,
-    launcher: CONTAINER_LAB_LAUNCHER,
-    launchAgentTemplate: `${CONTAINER_LAB_SOURCE_PATH}/cli/install/com.openai.codex-container-lab-reaper.plist`,
+  const installerRoot = join(pluginRoot, "packages/installer");
+  const sourceRoot = join(installerRoot, "src");
+  const sourcePaths = await listFiles(sourceRoot);
+  for (const sourcePath of sourcePaths) {
+    assertSupportedInstallerExtension(sourcePath);
+  }
+  const entrypoints = sourcePaths.map((path) => join(sourceRoot, path));
+  const buildConfig: Bun.BuildConfig & { write: false } = {
+    entrypoints,
+    format: "esm",
+    packages: "external",
+    plugins: [installerContainmentPlugin(installerRoot)],
+    target: "bun",
+    throw: false,
+    write: false,
   };
+  const result = await Bun.build(buildConfig);
+  if (!result.success) throw installerValidationError();
+  await validateInstallerCliHelp(installerRoot);
+}
 
-  if (
-    descriptor["configuredRuntime"] !== packageMetadata["version"] ||
-    !isObject(ownership) ||
-    ownership["runtimeOwner"] !== "skizzles" ||
-    ownership["canonicalSource"] !== CONTAINER_LAB_SOURCE_PATH ||
-    ownership["provenanceCommit"] !== CONTAINER_LAB_PROVENANCE ||
-    !isObject(bundled) ||
-    Object.entries(expected).some(([key, value]) => bundled[key] !== value) ||
-    !Array.isArray(bundled["documentation"]) ||
-    !sameStrings(bundled["documentation"], expectedDocumentation)
-  ) {
+function assertSupportedInstallerExtension(sourcePath: string): void {
+  if (!sourcePath.endsWith(".ts")) {
     throw new PackagingError(
-      "Container Lab descriptor must match the canonical package metadata and staged plugin inputs.",
+      `Packaged installer runtime src/${sourcePath} is unsupported; only TypeScript ESM .ts files may be staged.`,
     );
   }
+}
 
-  for (const path of [
-    expected.operationalEntrypoint,
-    expected.reaperEntrypoint,
-    expected.launcher,
-    expected.launchAgentTemplate,
-    ...expectedDocumentation,
-  ]) {
+function installerContainmentPlugin(installerRoot: string): Bun.BunPlugin {
+  return {
+    name: "installer-runtime-containment",
+    setup(build) {
+      build.onResolve(
+        { filter: RELATIVE_MODULE_PATTERN },
+        async ({ path, resolveDir }) => {
+          const resolvedPath = Bun.resolveSync(path, resolveDir);
+          await assertContainedNonSymlinkFile(installerRoot, resolvedPath);
+          return { path: resolvedPath };
+        },
+      );
+    },
+  };
+}
+
+async function validateInstallerCliHelp(installerRoot: string): Promise<void> {
+  const child = Bun.spawn([process.execPath, "src/cli.ts", "--help"], {
+    cwd: installerRoot,
+    detached: true,
+    env: { ...process.env, NO_COLOR: "1" },
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+  const outputAbort = new AbortController();
+  const output = Promise.all([
+    readBoundedOutput(child.stdout, outputAbort.signal),
+    readBoundedOutput(child.stderr, outputAbort.signal),
+  ]);
+  const deadline = Promise.withResolvers<"deadline">();
+  const timeout = setTimeout(
+    () => deadline.resolve("deadline"),
+    INSTALLER_SMOKE_TIMEOUT_MS,
+  );
+  try {
+    const completed = Promise.all([child.exited, output] as const);
+    const outcome = await Promise.race([completed, deadline.promise]);
+    if (outcome === "deadline") throw installerValidationError();
+    const [exitCode, [stdout, stderr]] = outcome;
     if (
-      !(
-        (await exists(join(repoRoot, path))) &&
-        (await exists(join(pluginRoot, path)))
-      )
+      exitCode !== 2 ||
+      stdout.overflow ||
+      stderr.overflow ||
+      !stderr.text.startsWith("usage: bun packages/installer/src/cli.ts ")
+    ) {
+      throw installerValidationError();
+    }
+  } finally {
+    clearTimeout(timeout);
+    outputAbort.abort();
+    await terminateInstallerProcessGroup(child);
+    await child.exited;
+    await output;
+  }
+}
+
+async function readBoundedOutput(
+  stream: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+): Promise<{ overflow: boolean; text: string }> {
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  let overflow = false;
+  const reader = stream.getReader();
+  const cancel = () => {
+    reader.cancel().catch(() => undefined);
+  };
+  signal.addEventListener("abort", cancel, { once: true });
+  try {
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (bytes < INSTALLER_SMOKE_OUTPUT_LIMIT) {
+        chunks.push(value.subarray(0, INSTALLER_SMOKE_OUTPUT_LIMIT - bytes));
+      }
+      bytes += value.byteLength;
+      overflow ||= bytes > INSTALLER_SMOKE_OUTPUT_LIMIT;
+    }
+  } catch (error) {
+    if (!signal.aborted) throw error;
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    reader.releaseLock();
+  }
+  return {
+    overflow,
+    text: new TextDecoder().decode(Buffer.concat(chunks)),
+  };
+}
+
+async function terminateInstallerProcessGroup(
+  child: Bun.Subprocess<"ignore", "pipe", "pipe">,
+): Promise<void> {
+  signalInstallerProcessGroup(child, "SIGTERM");
+  const exitedDuringGrace = await exitsWithin(
+    child.exited,
+    INSTALLER_SMOKE_TERM_GRACE_MS,
+  );
+  signalInstallerProcessGroup(child, "SIGKILL");
+  if (!exitedDuringGrace) await child.exited;
+}
+
+function signalInstallerProcessGroup(
+  child: Bun.Subprocess<"ignore", "pipe", "pipe">,
+  signal: NodeJS.Signals,
+): void {
+  try {
+    process.kill(-child.pid, signal);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ESRCH") return;
+    child.kill(signal);
+  }
+}
+
+async function exitsWithin(
+  exited: Promise<number>,
+  milliseconds: number,
+): Promise<boolean> {
+  const timeout = Promise.withResolvers<false>();
+  const timer = setTimeout(() => timeout.resolve(false), milliseconds);
+  try {
+    return await Promise.race([exited.then(() => true), timeout.promise]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function installerValidationError(): PackagingError {
+  return new PackagingError("Packaged installer runtime validation failed.");
+}
+
+async function assertContainedNonSymlinkFile(
+  installerRoot: string,
+  resolvedPath: string,
+): Promise<void> {
+  const root = await realpath(installerRoot);
+  const target = resolve(resolvedPath);
+  const relativePath = relative(root, target);
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${sep}`) ||
+    resolve(root, relativePath) !== target
+  ) {
+    throw new PackagingError("Resolved installer import escapes staged root.");
+  }
+  let current = root;
+  for (const segment of relativePath.split(sep)) {
+    current = join(current, segment);
+    const metadata = await lstat(current);
+    if (metadata.isSymbolicLink()) {
+      throw new PackagingError("Resolved installer import uses a symlink.");
+    }
+    const currentRealPath = await realpath(current);
+    const currentRelativePath = relative(root, currentRealPath);
+    if (
+      currentRelativePath === ".." ||
+      currentRelativePath.startsWith(`..${sep}`)
     ) {
       throw new PackagingError(
-        `Container Lab descriptor path is not a canonical and staged input: ${path}.`,
+        "Resolved installer import escapes staged root.",
       );
     }
   }
-}
-
-function sameStrings(actual: unknown[], expected: readonly string[]): boolean {
-  return (
-    actual.length === expected.length &&
-    actual.every((value, index) => value === expected[index])
-  );
+  if (!(await lstat(target)).isFile()) {
+    throw new PackagingError("Resolved installer import is not a file.");
+  }
 }
 
 interface PackagedPolicyFileFact {

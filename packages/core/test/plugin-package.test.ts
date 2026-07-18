@@ -103,7 +103,7 @@ describe("deterministic plugin packaging", () => {
     );
     expect(
       await readFile(join(first, "packages/installer/src/cli.ts"), "utf8"),
-    ).toContain("fixture cli");
+    ).toContain("usage: bun packages/installer/src/cli.ts");
     expect(await Bun.file(join(first, "README.md")).exists()).toBe(false);
     expect(await filesUnder(join(first, "instructions"))).toEqual([
       "compact-prompt.md",
@@ -140,6 +140,84 @@ describe("deterministic plugin packaging", () => {
         join(first, "packages/installer/src/prompt-policy.ts"),
       ).exists(),
     ).toBe(true);
+  });
+
+  test("rejects missing staged installer runtime imports while excluding test-only imports", async () => {
+    const root = await fixture();
+    await write(
+      root,
+      "packages/installer/test/not-packaged.test.ts",
+      'import "./test-helper-that-is-not-packaged.ts";\n',
+    );
+    await stagePlugin(root, join(root, "stage-with-test-only-import"));
+
+    await write(
+      root,
+      "packages/installer/src/managed-files.ts",
+      'import "./runtime-helper-that-is-not-packaged.ts";\n',
+    );
+    await expect(
+      stagePlugin(root, join(root, "stage-with-missing-runtime-import")),
+    ).rejects.toThrow("Packaged installer runtime validation failed.");
+  });
+
+  test("rejects Bun-resolved installer imports outside the staged installer root", async () => {
+    const root = await fixture();
+    await write(root, "runtime/outside.ts", "export const outside = true;\n");
+    await write(
+      root,
+      "packages/installer/src/managed-files.ts",
+      'import "../../../runtime/outside.ts";\n',
+    );
+
+    await expect(
+      stagePlugin(root, join(root, "stage-with-escaped-installer-import")),
+    ).rejects.toThrow("Packaged installer runtime validation failed.");
+  });
+
+  test("loads the staged installer CLI help contract", async () => {
+    const root = await fixture();
+    await stagePlugin(root, join(root, "stage-with-loadable-installer-cli"));
+  });
+
+  test("bounds a staged CLI that ignores termination and keeps output pipes open", async () => {
+    const root = await fixture();
+    await write(
+      root,
+      "packages/installer/src/cli.ts",
+      `if (import.meta.main) {
+  process.on("SIGTERM", () => {});
+  Bun.spawn([
+    process.execPath,
+    "-e",
+    "process.on('SIGTERM', () => {}); setInterval(() => {}, 1_000);",
+  ], { stdout: "inherit", stderr: "inherit" });
+  setInterval(() => {}, 1_000);
+}
+`,
+    );
+
+    const startedAt = performance.now();
+    await expect(
+      stagePlugin(root, join(root, "stage-with-hung-installer-cli")),
+    ).rejects.toThrow("Packaged installer runtime validation failed.");
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+  });
+
+  test("rejects every staged installer runtime extension outside .ts", async () => {
+    for (const extension of ["js", "tsx", "cjs", "json"] as const) {
+      const root = await fixture();
+      await write(
+        root,
+        `packages/core/plugin-template/packages/installer/src/unsupported.${extension}`,
+        "export {};\n",
+      );
+      await expect(
+        stagePlugin(root, join(root, `stage-with-unsupported-${extension}`)),
+      ).rejects.toThrow(
+        `Packaged installer runtime src/unsupported.${extension} is unsupported; only TypeScript ESM .ts files may be staged.`,
+      );
+    }
   });
 
   test("rejects tampered prompt-policy content, provenance, legal input, and descriptor shape", async () => {
@@ -403,9 +481,12 @@ describe("deterministic plugin packaging", () => {
     descriptor.configuredRuntime = "9.9.9";
     await writeFile(descriptorPath, JSON.stringify(descriptor));
 
-    expect(stagePlugin(root, join(root, "stage"))).rejects.toThrow(
+    await expect(stagePlugin(root, join(root, "stage"))).rejects.toThrow(
       "Container Lab descriptor must match the canonical package metadata and staged plugin inputs",
     );
+    await expect(
+      stagePlugin(root, join(root, "stage-error-type")),
+    ).rejects.toBeInstanceOf(PackagingError);
   });
 
   test("rejects stale Container Lab provenance and canonical ownership paths before staging", async () => {
@@ -574,19 +655,22 @@ async function fixture(): Promise<string> {
     "core.ts",
     "doctor.ts",
     "harness.ts",
+    "managed-files.ts",
     "prompt-policy-lock.ts",
     "prompt-policy.ts",
   ]) {
     await write(
       root,
       `packages/installer/src/${path}`,
-      `export const fixture = "${path}";\n`,
+      path === "codex-config.ts"
+        ? 'export { fixture } from "./managed-files.ts";\n'
+        : `export const fixture = "${path}";\n`,
     );
   }
   await write(
     root,
     "packages/installer/src/cli.ts",
-    "console.log('fixture cli');\n",
+    'if (import.meta.main) {\n  console.error("usage: bun packages/installer/src/cli.ts <command>");\n  process.exit(2);\n}\n',
   );
   await write(
     root,

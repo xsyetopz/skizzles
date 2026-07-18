@@ -29,11 +29,19 @@ async function fixtureHome(): Promise<string> {
   return home;
 }
 
-function run(home: string, args: string[]) {
+function run(
+  home: string,
+  args: string[],
+  extraEnv: Record<string, string | undefined> = {},
+) {
+  const env = { ...process.env } as Record<string, string | undefined>;
+  Object.assign(env, extraEnv);
+  if (!("CODEX_HOME" in extraEnv)) env["CODEX_HOME"] = home;
+  else if (extraEnv["CODEX_HOME"] === undefined) delete env["CODEX_HOME"];
   return Bun.spawnSync({
     cmd: [process.execPath, analyzer, ...args],
     cwd: join(import.meta.dir, "../.."),
-    env: { ...process.env, CODEX_HOME: home },
+    env,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -105,6 +113,50 @@ test("returns an empty report when sessions and state files are absent", async (
     subagentTiers: {},
     topRootTasks: [],
     timeline: {},
+  });
+  expect(await snapshot(home)).toEqual(before);
+});
+
+test("falls back to HOME/.codex without writing to it", async () => {
+  const home = await fixtureHome();
+  const codexHome = join(home, ".codex");
+  await writeJsonl(
+    join(codexHome, "sessions", "2026", "07", "02", `${rootId}.jsonl`),
+    [
+      {
+        timestamp,
+        type: "session_meta",
+        payload: { id: rootId, source: "cli" },
+      },
+      {
+        timestamp,
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 3,
+              output_tokens: 1,
+              total_tokens: 4,
+            },
+          },
+        },
+      },
+    ],
+  );
+  const before = await snapshot(home);
+
+  const result = output(
+    run(home, ["--from", "2026-07-01", "--to", "2026-07-02", "--json"], {
+      CODEX_HOME: undefined,
+      HOME: home,
+    }),
+  );
+
+  expect(result.exitCode).toBe(0);
+  expect(JSON.parse(result.stdout).actors.root).toMatchObject({
+    inputTokens: 3,
+    outputTokens: 1,
   });
   expect(await snapshot(home)).toEqual(before);
 });
@@ -430,4 +482,287 @@ test("preserves role and legacy tier attribution for historical task names", asy
     sessions: 1,
     inferences: 1,
   });
+});
+
+test("ignores malformed JSONL while preserving valid usage", async () => {
+  const home = await fixtureHome();
+  const path = join(home, "sessions", "2026", "07", "02", `${rootId}.jsonl`);
+  await mkdir(join(path, ".."), { recursive: true });
+  await writeFile(
+    path,
+    [
+      "{not-json}",
+      JSON.stringify({
+        timestamp,
+        type: "session_meta",
+        payload: { id: rootId, source: "cli" },
+      }),
+      JSON.stringify({
+        timestamp,
+        type: "turn_context",
+        payload: { model: "fixture" },
+      }),
+      JSON.stringify({
+        timestamp,
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 7,
+              output_tokens: 3,
+              total_tokens: 10,
+            },
+          },
+        },
+      }),
+      "also malformed",
+    ].join("\n"),
+  );
+
+  const result = output(
+    run(home, ["--from", "2026-07-01", "--to", "2026-07-02", "--json"]),
+  );
+  expect(result.exitCode).toBe(0);
+  expect(JSON.parse(result.stdout).actors.root).toMatchObject({
+    sessions: 1,
+    inferences: 1,
+    inputTokens: 7,
+    outputTokens: 3,
+  });
+});
+
+test("selects the largest active or archived duplicate and reports one rollout", async () => {
+  const home = await fixtureHome();
+  const active = join(home, "sessions", "2026", "07", "02", `${rootId}.jsonl`);
+  const archived = join(
+    home,
+    "archived_sessions",
+    "2026",
+    "07",
+    "02",
+    `${rootId}.jsonl`,
+  );
+  await writeJsonl(active, [
+    { timestamp, type: "session_meta", payload: { id: rootId, source: "cli" } },
+    {
+      timestamp,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 1,
+            output_tokens: 1,
+            total_tokens: 2,
+          },
+        },
+      },
+    },
+  ]);
+  await writeJsonl(archived, [
+    { timestamp, type: "session_meta", payload: { id: rootId, source: "cli" } },
+    { timestamp, type: "turn_context", payload: { model: "fixture" } },
+    {
+      timestamp,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          last_token_usage: {
+            input_tokens: 20,
+            output_tokens: 5,
+            total_tokens: 25,
+          },
+        },
+      },
+    },
+    {
+      timestamp,
+      type: "response_item",
+      payload: { text: "padding makes this duplicate larger" },
+    },
+  ]);
+
+  const result = output(
+    run(home, ["--from", "2026-07-01", "--to", "2026-07-02", "--json"]),
+  );
+  const report = JSON.parse(result.stdout);
+  expect(result.exitCode).toBe(0);
+  expect(report.range.rolloutFiles).toBe(1);
+  expect(report.actors.root).toMatchObject({
+    inputTokens: 20,
+    outputTokens: 5,
+  });
+});
+
+test("excludes inherited fork usage before the child task starts", async () => {
+  const home = await fixtureHome();
+  const path = join(
+    home,
+    "archived_sessions",
+    "2026",
+    "07",
+    "02",
+    `${childId}.jsonl`,
+  );
+  await writeJsonl(path, [
+    {
+      timestamp,
+      type: "session_meta",
+      payload: {
+        id: childId,
+        forked_from_id: rootId,
+        source: {
+          subagent: {
+            thread_spawn: {
+              parent_thread_id: rootId,
+              agent_path: "/root/worker__child",
+            },
+          },
+        },
+      },
+    },
+    {
+      timestamp,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 100,
+            output_tokens: 100,
+            total_tokens: 200,
+          },
+        },
+      },
+    },
+    {
+      timestamp,
+      type: "event_msg",
+      payload: { type: "task_started", turn_id: "own" },
+    },
+    {
+      timestamp,
+      type: "turn_context",
+      payload: { turn_id: "own", model: "fixture" },
+    },
+    {
+      timestamp,
+      type: "event_msg",
+      payload: {
+        type: "token_count",
+        info: {
+          total_token_usage: {
+            input_tokens: 110,
+            output_tokens: 105,
+            total_tokens: 215,
+          },
+        },
+      },
+    },
+  ]);
+
+  const report = JSON.parse(
+    output(run(home, ["--from", "2026-07-01", "--to", "2026-07-02", "--json"]))
+      .stdout,
+  );
+  expect(report.actors.subagent).toMatchObject({
+    inputTokens: 10,
+    outputTokens: 5,
+    totalTokens: 15,
+  });
+});
+
+test("human output includes report headings and proxy explanation", async () => {
+  const home = await fixtureHome();
+  await writeJsonl(
+    join(home, "sessions", "2026", "07", "02", `${rootId}.jsonl`),
+    [
+      {
+        timestamp,
+        type: "session_meta",
+        payload: { id: rootId, source: "cli" },
+      },
+      {
+        timestamp,
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 4,
+              output_tokens: 2,
+              total_tokens: 6,
+            },
+          },
+        },
+      },
+    ],
+  );
+  const result = output(
+    run(home, ["--from", "2026-07-01", "--to", "2026-07-02"]),
+  );
+  expect(result.exitCode).toBe(0);
+  expect(result.stdout).toContain("Actors");
+  expect(result.stdout).toContain("Models");
+  expect(result.stdout).toContain("Guardian");
+  expect(result.stdout).toContain("Timeline");
+  expect(result.stdout).toContain("Proxy = uncached input");
+});
+
+test("uses local time for date ranges and hourly bucket labels", async () => {
+  const home = await fixtureHome();
+  await writeJsonl(
+    join(home, "sessions", "2026", "07", "02", `${rootId}.jsonl`),
+    [
+      {
+        timestamp: "2026-07-02T02:00:00.000Z",
+        type: "session_meta",
+        payload: { id: rootId, source: "cli" },
+      },
+      {
+        timestamp: "2026-07-02T02:00:00.000Z",
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          info: {
+            last_token_usage: {
+              input_tokens: 3,
+              output_tokens: 1,
+              total_tokens: 4,
+            },
+          },
+        },
+      },
+    ],
+  );
+
+  const result = output(
+    run(
+      home,
+      [
+        "--from",
+        "2026-07-01",
+        "--to",
+        "2026-07-01",
+        "--bucket",
+        "hour",
+        "--json",
+      ],
+      { TZ: "Pacific/Honolulu" },
+    ),
+  );
+
+  expect(result.exitCode).toBe(0);
+  const report = JSON.parse(result.stdout);
+  expect(report.range.timezone).toBe("Pacific/Honolulu");
+  expect(Object.keys(report.timeline)).toEqual(["2026-07-01 16:00"]);
+});
+
+test("rejects invalid CLI input with a diagnostic and nonzero exit", async () => {
+  const home = await fixtureHome();
+  const result = output(run(home, ["--bucket", "minute"]));
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr).toContain("--bucket must be hour or day");
 });

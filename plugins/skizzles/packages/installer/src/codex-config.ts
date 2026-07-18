@@ -16,6 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { pathEntryExists as pathEntryExistsImpl } from "./managed-files.ts";
 
 export type JsonValue =
   | null
@@ -548,13 +549,7 @@ export interface OwnedConfigValue {
 }
 
 export function pathEntryExists(path: string): boolean {
-  try {
-    lstatSync(path);
-    return true;
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") return false;
-    throw error;
-  }
+  return pathEntryExistsImpl(path);
 }
 
 export function canonicalExistingPath(path: string): string {
@@ -913,8 +908,4 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function safeMethodName(method: string): string {
   return SAFE_METHOD_PATTERN.test(method) ? method : "unknown method";
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }

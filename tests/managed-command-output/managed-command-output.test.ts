@@ -13,8 +13,13 @@ import { join, resolve } from "node:path";
 const packageRoot = resolve(import.meta.dir, "../..");
 const hook = join(packageRoot, "hooks/manage-command-output.ts");
 const runner = join(packageRoot, "runtime/codex-command.ts");
-const runnerCommand = 'bun "${PLUGIN_ROOT}/runtime/codex-command.ts"';
+const pluginRootPlaceholder = ["$", "{PLUGIN_ROOT}"].join("");
+const runnerCommand = `bun "${pluginRootPlaceholder}/runtime/codex-command.ts"`;
 const temporaryDirectories: string[] = [];
+const artifactPathPattern = /\[codex-command\] artifact: ([^\n]+)/;
+const artifactCountPattern = /\[codex-command\] artifact:/g;
+const progressPattern = /\| \d+s \| \d+B \| \d+B \|/;
+const completionPattern = /\[codex-command\] exit 0 in \d+s\n$/;
 
 function temporaryDirectory(): string {
   const directory = mkdtempSync(join(tmpdir(), "codex-command-test-"));
@@ -44,9 +49,16 @@ function encode(script: string): string {
 }
 
 function artifactPath(output: string): string {
-  const match = output.match(/\[codex-command\] artifact: ([^\n]+)/);
-  if (!match) throw new Error(`artifact path missing from output: ${output}`);
-  return match[1]!;
+  const path = output.match(artifactPathPattern)?.[1];
+  if (!path) throw new Error(`artifact path missing from output: ${output}`);
+  return path;
+}
+
+function encodedCommand(rewritten: string): string {
+  const encoded = rewritten.split(" ").at(-1);
+  if (!encoded)
+    throw new Error(`encoded command missing from output: ${rewritten}`);
+  return encoded;
 }
 
 afterEach(() => {
@@ -74,8 +86,7 @@ describe("managed command output hook", () => {
   });
 
   test("rewrites through a portable PLUGIN_ROOT runner with a round-trippable encoding", () => {
-    const cmd =
-      "flutter test --reporter expanded && echo complete > result.txt";
+    const cmd = "flutter test --reporter expanded && cargo check --workspace";
     const result = invoke(hook, [], {
       stdin: JSON.stringify({
         hook_event_name: "PreToolUse",
@@ -85,9 +96,9 @@ describe("managed command output hook", () => {
     const payload = JSON.parse(text(result.stdout));
     const rewritten = payload.hookSpecificOutput.updatedInput.cmd as string;
     expect(rewritten).toStartWith(`${runnerCommand} run --base64url `);
-    expect(
-      Buffer.from(rewritten.split(" ").at(-1)!, "base64url").toString(),
-    ).toBe(cmd);
+    expect(Buffer.from(encodedCommand(rewritten), "base64url").toString()).toBe(
+      cmd,
+    );
     expect(payload.hookSpecificOutput.updatedInput.workdir).toBe("/tmp");
     expect(rewritten).not.toContain("/Users/");
   });
@@ -109,8 +120,8 @@ describe("managed command output hook", () => {
     expect(text(result.stdout)).toContain("portable-runner");
   });
 
-  test("finds a recognized command after leading commands and preserves the entire script", () => {
-    const command = "echo header; flutter test; echo header; cat log";
+  test("preserves an entire script when every simple command is recognized", () => {
+    const command = "flutter test; cargo check; bun test";
     const result = invoke(hook, [], {
       stdin: JSON.stringify({
         hook_event_name: "PreToolUse",
@@ -120,9 +131,9 @@ describe("managed command output hook", () => {
     });
     const payload = JSON.parse(text(result.stdout));
     const rewritten = payload.hookSpecificOutput.updatedInput.command as string;
-    expect(
-      Buffer.from(rewritten.split(" ").at(-1)!, "base64url").toString(),
-    ).toBe(command);
+    expect(Buffer.from(encodedCommand(rewritten), "base64url").toString()).toBe(
+      command,
+    );
     expect(payload.hookSpecificOutput.updatedInput.timeout).toBe(120_000);
   });
 
@@ -150,17 +161,14 @@ describe("managed command output hook", () => {
       "cargo nextest run",
       "cargo llvm-cov --workspace",
       "cargo install cargo-insta",
-      "RUST_LOG=debug cargo clippy --workspace",
-      "env RUST_BACKTRACE=1 cargo check",
       "rustup run nightly cargo test",
       "xcodebuild -workspace App.xcworkspace -scheme App test",
       "xcrun --sdk iphonesimulator xcodebuild -scheme App build",
-      "/usr/bin/xcodebuild -scheme App build",
       "swift build",
       "xcrun swift test",
       "gradle build",
-      "./gradlew :app:testDebugUnitTest --no-daemon",
-      "./gradlew connectedDebugAndroidTest",
+      "gradlew :app:testDebugUnitTest --no-daemon",
+      "gradlew connectedDebugAndroidTest",
       "fvm flutter test",
     ]) {
       const result = invoke(hook, [], {
@@ -173,20 +181,9 @@ describe("managed command output hook", () => {
     }
   });
 
-  test("recognizes literal Container Lab launchers with supported global options before run", () => {
+  test("recognizes canonical literal Container Lab launchers before run", () => {
     for (const command of [
       "codex-container-lab --owner thread-1 --state-root /tmp/state --runtime-root /tmp/runtime run --lab experiment -- echo hello",
-      "/tmp/source/skills/codex-container-lab/scripts/codex-container-lab --owner thread-1 run --lab experiment -- echo hello",
-      "bun /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab --owner thread-1 run --lab experiment -- echo hello",
-      "A=1 /tmp/source/skills/codex-container-lab/scripts/codex-container-lab --owner thread-1 run --lab experiment -- echo hello",
-      "env A=1 /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab --state-root /tmp/state run --lab experiment -- echo hello",
-      "env -i A=1 /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
-      "env -u FOO A=1 /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
-      "env -C ./tmp A=1 /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
-      "env --unset=FOO A=1 /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
-      "env --chdir=./tmp A=1 /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
-      "A= /tmp/source/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
-      "env A= /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab run --lab experiment -- echo hello",
     ]) {
       const result = invoke(hook, [], {
         stdin: JSON.stringify({
@@ -195,6 +192,52 @@ describe("managed command output hook", () => {
         }),
       });
       expect(text(result.stdout), command).not.toBe("");
+    }
+  });
+
+  test("does not auto-allow path, environment, config, or compound-command injection", () => {
+    for (const command of [
+      "/usr/bin/xcodebuild -scheme App build",
+      "./gradlew test",
+      "/tmp/cargo test",
+      "cargo* test",
+      "PATH=/tmp cargo test",
+      "RUSTC_WRAPPER=/tmp/wrapper cargo test",
+      "BUN_OPTIONS=--preload=/tmp/inject bun test",
+      "env PATH=/tmp cargo test",
+      "env RUST_BACKTRACE=1 cargo check",
+      "rustup run custom cargo test",
+      "cargo +custom test",
+      "cargo +/tmp/toolchain test",
+      "xcrun --sdk /tmp/sdk xcodebuild test",
+      "xcrun --sdk custom xcodebuild test",
+      "xcrun --toolchain default xcodebuild test",
+      "bun codex-container-lab run --lab experiment -- echo hello",
+      "echo header; flutter test",
+      "flutter test; rm -rf target",
+      "{ echo hidden; }; flutter test",
+      "if true; then echo hidden; fi; flutter test",
+      "while true; do echo hidden; done; flutter test",
+      "case x in x) echo hidden;; esac; flutter test",
+      "[[ -n value ]] && flutter test",
+      "echo hidden | flutter test",
+      "echo hidden & flutter test",
+      "cargo test &&",
+      "cargo test &&\nbun test",
+      "cargo test;\nbun test",
+      "flutter test > result.txt",
+      "flutter test *.dart",
+      "cargo\u00a0test",
+      "cargo\u2003test",
+    ]) {
+      const result = invoke(hook, [], {
+        stdin: JSON.stringify({
+          hook_event_name: "PreToolUse",
+          tool_input: { command },
+        }),
+      });
+      expect(result.exitCode, command).toBe(0);
+      expect(text(result.stdout), command).toBe("");
     }
   });
 
@@ -312,7 +355,7 @@ describe("managed command output runner", () => {
     expect(status.stdoutObservedBytes).toBe(30);
     expect(status.stdoutStoredBytes).toBe(12);
     expect(status.stdoutTruncated).toBe(true);
-    expect(text(result.stdout)).toMatch(/\| \d+s \| \d+B \| \d+B \|/);
+    expect(text(result.stdout)).toMatch(progressPattern);
   });
 
   test("bounds drain time when a background process keeps output descriptors open", () => {
@@ -350,7 +393,7 @@ describe("managed command output runner", () => {
   });
 
   test("uses the invoking zsh and supports process substitution", () => {
-    if (!Bun.file("/bin/zsh").size) return;
+    if (Bun.file("/bin/zsh").size === 0) return;
     const root = temporaryDirectory();
     const result = invoke(
       runner,
@@ -384,11 +427,11 @@ describe("managed command output runner", () => {
       },
     );
     const output = text(result.stdout);
-    expect(output.match(/\[codex-command\] artifact:/g)).toHaveLength(1);
+    expect(output.match(artifactCountPattern)).toHaveLength(1);
     expect(output).toContain("| seconds | out | err |");
     expect(output).toContain("[codex-command] stdout:\ncompact");
     expect(output).toContain("[codex-command] stderr:\nwarning");
-    expect(output).toMatch(/\[codex-command\] exit 0 in \d+s\n$/);
+    expect(output).toMatch(completionPattern);
     expect(output).not.toContain("observed");
     expect(output).not.toContain("stored");
   });
@@ -408,6 +451,6 @@ describe("managed command output runner", () => {
     const output = text(result.stdout);
     expect(output).toContain("[codex-command] stdout tail:\n1234567890");
     expect(output).not.toContain("[codex-command] stdout:\n");
-    expect(output.match(/\[codex-command\] artifact:/g)).toHaveLength(1);
+    expect(output.match(artifactCountPattern)).toHaveLength(1);
   });
 });

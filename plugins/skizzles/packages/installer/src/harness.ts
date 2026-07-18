@@ -10,13 +10,14 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import type { Transfer } from "./core.ts";
 import {
   assertManagedParentsAreReal,
   copyDirectoryExclusive,
   pathEntryExists,
+  rollbackStagedMoves,
   sameTree,
-  type Transfer,
-} from "./core";
+} from "./managed-files.ts";
 
 interface Marketplace {
   name: string;
@@ -137,7 +138,6 @@ export function installHarness(options: HarnessOptions): HarnessReceipt {
   return receipt;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 export function uninstallHarness(
   homeInput: string,
   dryRun = false,
@@ -207,11 +207,7 @@ export function uninstallHarness(
       moved.push({ from, to });
     }
   } catch (error) {
-    for (const item of moved.reverse()) {
-      if (pathEntryExists(item.to) && !pathEntryExists(item.from)) {
-        renameSync(item.to, item.from);
-      }
-    }
+    rollbackStagedMoves(moved);
     rmSync(quarantine, { recursive: true, force: true });
     throw error;
   }

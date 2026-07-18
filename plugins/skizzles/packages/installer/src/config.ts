@@ -17,7 +17,10 @@ import {
   valuesMatchBefore,
   writePrivateJson,
 } from "./codex-config.ts";
-import { assertManagedParentsAreReal, pathEntryExists } from "./core.ts";
+import {
+  assertManagedParentsAreReal,
+  pathEntryExists,
+} from "./managed-files.ts";
 
 export type { ConfigEdit, ConfigRpc } from "./codex-config.ts";
 export type OrchestrationMode = "aggressive" | "passive";
