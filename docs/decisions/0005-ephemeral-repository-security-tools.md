@@ -28,7 +28,7 @@ Adopt exactly these repository-verification tools:
 | Tool | Pin and provenance | License | Purpose |
 | --- | --- | --- | --- |
 | actionlint | `v1.7.12`, commit `914e7df21a07ef503a81201c76d2b11c789d3fca`, [upstream release](https://github.com/rhysd/actionlint/releases/tag/v1.7.12) | MIT | Parse and semantically validate actual Actions workflows with machine-readable findings. |
-| ShellCheck | `v0.11.0`, commit `aac0823e6b58f8a499e856e93738082691cbf212`, [upstream release](https://github.com/koalaman/shellcheck/releases/tag/v0.11.0) | GPL-3.0-only | Analyze shell embedded in Actions through actionlint's explicit executable path; never redistribute it. |
+| ShellCheck | `v0.11.0`, commit `aac0823e6b58f8a499e856e93738082691cbf212`, [upstream release](https://github.com/koalaman/shellcheck/releases/tag/v0.11.0) | GPL-3.0-or-later | Analyze shell embedded in Actions through actionlint's explicit executable path; never redistribute it. |
 | Gitleaks | `v8.30.1`, commit `83d9cd684c87d95d656c1458ef04895a7f1cbd8e`, [upstream release](https://github.com/gitleaks/gitleaks/releases/tag/v8.30.1) | MIT | Heuristically scan the current tree and complete Git history for credential content. |
 
 The workflow's action dependencies are separate executable supply-chain inputs. The
@@ -43,16 +43,22 @@ and primary-provenance review together.
 
 The root `config/repository-security-tools.json` is the strict versioned manifest.
 It supports only CI Linux x64 and maintainer macOS arm64 because those exact upstream
-archives were inspected. actionlint and Gitleaks release checksum files match the
-pinned SHA-256 values. ShellCheck publishes the release archives but no checksum or
-signature asset; the repository therefore pins the independently calculated archive
-digests and records that weaker upstream provenance explicitly. Windows and other
-platform claims are rejected until their exact artifacts are verified and added.
+archives were inspected. Every asset records the official GitHub release API URL,
+release and asset IDs, byte size, update timestamp, and API-provided SHA-256 digest;
+downloaded bytes matched that primary metadata. actionlint and Gitleaks additionally
+publish separate release checksum files. ShellCheck has no separate checksum or
+signature asset, but its release API provides the matching digest. ShellCheck source
+notices at the pinned commit grant GPL version 3 or later; its legacy Cabal/Hackage
+package metadata normalizes `GPL-3` as `GPL-3.0-only`, a discrepancy retained as
+review evidence rather than flattened into the source-license conclusion. Windows and
+other platform claims are rejected until their exact artifacts are verified and added.
 
 `@skizzles/workspace-policy` owns parsing, acquisition, extraction, execution, and
-causal probes. Acquisition uses HTTPS release URLs, approved GitHub redirect hosts, a
-60-second timeout, a 64 MiB maximum, and exact SHA-256 before any extraction. A
-private temporary directory holds archives and executables. Tar listings reject
+causal probes. Acquisition uses HTTPS release URLs, manually follows at most five
+redirects, validates HTTPS and an approved GitHub host at every hop, rejects loops or
+missing/unsafe locations, applies a 60-second timeout and 64 MiB maximum, and verifies
+the API-recorded byte length and exact SHA-256 before any extraction. A private
+temporary directory holds archives and executables. Tar listings reject
 absolute, parent, non-normalized paths and duplicate executable entries; member
 metadata and post-extraction checks reject symlink, hard-link, or non-regular
 executables. Extraction selects only the named executable, sets exact owner modes,
@@ -63,12 +69,18 @@ impose output/time limits with process-group termination.
 actionlint receives every actual `.github/workflows/*.{yml,yaml}` path and the pinned
 ShellCheck path, with JSON findings. Causal probes require invalid event, expression,
 `needs`, and unquoted expansion failures plus a corrected-workflow pass. Gitleaks runs
-`dir` and full-history `git --log-opts=--all` scans with `--redact=100`, retains no
-report, and withholds captured findings at the aggregate boundary. Its configuration
-extends defaults and narrowly allows the exact known fake privacy canary. A named
-fixture rule proves that an adjacent unlabeled token still fails. Disposable probes
-also prove a provider-like key and a committed-then-removed key fail without appearing
-raw in captured output.
+`dir` and full-history `git --log-opts=--all` scans with `--redact=100` and a distinct
+findings exit code of 10. Exit zero is clean only with an exact empty JSON report and
+no warning, skip, or error diagnostics. Exit 10 is findings only with a nonempty,
+strictly typed, fully redacted JSON report whose count matches the sole findings
+warning. Every other exit/status/report/diagnostic combination is an operational
+failure. Reports are bounded, mode `0600`, nested under the owner-only temporary root,
+parsed only after the process exits, and deleted in `finally`; captured findings are
+withheld at the aggregate boundary. Configuration extends defaults and narrowly
+allows the exact known fake privacy canary. A named fixture rule proves that an
+adjacent unlabeled token still fails. Disposable probes also prove a provider-like key,
+a committed-then-removed key, and a real unreadable-file skip cannot be mistaken for
+success or findings, without exposing the raw tokens.
 
 `bun run security:check` is the one aggregate authority. CI invokes it once after the
 separate `verify` aggregate and checks out complete history with
@@ -104,9 +116,10 @@ availability failures fail closed. Release acceptance runs the same root command
   third-party action source or transitive supply-chain integrity. Full commit pins
   bound reviewed inputs but do not establish their safety. An actual GitHub run and
   upstream-source review remain separate evidence.
-- Gitleaks is heuristic: a clean scan is not proof that no credential exists. Redaction
-  and non-retention reduce exposure but cannot make an arbitrary third-party detector
-  a secrecy oracle.
+- Gitleaks is heuristic: an exact clean result is not proof that no credential exists.
+  Strict status/report classification prevents known skipped/error ambiguity, while
+  redaction and non-retention reduce exposure; neither makes a third-party detector a
+  secrecy oracle.
 - Typed validation for non-Action YAML remains separate debt.
 
 ## Fitness checks

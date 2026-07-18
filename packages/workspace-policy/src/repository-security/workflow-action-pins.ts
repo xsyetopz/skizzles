@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 
 const LINE_PATTERN = /\r?\n/u;
+const USES_SOURCE_LINE_PATTERN =
+  /^\s*(?:-\s*)?(?:uses|["']uses["']):\s*(["']?)([^"'#\s]+)\1(?:\s*#\s*(\S+))?\s*$/u;
 const REQUIRED_ACTION_PINS = {
   "actions/checkout": {
     // biome-ignore lint/security/noSecrets: Public upstream action commit pin.
@@ -46,7 +48,7 @@ async function validateWorkflowActionPins(
       const expected = REQUIRED_ACTION_PINS[action];
       if (
         commit !== expected.commit ||
-        !hasReadableVersionComment(source, reference, expected.version)
+        actionVersionComment(source, reference) !== expected.version
       ) {
         throw new Error(
           `${location} ${action} must use ${expected.commit} # ${expected.version}`,
@@ -136,19 +138,18 @@ function isWorkflowRecord(input: unknown): input is Record<string, unknown> {
   return typeof input === "object" && input !== null && !Array.isArray(input);
 }
 
-function hasReadableVersionComment(
+function actionVersionComment(
   source: string,
   reference: string,
-  version: string,
-): boolean {
-  return source.split(LINE_PATTERN).some((line) => {
-    const trimmed = line.trimEnd();
-    return (
-      !trimmed.trimStart().startsWith("#") &&
-      trimmed.includes(reference) &&
-      trimmed.endsWith(`# ${version}`)
-    );
-  });
+): string | undefined {
+  const matches = source
+    .split(LINE_PATTERN)
+    .map((line) => USES_SOURCE_LINE_PATTERN.exec(line))
+    .filter((match) => match?.[2] === reference);
+  if (matches.length !== 1) {
+    return undefined;
+  }
+  return matches[0]?.[3];
 }
 
 function isRequiredAction(

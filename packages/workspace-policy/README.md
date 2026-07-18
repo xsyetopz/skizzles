@@ -54,17 +54,21 @@ This package also owns the networked repository security gate invoked by
 `config/repository-security-tools.json` pins the exact actionlint, ShellCheck,
 and Gitleaks release provenance and Linux x64/macOS arm64 archive digests.
 Unsupported platforms fail deterministically. Archives are downloaded with byte
-and time bounds into an owner-only temporary directory, verified before selective
-tar extraction, checked for contained regular executable members, version-tested,
-and removed on success or failure. No package manifest carries these tools and no
-persistent tool cache is used.
+and time bounds into an owner-only temporary directory. Every redirect hop is
+manually host/protocol checked; GitHub release API asset identity, byte count, and
+digest are pinned; bytes are verified before selective tar extraction, checked for
+contained regular executable members, version-tested, and removed on success or
+failure. No package manifest carries these tools and no persistent tool cache is used.
 
 The gate passes every real `.github/workflows/*.{yml,yaml}` file to actionlint
 with an explicit pinned ShellCheck executable, parses actionlint JSON output, and
 runs invalid-event, invalid-expression, invalid-`needs`, unquoted-shell, and
 corrected-workflow causal probes. Gitleaks scans the current tree and complete Git
-history with 100% redaction and no report file, then proves provider-token,
-exact-canary, adjacent-token, and removed-history behavior in disposable probes.
+history with 100% redaction and ephemeral owner-only JSON reports. Only exit zero
+plus an exact empty report and clean diagnostics is clean; only exit 10 plus a
+nonempty fully redacted report is findings. Other statuses, warning/error/skip
+diagnostics, or mismatched reports fail operationally. Provider-token, exact-canary,
+adjacent-token, removed-history, and real unreadable-file probes prove the classifier.
 The `.gitleaks.toml` allowance is restricted to the one documented fake privacy
 canary; it does not allow the test path or disable a default rule.
 

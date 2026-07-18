@@ -16,6 +16,16 @@ interface SecurityToolAsset {
   url: string;
   sha256: string;
   executablePath: string;
+  githubReleaseAsset: GitHubReleaseAssetEvidence;
+}
+
+interface GitHubReleaseAssetEvidence {
+  releaseApiUrl: string;
+  releaseId: number;
+  assetId: number;
+  bytes: number;
+  updatedAt: string;
+  digest: string;
 }
 
 interface SecurityToolSpec {
@@ -49,6 +59,7 @@ function validateArchiveMemberPath(path: string, label: string): void {
 }
 
 export type {
+  GitHubReleaseAssetEvidence,
   RepositorySecurityToolManifest,
   SecurityToolAsset,
   SecurityToolName,

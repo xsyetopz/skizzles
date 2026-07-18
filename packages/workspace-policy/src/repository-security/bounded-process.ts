@@ -19,6 +19,7 @@ interface BoundedCommandOptions {
   env?: Record<string, string | undefined>;
   timeoutMs?: number;
   outputLimitBytes?: number;
+  fileCreationMask?: number;
   label: string;
 }
 
@@ -39,6 +40,16 @@ async function runBoundedCommand(
   if (timeoutMs <= 0 || outputLimitBytes <= 0) {
     throw new Error(`${options.label} command limits must be positive`);
   }
+  if (
+    options.fileCreationMask !== undefined &&
+    (!Number.isInteger(options.fileCreationMask) ||
+      options.fileCreationMask < 0 ||
+      options.fileCreationMask > 0o777)
+  ) {
+    throw new Error(
+      `${options.label} file creation mask must be an octal mode`,
+    );
+  }
 
   const command = [executable, ...args];
   const spawnOptions = {
@@ -50,17 +61,27 @@ async function runBoundedCommand(
   const cwd = options.cwd;
   const env = options.env;
   let child: Bun.Subprocess<"ignore", "pipe", "pipe">;
-  if (cwd === undefined) {
-    if (env === undefined) {
-      child = Bun.spawn(command, spawnOptions);
+  let previousMask: number | undefined;
+  if (options.fileCreationMask !== undefined) {
+    previousMask = process.umask(options.fileCreationMask);
+  }
+  try {
+    if (cwd === undefined) {
+      if (env === undefined) {
+        child = Bun.spawn(command, spawnOptions);
+      } else {
+        child = Bun.spawn(command, { ...spawnOptions, env });
+      }
     } else {
-      child = Bun.spawn(command, { ...spawnOptions, env });
+      if (env === undefined) {
+        child = Bun.spawn(command, { ...spawnOptions, cwd });
+      } else {
+        child = Bun.spawn(command, { ...spawnOptions, cwd, env });
+      }
     }
-  } else {
-    if (env === undefined) {
-      child = Bun.spawn(command, { ...spawnOptions, cwd });
-    } else {
-      child = Bun.spawn(command, { ...spawnOptions, cwd, env });
+  } finally {
+    if (previousMask !== undefined) {
+      process.umask(previousMask);
     }
   }
 

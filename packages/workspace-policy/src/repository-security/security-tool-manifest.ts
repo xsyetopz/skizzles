@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import {
+  type GitHubReleaseAssetEvidence,
   type RepositorySecurityToolManifest,
   type SecurityToolAsset,
   type SecurityToolName,
@@ -10,33 +11,13 @@ import {
   TOOL_NAMES,
   validateArchiveMemberPath,
 } from "./security-tool-contract.ts";
+import {
+  REQUIRED_TOOL_FACTS,
+  type RequiredAssetFacts,
+} from "./security-tool-pins.ts";
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
-
-const REQUIRED_TOOL_FACTS: Record<SecurityToolName, ToolFacts> = {
-  actionlint: {
-    version: "1.7.12",
-    license: "MIT",
-    repository: "rhysd/actionlint",
-  },
-  shellcheck: {
-    version: "0.11.0",
-    license: "GPL-3.0-only",
-    repository: "koalaman/shellcheck",
-  },
-  gitleaks: {
-    version: "8.30.1",
-    license: "MIT",
-    repository: "gitleaks/gitleaks",
-  },
-};
-
-interface ToolFacts {
-  version: string;
-  license: string;
-  repository: string;
-}
 
 async function loadRepositorySecurityToolManifest(
   workspaceRoot: string,
@@ -170,7 +151,11 @@ function parseProvenance(
   const tag = exactString(value["tag"], `${label} tag`);
   const commit = exactString(value["commit"], `${label} commit`);
   const facts = REQUIRED_TOOL_FACTS[name];
-  if (repository !== facts.repository || tag !== `v${facts.version}`) {
+  if (
+    repository !== facts.repository ||
+    tag !== facts.tag ||
+    commit !== facts.commit
+  ) {
     throw new Error(`${label} does not match the pinned upstream release`);
   }
   if (!COMMIT_PATTERN.test(commit)) {
@@ -187,7 +172,11 @@ function parseAsset(
 ): SecurityToolAsset {
   const label = `security tool ${name} ${target} asset`;
   const value = record(input, label);
-  exactKeys(value, ["url", "sha256", "executablePath"], label);
+  exactKeys(
+    value,
+    ["url", "sha256", "executablePath", "githubReleaseAsset"],
+    label,
+  );
   const url = exactString(value["url"], `${label} url`);
   const sha256 = exactString(value["sha256"], `${label} sha256`);
   const executablePath = exactString(
@@ -213,7 +202,57 @@ function parseAsset(
     throw new Error(`${label} sha256 must be a lowercase SHA-256 digest`);
   }
   validateArchiveMemberPath(executablePath, `${label} executablePath`);
-  return { url, sha256, executablePath };
+  return {
+    url,
+    sha256,
+    executablePath,
+    githubReleaseAsset: parseGitHubReleaseAsset(
+      name,
+      target,
+      provenance,
+      sha256,
+      value["githubReleaseAsset"],
+    ),
+  };
+}
+
+function parseGitHubReleaseAsset(
+  name: SecurityToolName,
+  target: SecurityToolTarget,
+  provenance: SecurityToolProvenance,
+  sha256: string,
+  input: unknown,
+): GitHubReleaseAssetEvidence {
+  const label = `security tool ${name} ${target} GitHub release asset`;
+  const value = record(input, label);
+  exactKeys(
+    value,
+    ["releaseApiUrl", "releaseId", "assetId", "bytes", "updatedAt", "digest"],
+    label,
+  );
+  const releaseApiUrl = exactString(
+    value["releaseApiUrl"],
+    `${label} releaseApiUrl`,
+  );
+  const releaseId = positiveInteger(value["releaseId"], `${label} releaseId`);
+  const assetId = positiveInteger(value["assetId"], `${label} assetId`);
+  const bytes = positiveInteger(value["bytes"], `${label} bytes`);
+  const updatedAt = exactString(value["updatedAt"], `${label} updatedAt`);
+  const digest = exactString(value["digest"], `${label} digest`);
+  const facts = REQUIRED_TOOL_FACTS[name];
+  const assetFacts: RequiredAssetFacts = facts.assets[target];
+  if (
+    releaseApiUrl !==
+      `https://api.github.com/repos/${provenance.repository}/releases/${facts.releaseId}` ||
+    releaseId !== facts.releaseId ||
+    assetId !== assetFacts.assetId ||
+    bytes !== assetFacts.bytes ||
+    updatedAt !== assetFacts.updatedAt ||
+    digest !== `sha256:${sha256}`
+  ) {
+    throw new Error(`${label} does not match pinned primary API evidence`);
+  }
+  return { releaseApiUrl, releaseId, assetId, bytes, updatedAt, digest };
 }
 
 function recordOrUndefined(
@@ -255,6 +294,13 @@ function exactKeys(
 function exactString(value: unknown, label: string): string {
   if (typeof value !== "string" || value === "" || value.trim() !== value) {
     throw new Error(`${label} must be a non-empty exact string`);
+  }
+  return value;
+}
+
+function positiveInteger(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
+    throw new Error(`${label} must be a positive safe integer`);
   }
   return value;
 }

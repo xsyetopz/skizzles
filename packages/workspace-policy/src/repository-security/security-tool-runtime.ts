@@ -11,6 +11,7 @@ import {
 } from "./security-tool-contract.ts";
 
 const MAXIMUM_ARCHIVE_BYTES = 67_108_864;
+const MAXIMUM_REDIRECTS = 5;
 const DOWNLOAD_TIMEOUT_MS = 60_000;
 const ARCHIVE_COMMAND_TIMEOUT_MS = 30_000;
 const VERSION_COMMAND_TIMEOUT_MS = 10_000;
@@ -25,6 +26,7 @@ const ALLOWED_DOWNLOAD_HOSTS = new Set([
   "objects.githubusercontent.com",
   "release-assets.githubusercontent.com",
 ]);
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 
 type FetchArchive = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -74,22 +76,14 @@ async function downloadVerifiedArchive(
   const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
   let bytes: Uint8Array;
   try {
-    const response = await fetchArchive(asset.url, {
-      redirect: "follow",
-      signal: controller.signal,
-    });
+    const response = await fetchArchiveResponse(
+      asset.url,
+      fetchArchive,
+      controller.signal,
+    );
     if (!response.ok || response.body === null) {
       throw new Error(
         `security tool archive download returned HTTP ${response.status}`,
-      );
-    }
-    const finalUrl = new URL(response.url || asset.url);
-    if (
-      finalUrl.protocol !== "https:" ||
-      !ALLOWED_DOWNLOAD_HOSTS.has(finalUrl.hostname)
-    ) {
-      throw new Error(
-        "security tool archive redirected outside approved hosts",
       );
     }
     const declaredLength = response.headers.get("content-length");
@@ -112,6 +106,11 @@ async function downloadVerifiedArchive(
   } finally {
     clearTimeout(timer);
   }
+  if (bytes.byteLength !== asset.githubReleaseAsset.bytes) {
+    throw new Error(
+      `security tool archive byte length mismatch: expected ${asset.githubReleaseAsset.bytes}, received ${bytes.byteLength}`,
+    );
+  }
   const actual = createHash("sha256").update(bytes).digest("hex");
   if (actual !== asset.sha256) {
     throw new Error(
@@ -120,6 +119,62 @@ async function downloadVerifiedArchive(
   }
   await writeFile(destination, bytes, { flag: "wx", mode: 0o600 });
   await chmod(destination, PRIVATE_FILE_MODE);
+}
+
+async function fetchArchiveResponse(
+  initialUrl: string,
+  fetchArchive: FetchArchive,
+  signal: AbortSignal,
+): Promise<Response> {
+  let current = approvedDownloadUrl(initialUrl);
+  const visited = new Set<string>();
+  let redirects = 0;
+  while (true) {
+    const key = current.toString();
+    if (visited.has(key)) {
+      throw new Error("security tool archive redirect loop detected");
+    }
+    visited.add(key);
+    const response = await fetchArchive(key, {
+      redirect: "manual",
+      signal,
+    });
+    if (!REDIRECT_STATUSES.has(response.status)) {
+      return response;
+    }
+    if (redirects >= MAXIMUM_REDIRECTS) {
+      await response.body?.cancel();
+      throw new Error("security tool archive exceeded its redirect limit");
+    }
+    const location = response.headers.get("location");
+    await response.body?.cancel();
+    if (location === null || location.trim() === "") {
+      throw new Error("security tool archive redirect omitted its location");
+    }
+    current = approvedDownloadUrl(location, current);
+    redirects += 1;
+  }
+}
+
+function approvedDownloadUrl(value: string, base?: URL): URL {
+  let url: URL;
+  try {
+    url = base === undefined ? new URL(value) : new URL(value, base);
+  } catch (error) {
+    throw new Error("security tool archive redirect URL is invalid", {
+      cause: error,
+    });
+  }
+  if (
+    url.protocol !== "https:" ||
+    !ALLOWED_DOWNLOAD_HOSTS.has(url.hostname) ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.hash !== ""
+  ) {
+    throw new Error("security tool archive redirect used an unapproved URL");
+  }
+  return url;
 }
 
 function validateArchiveEntries(listing: string, executablePath: string): void {
@@ -278,7 +333,9 @@ function ensureContained(root: string, path: string): void {
 
 export type { FetchArchive, InstalledSecurityTools };
 export {
+  approvedDownloadUrl,
   downloadVerifiedArchive,
+  fetchArchiveResponse,
   installRepositorySecurityTools,
   validateArchiveEntries,
 };

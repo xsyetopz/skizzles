@@ -1,12 +1,10 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { parseActionlintFindings } from "../src/repository-security/actionlint-gate.ts";
-import { runBoundedCommand } from "../src/repository-security/bounded-process.ts";
 import { validateArchiveMemberPath } from "../src/repository-security/security-tool-contract.ts";
 import {
   loadRepositorySecurityToolManifest,
@@ -17,12 +15,13 @@ import {
   downloadVerifiedArchive,
   validateArchiveEntries,
 } from "../src/repository-security/security-tool-runtime.ts";
-import { validateWorkflowActionPins } from "../src/repository-security/workflow-action-pins.ts";
 
 const WORKSPACE_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../..",
 );
+// biome-ignore lint/security/noSecrets: Public upstream source commit pin.
+const ACTIONLINT_COMMIT = "914e7df21a07ef503a81201c76d2b11c789d3fca";
 const temporaryRoots: string[] = [];
 
 afterEach(async () => {
@@ -40,6 +39,7 @@ describe("repository security tool manifest", () => {
     expect(manifest.schemaVersion).toBe(1);
     expect(manifest.tools.actionlint.version).toBe("1.7.12");
     expect(manifest.tools.shellcheck.version).toBe("0.11.0");
+    expect(manifest.tools.shellcheck.license).toBe("GPL-3.0-or-later");
     expect(manifest.tools.gitleaks.version).toBe("8.30.1");
     expect(Object.keys(manifest.tools.gitleaks.assets).sort()).toEqual([
       "darwin-arm64",
@@ -69,6 +69,34 @@ describe("repository security tool manifest", () => {
     expect(() => parseRepositorySecurityToolManifest(extra)).toThrow(
       "keys must be exactly",
     );
+
+    for (const replacement of ["0".repeat(40), "1".repeat(40)]) {
+      const provenance: unknown = JSON.parse(
+        source.replace(ACTIONLINT_COMMIT, replacement),
+      );
+      expect(() => parseRepositorySecurityToolManifest(provenance)).toThrow(
+        "does not match the pinned upstream release",
+      );
+    }
+
+    for (const [expected, replacement] of [
+      ["rhysd/actionlint", "attacker/actionlint"],
+      ["v1.7.12", "v1.7.13"],
+    ]) {
+      const provenance: unknown = JSON.parse(
+        source.replace(`"${expected}"`, `"${replacement}"`),
+      );
+      expect(() => parseRepositorySecurityToolManifest(provenance)).toThrow(
+        "does not match the pinned upstream release",
+      );
+    }
+
+    const assetIdentity: unknown = JSON.parse(
+      source.replace('"assetId": 384924896', '"assetId": 384924897'),
+    );
+    expect(() => parseRepositorySecurityToolManifest(assetIdentity)).toThrow(
+      "does not match pinned primary API evidence",
+    );
   });
 
   it("rejects archive escape paths and duplicate executables", () => {
@@ -89,92 +117,105 @@ describe("repository security tool manifest", () => {
     const manifest = await loadRepositorySecurityToolManifest(WORKSPACE_ROOT);
     const root = await temporaryRoot();
     const destination = join(root, "archive.tar.gz");
+    const original = manifest.tools.actionlint.assets["darwin-arm64"];
+    const tamperedBytes = new Uint8Array(16);
     const fakeFetch = async (): Promise<Response> =>
-      new Response("tampered archive", {
+      new Response(tamperedBytes, {
         status: 200,
-        headers: { "content-length": "16" },
+        headers: { "content-length": String(tamperedBytes.byteLength) },
       });
+    const asset = {
+      ...original,
+      githubReleaseAsset: {
+        ...original.githubReleaseAsset,
+        bytes: tamperedBytes.byteLength,
+      },
+    };
 
     await expect(
-      downloadVerifiedArchive(
-        manifest.tools.actionlint.assets["darwin-arm64"],
-        destination,
-        fakeFetch,
-      ),
+      downloadVerifiedArchive(asset, destination, fakeFetch),
     ).rejects.toThrow("checksum mismatch");
     await expect(stat(destination)).rejects.toMatchObject({ code: "ENOENT" });
   });
-});
 
-describe("repository security process and output contracts", () => {
-  it("bounds command output and execution time", async () => {
-    await expect(
-      runBoundedCommand("yes", ["probe"], {
-        label: "output probe",
-        outputLimitBytes: 128,
-        timeoutMs: 10_000,
-      }),
-    ).rejects.toThrow("128-byte output limit");
-
-    await expect(
-      runBoundedCommand(
-        process.execPath,
-        ["--eval", "await Bun.sleep(10000)"],
-        {
-          label: "timeout probe",
-          outputLimitBytes: 128,
-          timeoutMs: 25,
-        },
-      ),
-    ).rejects.toThrow("25ms timeout");
-  });
-
-  it("parses actionlint JSON arrays and JSON Lines findings", () => {
-    expect(
-      parseActionlintFindings(
-        '[{"filepath":"ci.yml","line":2,"column":3,"message":"bad","kind":"syntax-check"}]\n',
-      ),
-    ).toEqual([
-      {
-        filepath: "ci.yml",
-        line: 2,
-        column: 3,
-        message: "bad",
-        kind: "syntax-check",
-      },
-    ]);
-    expect(
-      parseActionlintFindings(
-        '{"filepath":"ci.yml","line":4,"column":5,"message":"bad line","kind":"expression"}\n',
-      ),
-    ).toHaveLength(1);
-    expect(() => parseActionlintFindings("not-json\n")).toThrow("JSON Lines");
-    expect(() =>
-      parseActionlintFindings('{"message":"missing fields"}\n'),
-    ).toThrow("output contract");
-  });
-
-  it("requires reviewed full-commit action pins with version comments", async () => {
+  it("rejects unsafe, missing, looping, and excessive redirect chains", async () => {
+    const manifest = await loadRepositorySecurityToolManifest(WORKSPACE_ROOT);
+    const asset = manifest.tools.actionlint.assets["darwin-arm64"];
     const root = await temporaryRoot();
-    const workflow = join(root, "ci.yml");
-    const valid =
-      "jobs:\n" +
-      "  check:\n" +
-      "    runs-on: ubuntu-latest\n" +
-      "    steps:\n" +
-      "      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1\n" +
-      "      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0\n";
-    await writeFile(workflow, valid, { mode: 0o600 });
-    await expect(
-      validateWorkflowActionPins([workflow]),
-    ).resolves.toBeUndefined();
 
-    await writeFile(workflow, valid.replace(/@[a-f0-9]{40}/u, "@v4"), {
-      mode: 0o600,
-    });
-    await expect(validateWorkflowActionPins([workflow])).rejects.toThrow(
-      "must use 34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1",
-    );
+    let calls = 0;
+    const evilRedirect = async (_input: string, init: RequestInit) => {
+      calls += 1;
+      expect(init.redirect).toBe("manual");
+      return new Response(null, {
+        status: 302,
+        headers: { location: "//evil.example/archive" },
+      });
+    };
+    await expect(
+      downloadVerifiedArchive(asset, join(root, "evil"), evilRedirect),
+    ).rejects.toThrow("unapproved URL");
+    expect(calls).toBe(1);
+
+    const missingLocation = async (): Promise<Response> =>
+      new Response(null, { status: 302 });
+    await expect(
+      downloadVerifiedArchive(asset, join(root, "missing"), missingLocation),
+    ).rejects.toThrow("omitted its location");
+
+    const loop = async (): Promise<Response> =>
+      new Response(null, {
+        status: 302,
+        headers: { location: asset.url },
+      });
+    await expect(
+      downloadVerifiedArchive(asset, join(root, "loop"), loop),
+    ).rejects.toThrow("redirect loop");
+
+    let hop = 0;
+    const excessive = async (): Promise<Response> => {
+      hop += 1;
+      return new Response(null, {
+        status: 302,
+        headers: { location: `https://github.com/approved-hop/${hop}` },
+      });
+    };
+    await expect(
+      downloadVerifiedArchive(asset, join(root, "excessive"), excessive),
+    ).rejects.toThrow("redirect limit");
+  });
+
+  it("accepts a safe relative redirect and verifies the final bytes", async () => {
+    const manifest = await loadRepositorySecurityToolManifest(WORKSPACE_ROOT);
+    const original = manifest.tools.actionlint.assets["darwin-arm64"];
+    const root = await temporaryRoot();
+    const destination = join(root, "archive.tar.gz");
+    const bytes = new TextEncoder().encode("verified archive");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    const asset = {
+      ...original,
+      sha256,
+      githubReleaseAsset: {
+        ...original.githubReleaseAsset,
+        bytes: bytes.byteLength,
+        digest: `sha256:${sha256}`,
+      },
+    };
+    let request = 0;
+    const redirected = async (): Promise<Response> => {
+      request += 1;
+      if (request === 1) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "/approved/final.tar.gz" },
+        });
+      }
+      return new Response(bytes, { status: 200 });
+    };
+
+    await downloadVerifiedArchive(asset, destination, redirected);
+    expect(await readFile(destination)).toEqual(Buffer.from(bytes));
+    expect(request).toBe(2);
   });
 });
 

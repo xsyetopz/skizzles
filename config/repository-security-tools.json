@@ -15,18 +15,34 @@
         "linux-x64": {
           "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
           "sha256": "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",
-          "executablePath": "actionlint"
+          "executablePath": "actionlint",
+          "githubReleaseAsset": {
+            "releaseApiUrl": "https://api.github.com/repos/rhysd/actionlint/releases/303326868",
+            "releaseId": 303326868,
+            "assetId": 384924896,
+            "bytes": 2353908,
+            "updatedAt": "2026-03-30T17:49:19Z",
+            "digest": "sha256:8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          }
         },
         "darwin-arm64": {
           "url": "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_darwin_arm64.tar.gz",
           "sha256": "aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f",
-          "executablePath": "actionlint"
+          "executablePath": "actionlint",
+          "githubReleaseAsset": {
+            "releaseApiUrl": "https://api.github.com/repos/rhysd/actionlint/releases/303326868",
+            "releaseId": 303326868,
+            "assetId": 384924893,
+            "bytes": 2164202,
+            "updatedAt": "2026-03-30T17:49:19Z",
+            "digest": "sha256:aba9ced2dee8d27fecca3dc7feb1a7f9a52caefa1eb46f3271ea66b6e0e6953f"
+          }
         }
       }
     },
     "shellcheck": {
       "version": "0.11.0",
-      "license": "GPL-3.0-only",
+      "license": "GPL-3.0-or-later",
       "provenance": {
         "repository": "koalaman/shellcheck",
         "tag": "v0.11.0",
@@ -38,12 +54,28 @@
         "linux-x64": {
           "url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.gz",
           "sha256": "b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6",
-          "executablePath": "shellcheck-v0.11.0/shellcheck"
+          "executablePath": "shellcheck-v0.11.0/shellcheck",
+          "githubReleaseAsset": {
+            "releaseApiUrl": "https://api.github.com/repos/koalaman/shellcheck/releases/237202770",
+            "releaseId": 237202770,
+            "assetId": 336391469,
+            "bytes": 3773312,
+            "updatedAt": "2026-01-05T03:12:27Z",
+            "digest": "sha256:b7af85e41cc99489dcc21d66c6d5f3685138f06d34651e6d34b42ec6d54fe6f6"
+          }
         },
         "darwin-arm64": {
           "url": "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.darwin.aarch64.tar.gz",
           "sha256": "339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f",
-          "executablePath": "shellcheck-v0.11.0/shellcheck"
+          "executablePath": "shellcheck-v0.11.0/shellcheck",
+          "githubReleaseAsset": {
+            "releaseApiUrl": "https://api.github.com/repos/koalaman/shellcheck/releases/237202770",
+            "releaseId": 237202770,
+            "assetId": 336391359,
+            "bytes": 11370575,
+            "updatedAt": "2026-01-05T03:12:07Z",
+            "digest": "sha256:339b930feb1ea764467013cc1f72d09cd6b869ebf1013296ba9055ab2ffbd26f"
+          }
         }
       }
     },
@@ -61,12 +93,28 @@
         "linux-x64": {
           "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
           "sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb",
-          "executablePath": "gitleaks"
+          "executablePath": "gitleaks",
+          "githubReleaseAsset": {
+            "releaseApiUrl": "https://api.github.com/repos/gitleaks/gitleaks/releases/299662760",
+            "releaseId": 299662760,
+            "assetId": 378332058,
+            "bytes": 8230402,
+            "updatedAt": "2026-03-21T02:17:23Z",
+            "digest": "sha256:551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+          }
         },
         "darwin-arm64": {
           "url": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_darwin_arm64.tar.gz",
           "sha256": "b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5",
-          "executablePath": "gitleaks"
+          "executablePath": "gitleaks",
+          "githubReleaseAsset": {
+            "releaseApiUrl": "https://api.github.com/repos/gitleaks/gitleaks/releases/299662760",
+            "releaseId": 299662760,
+            "assetId": 378332059,
+            "bytes": 7897593,
+            "updatedAt": "2026-03-21T02:16:56Z",
+            "digest": "sha256:b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5"
+          }
         }
       }
     }
