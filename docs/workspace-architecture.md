@@ -48,8 +48,12 @@ Every workspace package declares:
 `@skizzles/workspace-policy` verifies these requirements, scans imports for
 dependency and containment violations, compiles declared TypeScript entrypoints
 in memory, imports TypeScript exports in isolated processes to reject
-import-time exit and stdio effects, rejects nested lockfiles/build-info, and
-rejects TypeScript sources outside a workspace package.
+import-time exit, stdio effects, lifecycle hangs, and POSIX same-group
+descendants, rejects nested lockfiles/build-info, and rejects TypeScript sources
+outside a workspace package. The import gate is lifecycle validation for
+trusted code, not a malicious-code sandbox: deliberate session re-detachment
+can escape POSIX group containment, and Windows cannot perform negative-PGID
+descendant detection.
 
 ## Toolchain
 

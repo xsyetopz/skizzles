@@ -1,16 +1,32 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import process from "node:process";
 import { validateWorkspace } from "../src/workspace-policy.ts";
 
 const roots: string[] = [];
+const descendantPidMarkers: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(
-    roots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
-  );
+  try {
+    await Promise.all(
+      descendantPidMarkers.splice(0).map(async (marker) => {
+        const pid = await readPidMarker(marker);
+        if (pid !== undefined) {
+          killPid(pid);
+          if (!(await pidGone(pid))) {
+            throw new Error(`descendant ${pid} survived fail-safe cleanup`);
+          }
+        }
+      }),
+    );
+  } finally {
+    await Promise.all(
+      roots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
+    );
+  }
 });
 
 describe("workspace policy", () => {
@@ -84,6 +100,76 @@ describe("workspace policy", () => {
     const codes = (await validateWorkspace(root)).map(({ code }) => code);
     expect(codes).toContain("unsafe-export-import");
   });
+
+  if (process.platform === "win32") {
+    test.skip("kills a silent same-group descendant that inherits export-import pipes (skipped because POSIX process groups are unavailable on Windows)", () => {});
+  } else {
+    test("kills a silent same-group descendant that inherits export-import pipes", async () => {
+      const root = await fixture();
+      const marker = registerPidMarker(root, "inherited-pipes.pid");
+      await writeFile(
+        join(root, "packages/example/src/index.ts"),
+        descendantExportSource(marker, "inherit"),
+      );
+
+      const findings = await validateWithin(root, marker);
+      expect(findings.map(({ code }) => code)).toContain(
+        "unsafe-export-import",
+      );
+      expect(unsafeExportImportMessage(findings)).toContain(
+        "did not exit and close stdout and stderr while stdin remained open",
+      );
+      const pid = await requiredPidMarker(marker);
+      expect(await pidGone(pid)).toBeTrue();
+    });
+  }
+
+  if (process.platform === "win32") {
+    test.skip("kills a noisy same-group descendant while its export leader hangs without accumulating output (skipped because POSIX process groups are unavailable on Windows)", () => {});
+  } else {
+    test("kills a noisy same-group descendant while its export leader hangs without accumulating output", async () => {
+      const root = await fixture();
+      const marker = registerPidMarker(root, "noisy-descendant.pid");
+      await writeFile(
+        join(root, "packages/example/src/index.ts"),
+        descendantExportSource(marker, "inherit", {
+          leaderWaitsOnStdin: true,
+          noisy: true,
+        }),
+      );
+
+      const findings = await validateWithin(root, marker);
+      expect(findings.map(({ code }) => code)).toContain(
+        "unsafe-export-import",
+      );
+      expect(unsafeExportImportMessage(findings)).toContain("wrote to stdout");
+      const pid = await requiredPidMarker(marker);
+      expect(await pidGone(pid)).toBeTrue();
+    });
+  }
+
+  if (process.platform === "win32") {
+    test.skip("kills a silent ignored-stdio same-group descendant after its export leader exits (skipped because POSIX process groups are unavailable on Windows)", () => {});
+  } else {
+    test("kills a silent ignored-stdio same-group descendant after its export leader exits", async () => {
+      const root = await fixture();
+      const marker = registerPidMarker(root, "ignored-stdio.pid");
+      await writeFile(
+        join(root, "packages/example/src/index.ts"),
+        descendantExportSource(marker, "ignore"),
+      );
+
+      const findings = await validateWithin(root, marker);
+      expect(findings.map(({ code }) => code)).toContain(
+        "unsafe-export-import",
+      );
+      expect(unsafeExportImportMessage(findings)).toContain(
+        "left a same-group descendant running after import",
+      );
+      const pid = await requiredPidMarker(marker);
+      expect(await pidGone(pid)).toBeTrue();
+    });
+  }
 
   test("rejects local Biome tooling and a check without inherited config", async () => {
     const root = await fixture();
@@ -171,6 +257,113 @@ describe("workspace policy", () => {
     expect(codes).toContain("invalid-biome-command");
   });
 });
+
+function registerPidMarker(root: string, name: string): string {
+  const marker = join(root, name);
+  descendantPidMarkers.push(marker);
+  return marker;
+}
+
+function unsafeExportImportMessage(
+  findings: Awaited<ReturnType<typeof validateWorkspace>>,
+): string {
+  const finding = findings.find(({ code }) => code === "unsafe-export-import");
+  if (finding === undefined) {
+    throw new Error("missing unsafe-export-import finding");
+  }
+  return finding.message;
+}
+
+function descendantExportSource(
+  marker: string,
+  stdio: "ignore" | "inherit",
+  options: { leaderWaitsOnStdin?: boolean; noisy?: boolean } = {},
+): string {
+  const descendantScript = options.noisy
+    ? 'const chunk = "x".repeat(65536); setInterval(() => process.stdout.write(chunk), 0);'
+    : "setInterval(() => {}, 1000);";
+  return [
+    `const descendant = Bun.spawn([process.execPath, "--eval", ${JSON.stringify(descendantScript)}], { stdin: "ignore", stdout: ${JSON.stringify(stdio)}, stderr: ${JSON.stringify(stdio)} });`,
+    `await Bun.write(${JSON.stringify(marker)}, String(descendant.pid));`,
+    "descendant.unref();",
+    options.leaderWaitsOnStdin ? "await Bun.stdin.text();" : "",
+  ].join("\n");
+}
+
+async function validateWithin(
+  root: string,
+  marker: string,
+): Promise<Awaited<ReturnType<typeof validateWorkspace>>> {
+  const validation = validateWorkspace(root);
+  const timeout = Promise.withResolvers<"deadline">();
+  const timer = setTimeout(() => timeout.resolve("deadline"), 2_500);
+  const outcome = await Promise.race([
+    validation.then((findings) => ({ findings })),
+    timeout.promise,
+  ]);
+  clearTimeout(timer);
+  if (outcome !== "deadline") {
+    return outcome.findings;
+  }
+  const pid = await readPidMarker(marker);
+  if (pid !== undefined) {
+    killPid(pid);
+  }
+  await Promise.race([validation, Bun.sleep(1_000)]);
+  throw new Error("workspace validation exceeded the 2500ms test bound");
+}
+
+async function requiredPidMarker(marker: string): Promise<number> {
+  const pid = await readPidMarker(marker);
+  if (pid === undefined) {
+    throw new Error(`missing descendant PID marker: ${marker}`);
+  }
+  return pid;
+}
+
+async function readPidMarker(marker: string): Promise<number | undefined> {
+  try {
+    const pid = Number.parseInt(await readFile(marker, "utf8"), 10);
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function killPid(pid: number): void {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch (error) {
+    if (
+      !(error instanceof Error && "code" in error && error.code === "ESRCH")
+    ) {
+      throw error;
+    }
+  }
+}
+
+async function pidGone(pid: number): Promise<boolean> {
+  const deadline = performance.now() + 1_000;
+  while (pidExists(pid) && performance.now() < deadline) {
+    await Bun.sleep(10);
+  }
+  return !pidExists(pid);
+}
+
+function pidExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") {
+      return false;
+    }
+    throw error;
+  }
+}
 
 async function fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "skizzles-workspace-policy-"));

@@ -1,6 +1,11 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import process from "node:process";
+import type {
+  ReadableStream,
+  ReadableStreamDefaultReader,
+  ReadableStreamReadResult,
+} from "node:stream/web";
 
 const TOOL_DEPENDENCIES = ["@types/bun", "@types/node", "typescript"] as const;
 export const SKIZZLES_PACKAGE_NAMES = [
@@ -18,6 +23,9 @@ export const SKIZZLES_PACKAGE_NAMES = [
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const IMPORT_EXTENSIONS = new Set([...SOURCE_EXTENSIONS, ".json"]);
 const EXPORT_IMPORT_TIMEOUT_MS = 1_000;
+const EXPORT_IMPORT_CLEANUP_TIMEOUT_MS = 1_000;
+const EXPORT_IMPORT_GROUP_POLL_INTERVAL_MS = 10;
+const HAS_POSIX_PROCESS_GROUPS = process.platform !== "win32";
 const PORTABLE_FASTMCP_ROOT =
   "skills/codex-project-tooling/assets/fastmcp-bun-template";
 const PORTABLE_FASTMCP_CHECK =
@@ -454,36 +462,31 @@ async function validateExportImports(
         stdin: "pipe",
         stdout: "pipe",
         stderr: "pipe",
+        detached: HAS_POSIX_PROCESS_GROUPS,
       },
     );
-    const deadline = Promise.withResolvers<"deadline">();
-    const timeout = setTimeout(
-      () => deadline.resolve("deadline"),
-      EXPORT_IMPORT_TIMEOUT_MS,
-    );
-    const outcome = await Promise.race([child.exited, deadline.promise]);
-    clearTimeout(timeout);
-    if (outcome === "deadline") {
-      child.kill("SIGKILL");
+    const stdout = watchZeroOutput(child.stdout, "stdout");
+    const stderr = watchZeroOutput(child.stderr, "stderr");
+    let failure = await observeExportImport(child, stdout, stderr);
+    if (failure === undefined) {
+      const closeFailure = closeExportImportStdin(child);
+      if (closeFailure === undefined) {
+        stdout.reader.releaseLock();
+        stderr.reader.releaseLock();
+      } else {
+        failure = new ExportImportObservationError(closeFailure);
+      }
     }
-    child.stdin.end();
-    const [exitCode, stdout, stderr] = await Promise.all([
-      child.exited,
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ]);
-    if (
-      outcome === "deadline" ||
-      exitCode !== 0 ||
-      stdout.length > 0 ||
-      stderr.length > 0
-    ) {
+    if (failure !== undefined) {
+      const cleanupFailures = await containFailedExportImport(
+        child,
+        stdout,
+        stderr,
+      );
       const reason =
-        outcome === "deadline"
-          ? "did not settle while stdin remained open"
-          : exitCode !== 0
-            ? `exited with status ${exitCode}`
-            : "wrote to stdout or stderr";
+        cleanupFailures.length === 0
+          ? failure.message
+          : `${failure.message}; cleanup could not establish containment: ${cleanupFailures.join("; ")}`;
       add(
         findings,
         "unsafe-export-import",
@@ -492,6 +495,281 @@ async function validateExportImports(
       );
     }
   }
+}
+
+interface ExportImportStreamWatch {
+  reader: ReadableStreamDefaultReader<Uint8Array>;
+  settled: Promise<void>;
+}
+
+class ExportImportObservationError extends Error {}
+
+function watchZeroOutput(
+  stream: ReadableStream<Uint8Array>,
+  name: "stdout" | "stderr",
+): ExportImportStreamWatch {
+  const reader = stream.getReader();
+  const settled = (async (): Promise<void> => {
+    while (true) {
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try {
+        result = await reader.read();
+      } catch (error) {
+        throw new ExportImportObservationError(
+          `${name} failed while observing import: ${errorDiagnostic(error)}`,
+        );
+      }
+      if (result.done) {
+        return;
+      }
+      if (result.value.byteLength > 0) {
+        throw new ExportImportObservationError(`wrote to ${name}`);
+      }
+    }
+  })();
+  return { reader, settled };
+}
+
+async function observeExportImport(
+  child: Bun.Subprocess<"pipe", "pipe", "pipe">,
+  stdout: ExportImportStreamWatch,
+  stderr: ExportImportStreamWatch,
+): Promise<ExportImportObservationError | undefined> {
+  const directExit = child.exited.then((exitCode) => {
+    if (exitCode !== 0) {
+      throw new ExportImportObservationError(`exited with status ${exitCode}`);
+    }
+  });
+  const completed = Promise.all([
+    directExit,
+    stdout.settled,
+    stderr.settled,
+  ]).then(
+    () => undefined,
+    (error: unknown) => observationError(error),
+  );
+  const deadline = Promise.withResolvers<ExportImportObservationError>();
+  const timeout = setTimeout(
+    () =>
+      deadline.resolve(
+        new ExportImportObservationError(
+          "did not exit and close stdout and stderr while stdin remained open",
+        ),
+      ),
+    EXPORT_IMPORT_TIMEOUT_MS,
+  );
+  const failure = await Promise.race([completed, deadline.promise]);
+  clearTimeout(timeout);
+  if (failure !== undefined) {
+    return failure;
+  }
+  if (HAS_POSIX_PROCESS_GROUPS) {
+    const group = probeProcessGroup(child.pid);
+    if (group === "present") {
+      return new ExportImportObservationError(
+        "left a same-group descendant running after import",
+      );
+    }
+    if (group instanceof Error) {
+      return new ExportImportObservationError(
+        `could not verify process-group exit after import: ${group.message}`,
+      );
+    }
+  }
+  return undefined;
+}
+
+async function containFailedExportImport(
+  child: Bun.Subprocess<"pipe", "pipe", "pipe">,
+  stdout: ExportImportStreamWatch,
+  stderr: ExportImportStreamWatch,
+): Promise<string[]> {
+  const failures: string[] = [];
+  const signalFailure = killExportImport(child);
+  if (signalFailure !== undefined) {
+    failures.push(signalFailure);
+  }
+  const closeFailure = closeExportImportStdin(child);
+  if (closeFailure !== undefined) {
+    failures.push(closeFailure);
+  }
+
+  const cleanupDeadline = Date.now() + EXPORT_IMPORT_CLEANUP_TIMEOUT_MS;
+  const readersSettled = await resolveBefore(
+    Promise.all([
+      cancelReader(stdout.reader, "stdout"),
+      cancelReader(stderr.reader, "stderr"),
+      stdout.settled.then(
+        () => undefined,
+        () => undefined,
+      ),
+      stderr.settled.then(
+        () => undefined,
+        () => undefined,
+      ),
+    ]),
+    cleanupDeadline,
+  );
+  if (!readersSettled.settled) {
+    failures.push(
+      "stdout and stderr readers did not settle after cancellation",
+    );
+  } else {
+    for (const readerFailure of readersSettled.value.slice(0, 2)) {
+      if (readerFailure !== undefined) {
+        failures.push(readerFailure);
+      }
+    }
+  }
+  const childReaped = await resolveBefore(
+    child.exited.then(
+      () => undefined,
+      (error: unknown) => errorDiagnostic(error),
+    ),
+    cleanupDeadline,
+  );
+  if (!childReaped.settled) {
+    failures.push("direct child was not reaped after SIGKILL");
+  } else if (childReaped.value !== undefined) {
+    failures.push(`direct child reaping failed: ${childReaped.value}`);
+  }
+  releaseReaderLock(stdout.reader);
+  releaseReaderLock(stderr.reader);
+
+  if (HAS_POSIX_PROCESS_GROUPS) {
+    const groupFailure = await waitForProcessGroupExit(
+      child.pid,
+      cleanupDeadline,
+    );
+    if (groupFailure !== undefined) {
+      failures.push(groupFailure);
+    }
+  }
+  return failures;
+}
+
+function closeExportImportStdin(
+  child: Bun.Subprocess<"pipe", "pipe", "pipe">,
+): string | undefined {
+  try {
+    child.stdin.end();
+    return undefined;
+  } catch (error) {
+    return `could not close stdin: ${errorDiagnostic(error)}`;
+  }
+}
+
+async function cancelReader(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  name: "stdout" | "stderr",
+): Promise<string | undefined> {
+  try {
+    await reader.cancel();
+    return undefined;
+  } catch (error) {
+    return `could not cancel ${name} reader: ${errorDiagnostic(error)}`;
+  }
+}
+
+function killExportImport(
+  child: Bun.Subprocess<"pipe", "pipe", "pipe">,
+): string | undefined {
+  try {
+    if (HAS_POSIX_PROCESS_GROUPS) {
+      process.kill(-child.pid, "SIGKILL");
+    } else {
+      child.kill("SIGKILL");
+    }
+    return undefined;
+  } catch (error) {
+    if (errorCode(error) === "ESRCH") {
+      return undefined;
+    }
+    return `could not SIGKILL ${HAS_POSIX_PROCESS_GROUPS ? `process group ${child.pid}` : `process ${child.pid}`}: ${errorDiagnostic(error)}`;
+  }
+}
+
+async function waitForProcessGroupExit(
+  pid: number,
+  deadline: number,
+): Promise<string | undefined> {
+  while (Date.now() < deadline) {
+    const group = probeProcessGroup(pid);
+    if (group === "absent") {
+      return undefined;
+    }
+    if (group instanceof Error) {
+      return `could not probe process group ${pid}: ${group.message}`;
+    }
+    await Bun.sleep(EXPORT_IMPORT_GROUP_POLL_INTERVAL_MS);
+  }
+  return `process group ${pid} survived SIGKILL beyond the cleanup deadline`;
+}
+
+function probeProcessGroup(pid: number): "absent" | "present" | Error {
+  try {
+    process.kill(-pid, 0);
+    return "present";
+  } catch (error) {
+    if (errorCode(error) === "ESRCH") {
+      return "absent";
+    }
+    return new Error(errorDiagnostic(error));
+  }
+}
+
+type DeadlineResult<T> =
+  | { settled: true; value: T }
+  | { settled: false; value?: never };
+
+async function resolveBefore<T>(
+  promise: Promise<T>,
+  deadline: number,
+): Promise<DeadlineResult<T>> {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) {
+    return { settled: false };
+  }
+  const timeout = Promise.withResolvers<DeadlineResult<T>>();
+  const timer = setTimeout(
+    () => timeout.resolve({ settled: false }),
+    remaining,
+  );
+  const settled = await Promise.race([
+    promise.then((value) => ({ settled: true as const, value })),
+    timeout.promise,
+  ]);
+  clearTimeout(timer);
+  return settled;
+}
+
+function releaseReaderLock(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+): void {
+  try {
+    reader.releaseLock();
+  } catch {
+    // A reader that missed the cleanup deadline remains locked and is reported.
+  }
+}
+
+function observationError(error: unknown): ExportImportObservationError {
+  return error instanceof ExportImportObservationError
+    ? error
+    : new ExportImportObservationError(
+        `failed while observing import lifecycle: ${errorDiagnostic(error)}`,
+      );
+}
+
+function errorDiagnostic(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (!(error instanceof Error) || !("code" in error)) {
+    return undefined;
+  }
+  return typeof error.code === "string" ? error.code : undefined;
 }
 
 async function validateImports(
