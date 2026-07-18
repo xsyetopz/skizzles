@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { guardedPath, safeRelativePath } from "../src/files.ts";
-import { buildGitManifest } from "../src/git-manifest.ts";
+import { buildGitManifest } from "../src/sync/git-manifest.ts";
 
 const temporary: string[] = [];
 

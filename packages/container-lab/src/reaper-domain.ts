@@ -2,31 +2,34 @@
 import { Database } from "bun:sqlite";
 import { lstat, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { internalImageTag } from "./compose.ts";
+import { internalImageTag } from "./compose/generation.ts";
 import type { DockerRunner } from "./docker.ts";
 import { defaultDockerRunner } from "./docker.ts";
 import {
   cleanupManagedLabDockerResources,
   recoverLabSync,
-} from "./lab-destruction.ts";
+} from "./lab/destruction.ts";
 import { withFileLock } from "./locks.ts";
 import {
+  listLabs,
+  readLab,
+  removeLabState,
+  writeLab,
+} from "./state/lab-store.ts";
+import {
   activityLockPath,
+  labLockPath,
+  ownerLockPath,
+  resolveRoots,
+  type StateRoots,
+} from "./state/layout.ts";
+import { markOwnerReaped, readOwnerManifest } from "./state/owner-store.ts";
+import {
   assertOwnerStateDirectory,
   assertTrustedLabRuntimeIdentity,
   exactDirectoryChain,
   inspectTrustedLabRuntimeDirectories,
-  labLockPath,
-  listLabs,
-  markOwnerReaped,
-  ownerLockPath,
-  readLab,
-  readOwnerManifest,
-  removeLabState,
-  resolveRoots,
-  type StateRoots,
-  writeLab,
-} from "./state.ts";
+} from "./state/runtime-trust.ts";
 
 const OWNER_KEY = /^[a-f0-9]{64}$/;
 

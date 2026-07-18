@@ -5,7 +5,7 @@ import {
   manifestName as labManifestName,
   type RuntimeConfig as ManifestRuntimeConfig,
   parseLabManifest,
-} from "./lab-manifest.ts";
+} from "./lab/manifest.ts";
 
 export const manifestName = labManifestName;
 export interface RuntimeConfig extends ManifestRuntimeConfig {}

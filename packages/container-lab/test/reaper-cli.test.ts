@@ -7,7 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import { REAPER_OUTPUT_MAX_BYTES } from "../src/reaper-cli.ts";
-import { ensureOwner, ownerKey } from "../src/state.ts";
+import { ownerKey } from "../src/state/layout.ts";
+import { ensureOwner } from "../src/state/owner-store.ts";
 
 const temporary: string[] = [];
 const OWNER_KEY_OUTPUT = /\b[a-f0-9]{64}\b/i;

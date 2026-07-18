@@ -3,11 +3,11 @@ import { describe, expect, test } from "bun:test";
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
 import { parse as parseYaml } from "yaml";
 import {
-  type ComposeModel,
   composeCommandArgs,
   generateBaseCompose,
   generateOverrideCompose,
-} from "../src/compose.ts";
+} from "../src/compose/generation.ts";
+import type { ComposeModel } from "../src/compose/model.ts";
 import { parseLabConfig } from "../src/config.ts";
 
 const repoRoot = "/tmp/example-repository";

@@ -1,4 +1,4 @@
-import type { ComposeInspectionFinding } from "./compose.ts";
+import type { ComposeInspectionFinding } from "./compose/inspection.ts";
 import type { LabConfig } from "./config.ts";
 
 export type LabState = "provisioning" | "ready" | "failed" | "destroying";

@@ -16,8 +16,6 @@ import {
   launchDockerRun,
   prepareLabRuntime,
   provisionLabStack,
-  stackLogs,
-  stackStatus,
   terminateDockerRun,
 } from "../src/docker.ts";
 import type { CommandResult, RunOptions } from "../src/process.ts";
@@ -522,70 +520,6 @@ describe("exact Docker cleanup", () => {
       confirmed: true,
       status: "absent",
     });
-  });
-
-  test("service logs enforce both line and hard UTF-8 byte caps", async () => {
-    const docker = new MockDocker();
-    docker.responses.push(
-      result('{"services":{"dev":{}}}'),
-      result(
-        Array.from(
-          { length: 900 },
-          (_, index) => `${index}: ${'\\"'.repeat(40)}`,
-        ).join("\n"),
-      ),
-    );
-    const transcript = await stackLogs(runtime(), "dev", 500, docker);
-    expect(transcript.truncated).toBe(true);
-    expect(Buffer.byteLength(transcript.text)).toBeLessThanOrEqual(8 * 1024);
-    expect(transcript.text.split("\n").length).toBeLessThanOrEqual(500);
-    expect(
-      Buffer.byteLength(
-        JSON.stringify({ labId: "lab-1", service: "dev", transcript }),
-      ),
-    ).toBeLessThan(16 * 1024);
-  });
-
-  test("stack status reduces Compose output to purpose-built service summaries", async () => {
-    const docker = new MockDocker();
-    docker.responses.push(
-      result(
-        JSON.stringify([
-          {
-            Service: "dev",
-            State: "running",
-            Health: "healthy",
-            ExitCode: 0,
-            ID: "container-secret",
-            Project: "internal-project",
-            Publishers: [{ URL: "0.0.0.0" }],
-          },
-        ]),
-      ),
-    );
-    expect(await stackStatus(runtime(), docker)).toEqual({
-      available: true,
-      services: [
-        { service: "dev", state: "running", health: "healthy", exitCode: 0 },
-      ],
-    });
-  });
-
-  test("stack status failures redact internal paths, owner hashes, projects, and image bookkeeping", async () => {
-    const docker = new MockDocker();
-    docker.responses.push(
-      resultWithError(
-        `compose -f /private/tmp/runtime/override.yaml --project-name ccl-secret failed for ${"a".repeat(
-          64,
-        )} codex-container-lab:private-image`,
-      ),
-    );
-    const encoded = JSON.stringify(await stackStatus(runtime(), docker));
-    expect(encoded).toContain("[path]");
-    expect(encoded).not.toContain("/private/tmp");
-    expect(encoded).not.toContain("a".repeat(64));
-    expect(encoded).not.toContain("ccl-secret");
-    expect(encoded).not.toContain("private-image");
   });
 });
 

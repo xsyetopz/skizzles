@@ -4,7 +4,7 @@ import { join } from "node:path";
 import process from "node:process";
 import { redactPublicText } from "./public-output.ts";
 import { type ReaperResult, reapArchivedOwners } from "./reaper-domain.ts";
-import { resolveRoots } from "./state.ts";
+import { resolveRoots } from "./state/layout.ts";
 import { CONTAINER_LAB_VERSION } from "./version.ts";
 
 export const REAPER_OUTPUT_MAX_BYTES = 1_536;

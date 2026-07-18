@@ -12,6 +12,11 @@ it("exports the stable installer integration descriptor", () => {
   expect(descriptor).toMatchObject({
     id: "codex-container-lab",
     integrationContract: 1,
+    locations: {
+      canonicalWorkspace:
+        "packages/container-lab/assets/integrations/container-lab.json",
+      packagedPlugin: "integrations/container-lab.json",
+    },
     ownership: {
       runtimeOwner: "skizzles",
       canonicalSource: "packages/container-lab",

@@ -1,10 +1,5 @@
 import process from "node:process";
 import {
-  type RunOutput,
-  runAttachedCommand,
-  validateAttachedRunRequest,
-} from "./attached-run.ts";
-import {
   type DockerRunner,
   defaultDockerRunner,
   dockerAvailable,
@@ -13,32 +8,36 @@ import {
   stackStatus,
 } from "./docker.ts";
 import {
+  type RunOutput,
+  runAttachedCommand,
+  validateAttachedRunRequest,
+} from "./lab/attached-run.ts";
+import {
   assertSourceRepositoryIdentity,
   destroyAllManagedLabs,
   destroyManagedLab,
   reconcileOwnerLabs,
   recoverLabSync as recoverManagedLabSync,
-} from "./lab-destruction.ts";
-import { createProvisionedLab } from "./lab-provisioning.ts";
+} from "./lab/destruction.ts";
+import { createProvisionedLab } from "./lab/provisioning.ts";
 import { withFileLock } from "./locks.ts";
 import { redactPublicText } from "./public-output.ts";
+import { listLabs, readLab } from "./state/lab-store.ts";
 import {
   activityLockPath,
   labLockPath,
-  listLabs,
-  readLab,
   resolveRoots,
   type StateRoots,
-} from "./state.ts";
+} from "./state/layout.ts";
 import {
   applySync,
   previewSync,
   publicSyncPreview,
   type SyncDirection,
-} from "./sync.ts";
+} from "./sync/service.ts";
 import type { LabMetadata } from "./types.ts";
 
-export type { RunOutput } from "./attached-run.ts";
+export type { RunOutput } from "./lab/attached-run.ts";
 
 export async function recoverLabSync(
   roots: StateRoots,

@@ -22,13 +22,13 @@ import {
   reapArchivedOwners,
   validateThreadsSchema,
 } from "../src/reaper-domain.ts";
+import { writeLab } from "../src/state/lab-store.ts";
 import {
-  ensureOwner,
   labManifestPath,
   ownerDirectory,
   ownerKey,
-  writeLab,
-} from "../src/state.ts";
+} from "../src/state/layout.ts";
+import { ensureOwner } from "../src/state/owner-store.ts";
 import type { LabMetadata } from "../src/types.ts";
 
 const temporary: string[] = [];

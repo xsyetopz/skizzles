@@ -2,13 +2,13 @@ import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import process from "node:process";
 import type { LabConfig } from "./config.ts";
 import {
-  cleanupLabLabelsInDocker,
-  destroyLabStackInDocker,
-} from "./docker-cleanup.ts";
-import {
   launchAttachedDockerProcess,
   terminateAttachedDockerProcess,
-} from "./docker-process.ts";
+} from "./docker/attached-process.ts";
+import {
+  cleanupLabLabelsInDocker,
+  destroyLabStackInDocker,
+} from "./docker/cleanup.ts";
 import {
   dockerAvailableInRuntime,
   prepareLabRuntimeInDocker,
@@ -17,7 +17,7 @@ import {
   readStackStatus,
   runComposeCommand,
   runtimeFromMetadata,
-} from "./docker-runtime.ts";
+} from "./docker/runtime.ts";
 import { type CommandResult, type RunOptions, runCommand } from "./process.ts";
 import type { Endpoint, LabMetadata, PersistedLabRuntime } from "./types.ts";
 

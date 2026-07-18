@@ -3,8 +3,8 @@ import { describe, expect, test } from "bun:test";
 import {
   inspectComposeModel,
   validateSecretEnvironmentModel,
-} from "../src/compose-inspection.ts";
-import type { ComposeModel } from "../src/compose-model.ts";
+} from "../src/compose/inspection.ts";
+import type { ComposeModel } from "../src/compose/model.ts";
 
 function composeVariable(expression: string): string {
   return `\${${expression}}`;
