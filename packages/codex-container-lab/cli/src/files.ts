@@ -5,12 +5,12 @@ import {
   mkdir,
   readFile,
   readlink,
-  realpath,
   rename,
   rm,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { canonicalDirectoryRoot } from "./trusted-filesystem";
 
 export type SyncFileKind = "file" | "symlink";
 
@@ -53,12 +53,7 @@ export function safeStateName(value: string, label = "identifier"): string {
 }
 
 export async function canonicalRoot(root: string): Promise<string> {
-  const resolved = await realpath(root);
-  const stat = await lstat(resolved);
-  if (!stat.isDirectory()) {
-    throw new Error(`Synchronization root is not a directory: ${root}`);
-  }
-  return resolved;
+  return await canonicalDirectoryRoot(root, "Synchronization root");
 }
 
 /** Resolve a relative path without permitting an existing parent symlink. */

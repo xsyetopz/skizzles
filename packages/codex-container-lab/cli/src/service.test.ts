@@ -20,6 +20,7 @@ import { ContainerLabService } from "./service";
 import {
   ensureOwner,
   labManifestPath,
+  ownerDirectory,
   ownerKey,
   readLab,
   writeLab,
@@ -348,7 +349,7 @@ describe("attached service lifecycle", () => {
     );
     await service.destroyLab(lab.id);
     for (const call of docker.runCalls.filter(
-      (call) => !call.args.includes("config") && !call.args.includes("up"),
+      (call) => !(call.args.includes("config") || call.args.includes("up")),
     )) {
       expect(Object.hasOwn(call.options?.env ?? {}, "REGISTRY_TOKEN")).toBe(
         false,
@@ -589,6 +590,45 @@ describe("attached service lifecycle", () => {
         fixture.lab.id,
       ),
     ).rejects.toThrow("unsafe indirection");
+    expect(docker.calls).toEqual([]);
+  });
+
+  test("destroy accepts an already-missing runtime but still removes exact state", async () => {
+    const fixture = await durableFixture("thread-destroy-missing", "failed");
+    const docker = new RecordingDocker();
+
+    expect(
+      await new ContainerLabService(
+        fixture.owner,
+        fixture.roots,
+        docker,
+      ).destroyLab(fixture.lab.id),
+    ).toEqual({ labId: fixture.lab.id, destroyed: true });
+    await expect(
+      readLab(fixture.roots, fixture.owner, fixture.lab.id),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("a replaced owner state directory fails closed before Docker or outside cleanup", async () => {
+    const fixture = await durableFixture(
+      "thread-destroy-replaced-state",
+      "ready",
+      true,
+    );
+    const ownerState = ownerDirectory(fixture.roots.stateRoot, fixture.owner);
+    const outside = join(fixture.root, "outside-owner-state");
+    const sentinel = join(outside, "sentinel.txt");
+    await rename(ownerState, outside);
+    await writeFile(sentinel, "keep");
+    await symlink(outside, ownerState, "dir");
+    const docker = new RecordingDocker();
+
+    await expect(
+      new ContainerLabService(fixture.owner, fixture.roots, docker).destroyLab(
+        fixture.lab.id,
+      ),
+    ).rejects.toThrow("unsafe indirection");
+    expect(await Bun.file(sentinel).text()).toBe("keep");
     expect(docker.calls).toEqual([]);
   });
 

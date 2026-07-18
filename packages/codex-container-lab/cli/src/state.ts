@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readdir, realpath, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import {
   basename,
@@ -14,6 +14,13 @@ import {
 import { composeCommandArgs, internalImageTag } from "./compose";
 import { manifestName } from "./config";
 import { readJson, safeStateName, writeJsonAtomic } from "./files";
+import {
+  assertRealDirectoryInside,
+  assertRealFileInside,
+  type ExactDirectoryChainOptions,
+  exactDirectoryChain as inspectExactDirectoryChain,
+  realDirectory,
+} from "./trusted-filesystem";
 import type { LabMetadata, OwnerManifest, PersistedLabRuntime } from "./types";
 
 export type StateRoots = { stateRoot: string; runtimeRoot: string };
@@ -37,6 +44,89 @@ const FINDING_SURFACES = new Set([
   "fixed-port",
   "non-loopback-port",
 ]);
+
+export async function exactDirectoryChain(
+  root: string,
+  segments: readonly string[],
+  label: string,
+  options: ExactDirectoryChainOptions = {},
+): Promise<boolean> {
+  return await inspectExactDirectoryChain(root, segments, label, options);
+}
+
+export async function assertOwnerStateDirectory(
+  stateRoot: string,
+  ownerKey: string,
+  missingMessage: string,
+  options: ExactDirectoryChainOptions = {},
+): Promise<void> {
+  if (
+    !(await exactDirectoryChain(
+      stateRoot,
+      ["owners", ownerKey],
+      "owner state directory",
+      options,
+    ))
+  ) {
+    throw new Error(missingMessage);
+  }
+}
+
+type TrustedLabRuntimeOptions = ExactDirectoryChainOptions & {
+  expectedOwner?: string;
+  expectedOwnerKey?: string;
+  containmentMessage?: string;
+};
+
+export function assertTrustedLabRuntimeIdentity(
+  roots: StateRoots,
+  lab: LabMetadata,
+  options: TrustedLabRuntimeOptions = {},
+): void {
+  const expectedOwner = options.expectedOwner ?? lab.owner;
+  const expectedOwnerKey = options.expectedOwnerKey ?? ownerKey(expectedOwner);
+  const expectedRuntime = expectedLabRuntimeRoot(roots, expectedOwner, lab.id);
+  if (
+    lab.owner !== expectedOwner ||
+    lab.ownerKey !== expectedOwnerKey ||
+    resolve(lab.runtimeRoot) !== expectedRuntime ||
+    resolve(lab.workspace) !== join(expectedRuntime, "workspace")
+  ) {
+    throw new Error(
+      options.containmentMessage ?? "lab runtime containment is invalid",
+    );
+  }
+}
+
+export async function inspectTrustedLabRuntimeDirectories(
+  roots: StateRoots,
+  lab: LabMetadata,
+  options: TrustedLabRuntimeOptions & { inspectWorkspace?: boolean } = {},
+): Promise<boolean> {
+  assertTrustedLabRuntimeIdentity(roots, lab, options);
+  const expectedOwner = options.expectedOwner ?? lab.owner;
+  const expectedOwnerKey = options.expectedOwnerKey ?? ownerKey(expectedOwner);
+  const chainOptions: ExactDirectoryChainOptions = {
+    ...(options.canonicalMismatch === undefined
+      ? {}
+      : { canonicalMismatch: options.canonicalMismatch }),
+  };
+  const runtimePresent = await exactDirectoryChain(
+    roots.runtimeRoot,
+    [expectedOwnerKey, lab.id],
+    "lab runtime directory",
+    chainOptions,
+  );
+  if (runtimePresent && options.inspectWorkspace !== false) {
+    await exactDirectoryChain(
+      roots.runtimeRoot,
+      [expectedOwnerKey, lab.id, "workspace"],
+      "lab workspace",
+      chainOptions,
+    );
+  }
+  return runtimePresent;
+}
 
 export function defaultStateRoot(): string {
   return join(
@@ -107,6 +197,24 @@ export function ownerManifestPath(stateRoot: string, owner: string): string {
 
 export function ownerLockPath(stateRoot: string, owner: string): string {
   return join(stateRoot, ".locks", `owner-${ownerKey(owner)}`);
+}
+
+export function labLockPath(
+  stateRoot: string,
+  owner: string,
+  labId: string,
+): string {
+  safeStateName(labId, "lab id");
+  return join(ownerDirectory(stateRoot, owner), ".locks", `lab-${labId}`);
+}
+
+export function activityLockPath(
+  stateRoot: string,
+  owner: string,
+  labId: string,
+): string {
+  safeStateName(labId, "lab id");
+  return join(ownerDirectory(stateRoot, owner), ".locks", `activity-${labId}`);
 }
 
 export function reapedOwnerPath(stateRoot: string, owner: string): string {
@@ -325,10 +433,14 @@ export async function assertReadyLabFilesystem(
     );
   }
   const source = await realDirectory(lab.sourceRoot, "lab source root");
-  await realFileInside(source, lab.manifestPath, "lab manifest");
-  await realFileInside(runtime, lab.runtime.overrideFile, "Compose override");
+  await assertRealFileInside(source, lab.manifestPath, "lab manifest");
+  await assertRealFileInside(
+    runtime,
+    lab.runtime.overrideFile,
+    "Compose override",
+  );
   if (lab.runtime.baseFile) {
-    await realFileInside(
+    await assertRealFileInside(
       runtime,
       lab.runtime.baseFile,
       "internal Compose base",
@@ -337,11 +449,11 @@ export async function assertReadyLabFilesystem(
   const mode = lab.runtime.config.mode;
   if (mode.kind === "compose") {
     for (const path of mode.files) {
-      await realFileInside(source, path, "project Compose file");
+      await assertRealFileInside(source, path, "project Compose file");
     }
   } else if (mode.kind === "dockerfile") {
-    await realFileInside(source, mode.dockerfile, "project Dockerfile");
-    await realDirectoryInside(source, mode.context, "Dockerfile context");
+    await assertRealFileInside(source, mode.dockerfile, "project Dockerfile");
+    await assertRealDirectoryInside(source, mode.context, "Dockerfile context");
   }
 }
 
@@ -680,52 +792,6 @@ function isFinding(value: unknown): boolean {
     FINDING_SURFACES.has(value["surface"]) &&
     isBoundedString(value["detail"], 1_024)
   );
-}
-
-async function realDirectory(path: string, label: string): Promise<string> {
-  const info = await lstat(path);
-  if (!info.isDirectory() || info.isSymbolicLink()) {
-    throw new Error(`${label} is not a real directory`);
-  }
-  return await realpath(path);
-}
-
-async function realFileInside(
-  root: string,
-  path: string,
-  label: string,
-): Promise<void> {
-  const info = await lstat(path);
-  if (!info.isFile() || info.isSymbolicLink()) {
-    throw new Error(`${label} is not a real file`);
-  }
-  assertCanonicalInside(root, await realpath(path), label, false);
-}
-
-async function realDirectoryInside(
-  root: string,
-  path: string,
-  label: string,
-): Promise<void> {
-  const canonical = await realDirectory(path, label);
-  assertCanonicalInside(root, canonical, label, true);
-}
-
-function assertCanonicalInside(
-  root: string,
-  candidate: string,
-  label: string,
-  allowRoot: boolean,
-): void {
-  const fromRoot = relative(root, candidate);
-  if (
-    (!allowRoot && fromRoot === "") ||
-    fromRoot === ".." ||
-    fromRoot.startsWith(`..${sep}`) ||
-    isAbsolute(fromRoot)
-  ) {
-    throw new Error(`${label} resolves outside its trusted root`);
-  }
 }
 
 function isTimestamp(value: unknown): value is string {

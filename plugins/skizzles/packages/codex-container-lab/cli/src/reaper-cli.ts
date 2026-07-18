@@ -6946,12 +6946,12 @@ var require_public_api = __commonJS((exports) => {
 
 // packages/codex-container-lab/cli/src/reaper-cli.ts
 import { homedir as homedir2 } from "os";
-import { join as join4 } from "path";
+import { join as join5 } from "path";
 
 // packages/codex-container-lab/cli/src/archive-reaper.ts
 import { Database } from "bun:sqlite";
-import { lstat as lstat6, readdir as readdir3, realpath as realpath4, rm as rm5 } from "fs/promises";
-import { join as join3, resolve as resolve3 } from "path";
+import { lstat as lstat5, readdir as readdir3, rm as rm5 } from "fs/promises";
+import { join as join4 } from "path";
 
 // node_modules/.bun/yaml@2.9.0/node_modules/yaml/dist/index.js
 var composer = require_composer();
@@ -7496,8 +7496,8 @@ function isRecord2(value) {
 
 // packages/codex-container-lab/cli/src/service.ts
 import { createHash as createHash3 } from "crypto";
-import { lstat as lstat5, mkdir as mkdir5, readdir as readdir2, realpath as realpath3, stat } from "fs/promises";
-import { join as join2, resolve as resolve2 } from "path";
+import { mkdir as mkdir5, readdir as readdir2, realpath as realpath2, stat } from "fs/promises";
+import { join as join3 } from "path";
 
 // packages/codex-container-lab/cli/src/lab-manifest.ts
 var manifestName = ".codex-container-lab.yaml";
@@ -7509,16 +7509,85 @@ var manifestName2 = manifestName;
 import { createHash, randomUUID } from "crypto";
 import { createReadStream } from "fs";
 import {
-  lstat as lstat2,
+  lstat as lstat3,
   mkdir as mkdir2,
   readFile as readFile2,
   readlink,
-  realpath,
   rename,
   rm as rm2,
   writeFile as writeFile2
 } from "fs/promises";
 import path from "path";
+
+// packages/codex-container-lab/cli/src/trusted-filesystem.ts
+import { lstat as lstat2, realpath } from "fs/promises";
+import { isAbsolute, join, relative, resolve, sep } from "path";
+async function canonicalDirectoryRoot(root, label) {
+  const canonical = await realpath(root);
+  const info = await lstat2(canonical);
+  if (!info.isDirectory()) {
+    throw new Error(`${label} is not a directory: ${root}`);
+  }
+  return canonical;
+}
+async function exactDirectoryChain(root, segments, label, options = {}) {
+  let candidate = resolve(root);
+  const rootInfo = await lstatIfPresent(candidate);
+  if (!rootInfo)
+    return false;
+  assertRealDirectory(rootInfo, `configured ${label}`);
+  let expected = await realpath(candidate);
+  for (const segment of segments) {
+    assertExactSegment(segment, label);
+    candidate = join(candidate, segment);
+    expected = join(expected, segment);
+    if (!await exactDirectory(candidate, expected, label, options)) {
+      return false;
+    }
+  }
+  return true;
+}
+async function lstatIfPresent(candidate) {
+  try {
+    return await lstat2(candidate);
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return;
+    throw error;
+  }
+}
+async function exactDirectory(candidate, expected, label, options) {
+  const info = await lstatIfPresent(candidate);
+  if (!info)
+    return false;
+  assertRealDirectory(info, label);
+  let canonical;
+  try {
+    canonical = await realpath(candidate);
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return false;
+    throw error;
+  }
+  if (canonical === expected)
+    return true;
+  if (options.canonicalMismatch === "unsafe-indirection") {
+    throw new Error(`${label} contains unsafe indirection`);
+  }
+  throw new Error(`${label} is not exactly contained in its configured root`);
+}
+function assertRealDirectory(info, label) {
+  if (!info.isDirectory() || info.isSymbolicLink()) {
+    throw new Error(`${label} contains unsafe indirection`);
+  }
+}
+function assertExactSegment(segment, label) {
+  if (segment.length === 0 || segment === "." || segment === ".." || segment.includes("/") || segment.includes("\\") || segment.includes("\x00") || isAbsolute(segment)) {
+    throw new Error(`${label} contains an unsafe path segment`);
+  }
+}
+
+// packages/codex-container-lab/cli/src/files.ts
 var MAX_SYNC_FILE_BYTES = 64 * 1024 * 1024;
 function safeRelativePath(value) {
   if (!value || value.includes("\x00") || value.includes("\\")) {
@@ -7537,24 +7606,19 @@ function safeStateName(value, label = "identifier") {
   return value;
 }
 async function canonicalRoot(root) {
-  const resolved = await realpath(root);
-  const stat = await lstat2(resolved);
-  if (!stat.isDirectory()) {
-    throw new Error(`Synchronization root is not a directory: ${root}`);
-  }
-  return resolved;
+  return await canonicalDirectoryRoot(root, "Synchronization root");
 }
-async function guardedPath(root, relative, createParents = false) {
-  safeRelativePath(relative);
+async function guardedPath(root, relative2, createParents = false) {
+  safeRelativePath(relative2);
   const canonical = await canonicalRoot(root);
-  const parts = relative.split("/");
+  const parts = relative2.split("/");
   let parent = canonical;
   for (const part of parts.slice(0, -1)) {
     parent = path.join(parent, part);
     try {
-      const stat = await lstat2(parent);
+      const stat = await lstat3(parent);
       if (stat.isSymbolicLink() || !stat.isDirectory()) {
-        throw new Error(`Unsafe synchronization parent for ${relative}`);
+        throw new Error(`Unsafe synchronization parent for ${relative2}`);
       }
     } catch (error) {
       if (error.code !== "ENOENT")
@@ -7566,19 +7630,19 @@ async function guardedPath(root, relative, createParents = false) {
   }
   const result = path.join(canonical, ...parts);
   if (result !== canonical && !result.startsWith(`${canonical}${path.sep}`)) {
-    throw new Error(`Synchronization path escapes its root: ${relative}`);
+    throw new Error(`Synchronization path escapes its root: ${relative2}`);
   }
   return result;
 }
-async function describeSyncFile(root, relative) {
-  const absolute = await guardedPath(root, relative);
-  const stat = await lstat2(absolute);
+async function describeSyncFile(root, relative2) {
+  const absolute = await guardedPath(root, relative2);
+  const stat = await lstat3(absolute);
   const mode = stat.mode & 511;
   if (stat.isSymbolicLink()) {
     const target = await readlink(absolute);
     const bytes = Buffer.from(target);
     return {
-      path: relative,
+      path: relative2,
       kind: "symlink",
       sha256: sha256(bytes),
       size: bytes.byteLength,
@@ -7586,17 +7650,17 @@ async function describeSyncFile(root, relative) {
     };
   }
   if (!stat.isFile()) {
-    throw new Error(`Eligible Git path is not a regular file or symlink: ${relative}`);
+    throw new Error(`Eligible Git path is not a regular file or symlink: ${relative2}`);
   }
   if (stat.size > MAX_SYNC_FILE_BYTES) {
-    throw new Error(`Eligible Git file exceeds 64 MiB synchronization limit: ${relative}`);
+    throw new Error(`Eligible Git file exceeds 64 MiB synchronization limit: ${relative2}`);
   }
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(absolute)) {
     hash.update(chunk);
   }
   return {
-    path: relative,
+    path: relative2,
     kind: "file",
     sha256: hash.digest("hex"),
     size: stat.size,
@@ -7619,17 +7683,17 @@ async function writeJsonAtomic(file, value) {
 
 // packages/codex-container-lab/cli/src/state.ts
 import { createHash as createHash2 } from "crypto";
-import { lstat as lstat3, mkdir as mkdir3, readdir, realpath as realpath2, rm as rm3 } from "fs/promises";
+import { mkdir as mkdir3, readdir, rm as rm3 } from "fs/promises";
 import { homedir, tmpdir } from "os";
 import {
   basename,
-  isAbsolute,
-  join,
+  isAbsolute as isAbsolute2,
+  join as join2,
   parse,
   posix,
-  relative,
-  resolve,
-  sep
+  relative as relative2,
+  resolve as resolve2,
+  sep as sep2
 } from "path";
 var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
 var FINDING_SURFACES = new Set([
@@ -7644,16 +7708,45 @@ var FINDING_SURFACES = new Set([
   "fixed-port",
   "non-loopback-port"
 ]);
+async function exactDirectoryChain2(root, segments, label, options = {}) {
+  return await exactDirectoryChain(root, segments, label, options);
+}
+async function assertOwnerStateDirectory(stateRoot, ownerKey, missingMessage, options = {}) {
+  if (!await exactDirectoryChain2(stateRoot, ["owners", ownerKey], "owner state directory", options)) {
+    throw new Error(missingMessage);
+  }
+}
+function assertTrustedLabRuntimeIdentity(roots, lab, options = {}) {
+  const expectedOwner = options.expectedOwner ?? lab.owner;
+  const expectedOwnerKey = options.expectedOwnerKey ?? ownerKey(expectedOwner);
+  const expectedRuntime = expectedLabRuntimeRoot(roots, expectedOwner, lab.id);
+  if (lab.owner !== expectedOwner || lab.ownerKey !== expectedOwnerKey || resolve2(lab.runtimeRoot) !== expectedRuntime || resolve2(lab.workspace) !== join2(expectedRuntime, "workspace")) {
+    throw new Error(options.containmentMessage ?? "lab runtime containment is invalid");
+  }
+}
+async function inspectTrustedLabRuntimeDirectories(roots, lab, options = {}) {
+  assertTrustedLabRuntimeIdentity(roots, lab, options);
+  const expectedOwner = options.expectedOwner ?? lab.owner;
+  const expectedOwnerKey = options.expectedOwnerKey ?? ownerKey(expectedOwner);
+  const chainOptions = {
+    ...options.canonicalMismatch === undefined ? {} : { canonicalMismatch: options.canonicalMismatch }
+  };
+  const runtimePresent = await exactDirectoryChain2(roots.runtimeRoot, [expectedOwnerKey, lab.id], "lab runtime directory", chainOptions);
+  if (runtimePresent && options.inspectWorkspace !== false) {
+    await exactDirectoryChain2(roots.runtimeRoot, [expectedOwnerKey, lab.id, "workspace"], "lab workspace", chainOptions);
+  }
+  return runtimePresent;
+}
 function defaultStateRoot() {
-  return join(homedir(), "Library", "Application Support", "OpenAI", "codex-container-lab");
+  return join2(homedir(), "Library", "Application Support", "OpenAI", "codex-container-lab");
 }
 function defaultRuntimeRoot() {
-  return join(tmpdir(), "codex-container-lab");
+  return join2(tmpdir(), "codex-container-lab");
 }
 function resolveRoots(options = {}) {
   return {
-    stateRoot: resolve(options.stateRoot ?? process.env["CODEX_CONTAINER_LAB_STATE_ROOT"] ?? defaultStateRoot()),
-    runtimeRoot: resolve(options.runtimeRoot ?? process.env["CODEX_CONTAINER_LAB_RUNTIME_ROOT"] ?? defaultRuntimeRoot())
+    stateRoot: resolve2(options.stateRoot ?? process.env["CODEX_CONTAINER_LAB_STATE_ROOT"] ?? defaultStateRoot()),
+    runtimeRoot: resolve2(options.runtimeRoot ?? process.env["CODEX_CONTAINER_LAB_RUNTIME_ROOT"] ?? defaultRuntimeRoot())
   };
 }
 function resolveOwner(explicit, environment = process.env) {
@@ -7672,13 +7765,21 @@ function ownerKey(owner) {
   return createHash2("sha256").update(owner).digest("hex");
 }
 function ownerDirectory(stateRoot, owner) {
-  return join(stateRoot, "owners", ownerKey(owner));
+  return join2(stateRoot, "owners", ownerKey(owner));
 }
 function ownerLockPath(stateRoot, owner) {
-  return join(stateRoot, ".locks", `owner-${ownerKey(owner)}`);
+  return join2(stateRoot, ".locks", `owner-${ownerKey(owner)}`);
+}
+function labLockPath(stateRoot, owner, labId) {
+  safeStateName(labId, "lab id");
+  return join2(ownerDirectory(stateRoot, owner), ".locks", `lab-${labId}`);
+}
+function activityLockPath(stateRoot, owner, labId) {
+  safeStateName(labId, "lab id");
+  return join2(ownerDirectory(stateRoot, owner), ".locks", `activity-${labId}`);
 }
 function reapedOwnerPath(stateRoot, owner) {
-  return join(stateRoot, "reaped", `${ownerKey(owner)}.json`);
+  return join2(stateRoot, "reaped", `${ownerKey(owner)}.json`);
 }
 async function readReapedOwner(stateRoot, owner) {
   let value;
@@ -7708,15 +7809,15 @@ async function markOwnerReaped(stateRoot, owner) {
   return manifest;
 }
 function labsDirectory(stateRoot, owner) {
-  return join(ownerDirectory(stateRoot, owner), "labs");
+  return join2(ownerDirectory(stateRoot, owner), "labs");
 }
 function labManifestPath(stateRoot, owner, labId) {
   safeStateName(labId, "lab id");
-  return join(labsDirectory(stateRoot, owner), `${labId}.json`);
+  return join2(labsDirectory(stateRoot, owner), `${labId}.json`);
 }
 function expectedLabRuntimeRoot(roots, owner, labId) {
   safeStateName(labId, "lab id");
-  return join(resolve(roots.runtimeRoot), ownerKey(owner), labId);
+  return join2(resolve2(roots.runtimeRoot), ownerKey(owner), labId);
 }
 async function readOwnerManifest(path2) {
   const value = await readJson(path2);
@@ -7724,7 +7825,7 @@ async function readOwnerManifest(path2) {
     throw new Error(`invalid owner manifest: ${path2}`);
   }
   resolveOwner(value["owner"], {});
-  if (value["ownerKey"] !== ownerKey(value["owner"]) || basename(resolve(path2, "..")) !== value["ownerKey"]) {
+  if (value["ownerKey"] !== ownerKey(value["owner"]) || basename(resolve2(path2, "..")) !== value["ownerKey"]) {
     throw new Error(`owner manifest hash mismatch: ${path2}`);
   }
   return value;
@@ -7779,12 +7880,12 @@ function assertLabMetadata(value, roots, owner, labId) {
     const expectedRuntime = expectedLabRuntimeRoot(roots, owner, labId);
     if (!isNormalizedAbsolute(value["runtimeRoot"]) || value["runtimeRoot"] !== expectedRuntime)
       throw new Error("invalid runtime root");
-    if (value["workspace"] !== join(expectedRuntime, "workspace")) {
+    if (value["workspace"] !== join2(expectedRuntime, "workspace")) {
       throw new Error("invalid workspace root");
     }
     if (!isNormalizedAbsolute(value["sourceRoot"]) || value["sourceRoot"] === parse(value["sourceRoot"]).root)
       throw new Error("invalid source root");
-    if (value["manifestPath"] !== join(value["sourceRoot"], manifestName2)) {
+    if (value["manifestPath"] !== join2(value["sourceRoot"], manifestName2)) {
       throw new Error("invalid source manifest relationship");
     }
     if (typeof value["commandService"] !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["commandService"])) {
@@ -7867,8 +7968,8 @@ function validatePersistedRuntime(lab, runtime) {
     throw new Error("secret environment metadata mismatch");
   }
   const runtimeRoot = lab["runtimeRoot"];
-  const expectedOverride = join(runtimeRoot, "override.compose.yaml");
-  const expectedBase = mode["kind"] === "compose" ? undefined : join(runtimeRoot, "base.compose.yaml");
+  const expectedOverride = join2(runtimeRoot, "override.compose.yaml");
+  const expectedBase = mode["kind"] === "compose" ? undefined : join2(runtimeRoot, "base.compose.yaml");
   if (runtime["overrideFile"] !== expectedOverride || runtime["baseFile"] !== expectedBase || !Array.isArray(runtime["findings"]) || !runtime["findings"].every(isFinding) || JSON.stringify(runtime["findings"]) !== JSON.stringify(lab["findings"]))
     throw new Error("invalid runtime files or findings");
   const expectedArgs = composeCommandArgs2(config, {
@@ -7898,11 +7999,11 @@ function isPathInside(root, candidate, allowRoot = false) {
   if (typeof candidate !== "string" || !isNormalizedAbsolute(candidate)) {
     return false;
   }
-  const fromRoot = relative(root, candidate);
-  return (allowRoot || fromRoot !== "") && fromRoot !== ".." && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot);
+  const fromRoot = relative2(root, candidate);
+  return (allowRoot || fromRoot !== "") && fromRoot !== ".." && !fromRoot.startsWith(`..${sep2}`) && !isAbsolute2(fromRoot);
 }
 function isNormalizedAbsolute(value) {
-  return typeof value === "string" && !value.includes("\x00") && isAbsolute(value) && resolve(value) === value;
+  return typeof value === "string" && !value.includes("\x00") && isAbsolute2(value) && resolve2(value) === value;
 }
 function isEndpoint(value) {
   return isRecord3(value) && typeof value["name"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["name"]) && typeof value["service"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && isBoundedString(value["url"], 2048);
@@ -8001,7 +8102,7 @@ async function statePaths(identity3) {
   const used = path2.join(root, "used");
   const journals = path2.join(root, "journals");
   const backups = path2.join(root, "backups");
-  for (const relative2 of [
+  for (const relative3 of [
     "sync",
     `sync/${identity3.labId}`,
     `sync/${identity3.labId}/previews`,
@@ -8009,7 +8110,7 @@ async function statePaths(identity3) {
     `sync/${identity3.labId}/journals`,
     `sync/${identity3.labId}/backups`
   ]) {
-    await ensureStateDirectory(stateRoot, relative2);
+    await ensureStateDirectory(stateRoot, relative3);
   }
   return {
     root,
@@ -8020,15 +8121,15 @@ async function statePaths(identity3) {
     baseline: path2.join(root, "baseline.json")
   };
 }
-async function ensureStateDirectory(stateRoot, relative2) {
-  const directory = await guardedPath(stateRoot, relative2, true);
+async function ensureStateDirectory(stateRoot, relative3) {
+  const directory = await guardedPath(stateRoot, relative3, true);
   await mkdir4(directory, { mode: 448 }).catch((error) => {
     if (error.code !== "EEXIST")
       throw error;
   });
   const stat = await lstat4(directory);
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
-    throw new Error(`Unsafe synchronization state directory: ${relative2}`);
+    throw new Error(`Unsafe synchronization state directory: ${relative3}`);
   }
 }
 async function restoreBackups(targetRoot, backups) {
@@ -8081,7 +8182,7 @@ async function readRequiredJson(file, message2) {
 
 // packages/codex-container-lab/cli/src/service.ts
 async function recoverLabSync(roots, lab) {
-  if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join2(lab.runtimeRoot, "workspace")) {
+  if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join3(lab.runtimeRoot, "workspace")) {
     throw new Error("lab runtime containment is invalid");
   }
   try {
@@ -8092,7 +8193,7 @@ async function recoverLabSync(roots, lab) {
       return;
     throw error;
   }
-  const journalDirectory = join2(lab.runtimeRoot, "sync", lab.id, "journals");
+  const journalDirectory = join3(lab.runtimeRoot, "sync", lab.id, "journals");
   let journals;
   try {
     journals = await readdir2(journalDirectory);
@@ -8118,7 +8219,7 @@ async function assertSourceRepositoryIdentity(lab) {
     "--path-format=absolute",
     "--git-common-dir"
   ], { timeoutMs: 1e4 })).stdout.toString().trim();
-  const actual = createHash3("sha256").update(await realpath3(commonGit)).digest("hex").slice(0, 12);
+  const actual = createHash3("sha256").update(await realpath2(commonGit)).digest("hex").slice(0, 12);
   if (actual !== lab.repoHash) {
     throw new Error("lab source repository identity no longer matches durable state");
   }
@@ -8153,8 +8254,8 @@ async function reapArchivedOwners(options) {
     };
   }
   try {
-    const ownerRoot = join3(roots.stateRoot, "owners");
-    if (!await exactDirectoryChain(roots.stateRoot, ["owners"], "owner state root"))
+    const ownerRoot = join4(roots.stateRoot, "owners");
+    if (!await exactDirectoryChain2(roots.stateRoot, ["owners"], "owner state root"))
       return result;
     let entries;
     try {
@@ -8180,10 +8281,10 @@ async function reapArchivedOwners(options) {
       }
       let owner;
       try {
-        if (!await exactDirectoryChain(roots.stateRoot, ["owners", entry.name], "owner state directory")) {
+        if (!await exactDirectoryChain2(roots.stateRoot, ["owners", entry.name], "owner state directory")) {
           throw new Error("owner state directory disappeared");
         }
-        owner = await readOwnerManifest(join3(ownerRoot, entry.name, "owner.json"));
+        owner = await readOwnerManifest(join4(ownerRoot, entry.name, "owner.json"));
       } catch {
         result.retainedOwners.push({
           ownerKey: fallbackKey,
@@ -8218,10 +8319,8 @@ async function reapArchivedOwners(options) {
       try {
         await options.beforeOwnerLock?.(owner.ownerKey);
         await withFileLock(ownerLockPath(roots.stateRoot, owner.owner), async () => {
-          if (!await exactDirectoryChain(roots.stateRoot, ["owners", owner.ownerKey], "owner state directory")) {
-            throw new Error("owner state directory disappeared");
-          }
-          const currentOwner = await readOwnerManifest(join3(ownerRoot, owner.ownerKey, "owner.json"));
+          await assertOwnerStateDirectory(roots.stateRoot, owner.ownerKey, "owner state directory disappeared");
+          const currentOwner = await readOwnerManifest(join4(ownerRoot, owner.ownerKey, "owner.json"));
           if (currentOwner.owner !== owner.owner || currentOwner.ownerKey !== owner.ownerKey || currentOwner.createdAt !== owner.createdAt) {
             throw new Error("owner state changed before archive cleanup");
           }
@@ -8258,11 +8357,11 @@ async function reapArchivedOwners(options) {
             throw new Error("thread archival changed or became uncertain before final cleanup");
           }
           await markOwnerReaped(roots.stateRoot, owner.owner);
-          if (await exactDirectoryChain(roots.stateRoot, ["owners", owner.ownerKey], "owner state directory")) {
-            await boundedRemove(join3(ownerRoot, owner.ownerKey), 1e5);
+          if (await exactDirectoryChain2(roots.stateRoot, ["owners", owner.ownerKey], "owner state directory")) {
+            await boundedRemove(join4(ownerRoot, owner.ownerKey), 1e5);
           }
-          if (await exactDirectoryChain(roots.runtimeRoot, [owner.ownerKey], "owner runtime directory")) {
-            await boundedRemove(join3(roots.runtimeRoot, owner.ownerKey), 1e5);
+          if (await exactDirectoryChain2(roots.runtimeRoot, [owner.ownerKey], "owner runtime directory")) {
+            await boundedRemove(join4(roots.runtimeRoot, owner.ownerKey), 1e5);
           }
           result.archivedOwnersCleaned.push(owner.ownerKey);
         }, { attempts: 600, delayMs: 50 });
@@ -8311,7 +8410,7 @@ function queryThreadState(database, owner) {
   return "uncertain";
 }
 async function prepareExactLab(roots, snapshot, cleanup) {
-  const lock = join3(ownerDirectory(roots.stateRoot, snapshot.owner), ".locks", `lab-${snapshot.id}`);
+  const lock = labLockPath(roots.stateRoot, snapshot.owner, snapshot.id);
   const claimed = await withFileLock(lock, async () => {
     const lab = await readLab(roots, snapshot.owner, snapshot.id);
     await validateReaperLab(roots, lab.owner, lab.ownerKey, lab);
@@ -8320,8 +8419,8 @@ async function prepareExactLab(roots, snapshot, cleanup) {
   await cleanup?.(claimed);
 }
 async function cleanupExactLab(roots, lab, docker, authorize) {
-  const labLock = join3(ownerDirectory(roots.stateRoot, lab.owner), ".locks", `lab-${lab.id}`);
-  const activityLock = join3(ownerDirectory(roots.stateRoot, lab.owner), ".locks", `activity-${lab.id}`);
+  const labLock = labLockPath(roots.stateRoot, lab.owner, lab.id);
+  const activityLock = activityLockPath(roots.stateRoot, lab.owner, lab.id);
   await authorize();
   let previous;
   await withFileLock(labLock, async () => {
@@ -8360,86 +8459,38 @@ async function cleanupExactLab(roots, lab, docker, authorize) {
     await validateReaperLab(roots, lab.owner, lab.ownerKey, lab);
     await authorize();
     await recoverLabSync(roots, lab);
-    if (!await exactDirectoryChain(roots.stateRoot, ["owners", lab.ownerKey], "owner state directory")) {
-      throw new Error("owner state directory disappeared");
-    }
-    await exactDirectoryChain(roots.runtimeRoot, [lab.ownerKey, lab.id], "lab runtime directory");
+    await assertOwnerStateDirectory(roots.stateRoot, lab.ownerKey, "owner state directory disappeared");
+    await inspectTrustedLabRuntimeDirectories(roots, lab, {
+      inspectWorkspace: false
+    });
     await cleanupLabLabels(lab, lab.modeKind === "dockerfile", docker);
-    if (await exactDirectoryChain(roots.runtimeRoot, [lab.ownerKey, lab.id], "lab runtime directory")) {
+    if (await inspectTrustedLabRuntimeDirectories(roots, lab, {
+      inspectWorkspace: false
+    })) {
       await boundedRemove(lab.runtimeRoot, 1e5);
     }
-    if (!await exactDirectoryChain(roots.stateRoot, ["owners", lab.ownerKey], "owner state directory")) {
-      throw new Error("owner state directory disappeared");
-    }
+    await assertOwnerStateDirectory(roots.stateRoot, lab.ownerKey, "owner state directory disappeared");
     await removeLabState(roots.stateRoot, lab.owner, lab.id);
   }, { attempts: 600, delayMs: 50 }), { attempts: 600, delayMs: 50 });
 }
 async function validateReaperLab(roots, owner, ownerKey2, lab) {
-  const expectedRuntime = resolve3(roots.runtimeRoot, ownerKey2, lab.id);
-  if (lab.owner !== owner || lab.ownerKey !== ownerKey2 || resolve3(lab.runtimeRoot) !== expectedRuntime || resolve3(lab.workspace) !== join3(expectedRuntime, "workspace")) {
-    throw new Error("lab ownership or runtime containment is invalid");
-  }
+  const identity3 = {
+    expectedOwner: owner,
+    expectedOwnerKey: ownerKey2,
+    containmentMessage: "lab ownership or runtime containment is invalid"
+  };
+  assertTrustedLabRuntimeIdentity(roots, lab, identity3);
   if (lab.modeKind === "dockerfile" && lab.managedImage !== internalImageTag2(ownerKey2, lab.id)) {
     throw new Error("managed Dockerfile image identity is invalid");
   }
-  const runtimePresent = await exactDirectoryChain(roots.runtimeRoot, [ownerKey2, lab.id], "lab runtime directory");
-  if (runtimePresent) {
-    await exactDirectoryChain(roots.runtimeRoot, [ownerKey2, lab.id, "workspace"], "lab workspace");
-  }
-}
-async function exactDirectoryChain(root, segments, label) {
-  let path3 = resolve3(root);
-  let info;
-  try {
-    info = await lstat6(path3);
-  } catch (error) {
-    if (error.code === "ENOENT")
-      return false;
-    throw error;
-  }
-  if (!info.isDirectory() || info.isSymbolicLink()) {
-    throw new Error(`configured ${label} contains unsafe indirection`);
-  }
-  let expected = await realpath4(path3);
-  for (const segment of segments) {
-    path3 = join3(path3, segment);
-    expected = join3(expected, segment);
-    if (!await exactDirectory(path3, expected, label))
-      return false;
-  }
-  return true;
-}
-async function exactDirectory(path3, expected, label) {
-  let info;
-  try {
-    info = await lstat6(path3);
-  } catch (error) {
-    if (error.code === "ENOENT")
-      return false;
-    throw error;
-  }
-  if (!info.isDirectory() || info.isSymbolicLink()) {
-    throw new Error(`${label} contains unsafe indirection`);
-  }
-  let canonical;
-  try {
-    canonical = await realpath4(path3);
-  } catch (error) {
-    if (error.code === "ENOENT")
-      return false;
-    throw error;
-  }
-  if (canonical !== expected) {
-    throw new Error(`${label} is not exactly contained in its configured root`);
-  }
-  return true;
+  await inspectTrustedLabRuntimeDirectories(roots, lab, identity3);
 }
 async function boundedRemove(root, maxEntries) {
   let count = 0;
   async function scan(path3) {
     let info;
     try {
-      info = await lstat6(path3);
+      info = await lstat5(path3);
     } catch (error) {
       if (error.code === "ENOENT")
         return;
@@ -8452,7 +8503,7 @@ async function boundedRemove(root, maxEntries) {
       if (++count > maxEntries) {
         throw new Error("cleanup path exceeds bounded entry limit");
       }
-      await scan(join3(path3, name));
+      await scan(join4(path3, name));
     }
   }
   await scan(root);
@@ -8474,7 +8525,7 @@ async function reaperMain(args = process.argv.slice(2)) {
       return 0;
     }
     const result = await reapArchivedOwners({
-      dbPath: parsed.dbPath ?? join4(homedir2(), ".codex", "state_5.sqlite"),
+      dbPath: parsed.dbPath ?? join5(homedir2(), ".codex", "state_5.sqlite"),
       roots: resolveRoots({
         ...parsed.stateRoot === undefined ? {} : { stateRoot: parsed.stateRoot },
         ...parsed.runtimeRoot === undefined ? {} : { runtimeRoot: parsed.runtimeRoot }

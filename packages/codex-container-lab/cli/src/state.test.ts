@@ -3,10 +3,13 @@ import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  activityLockPath,
   ensureOwner,
+  labLockPath,
   listLabs,
   ownerDirectory,
   ownerKey,
+  ownerLockPath,
   readLab,
   resolveOwner,
   writeLab,
@@ -61,6 +64,23 @@ describe("owner resolution and durable state", () => {
       "labs",
       "owner.json",
     ]);
+  });
+
+  test("derives owner, lab, and activity locks from the hashed owner boundary", () => {
+    const root = "/state";
+    const owner = "thread/with spaces";
+    const locks = join(ownerDirectory(root, owner), ".locks");
+
+    expect(ownerLockPath(root, owner)).toBe(
+      join(root, ".locks", `owner-${ownerKey(owner)}`),
+    );
+    expect(labLockPath(root, owner, "lab-1")).toBe(join(locks, "lab-lab-1"));
+    expect(activityLockPath(root, owner, "lab-1")).toBe(
+      join(locks, "activity-lab-1"),
+    );
+    expect(() => labLockPath(root, owner, "../escaped")).toThrow(
+      "Unsafe lab id",
+    );
   });
 
   test("accepts synchronous provisioning manifests without worker identity", async () => {

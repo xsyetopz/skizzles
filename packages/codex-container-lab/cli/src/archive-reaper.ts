@@ -1,15 +1,20 @@
 import { Database } from "bun:sqlite";
-import { lstat, readdir, realpath, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { lstat, readdir, rm } from "node:fs/promises";
+import { join } from "node:path";
 import { internalImageTag } from "./compose";
 import type { DockerRunner } from "./docker";
 import { cleanupLabLabels, defaultDockerRunner } from "./docker";
 import { withFileLock } from "./locks";
 import { recoverLabSync } from "./service";
 import {
+  activityLockPath,
+  assertOwnerStateDirectory,
+  assertTrustedLabRuntimeIdentity,
+  exactDirectoryChain,
+  inspectTrustedLabRuntimeDirectories,
+  labLockPath,
   listLabs,
   markOwnerReaped,
-  ownerDirectory,
   ownerLockPath,
   readLab,
   readOwnerManifest,
@@ -166,15 +171,11 @@ export async function reapArchivedOwners(
           ownerLockPath(roots.stateRoot, owner.owner),
           // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
           async () => {
-            if (
-              !(await exactDirectoryChain(
-                roots.stateRoot,
-                ["owners", owner.ownerKey],
-                "owner state directory",
-              ))
-            ) {
-              throw new Error("owner state directory disappeared");
-            }
+            await assertOwnerStateDirectory(
+              roots.stateRoot,
+              owner.ownerKey,
+              "owner state directory disappeared",
+            );
             const currentOwner = await readOwnerManifest(
               join(ownerRoot, owner.ownerKey, "owner.json"),
             );
@@ -350,11 +351,7 @@ async function prepareExactLab(
   snapshot: import("./types").LabMetadata,
   cleanup?: (claimed: import("./types").LabMetadata) => Promise<void>,
 ): Promise<void> {
-  const lock = join(
-    ownerDirectory(roots.stateRoot, snapshot.owner),
-    ".locks",
-    `lab-${snapshot.id}`,
-  );
+  const lock = labLockPath(roots.stateRoot, snapshot.owner, snapshot.id);
   const claimed = await withFileLock(
     lock,
     async () => {
@@ -373,16 +370,8 @@ async function cleanupExactLab(
   docker: DockerRunner,
   authorize: () => Promise<void>,
 ): Promise<void> {
-  const labLock = join(
-    ownerDirectory(roots.stateRoot, lab.owner),
-    ".locks",
-    `lab-${lab.id}`,
-  );
-  const activityLock = join(
-    ownerDirectory(roots.stateRoot, lab.owner),
-    ".locks",
-    `activity-${lab.id}`,
-  );
+  const labLock = labLockPath(roots.stateRoot, lab.owner, lab.id);
+  const activityLock = activityLockPath(roots.stateRoot, lab.owner, lab.id);
   await authorize();
   let previous:
     | {
@@ -442,39 +431,27 @@ async function cleanupExactLab(
           await validateReaperLab(roots, lab.owner, lab.ownerKey, lab);
           await authorize();
           await recoverLabSync(roots, lab);
-          if (
-            !(await exactDirectoryChain(
-              roots.stateRoot,
-              ["owners", lab.ownerKey],
-              "owner state directory",
-            ))
-          ) {
-            throw new Error("owner state directory disappeared");
-          }
-          await exactDirectoryChain(
-            roots.runtimeRoot,
-            [lab.ownerKey, lab.id],
-            "lab runtime directory",
+          await assertOwnerStateDirectory(
+            roots.stateRoot,
+            lab.ownerKey,
+            "owner state directory disappeared",
           );
+          await inspectTrustedLabRuntimeDirectories(roots, lab, {
+            inspectWorkspace: false,
+          });
           await cleanupLabLabels(lab, lab.modeKind === "dockerfile", docker);
           if (
-            await exactDirectoryChain(
-              roots.runtimeRoot,
-              [lab.ownerKey, lab.id],
-              "lab runtime directory",
-            )
+            await inspectTrustedLabRuntimeDirectories(roots, lab, {
+              inspectWorkspace: false,
+            })
           ) {
             await boundedRemove(lab.runtimeRoot, 100_000);
           }
-          if (
-            !(await exactDirectoryChain(
-              roots.stateRoot,
-              ["owners", lab.ownerKey],
-              "owner state directory",
-            ))
-          ) {
-            throw new Error("owner state directory disappeared");
-          }
+          await assertOwnerStateDirectory(
+            roots.stateRoot,
+            lab.ownerKey,
+            "owner state directory disappeared",
+          );
           await removeLabState(roots.stateRoot, lab.owner, lab.id);
         },
         { attempts: 600, delayMs: 50 },
@@ -489,86 +466,19 @@ async function validateReaperLab(
   ownerKey: string,
   lab: import("./types").LabMetadata,
 ): Promise<void> {
-  const expectedRuntime = resolve(roots.runtimeRoot, ownerKey, lab.id);
-  if (
-    lab.owner !== owner ||
-    lab.ownerKey !== ownerKey ||
-    resolve(lab.runtimeRoot) !== expectedRuntime ||
-    resolve(lab.workspace) !== join(expectedRuntime, "workspace")
-  ) {
-    throw new Error("lab ownership or runtime containment is invalid");
-  }
+  const identity = {
+    expectedOwner: owner,
+    expectedOwnerKey: ownerKey,
+    containmentMessage: "lab ownership or runtime containment is invalid",
+  };
+  assertTrustedLabRuntimeIdentity(roots, lab, identity);
   if (
     lab.modeKind === "dockerfile" &&
     lab.managedImage !== internalImageTag(ownerKey, lab.id)
   ) {
     throw new Error("managed Dockerfile image identity is invalid");
   }
-  const runtimePresent = await exactDirectoryChain(
-    roots.runtimeRoot,
-    [ownerKey, lab.id],
-    "lab runtime directory",
-  );
-  if (runtimePresent) {
-    await exactDirectoryChain(
-      roots.runtimeRoot,
-      [ownerKey, lab.id, "workspace"],
-      "lab workspace",
-    );
-  }
-}
-
-async function exactDirectoryChain(
-  root: string,
-  segments: string[],
-  label: string,
-): Promise<boolean> {
-  let path = resolve(root);
-  let info: import("node:fs").Stats;
-  try {
-    info = await lstat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-  if (!info.isDirectory() || info.isSymbolicLink()) {
-    throw new Error(`configured ${label} contains unsafe indirection`);
-  }
-  let expected = await realpath(path);
-  for (const segment of segments) {
-    path = join(path, segment);
-    expected = join(expected, segment);
-    if (!(await exactDirectory(path, expected, label))) return false;
-  }
-  return true;
-}
-
-async function exactDirectory(
-  path: string,
-  expected: string,
-  label: string,
-): Promise<boolean> {
-  let info: import("node:fs").Stats;
-  try {
-    info = await lstat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-  if (!info.isDirectory() || info.isSymbolicLink()) {
-    throw new Error(`${label} contains unsafe indirection`);
-  }
-  let canonical: string;
-  try {
-    canonical = await realpath(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-  if (canonical !== expected) {
-    throw new Error(`${label} is not exactly contained in its configured root`);
-  }
-  return true;
+  await inspectTrustedLabRuntimeDirectories(roots, lab, identity);
 }
 
 async function boundedRemove(root: string, maxEntries: number): Promise<void> {

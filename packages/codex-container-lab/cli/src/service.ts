@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readdir, realpath, stat } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdir, readdir, realpath, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { internalImageTag } from "./compose";
 import { loadLabConfig } from "./config";
 import {
@@ -22,11 +22,14 @@ import { withFileLock } from "./locks";
 import { runCommand } from "./process";
 import { redactPublicText } from "./public-output";
 import {
+  activityLockPath,
+  assertOwnerStateDirectory,
   assertReadyLabFilesystem,
   ensureOwner,
   expectedLabRuntimeRoot,
+  inspectTrustedLabRuntimeDirectories,
+  labLockPath,
   listLabs,
-  ownerDirectory,
   ownerLockPath,
   ownerRuntimeDirectory,
   readLab,
@@ -492,25 +495,21 @@ export class ContainerLabService {
             }
             if (runtimePresent) {
               if (
-                !(await exactDirectoryChain(
-                  this.roots.runtimeRoot,
-                  [lab.ownerKey, lab.id],
-                  "lab runtime directory",
-                ))
+                !(await inspectTrustedLabRuntimeDirectories(this.roots, lab, {
+                  canonicalMismatch: "unsafe-indirection",
+                  inspectWorkspace: false,
+                }))
               ) {
                 throw new Error("lab runtime directory changed during cleanup");
               }
               await removeIfPresent(lab.runtimeRoot, { recursive: true });
             }
-            if (
-              !(await exactDirectoryChain(
-                this.roots.stateRoot,
-                ["owners", lab.ownerKey],
-                "owner state directory",
-              ))
-            ) {
-              throw new Error("owner state directory changed during cleanup");
-            }
+            await assertOwnerStateDirectory(
+              this.roots.stateRoot,
+              lab.ownerKey,
+              "owner state directory changed during cleanup",
+              { canonicalMismatch: "unsafe-indirection" },
+            );
             await removeLabState(this.roots.stateRoot, this.owner, id);
             return { labId: id, destroyed: true };
           },
@@ -760,28 +759,15 @@ export class ContainerLabService {
   }
 
   private async assertDestroyFilesystem(lab: LabMetadata): Promise<boolean> {
-    if (
-      !(await exactDirectoryChain(
-        this.roots.stateRoot,
-        ["owners", lab.ownerKey],
-        "owner state directory",
-      ))
-    ) {
-      throw new Error("owner state directory is missing or unsafe");
-    }
-    const runtimePresent = await exactDirectoryChain(
-      this.roots.runtimeRoot,
-      [lab.ownerKey, lab.id],
-      "lab runtime directory",
+    await assertOwnerStateDirectory(
+      this.roots.stateRoot,
+      lab.ownerKey,
+      "owner state directory is missing or unsafe",
+      { canonicalMismatch: "unsafe-indirection" },
     );
-    if (runtimePresent) {
-      await exactDirectoryChain(
-        this.roots.runtimeRoot,
-        [lab.ownerKey, lab.id, "workspace"],
-        "lab workspace",
-      );
-    }
-    return runtimePresent;
+    return await inspectTrustedLabRuntimeDirectories(this.roots, lab, {
+      canonicalMismatch: "unsafe-indirection",
+    });
   }
 
   private ownerLock(): string {
@@ -789,57 +775,12 @@ export class ContainerLabService {
   }
 
   private labLock(id: string): string {
-    return join(
-      ownerDirectory(this.roots.stateRoot, this.owner),
-      ".locks",
-      `lab-${id}`,
-    );
+    return labLockPath(this.roots.stateRoot, this.owner, id);
   }
 
   private activityLock(id: string): string {
-    return join(
-      ownerDirectory(this.roots.stateRoot, this.owner),
-      ".locks",
-      `activity-${id}`,
-    );
+    return activityLockPath(this.roots.stateRoot, this.owner, id);
   }
-}
-
-async function exactDirectoryChain(
-  root: string,
-  segments: string[],
-  label: string,
-): Promise<boolean> {
-  let path = resolve(root);
-  let info: import("node:fs").Stats;
-  try {
-    info = await lstat(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-  if (!info.isDirectory() || info.isSymbolicLink()) {
-    throw new Error(`configured ${label} contains unsafe indirection`);
-  }
-  let expected = await realpath(path);
-  for (const segment of segments) {
-    path = join(path, segment);
-    expected = join(expected, segment);
-    try {
-      info = await lstat(path);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-      throw error;
-    }
-    if (
-      !info.isDirectory() ||
-      info.isSymbolicLink() ||
-      (await realpath(path)) !== expected
-    ) {
-      throw new Error(`${label} contains unsafe indirection`);
-    }
-  }
-  return true;
 }
 
 export async function recoverLabSync(

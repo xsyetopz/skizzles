@@ -1,14 +1,28 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { reapArchivedOwners, validateThreadsSchema } from "./archive-reaper";
 import type { DockerRunner } from "./docker";
 import { withFileLock } from "./locks";
 import type { CommandResult, RunOptions } from "./process";
-import { ensureOwner, ownerKey, writeLab } from "./state";
+import {
+  ensureOwner,
+  labManifestPath,
+  ownerDirectory,
+  ownerKey,
+  writeLab,
+} from "./state";
 import type { LabMetadata } from "./types";
 
 const temporary: string[] = [];
@@ -125,6 +139,75 @@ describe("archive reaper", () => {
     const result = await reapArchivedOwners({ dbPath, roots: fixture, docker });
     expect(result.ok).toBe(false);
     expect(await Bun.file(join(outside, "sentinel")).text()).toBe("keep");
+    expect(docker.calls).toEqual([]);
+  });
+
+  test("an already-missing runtime remains safely cleanable", async () => {
+    const fixture = await roots();
+    const lab = await createLabFixture(fixture, "thread-missing-runtime");
+    await rm(join(fixture.runtimeRoot, lab.ownerKey), { recursive: true });
+    const dbPath = join(fixture.root, "state.sqlite");
+    const db = createDatabase(dbPath);
+    db.run("INSERT INTO threads VALUES (?, 1, 10)", [lab.owner]);
+    db.close();
+
+    const result = await reapArchivedOwners({
+      dbPath,
+      roots: fixture,
+      docker: new EmptyDocker(),
+    });
+
+    expect(result.archivedOwnersCleaned).toEqual([lab.ownerKey]);
+    expect(result.ok).toBe(true);
+  });
+
+  test("a replaced owner state directory is retained without outside deletion or Docker", async () => {
+    const fixture = await roots();
+    const lab = await createLabFixture(fixture, "thread-replaced-state");
+    const ownerState = ownerDirectory(fixture.stateRoot, lab.owner);
+    const outside = join(fixture.root, "outside-owner-state");
+    const sentinel = join(outside, "sentinel.txt");
+    const dbPath = join(fixture.root, "state.sqlite");
+    const db = createDatabase(dbPath);
+    db.run("INSERT INTO threads VALUES (?, 1, 10)", [lab.owner]);
+    db.close();
+    const docker = new EmptyDocker();
+
+    const result = await reapArchivedOwners({
+      dbPath,
+      roots: fixture,
+      docker,
+      beforeOwnerLock: async () => {
+        await rename(ownerState, outside);
+        await writeFile(sentinel, "keep");
+        await symlink(outside, ownerState, "dir");
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.retainedOwners[0]?.reason).toContain("unsafe indirection");
+    expect(await Bun.file(sentinel).text()).toBe("keep");
+    expect(docker.calls).toEqual([]);
+  });
+
+  test("an escaped persisted runtime is retained before Docker", async () => {
+    const fixture = await roots();
+    const lab = await createLabFixture(fixture, "thread-escaped-runtime");
+    const manifest = labManifestPath(fixture.stateRoot, lab.owner, lab.id);
+    const persisted = JSON.parse(await readFile(manifest, "utf8"));
+    persisted.runtimeRoot = join(fixture.root, "outside");
+    persisted.workspace = join(persisted.runtimeRoot, "workspace");
+    await writeFile(manifest, JSON.stringify(persisted));
+    const dbPath = join(fixture.root, "state.sqlite");
+    const db = createDatabase(dbPath);
+    db.run("INSERT INTO threads VALUES (?, 1, 10)", [lab.owner]);
+    db.close();
+    const docker = new EmptyDocker();
+
+    const result = await reapArchivedOwners({ dbPath, roots: fixture, docker });
+
+    expect(result.ok).toBe(false);
+    expect(result.retainedOwners[0]?.reason).toContain("invalid lab manifest");
     expect(docker.calls).toEqual([]);
   });
 
