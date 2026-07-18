@@ -6999,7 +6999,7 @@ var $stringify = publicApi.stringify;
 var $visit = visit.visit;
 var $visitAsync = visit.visitAsync;
 
-// packages/codex-container-lab/cli/src/compose.ts
+// packages/codex-container-lab/cli/src/compose-generation.ts
 function composeCommandArgs(config, options) {
   const sourceFiles = config.mode.kind === "compose" ? config.mode.files : options.baseFile ? [options.baseFile] : [];
   if (sourceFiles.length === 0) {
@@ -7018,6 +7018,14 @@ function composeCommandArgs(config, options) {
 }
 function internalImageTag(ownerKey, labId) {
   return `codex-container-lab:${ownerKey.slice(0, 24)}-${labId}`;
+}
+
+// packages/codex-container-lab/cli/src/compose.ts
+function composeCommandArgs2(config, options) {
+  return composeCommandArgs(config, options);
+}
+function internalImageTag2(ownerKey, labId) {
+  return internalImageTag(ownerKey, labId);
 }
 
 // packages/codex-container-lab/cli/src/docker.ts
@@ -7179,7 +7187,7 @@ async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultD
   }
 }
 async function removeManagedInternalImage(metadata, runner) {
-  const tag = internalImageTag(metadata.ownerKey, metadata.id);
+  const tag = internalImageTag2(metadata.ownerKey, metadata.id);
   const inspected = await runner.run([
     "image",
     "inspect",
@@ -7491,8 +7499,11 @@ import { createHash as createHash3 } from "crypto";
 import { lstat as lstat5, mkdir as mkdir5, readdir as readdir2, realpath as realpath3, stat } from "fs/promises";
 import { join as join2, resolve as resolve2 } from "path";
 
-// packages/codex-container-lab/cli/src/config.ts
+// packages/codex-container-lab/cli/src/lab-manifest.ts
 var manifestName = ".codex-container-lab.yaml";
+
+// packages/codex-container-lab/cli/src/config.ts
+var manifestName2 = manifestName;
 
 // packages/codex-container-lab/cli/src/files.ts
 import { createHash, randomUUID } from "crypto";
@@ -7773,7 +7784,7 @@ function assertLabMetadata(value, roots, owner, labId) {
     }
     if (!isNormalizedAbsolute(value["sourceRoot"]) || value["sourceRoot"] === parse(value["sourceRoot"]).root)
       throw new Error("invalid source root");
-    if (value["manifestPath"] !== join(value["sourceRoot"], manifestName)) {
+    if (value["manifestPath"] !== join(value["sourceRoot"], manifestName2)) {
       throw new Error("invalid source manifest relationship");
     }
     if (typeof value["commandService"] !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["commandService"])) {
@@ -7804,7 +7815,7 @@ function assertLabMetadata(value, roots, owner, labId) {
       throw new Error("ready lab has no runtime");
     }
     if (value["modeKind"] === "dockerfile") {
-      if (value["managedImage"] !== internalImageTag(value["ownerKey"], value["id"])) {
+      if (value["managedImage"] !== internalImageTag2(value["ownerKey"], value["id"])) {
         throw new Error("invalid managed image");
       }
     } else if (value["managedImage"] !== undefined) {
@@ -7860,7 +7871,7 @@ function validatePersistedRuntime(lab, runtime) {
   const expectedBase = mode["kind"] === "compose" ? undefined : join(runtimeRoot, "base.compose.yaml");
   if (runtime["overrideFile"] !== expectedOverride || runtime["baseFile"] !== expectedBase || !Array.isArray(runtime["findings"]) || !runtime["findings"].every(isFinding) || JSON.stringify(runtime["findings"]) !== JSON.stringify(lab["findings"]))
     throw new Error("invalid runtime files or findings");
-  const expectedArgs = composeCommandArgs(config, {
+  const expectedArgs = composeCommandArgs2(config, {
     projectName: lab["composeProject"],
     overrideFile: expectedOverride,
     ...expectedBase === undefined ? {} : { baseFile: expectedBase }
@@ -8368,7 +8379,7 @@ async function validateReaperLab(roots, owner, ownerKey2, lab) {
   if (lab.owner !== owner || lab.ownerKey !== ownerKey2 || resolve3(lab.runtimeRoot) !== expectedRuntime || resolve3(lab.workspace) !== join3(expectedRuntime, "workspace")) {
     throw new Error("lab ownership or runtime containment is invalid");
   }
-  if (lab.modeKind === "dockerfile" && lab.managedImage !== internalImageTag(ownerKey2, lab.id)) {
+  if (lab.modeKind === "dockerfile" && lab.managedImage !== internalImageTag2(ownerKey2, lab.id)) {
     throw new Error("managed Dockerfile image identity is invalid");
   }
   const runtimePresent = await exactDirectoryChain(roots.runtimeRoot, [ownerKey2, lab.id], "lab runtime directory");

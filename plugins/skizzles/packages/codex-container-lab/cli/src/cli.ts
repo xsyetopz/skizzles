@@ -7070,7 +7070,7 @@ var $stringify = publicApi.stringify;
 var $visit = visit.visit;
 var $visitAsync = visit.visitAsync;
 
-// packages/codex-container-lab/cli/src/compose.ts
+// packages/codex-container-lab/cli/src/compose-generation.ts
 var labelPrefix = "io.openai.codex-container-lab";
 function generateBaseCompose(config) {
   if (config.mode.kind === "compose")
@@ -7092,6 +7092,20 @@ function generateBaseCompose(config) {
 function generateOverrideCompose(config, model, context) {
   const labels = managementLabels(context);
   const serviceNames = Object.keys(model.services ?? {});
+  validateOverrideModel(config, model, serviceNames);
+  const services = Object.fromEntries(serviceNames.map((name) => [
+    name,
+    generateServiceOverride(config, context, labels, name)
+  ]));
+  const volumes = labelTopLevelResources(model.volumes, labels);
+  const networks = labelTopLevelResources(model.networks, labels);
+  return $stringify({
+    services,
+    ...Object.keys(volumes).length > 0 ? { volumes } : {},
+    ...Object.keys(networks).length > 0 ? { networks } : {}
+  });
+}
+function validateOverrideModel(config, model, serviceNames) {
   if (!serviceNames.includes(config.mode.commandService)) {
     throw new Error(`command service is absent from normalized Compose model: ${config.mode.commandService}`);
   }
@@ -7104,39 +7118,32 @@ function generateOverrideCompose(config, model, context) {
       throw new Error(`declared port ${port.name} overlaps a project publication for ${port.service}:${port.target}`);
     }
   }
-  const services = Object.fromEntries(serviceNames.map((name) => {
-    const override = { labels };
-    if (name === config.mode.commandService) {
-      override["init"] = true;
-      override["working_dir"] = config.runtime.workspace;
-      override["volumes"] = [
-        {
-          type: "bind",
-          source: context.workspaceHostPath,
-          target: config.runtime.workspace
-        }
-      ];
-      if (config.forwardEnvironment.length > 0) {
-        override["environment"] = config.forwardEnvironment;
+}
+function generateServiceOverride(config, context, labels, serviceName) {
+  const override = { labels };
+  if (serviceName === config.mode.commandService) {
+    override["init"] = true;
+    override["working_dir"] = config.runtime.workspace;
+    override["volumes"] = [
+      {
+        type: "bind",
+        source: context.workspaceHostPath,
+        target: config.runtime.workspace
       }
-      if (config.mode.kind === "dockerfile") {
-        override["image"] = internalImageTag(context.ownerKey, context.labId);
-        override["build"] = { labels };
-      }
+    ];
+    if (config.forwardEnvironment.length > 0) {
+      override["environment"] = config.forwardEnvironment;
     }
-    const servicePorts = config.ports.filter((port) => port.service === name);
-    if (servicePorts.length > 0) {
-      override["ports"] = servicePorts.map(({ target }) => `127.0.0.1::${target}`);
+    if (config.mode.kind === "dockerfile") {
+      override["image"] = internalImageTag(context.ownerKey, context.labId);
+      override["build"] = { labels };
     }
-    return [name, override];
-  }));
-  const volumes = labelTopLevelResources(model.volumes, labels);
-  const networks = labelTopLevelResources(model.networks, labels);
-  return $stringify({
-    services,
-    ...Object.keys(volumes).length > 0 ? { volumes } : {},
-    ...Object.keys(networks).length > 0 ? { networks } : {}
-  });
+  }
+  const servicePorts = config.ports.filter((port) => port.service === serviceName);
+  if (servicePorts.length > 0) {
+    override["ports"] = servicePorts.map(({ target }) => `127.0.0.1::${target}`);
+  }
+  return override;
 }
 function managementLabels(context) {
   return {
@@ -7167,60 +7174,88 @@ function composeCommandArgs(config, options) {
 function internalImageTag(ownerKey, labId) {
   return `codex-container-lab:${ownerKey.slice(0, 24)}-${labId}`;
 }
+function publishedTarget(port) {
+  if (typeof port === "string") {
+    const target = (port.split("/")[0] ?? "").split(":").at(-1);
+    const parsed = Number(target);
+    return Number.isInteger(parsed) ? parsed : undefined;
+  }
+  if (isRecord2(port)) {
+    const parsed = Number(port["target"]);
+    return Number.isInteger(parsed) ? parsed : undefined;
+  }
+  return;
+}
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// packages/codex-container-lab/cli/src/compose-inspection.ts
+var hostNamespaceKeys = [
+  "pid",
+  "ipc",
+  "network_mode",
+  "uts",
+  "userns_mode",
+  "cgroup"
+];
+var environmentNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+var socketPathPattern = /(?:^|\/)docker\.sock$|(?:^|\/)podman\.sock$|\.sock$/i;
+var regexSyntaxPattern = /[.*+?^${}()|[\]\\]/g;
 function inspectComposeModel(model) {
   const findings = [];
   for (const [serviceName, service] of Object.entries(model.services ?? {})) {
-    if (service["use_api_socket"] === true) {
-      add(findings, serviceName, "socket-bind", "container engine API socket enabled; details redacted");
-    }
-    if (service["privileged"] === true) {
-      add(findings, serviceName, "privileged", "privileged mode enabled");
-    }
-    for (const key of [
-      "pid",
-      "ipc",
-      "network_mode",
-      "uts",
-      "userns_mode",
-      "cgroup"
-    ]) {
-      if (service[key] === "host") {
-        add(findings, serviceName, "host-namespace", `${key} uses host namespace`);
-      }
-    }
-    const capabilities = asArray(service["cap_add"]);
-    if (capabilities.length > 0) {
-      add(findings, serviceName, "capability", `${capabilities.length} added capability(s)`);
-    }
-    const devices = asArray(service["devices"]);
-    if (devices.length > 0) {
-      add(findings, serviceName, "device", `${devices.length} host device mapping(s); paths redacted`);
-    }
-    for (const volume of asArray(service["volumes"])) {
-      inspectVolume(findings, serviceName, volume);
-    }
-    for (const port of asArray(service["ports"])) {
-      inspectPort(findings, serviceName, port);
-    }
-    const secrets = asArray(service["secrets"]);
-    if (secrets.length > 0) {
-      add(findings, serviceName, "secret", `${secrets.length} secret attachment(s); names redacted`);
-    }
-    const configs = asArray(service["configs"]);
-    if (configs.length > 0) {
-      add(findings, serviceName, "config", `${configs.length} config attachment(s); names redacted`);
-    }
-    if (isRecord2(service["build"])) {
-      const ssh = service["build"]["ssh"];
-      if (Array.isArray(ssh) && ssh.length > 0 || isRecord2(ssh) && Object.keys(ssh).length > 0 || typeof ssh === "string") {
-        add(findings, serviceName, "secret", "build SSH forwarding enabled; identities redacted");
-      }
-      const buildSecrets = asArray(service["build"]["secrets"]);
-      if (buildSecrets.length > 0) {
-        add(findings, serviceName, "secret", `${buildSecrets.length} build secret attachment(s); names redacted`);
-      }
+    inspectService(findings, serviceName, service);
+  }
+  inspectTopLevelResources(findings, model);
+  return findings;
+}
+function inspectService(findings, serviceName, service) {
+  inspectServicePrivileges(findings, serviceName, service);
+  inspectServiceMappings(findings, serviceName, service);
+  inspectServiceAttachments(findings, serviceName, service);
+  inspectBuildCredentials(findings, serviceName, service["build"]);
+}
+function inspectServicePrivileges(findings, serviceName, service) {
+  if (service["use_api_socket"] === true) {
+    add(findings, serviceName, "socket-bind", "container engine API socket enabled; details redacted");
+  }
+  if (service["privileged"] === true) {
+    add(findings, serviceName, "privileged", "privileged mode enabled");
+  }
+  for (const key of hostNamespaceKeys) {
+    if (service[key] === "host") {
+      add(findings, serviceName, "host-namespace", `${key} uses host namespace`);
     }
   }
+  addCountFinding(findings, serviceName, "capability", asArray2(service["cap_add"]).length, "added capability(s)");
+  addCountFinding(findings, serviceName, "device", asArray2(service["devices"]).length, "host device mapping(s); paths redacted");
+}
+function inspectServiceMappings(findings, serviceName, service) {
+  for (const volume of asArray2(service["volumes"])) {
+    inspectVolume(findings, serviceName, volume);
+  }
+  for (const port of asArray2(service["ports"])) {
+    inspectPort(findings, serviceName, port);
+  }
+}
+function inspectServiceAttachments(findings, serviceName, service) {
+  addCountFinding(findings, serviceName, "secret", asArray2(service["secrets"]).length, "secret attachment(s); names redacted");
+  addCountFinding(findings, serviceName, "config", asArray2(service["configs"]).length, "config attachment(s); names redacted");
+}
+function inspectBuildCredentials(findings, serviceName, value) {
+  if (!isRecord3(value))
+    return;
+  const ssh = value["ssh"];
+  if (Array.isArray(ssh) && ssh.length > 0 || isRecord3(ssh) && Object.keys(ssh).length > 0 || typeof ssh === "string") {
+    add(findings, serviceName, "secret", "build SSH forwarding enabled; identities redacted");
+  }
+  addCountFinding(findings, serviceName, "secret", asArray2(value["secrets"]).length, "build secret attachment(s); names redacted");
+}
+function inspectTopLevelResources(findings, model) {
   const topSecrets = Object.keys(model.secrets ?? {}).length;
   if (topSecrets > 0) {
     findings.push({
@@ -7235,16 +7270,23 @@ function inspectComposeModel(model) {
       detail: `${topConfigs} top-level config definition(s); names redacted`
     });
   }
-  return findings;
 }
 function validateSecretEnvironmentModel(model, declaredNames, environment) {
   const declared = new Set(declaredNames);
+  validateSecretDefinitions(model, declared, environment);
+  validatePlaintextServiceEnvironment(model, declaredNames, declared);
+  const referenced = referencedSecretNameInModel(model, declaredNames);
+  if (referenced) {
+    throw new Error(`Compose model references declared secret environment source: ${referenced}`);
+  }
+}
+function validateSecretDefinitions(model, declared, environment) {
   for (const definition of Object.values(model.secrets ?? {})) {
-    if (!isRecord2(definition) || typeof definition["environment"] !== "string") {
+    if (!isRecord3(definition) || typeof definition["environment"] !== "string") {
       continue;
     }
     const source = definition["environment"];
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(source)) {
+    if (!environmentNamePattern.test(source)) {
       throw new Error("Compose secret environment source is invalid or undeclared");
     }
     if (!declared.has(source)) {
@@ -7254,39 +7296,45 @@ function validateSecretEnvironmentModel(model, declaredNames, environment) {
       throw new Error(`Compose secret environment source is unavailable: ${source}`);
     }
   }
+}
+function validatePlaintextServiceEnvironment(model, declaredNames, declared) {
   for (const [serviceName, service] of Object.entries(model.services ?? {})) {
-    const serviceEnvironment = service["environment"];
-    if (Array.isArray(serviceEnvironment)) {
-      for (const entry of serviceEnvironment) {
-        if (typeof entry !== "string")
-          continue;
-        const separator = entry.indexOf("=");
-        const key = separator < 0 ? entry : entry.slice(0, separator);
-        const value = separator < 0 ? "" : entry.slice(separator + 1);
-        const referenced2 = declared.has(key) ? key : referencedSecretName(value, declaredNames);
-        if (referenced2) {
-          throw plaintextSecretEnvironmentError(serviceName, referenced2);
-        }
-      }
-    } else if (isRecord2(serviceEnvironment)) {
-      for (const [key, value] of Object.entries(serviceEnvironment)) {
-        const referenced2 = declared.has(key) ? key : referencedSecretName(value, declaredNames);
-        if (referenced2) {
-          throw plaintextSecretEnvironmentError(serviceName, referenced2);
-        }
-      }
-    }
+    validateServiceEnvironment(serviceName, service["environment"], declaredNames, declared);
   }
-  const referenced = referencedSecretNameInModel(model, declaredNames);
+}
+function validateServiceEnvironment(serviceName, environment, declaredNames, declared) {
+  if (Array.isArray(environment)) {
+    validateServiceEnvironmentList(serviceName, environment, declaredNames, declared);
+  } else if (isRecord3(environment)) {
+    validateServiceEnvironmentMap(serviceName, environment, declaredNames, declared);
+  }
+}
+function validateServiceEnvironmentList(serviceName, environment, declaredNames, declared) {
+  for (const entry of environment) {
+    if (typeof entry !== "string")
+      continue;
+    const separator = entry.indexOf("=");
+    const key = separator < 0 ? entry : entry.slice(0, separator);
+    const value = separator < 0 ? "" : entry.slice(separator + 1);
+    rejectPlaintextSecretReference(serviceName, key, value, declaredNames, declared);
+  }
+}
+function validateServiceEnvironmentMap(serviceName, environment, declaredNames, declared) {
+  for (const [key, value] of Object.entries(environment)) {
+    rejectPlaintextSecretReference(serviceName, key, value, declaredNames, declared);
+  }
+}
+function rejectPlaintextSecretReference(serviceName, key, value, declaredNames, declared) {
+  const referenced = declared.has(key) ? key : referencedSecretName(value, declaredNames);
   if (referenced) {
-    throw new Error(`Compose model references declared secret environment source: ${referenced}`);
+    throw plaintextSecretEnvironmentError(serviceName, referenced);
   }
 }
 function referencedSecretName(value, names) {
   if (typeof value !== "string")
     return;
   return names.find((name) => {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const escaped = name.replace(regexSyntaxPattern, "\\$&");
     return new RegExp(`\\$${escaped}(?![A-Za-z0-9_])|\\$\\{${escaped}(?![A-Za-z0-9_])`).test(value);
   });
 }
@@ -7297,17 +7345,25 @@ function referencedSecretNameInModel(model, names) {
     const direct = referencedSecretName(value, names);
     if (direct)
       return direct;
-    if (Array.isArray(value)) {
-      for (const nested of value)
-        pending.push(nested);
-    } else if (isRecord2(value)) {
-      for (const [key, nested] of Object.entries(value)) {
-        const keyReference = referencedSecretName(key, names);
-        if (keyReference)
-          return keyReference;
-        pending.push(nested);
-      }
-    }
+    const keyReference = enqueueNestedValues(value, names, pending);
+    if (keyReference)
+      return keyReference;
+  }
+  return;
+}
+function enqueueNestedValues(value, names, pending) {
+  if (Array.isArray(value)) {
+    for (const nested of value)
+      pending.push(nested);
+    return;
+  }
+  if (!isRecord3(value))
+    return;
+  for (const [key, nested] of Object.entries(value)) {
+    const keyReference = referencedSecretName(key, names);
+    if (keyReference)
+      return keyReference;
+    pending.push(nested);
   }
   return;
 }
@@ -7320,14 +7376,14 @@ function inspectVolume(findings, service, volume) {
   if (typeof volume === "string") {
     source = volume.split(":", 1)[0] ?? "";
     isBind = source.startsWith("/") || source.startsWith(".") || source.startsWith("~");
-  } else if (isRecord2(volume)) {
+  } else if (isRecord3(volume)) {
     isBind = volume["type"] === "bind";
     source = typeof volume["source"] === "string" ? volume["source"] : "";
   }
   if (!isBind)
     return;
   add(findings, service, "host-bind", "host bind mount; path redacted");
-  if (/(?:^|\/)docker\.sock$|(?:^|\/)podman\.sock$|\.sock$/i.test(source)) {
+  if (socketPathPattern.test(source)) {
     add(findings, service, "socket-bind", "host socket bind mount; path redacted");
   }
 }
@@ -7341,7 +7397,7 @@ function inspectPort(findings, service, port) {
       [hostIp, published] = parts;
     else if (parts.length === 2)
       published = parts[0];
-  } else if (isRecord2(port)) {
+  } else if (isRecord3(port)) {
     hostIp = typeof port["host_ip"] === "string" ? port["host_ip"] : undefined;
     published = port["published"] === undefined ? undefined : String(port["published"]);
   }
@@ -7352,38 +7408,56 @@ function inspectPort(findings, service, port) {
     add(findings, service, "non-loopback-port", "port is published beyond explicit loopback; address redacted");
   }
 }
-function publishedTarget(port) {
-  if (typeof port === "string") {
-    const target = (port.split("/")[0] ?? "").split(":").at(-1);
-    const parsed = Number(target);
-    return Number.isInteger(parsed) ? parsed : undefined;
-  }
-  if (isRecord2(port)) {
-    const parsed = Number(port["target"]);
-    return Number.isInteger(parsed) ? parsed : undefined;
-  }
-  return;
-}
 function add(findings, service, surface, detail) {
   findings.push({ service, surface, detail });
 }
-function asArray(value) {
+function addCountFinding(findings, service, surface, count, detail) {
+  if (count > 0)
+    add(findings, service, surface, `${count} ${detail}`);
+}
+function asArray2(value) {
   return Array.isArray(value) ? value : [];
 }
-function isRecord2(value) {
+function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// packages/codex-container-lab/cli/src/compose.ts
+function composeCommandArgs2(config, options) {
+  return composeCommandArgs(config, options);
+}
+function generateBaseCompose2(config) {
+  return generateBaseCompose(config);
+}
+function generateOverrideCompose2(config, model, context) {
+  return generateOverrideCompose(config, model, context);
+}
+function internalImageTag2(ownerKey, labId) {
+  return internalImageTag(ownerKey, labId);
+}
+function inspectComposeModel2(model) {
+  return inspectComposeModel(model);
+}
+function validateSecretEnvironmentModel2(model, declaredNames, environment) {
+  validateSecretEnvironmentModel(model, declaredNames, environment);
 }
 
 // packages/codex-container-lab/cli/src/config.ts
 import { readFile, realpath, stat } from "fs/promises";
-import { isAbsolute, posix, relative, resolve } from "path";
+import { isAbsolute, relative, resolve } from "path";
+
+// packages/codex-container-lab/cli/src/lab-manifest.ts
+import { posix } from "path";
 var manifestName = ".codex-container-lab.yaml";
+var serviceNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
+var environmentNamePattern2 = /^[A-Za-z_][A-Za-z0-9_]*$/;
+var uriSchemePattern = /^[a-z][a-z0-9+.-]*$/;
 function isValidContainerPath(value, allowRoot) {
   if (!value.startsWith("/") || value.includes("\x00") || !allowRoot && value === "/")
     return false;
   return posix.normalize(value) === value && value.split("/").every((part) => part !== "." && part !== "..");
 }
-function isRecord3(value) {
+function isRecord4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 function hasOwn(value, key) {
@@ -7400,7 +7474,7 @@ function rejectUnknownKeys(value, allowed, path, issues) {
   }
 }
 function asObject(value, path, issues) {
-  if (!isRecord3(value)) {
+  if (!isRecord4(value)) {
     addIssue(issues, path, "must be an object");
     return;
   }
@@ -7431,7 +7505,7 @@ function parseServiceName(value) {
   if (typeof value !== "string")
     return;
   const parsed = value.trim();
-  return /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(parsed) ? parsed : undefined;
+  return serviceNamePattern.test(parsed) ? parsed : undefined;
 }
 function parseRelativePath(value) {
   if (typeof value !== "string")
@@ -7440,7 +7514,7 @@ function parseRelativePath(value) {
   return parsed.length > 0 ? parsed : undefined;
 }
 function parseEnvironmentName(value) {
-  return typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value) ? value : undefined;
+  return typeof value === "string" && environmentNamePattern2.test(value) ? value : undefined;
 }
 function parseShellArgument(value) {
   if (typeof value !== "string" || value.length === 0 || value.includes("\x00")) {
@@ -7477,7 +7551,12 @@ function parseCompose(value, path, issues) {
   if (!record)
     return;
   rejectUnknownKeys(record, ["files", "command_service"], path, issues);
-  const files = hasOwn(record, "files") ? parseStringArray(record["files"], [...path, "files"], issues, parseRelativePath, "must be a non-empty relative path", 1) : (addIssue(issues, [...path, "files"], "is required"), []);
+  let files = [];
+  if (hasOwn(record, "files")) {
+    files = parseStringArray(record["files"], [...path, "files"], issues, parseRelativePath, "must be a non-empty relative path", 1);
+  } else {
+    addIssue(issues, [...path, "files"], "is required");
+  }
   const commandService = requiredString(record, "command_service", path, issues, parseServiceName, "must be a Compose service name");
   return commandService === undefined ? undefined : { files, command_service: commandService };
 }
@@ -7528,7 +7607,7 @@ function parsePort(value, path, issues) {
   }
   let scheme;
   if (hasOwn(record, "scheme")) {
-    if (typeof record["scheme"] !== "string" || !/^[a-z][a-z0-9+.-]*$/.test(record["scheme"])) {
+    if (typeof record["scheme"] !== "string" || !uriSchemePattern.test(record["scheme"])) {
       addIssue(issues, [...path, "scheme"], "must be a URI scheme");
     } else {
       scheme = record["scheme"];
@@ -7574,6 +7653,24 @@ function validateManifest(document) {
     "environment",
     "secret_environment"
   ], [], issues);
+  const modes = parseManifestModes(manifest, issues);
+  const runtime = parseRuntime(manifest["runtime"], ["runtime"], issues);
+  validateRuntimePaths(runtime, issues);
+  const ports = parsePorts(manifest["ports"], ["ports"], issues);
+  const { environment, secretEnvironment } = parseEnvironmentLists(manifest, issues);
+  validateUniquePortTargets(ports, issues);
+  if (issues.length > 0) {
+    throw new Error(`invalid ${manifestName}: ${issues.map(formatIssue).join("; ")}`);
+  }
+  return {
+    ...modes,
+    runtime,
+    ports,
+    environment,
+    secret_environment: secretEnvironment
+  };
+}
+function parseManifestModes(manifest, issues) {
   const compose = hasOwn(manifest, "compose") ? parseCompose(manifest["compose"], ["compose"], issues) : undefined;
   const dockerfile = hasOwn(manifest, "dockerfile") ? parseDockerfile(manifest["dockerfile"], ["dockerfile"], issues) : undefined;
   const image = hasOwn(manifest, "image") ? parseImage(manifest["image"], ["image"], issues) : undefined;
@@ -7581,7 +7678,13 @@ function validateManifest(document) {
   if (modeCount !== 1) {
     addIssue(issues, [], "exactly one of compose, dockerfile, or image must be configured");
   }
-  const runtime = parseRuntime(manifest["runtime"], ["runtime"], issues);
+  return {
+    ...compose === undefined ? {} : { compose },
+    ...dockerfile === undefined ? {} : { dockerfile },
+    ...image === undefined ? {} : { image }
+  };
+}
+function validateRuntimePaths(runtime, issues) {
   if (!isValidContainerPath(runtime.workspace, false)) {
     addIssue(issues, ["runtime", "workspace"], "must be a normalized absolute container path other than /");
   }
@@ -7589,7 +7692,8 @@ function validateManifest(document) {
   if (shellExecutable === undefined || !isValidContainerPath(shellExecutable, false)) {
     addIssue(issues, ["runtime", "shell"], "first argv item must be a normalized absolute executable path");
   }
-  const ports = parsePorts(manifest["ports"], ["ports"], issues);
+}
+function parseEnvironmentLists(manifest, issues) {
   const environment = parseEnvironment(manifest["environment"], ["environment"], issues);
   if (new Set(environment).size !== environment.length) {
     addIssue(issues, ["environment"], "environment forwarding names must be unique");
@@ -7602,23 +7706,30 @@ function validateManifest(document) {
   if (overlappingEnvironment.length > 0) {
     addIssue(issues, ["secret_environment"], `must not overlap environment: ${overlappingEnvironment.join(", ")}`);
   }
+  return { environment, secretEnvironment };
+}
+function validateUniquePortTargets(ports, issues) {
   const portTargets = Object.values(ports).map((port) => `${port.service}:${port.target}`);
   if (new Set(portTargets).size !== portTargets.length) {
     addIssue(issues, ["ports"], "service and target pairs must be unique");
   }
-  if (issues.length > 0) {
-    throw new Error(`invalid ${manifestName}: ${issues.map(formatIssue).join("; ")}`);
-  }
-  return {
-    ...compose === undefined ? {} : { compose },
-    ...dockerfile === undefined ? {} : { dockerfile },
-    ...image === undefined ? {} : { image },
-    runtime,
-    ports,
-    environment,
-    secret_environment: secretEnvironment
-  };
 }
+function parseLabManifest(source, sourcePath) {
+  let document;
+  try {
+    document = $parse(source);
+  } catch (error) {
+    throw new Error(`invalid YAML in ${sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return validateManifest(document);
+}
+function formatIssue(issue) {
+  const location = issue.path.length > 0 ? `${issue.path.join(".")}: ` : "";
+  return `${location}${issue.message}`;
+}
+
+// packages/codex-container-lab/cli/src/config.ts
+var manifestName2 = manifestName;
 function resolveRepoPath(repoRoot, candidate) {
   if (isAbsolute(candidate)) {
     throw new Error(`project path must be relative: ${candidate}`);
@@ -7631,14 +7742,8 @@ function resolveRepoPath(repoRoot, candidate) {
   }
   return resolved;
 }
-function parseLabConfig(source, repoRoot, sourcePath = resolve(repoRoot, manifestName)) {
-  let document;
-  try {
-    document = $parse(source);
-  } catch (error) {
-    throw new Error(`invalid YAML in ${sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  const value = validateManifest(document);
+function parseLabConfig(source, repoRoot, sourcePath = resolve(repoRoot, manifestName2)) {
+  const value = parseLabManifest(source, sourcePath);
   const root = resolve(repoRoot);
   let mode;
   if (value.compose) {
@@ -7661,7 +7766,7 @@ function parseLabConfig(source, repoRoot, sourcePath = resolve(repoRoot, manifes
       commandService: value.image.service
     };
   } else {
-    throw new Error(`invalid ${manifestName}: no mode configured`);
+    throw new Error(`invalid ${manifestName2}: no mode configured`);
   }
   return {
     repoRoot: root,
@@ -7676,7 +7781,7 @@ function parseLabConfig(source, repoRoot, sourcePath = resolve(repoRoot, manifes
     secretEnvironment: [...value.secret_environment]
   };
 }
-async function loadLabConfig(repoRoot, sourcePath = resolve(repoRoot, manifestName)) {
+async function loadLabConfig(repoRoot, sourcePath = resolve(repoRoot, manifestName2)) {
   const root = resolve(repoRoot);
   const manifestPath = resolveRepoPath(root, relative(root, resolve(sourcePath)));
   await assertRealPathInside(root, manifestPath);
@@ -7707,10 +7812,6 @@ async function assertRealPathInside(repoRoot, projectPath) {
   if (fromRoot === ".." || fromRoot.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) || isAbsolute(fromRoot)) {
     throw new Error(`project path resolves outside repository: ${projectPath}`);
   }
-}
-function formatIssue(issue) {
-  const location = issue.path.length > 0 ? `${issue.path.join(".")}: ` : "";
-  return `${location}${issue.message}`;
 }
 
 // packages/codex-container-lab/cli/src/docker.ts
@@ -7789,7 +7890,7 @@ async function dockerAvailable(runner = defaultDockerRunner, secretEnvironment =
 }
 async function prepareLabRuntime(metadata, config, runner = defaultDockerRunner, environment = process.env) {
   await mkdir(metadata.runtimeRoot, { recursive: true, mode: 448 });
-  const base = generateBaseCompose(config);
+  const base = generateBaseCompose2(config);
   const baseFile = base === undefined ? undefined : join(metadata.runtimeRoot, "base.compose.yaml");
   if (baseFile && base !== undefined) {
     await writeFile(baseFile, base, { mode: 384 });
@@ -7797,16 +7898,16 @@ async function prepareLabRuntime(metadata, config, runner = defaultDockerRunner,
   const overrideFile = join(metadata.runtimeRoot, "override.compose.yaml");
   await writeFile(overrideFile, `{}
 `, { mode: 384 });
-  const composeArgs = composeCommandArgs(config, {
+  const composeArgs = composeCommandArgs2(config, {
     projectName: metadata.composeProject,
     overrideFile,
     ...baseFile === undefined ? {} : { baseFile }
   });
   const composeEnvironment = secretComposeEnvironment(config.secretEnvironment, environment);
   const sourceModel = await normalizedModel(composeArgs, runner, composeEnvironment);
-  validateSecretEnvironmentModel(sourceModel, config.secretEnvironment, composeEnvironment);
-  const findings = inspectComposeModel(sourceModel);
-  const override = generateOverrideCompose(config, sourceModel, {
+  validateSecretEnvironmentModel2(sourceModel, config.secretEnvironment, composeEnvironment);
+  const findings = inspectComposeModel2(sourceModel);
+  const override = generateOverrideCompose2(config, sourceModel, {
     workspaceHostPath: metadata.workspace,
     owner: metadata.owner,
     ownerKey: metadata.ownerKey,
@@ -7814,7 +7915,7 @@ async function prepareLabRuntime(metadata, config, runner = defaultDockerRunner,
   });
   await writeFile(overrideFile, override, { mode: 384 });
   const finalModel = await normalizedModel(composeArgs, runner, composeEnvironment);
-  validateSecretEnvironmentModel(finalModel, config.secretEnvironment, composeEnvironment);
+  validateSecretEnvironmentModel2(finalModel, config.secretEnvironment, composeEnvironment);
   return {
     metadata,
     config,
@@ -8041,7 +8142,7 @@ async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultD
   }
 }
 async function removeManagedInternalImage(metadata, runner) {
-  const tag = internalImageTag(metadata.ownerKey, metadata.id);
+  const tag = internalImageTag2(metadata.ownerKey, metadata.id);
   const inspected = await runner.run([
     "image",
     "inspect",
@@ -8060,7 +8161,7 @@ async function removeManagedInternalImage(metadata, runner) {
   } catch {
     throw new Error("invalid managed Dockerfile image ownership inspection");
   }
-  if (!isRecord4(image) || typeof image["id"] !== "string" || !/^sha256:[0-9a-f]{64}$/.test(image["id"]) || !isRecord4(image["labels"])) {
+  if (!isRecord5(image) || typeof image["id"] !== "string" || !/^sha256:[0-9a-f]{64}$/.test(image["id"]) || !isRecord5(image["labels"])) {
     throw new Error("invalid managed Dockerfile image ownership inspection");
   }
   if (image["labels"]["io.openai.codex-container-lab.managed"] !== "true" || image["labels"]["io.openai.codex-container-lab.owner"] !== metadata.owner || image["labels"]["io.openai.codex-container-lab.lab"] !== metadata.id) {
@@ -8199,7 +8300,7 @@ async function terminateDockerRun(runtime, identity2, signal, runner = defaultDo
 }
 function summarizeServices(values) {
   return values.slice(0, 16).flatMap((value) => {
-    if (!isRecord4(value))
+    if (!isRecord5(value))
       return [];
     const service = typeof value["Service"] === "string" ? value["Service"] : typeof value["Name"] === "string" ? value["Name"] : undefined;
     const state = typeof value["State"] === "string" ? value["State"] : undefined;
@@ -8273,7 +8374,7 @@ function scrubDockerRunnerEnvironment(runner, names, environment) {
     })
   };
 }
-function isRecord4(value) {
+function isRecord5(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -8466,7 +8567,7 @@ async function removeConfirmedStaleLock(path2, staleMs, processProbe) {
     try {
       const contents = info.isDirectory() ? await readFile3(`${path2}/owner.json`, "utf8") : await handle.readFile({ encoding: "utf8" });
       const value = JSON.parse(contents);
-      if (isRecord5(value) && typeof value["pid"] === "number" && Number.isInteger(value["pid"]) && value["pid"] > 0 && typeof value["createdAt"] === "string") {
+      if (isRecord6(value) && typeof value["pid"] === "number" && Number.isInteger(value["pid"]) && value["pid"] > 0 && typeof value["createdAt"] === "string") {
         record = value;
       }
     } catch {}
@@ -8552,7 +8653,7 @@ async function removeConfirmedOrphanClaim(claimPath, staleMs, processProbe) {
     } catch {
       return false;
     }
-    if (!isRecord5(value) || typeof value["pid"] !== "number" || !Number.isInteger(value["pid"]) || value["pid"] <= 0 || typeof value["createdAt"] !== "string")
+    if (!isRecord6(value) || typeof value["pid"] !== "number" || !Number.isInteger(value["pid"]) || value["pid"] <= 0 || typeof value["createdAt"] !== "string")
       return false;
     const age = Date.now() - Date.parse(value["createdAt"]);
     if (!Number.isFinite(age) || age < staleMs)
@@ -8597,7 +8698,7 @@ function identity2(info) {
 function probeProcess(pid) {
   process.kill(pid, 0);
 }
-function isRecord5(value) {
+function isRecord6(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -8679,7 +8780,7 @@ async function readReapedOwner(stateRoot, owner) {
       return;
     throw error;
   }
-  if (!isRecord6(value) || value["version"] !== 1 || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner) || !isTimestamp(value["reapedAt"])) {
+  if (!isRecord7(value) || value["version"] !== 1 || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner) || !isTimestamp(value["reapedAt"])) {
     throw new Error("invalid reaped owner manifest");
   }
   return value;
@@ -8721,7 +8822,7 @@ async function ensureOwner(stateRoot, owner) {
 }
 async function readOwnerManifest(path2) {
   const value = await readJson(path2);
-  if (!isRecord6(value) || value["version"] !== 1 || typeof value["owner"] !== "string" || typeof value["ownerKey"] !== "string" || !isTimestamp(value["createdAt"])) {
+  if (!isRecord7(value) || value["version"] !== 1 || typeof value["owner"] !== "string" || typeof value["ownerKey"] !== "string" || !isTimestamp(value["createdAt"])) {
     throw new Error(`invalid owner manifest: ${path2}`);
   }
   resolveOwner(value["owner"], {});
@@ -8792,7 +8893,7 @@ function assertLabMetadata(value, roots, owner, labId) {
   try {
     safeStateName(labId, "lab id");
     resolveOwner(owner, {});
-    if (!isRecord6(value) || value["version"] !== 1 || value["id"] !== labId || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner))
+    if (!isRecord7(value) || value["version"] !== 1 || value["id"] !== labId || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner))
       throw new Error("identity mismatch");
     normalizeSecretEnvironment(value);
     if (typeof value["name"] !== "string" || !/^[a-z0-9][a-z0-9-]{0,31}$/.test(value["name"]))
@@ -8812,7 +8913,7 @@ function assertLabMetadata(value, roots, owner, labId) {
     }
     if (!isNormalizedAbsolute(value["sourceRoot"]) || value["sourceRoot"] === parse(value["sourceRoot"]).root)
       throw new Error("invalid source root");
-    if (value["manifestPath"] !== join2(value["sourceRoot"], manifestName)) {
+    if (value["manifestPath"] !== join2(value["sourceRoot"], manifestName2)) {
       throw new Error("invalid source manifest relationship");
     }
     if (typeof value["commandService"] !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["commandService"])) {
@@ -8843,7 +8944,7 @@ function assertLabMetadata(value, roots, owner, labId) {
       throw new Error("ready lab has no runtime");
     }
     if (value["modeKind"] === "dockerfile") {
-      if (value["managedImage"] !== internalImageTag(value["ownerKey"], value["id"])) {
+      if (value["managedImage"] !== internalImageTag2(value["ownerKey"], value["id"])) {
         throw new Error("invalid managed image");
       }
     } else if (value["managedImage"] !== undefined) {
@@ -8854,11 +8955,11 @@ function assertLabMetadata(value, roots, owner, labId) {
   }
 }
 function validatePersistedRuntime(lab, runtime) {
-  if (!isRecord6(runtime) || !isRecord6(runtime["config"])) {
+  if (!isRecord7(runtime) || !isRecord7(runtime["config"])) {
     throw new Error("invalid persisted runtime");
   }
   const config = runtime["config"];
-  if (config["repoRoot"] !== lab["sourceRoot"] || config["manifestPath"] !== lab["manifestPath"] || !isRecord6(config["mode"]) || !isRecord6(config["runtime"])) {
+  if (config["repoRoot"] !== lab["sourceRoot"] || config["manifestPath"] !== lab["manifestPath"] || !isRecord7(config["mode"]) || !isRecord7(config["runtime"])) {
     throw new Error("runtime source identity mismatch");
   }
   const mode = config["mode"];
@@ -8899,7 +9000,7 @@ function validatePersistedRuntime(lab, runtime) {
   const expectedBase = mode["kind"] === "compose" ? undefined : join2(runtimeRoot, "base.compose.yaml");
   if (runtime["overrideFile"] !== expectedOverride || runtime["baseFile"] !== expectedBase || !Array.isArray(runtime["findings"]) || !runtime["findings"].every(isFinding) || JSON.stringify(runtime["findings"]) !== JSON.stringify(lab["findings"]))
     throw new Error("invalid runtime files or findings");
-  const expectedArgs = composeCommandArgs(config, {
+  const expectedArgs = composeCommandArgs2(config, {
     projectName: lab["composeProject"],
     overrideFile: expectedOverride,
     ...expectedBase === undefined ? {} : { baseFile: expectedBase }
@@ -8909,7 +9010,7 @@ function validatePersistedRuntime(lab, runtime) {
 }
 function normalizeSecretEnvironment(lab) {
   let runtimeNames;
-  if (isRecord6(lab["runtime"]) && isRecord6(lab["runtime"]["config"])) {
+  if (isRecord7(lab["runtime"]) && isRecord7(lab["runtime"]["config"])) {
     if (lab["runtime"]["config"]["secretEnvironment"] === undefined) {
       lab["runtime"]["config"]["secretEnvironment"] = [];
     }
@@ -8933,13 +9034,13 @@ function isNormalizedAbsolute(value) {
   return typeof value === "string" && !value.includes("\x00") && isAbsolute2(value) && resolve2(value) === value;
 }
 function isEndpoint(value) {
-  return isRecord6(value) && typeof value["name"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["name"]) && typeof value["service"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && isBoundedString(value["url"], 2048);
+  return isRecord7(value) && typeof value["name"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["name"]) && typeof value["service"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && isBoundedString(value["url"], 2048);
 }
 function isDeclaredPort(value) {
-  return isRecord6(value) && typeof value["name"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["name"]) && typeof value["service"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && (value["scheme"] === undefined || typeof value["scheme"] === "string" && /^[a-z][a-z0-9+.-]*$/.test(value["scheme"]));
+  return isRecord7(value) && typeof value["name"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["name"]) && typeof value["service"] === "string" && /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && (value["scheme"] === undefined || typeof value["scheme"] === "string" && /^[a-z][a-z0-9+.-]*$/.test(value["scheme"]));
 }
 function isFinding(value) {
-  return isRecord6(value) && (value["service"] === undefined || isBoundedString(value["service"], 128)) && typeof value["surface"] === "string" && FINDING_SURFACES.has(value["surface"]) && isBoundedString(value["detail"], 1024);
+  return isRecord7(value) && (value["service"] === undefined || isBoundedString(value["service"], 128)) && typeof value["surface"] === "string" && FINDING_SURFACES.has(value["surface"]) && isBoundedString(value["detail"], 1024);
 }
 async function realDirectory(path2, label) {
   const info = await lstat3(path2);
@@ -8980,7 +9081,7 @@ function isBoundedString(value, maximum) {
 function message(error) {
   return error instanceof Error ? error.message : String(error);
 }
-function isRecord6(value) {
+function isRecord7(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -9811,7 +9912,7 @@ class ContainerLabService {
       lab.modeKind = config.mode.kind;
       lab.secretEnvironment = secretEnvironmentNames;
       if (config.mode.kind === "dockerfile") {
-        lab.managedImage = internalImageTag(lab.ownerKey, lab.id);
+        lab.managedImage = internalImageTag2(lab.ownerKey, lab.id);
       }
       lab = await this.updateProvisioning(id, (current) => {
         current.manifestPath = lab.manifestPath;

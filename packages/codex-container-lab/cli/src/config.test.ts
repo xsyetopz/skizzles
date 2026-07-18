@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadLabConfig, parseLabConfig, resolveRepoPath } from "./config";
+import { loadLabConfig, parseLabConfig, resolveRepoPath } from "./config.ts";
 
 const root = "/tmp/example-repository";
 const temporaryRoots: string[] = [];
