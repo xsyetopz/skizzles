@@ -1,0 +1,247 @@
+// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
+import { afterEach, describe, expect, it } from "bun:test";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { validateWorkspaceArchitecture } from "../src/workspace-policy.ts";
+
+const roots: string[] = [];
+const REVIEWED_BODY_LINES = 650;
+const GENERATED_BODY_LINES = 900;
+const OVERSIZED_BODY_LINES = 800;
+const THICK_ENTRYPOINT_BODY_LINES = 199;
+
+afterEach(async () => {
+  await Promise.all(
+    roots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
+  );
+});
+
+describe("workspace architecture fitness", () => {
+  it("rejects general package cycles and private package imports", async () => {
+    const root = await fixture();
+    await addPackage(root, "two", "@skizzles/two");
+    const first = packageManifest("@skizzles/example");
+    first.dependencies["@skizzles/two"] = "workspace:*";
+    const second = packageManifest("@skizzles/two");
+    second.dependencies["@skizzles/example"] = "workspace:*";
+    await writeManifest(root, "example", first);
+    await writeManifest(root, "two", second);
+    await writeFile(
+      join(root, "packages/example/src/index.ts"),
+      'import "@skizzles/two/internal";\nexport const value = 1;\n',
+    );
+
+    const codes = (await validateWorkspaceArchitecture(root)).map(
+      ({ code }) => code,
+    );
+    expect(codes).toContain("package-dependency-cycle");
+    expect(codes).toContain("private-package-import");
+  });
+
+  it("enforces current public export and binary budgets", async () => {
+    const root = await fixture();
+    const manifest = packageManifest("@skizzles/example");
+    manifest.exports = {
+      ".": "./src/index.ts",
+      "./one": "./src/index.ts",
+      "./two": "./src/index.ts",
+      "./three": "./src/index.ts",
+    };
+    manifest.bin = {
+      one: "./src/cli.ts",
+      two: "./src/cli.ts",
+      three: "./src/cli.ts",
+    };
+    await writeManifest(root, "example", manifest);
+
+    const codes = (await validateWorkspaceArchitecture(root)).map(
+      ({ code }) => code,
+    );
+    expect(codes).toContain("public-export-budget");
+    expect(codes).toContain("public-bin-budget");
+  });
+
+  it("enforces source ownership and production-to-test direction", async () => {
+    const root = await fixture();
+    await writeFile(join(root, "packages/example/orphan.ts"), "export {};\n");
+    await writeFile(
+      join(root, "packages/example/src/index.ts"),
+      'import "../test/support.ts";\nexport const value = 1;\n',
+    );
+    await writeFile(
+      join(root, "packages/example/test/support.ts"),
+      "export {};\n",
+    );
+    await mkdir(join(root, "packages/example/generated"));
+    await writeFile(
+      join(root, "packages/example/generated/contract.generated.ts"),
+      "export {};\n",
+    );
+    await writeFile(
+      join(root, "packages/example/src/generated-consumer.ts"),
+      'import "../generated/contract.generated.ts";\n',
+    );
+
+    const codes = (await validateWorkspaceArchitecture(root)).map(
+      ({ code }) => code,
+    );
+    expect(codes).toContain("unowned-package-source");
+    expect(codes).toContain("production-to-test-import");
+    expect(codes).toContain("production-to-generated-import");
+  });
+
+  it("requires responsibility records above 650 lines and errors above 800", async () => {
+    const root = await fixture();
+    const packageRoot = join(root, "packages/example");
+    await writeFile(
+      join(packageRoot, "src/reviewed.ts"),
+      `${"// cohesive policy\n".repeat(REVIEWED_BODY_LINES)}export {};\n`,
+    );
+    await mkdir(join(packageRoot, "generated"));
+    await writeFile(
+      join(packageRoot, "generated/large.ts"),
+      `${"// generated\n".repeat(GENERATED_BODY_LINES)}export {};\n`,
+    );
+    let codes = (await validateWorkspaceArchitecture(root)).map(
+      ({ code }) => code,
+    );
+    expect(codes).toContain("missing-file-size-review");
+    expect(codes).not.toContain("authored-file-too-large");
+
+    await writeFile(
+      join(packageRoot, "architecture-file-reviews.json"),
+      JSON.stringify({
+        files: {
+          "src/reviewed.ts": {
+            owner: "example-policy",
+            responsibilities: ["cohesive policy table"],
+            reviewTrigger: "split when a second change reason appears",
+          },
+        },
+      }),
+    );
+    codes = (await validateWorkspaceArchitecture(root)).map(({ code }) => code);
+    expect(codes).not.toContain("missing-file-size-review");
+
+    await writeFile(
+      join(packageRoot, "src/reviewed.ts"),
+      `${"// oversized\n".repeat(OVERSIZED_BODY_LINES)}export {};\n`,
+    );
+    codes = (await validateWorkspaceArchitecture(root)).map(({ code }) => code);
+    expect(codes).toContain("authored-file-too-large");
+  });
+
+  it("rejects thick executable entrypoints", async () => {
+    const root = await fixture();
+    await writeFile(
+      join(root, "packages/example/src/cli.ts"),
+      `#!/usr/bin/env bun\n${"// orchestration\n".repeat(THICK_ENTRYPOINT_BODY_LINES)}export {};\n`,
+    );
+
+    const codes = (await validateWorkspaceArchitecture(root)).map(
+      ({ code }) => code,
+    );
+    expect(codes).toContain("thick-executable-entrypoint");
+  });
+
+  it("rejects undeclared static filesystem reach-through", async () => {
+    const root = await fixture();
+    await addPackage(root, "two", "@skizzles/two");
+    await writeFile(
+      join(root, "packages/example/src/index.ts"),
+      'export const path = "packages/two/assets/contract.json";\n',
+    );
+
+    const findings = await validateWorkspaceArchitecture(root);
+    expect(findings).toContainEqual({
+      code: "hidden-package-filesystem-reach-through",
+      path: "packages/example/src/index.ts",
+      message:
+        "static path reaches packages/two without artifact composition authority",
+    });
+  });
+});
+
+async function fixture(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "skizzles-fitness-"));
+  roots.push(root);
+  await writeFile(join(root, "bun.lock"), "");
+  const rootPackage = packageManifest("skizzles");
+  await writeFile(
+    join(root, "package.json"),
+    JSON.stringify({ ...rootPackage, workspaces: ["packages/*"] }),
+  );
+  await addPackage(root, "example", "@skizzles/example");
+  return root;
+}
+
+async function addPackage(
+  root: string,
+  directory: string,
+  name: string,
+): Promise<void> {
+  const packageRoot = join(root, "packages", directory);
+  await mkdir(join(packageRoot, "src"), { recursive: true });
+  await mkdir(join(packageRoot, "test"), { recursive: true });
+  await writeManifest(root, directory, packageManifest(name));
+  await writeFile(join(packageRoot, "README.md"), `# ${name}\n`);
+  await writeFile(join(packageRoot, "tsconfig.json"), "{}\n");
+  await writeFile(
+    join(packageRoot, "src/index.ts"),
+    "export const value = 1;\n",
+  );
+  await writeFile(
+    join(packageRoot, "src/cli.ts"),
+    "#!/usr/bin/env bun\nexport {};\n",
+  );
+  await writeFile(
+    join(packageRoot, "test/index.test.ts"),
+    'import { value } from "../src/index.ts";\nvoid value;\n',
+  );
+}
+
+async function writeManifest(
+  root: string,
+  directory: string,
+  manifest: ReturnType<typeof packageManifest>,
+): Promise<void> {
+  await writeFile(
+    join(root, "packages", directory, "package.json"),
+    JSON.stringify(manifest),
+  );
+}
+
+function packageManifest(name: string): {
+  name: string;
+  version: string;
+  private: boolean;
+  type: string;
+  exports: Record<string, string>;
+  bin: Record<string, string>;
+  scripts: Record<string, string>;
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+} {
+  return {
+    name,
+    version: "0.1.0",
+    private: true,
+    type: "module",
+    exports: { ".": "./src/index.ts" },
+    bin: { example: "./src/cli.ts" },
+    scripts: {
+      build: "bun build ./src/index.ts",
+      check:
+        "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+      test: "bun test ./test",
+      typecheck: "tsc --noEmit",
+    },
+    dependencies: {},
+    devDependencies: {
+      "@types/bun": "^1.3.14",
+      "@types/node": "^26.1.1",
+      typescript: "^7.0.2",
+    },
+  };
+}
