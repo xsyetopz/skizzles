@@ -1,4 +1,7 @@
 import { basename, extname } from "node:path";
+// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
+// biome-ignore lint/performance/noNamespaceImport: semantic scanning uses the parser's document, node predicates, and visitor as one boundary.
+import * as Yaml from "yaml";
 import { PackagingError } from "../plugin/contract.ts";
 import { safeLanguageDiagnosticPath } from "./file-boundary.ts";
 
@@ -6,10 +9,11 @@ const MAX_SEMANTIC_DEPTH = 64;
 const MAX_SEMANTIC_NODES = 100_000;
 const MAX_SEMANTIC_TEXT_UNITS = 8 * 1024 * 1024;
 const MAX_SURFACE_TEXT_UNITS = 16 * 1024 * 1024;
-const XML_ENTITY_PATTERN =
-  /&(?:amp|lt|gt|quot|apos|#\d{1,7}|#x[0-9a-fA-F]{1,6});/gu;
-const XML_ENTITY_DECLARATION_PATTERN = /<!ENTITY\b/iu;
-const UNRESOLVED_XML_ENTITY_PATTERN = /&(?:#[^;\s]+|[A-Za-z_:][^;\s]*);/u;
+const XML_NAME_PATTERN = /^[A-Za-z_:][A-Za-z0-9_.:-]*/u;
+const XML_ATTRIBUTE_PATTERN =
+  /^\s+([A-Za-z_:][A-Za-z0-9_.:-]*)\s*=\s*("[^"]*"|'[^']*')/u;
+const XML_DECLARATION_PATTERN =
+  /^<\?xml\s+version=(?:"1\.[01]"|'1\.[01]')(?:\s+encoding=(?:"UTF-8"|'UTF-8'))?(?:\s+standalone=(?:"(?:yes|no)"|'(?:yes|no)'))?\s*\?>/u;
 const SYNTAX_ERROR_NAME = "LanguageSurfaceSyntaxError";
 const TYPESCRIPT_TRANSPILER = new Bun.Transpiler({
   loader: "ts",
@@ -32,6 +36,7 @@ type SurfaceKind =
   | "javascript"
   | "json"
   | "jsonc"
+  | "markdown"
   | "plist"
   | "text"
   | "typescript"
@@ -58,8 +63,10 @@ export function semanticSurfaceTexts(
         return [transpile(path, text, TYPESCRIPT_TRANSPILER)];
       case "javascript":
         return [transpile(path, text, JAVASCRIPT_TRANSPILER)];
+      case "markdown":
+        return [renderMarkdown(path, text)];
       case "plist":
-        return [decodePlistEntities(path, text)];
+        return decodedPlistTexts(path, text);
       case "text":
         return [];
     }
@@ -112,7 +119,7 @@ function classifySurface(
     case ".plist":
       return "plist";
     case ".md":
-      return "text";
+      return "markdown";
     default:
       if (mode === "canonical") {
         return "text";
@@ -141,24 +148,46 @@ function decodedJsonTexts(
 }
 
 function decodedYamlTexts(path: string, text: string): readonly string[] {
-  let value: unknown;
-  try {
-    value = Bun.YAML.parse(text);
-  } catch {
+  const document = Yaml.parseDocument(text, {
+    customTags: [],
+    merge: false,
+    prettyErrors: false,
+    resolveKnownTags: true,
+    schema: "core",
+    strict: true,
+    stringKeys: true,
+    uniqueKeys: false,
+    version: "1.2",
+  });
+  if (document.errors.length > 0 || document.warnings.length > 0) {
     throw syntaxError(path, "YAML");
   }
   const collector = new SemanticTextCollector(path);
-  collector.visit(value);
-  for (const token of yamlQuotedScalars(path, text)) {
-    collector.add(token);
+  let nodes = 0;
+  Yaml.visit(document, (_key, node) => {
+    nodes += 1;
+    if (nodes > MAX_SEMANTIC_NODES) {
+      throw boundsError(path);
+    }
+    if (Yaml.isScalar(node) && typeof node.value === "string") {
+      collector.add(node.value);
+    }
+  });
+  let value: unknown;
+  try {
+    value = document.toJS({ maxAliasCount: MAX_SEMANTIC_NODES });
+  } catch {
+    throw boundsError(path);
   }
+  collector.visit(value);
   return collector.values();
 }
 
 class SemanticTextCollector {
   readonly #path: string;
   readonly #texts = new Set<string>();
-  readonly #visited = new WeakSet<object>();
+  readonly #active = new WeakSet<object>();
+  readonly #completed = new WeakSet<object>();
   #nodes = 0;
   #textUnits = 0;
 
@@ -189,14 +218,19 @@ class SemanticTextCollector {
     if (value === null || typeof value !== "object") {
       return;
     }
-    if (this.#visited.has(value)) {
+    if (this.#active.has(value)) {
       throw boundsError(this.#path);
     }
-    this.#visited.add(value);
+    if (this.#completed.has(value)) {
+      return;
+    }
+    this.#active.add(value);
     if (Array.isArray(value)) {
       for (const item of value) {
         this.visit(item, depth + 1);
       }
+      this.#active.delete(value);
+      this.#completed.add(value);
       return;
     }
     if (!isPlainRecord(value)) {
@@ -206,6 +240,8 @@ class SemanticTextCollector {
       this.add(key);
       this.visit(item, depth + 1);
     }
+    this.#active.delete(value);
+    this.#completed.add(value);
   }
 
   values(): readonly string[] {
@@ -246,73 +282,6 @@ function jsonStringTokens(
     index = end;
   }
   return decoded;
-}
-
-function yamlQuotedScalars(path: string, text: string): readonly string[] {
-  const decoded: string[] = [];
-  let index = 0;
-  let lineStart = true;
-  while (index < text.length) {
-    const character = text[index];
-    if (character === "\n" || character === "\r") {
-      lineStart = true;
-      index += 1;
-      continue;
-    }
-    if (character === "#") {
-      index = skipLineComment(text, index + 1);
-      lineStart = true;
-      continue;
-    }
-    if (
-      (character === '"' || character === "'") &&
-      isYamlScalarStart(text, index, lineStart)
-    ) {
-      const end = quotedEnd(path, text, index, character, character === "'");
-      const snippet = `value: ${text.slice(index, end)}\n`;
-      let parsed: unknown;
-      try {
-        parsed = Bun.YAML.parse(snippet);
-      } catch {
-        throw parseError(path, "YAML scalar");
-      }
-      if (!isPlainRecord(parsed) || typeof parsed["value"] !== "string") {
-        throw parseError(path, "YAML scalar");
-      }
-      decoded.push(parsed["value"]);
-      index = end;
-      lineStart = false;
-      continue;
-    }
-    if (character !== " " && character !== "\t") {
-      lineStart = false;
-    }
-    index += 1;
-  }
-  return decoded;
-}
-
-function isYamlScalarStart(
-  text: string,
-  index: number,
-  lineStart: boolean,
-): boolean {
-  if (lineStart) {
-    return true;
-  }
-  let previous = index - 1;
-  while (previous >= 0 && (text[previous] === " " || text[previous] === "\t")) {
-    previous -= 1;
-  }
-  const character = text[previous];
-  return (
-    character === undefined ||
-    character === ":" ||
-    character === "," ||
-    character === "-" ||
-    character === "[" ||
-    character === "{"
-  );
 }
 
 function quotedEnd(
@@ -365,45 +334,183 @@ function transpile(
   }
 }
 
-function decodePlistEntities(path: string, text: string): string {
-  if (XML_ENTITY_DECLARATION_PATTERN.test(text)) {
-    throw parseError(path, "plist entity policy");
+function renderMarkdown(path: string, text: string): string {
+  let rendered: string;
+  try {
+    rendered = Bun.markdown.render(text);
+  } catch {
+    throw syntaxError(path, "Markdown");
   }
-  const decoded = text.replace(XML_ENTITY_PATTERN, (entity) => {
-    switch (entity) {
-      case "&amp;":
-        return "&";
-      case "&lt;":
-        return "<";
-      case "&gt;":
-        return ">";
-      case "&quot;":
-        return '"';
-      case "&apos;":
-        return "'";
-      default:
-        return numericXmlEntity(path, entity);
+  if (rendered.length > MAX_SEMANTIC_TEXT_UNITS) {
+    throw boundsError(path);
+  }
+  return rendered;
+}
+
+function decodedPlistTexts(path: string, text: string): readonly string[] {
+  const values: string[] = [];
+  const elements: string[] = [];
+  let index = 0;
+  let rootSeen = false;
+
+  if (text.startsWith("<?xml")) {
+    const declaration = XML_DECLARATION_PATTERN.exec(text);
+    if (declaration === null) {
+      throw syntaxError(path, "plist/XML");
     }
-  });
-  if (UNRESOLVED_XML_ENTITY_PATTERN.test(decoded)) {
-    throw parseError(path, "plist entity policy");
+    index = declaration[0].length;
+  }
+
+  while (index < text.length) {
+    if (text.startsWith("<!--", index)) {
+      const end = text.indexOf("-->", index + 4);
+      if (end === -1 || text.slice(index + 4, end).includes("--")) {
+        throw syntaxError(path, "plist/XML");
+      }
+      index = end + 3;
+      continue;
+    }
+    if (text.startsWith("<![CDATA[", index)) {
+      const end = text.indexOf("]]>", index + 9);
+      if (end === -1 || elements.length === 0) {
+        throw syntaxError(path, "plist/XML");
+      }
+      values.push(text.slice(index + 9, end));
+      index = end + 3;
+      continue;
+    }
+    if (text.startsWith("<!", index) || text.startsWith("<?", index)) {
+      throw syntaxError(path, "plist/XML declaration policy");
+    }
+    if (text[index] === "<") {
+      if (text[index + 1] === "/") {
+        const closing = /^<\/([A-Za-z_:][A-Za-z0-9_.:-]*)\s*>/u.exec(
+          text.slice(index),
+        );
+        const expected = elements.pop();
+        if (
+          closing === null ||
+          expected === undefined ||
+          closing[1] !== expected
+        ) {
+          throw syntaxError(path, "plist/XML");
+        }
+        index += closing[0].length;
+        continue;
+      }
+      const name = XML_NAME_PATTERN.exec(text.slice(index + 1))?.[0];
+      if (name === undefined) {
+        throw syntaxError(path, "plist/XML");
+      }
+      if (elements.length === 0) {
+        if (rootSeen || name !== "plist") {
+          throw syntaxError(path, "plist/XML");
+        }
+        rootSeen = true;
+      }
+      index += name.length + 1;
+      const attributes = new Set<string>();
+      while (true) {
+        const rest = text.slice(index);
+        const terminator = /^\s*(\/?>)/u.exec(rest);
+        if (terminator !== null) {
+          index += terminator[0].length;
+          if (terminator[1] === ">") {
+            elements.push(name);
+          }
+          break;
+        }
+        const attribute = XML_ATTRIBUTE_PATTERN.exec(rest);
+        const attributeName = attribute?.[1];
+        const quotedValue = attribute?.[2];
+        if (
+          attribute === null ||
+          attributeName === undefined ||
+          quotedValue === undefined ||
+          attributes.has(attributeName)
+        ) {
+          throw syntaxError(path, "plist/XML");
+        }
+        attributes.add(attributeName);
+        decodeXmlReferences(path, quotedValue.slice(1, -1));
+        index += attribute[0].length;
+      }
+      continue;
+    }
+
+    const end = text.indexOf("<", index);
+    const next = end === -1 ? text.length : end;
+    const decoded = decodeXmlReferences(path, text.slice(index, next));
+    const current = elements.at(-1);
+    if (current === "string" || current === "key") {
+      values.push(decoded);
+    } else if (elements.length === 0 && decoded.trim().length > 0) {
+      throw syntaxError(path, "plist/XML");
+    }
+    index = next;
+  }
+  if (!rootSeen || elements.length > 0) {
+    throw syntaxError(path, "plist/XML");
+  }
+  return values;
+}
+
+function decodeXmlReferences(path: string, value: string): string {
+  let decoded = "";
+  let index = 0;
+  while (index < value.length) {
+    const character = value[index];
+    if (character === "<" || value.startsWith("]]>", index)) {
+      throw syntaxError(path, "plist/XML");
+    }
+    if (character !== "&") {
+      decoded += character;
+      index += 1;
+      continue;
+    }
+    const end = value.indexOf(";", index + 1);
+    if (end === -1 || end - index > 32) {
+      throw syntaxError(path, "plist/XML entity policy");
+    }
+    const entity = value.slice(index + 1, end);
+    const named = predefinedXmlEntity(entity);
+    decoded += named ?? numericXmlEntity(path, entity);
+    index = end + 1;
   }
   return decoded;
 }
 
+function predefinedXmlEntity(entity: string): string | undefined {
+  return { amp: "&", apos: "'", gt: ">", lt: "<", quot: '"' }[entity];
+}
+
 function numericXmlEntity(path: string, entity: string): string {
-  const hexadecimal = entity.startsWith("&#x");
-  const digits = entity.slice(hexadecimal ? 3 : 2, -1);
+  const match = /^#(x[0-9A-Fa-f]+|[0-9]+)$/u.exec(entity);
+  if (match === null) {
+    throw syntaxError(path, "plist/XML entity policy");
+  }
+  const encoded = match[1];
+  if (encoded === undefined) {
+    throw syntaxError(path, "plist/XML entity policy");
+  }
+  const hexadecimal = encoded.startsWith("x");
+  const digits = hexadecimal ? encoded.slice(1) : encoded;
   const codePoint = Number.parseInt(digits, hexadecimal ? 16 : 10);
-  if (
-    !Number.isInteger(codePoint) ||
-    codePoint < 0 ||
-    codePoint > 0x10ffff ||
-    (codePoint >= 0xd800 && codePoint <= 0xdfff)
-  ) {
-    throw parseError(path, "plist entity");
+  if (!isXmlCodePoint(codePoint)) {
+    throw syntaxError(path, "plist/XML entity");
   }
   return String.fromCodePoint(codePoint);
+}
+
+function isXmlCodePoint(codePoint: number): boolean {
+  return (
+    codePoint === 9 ||
+    codePoint === 10 ||
+    codePoint === 13 ||
+    (codePoint >= 0x20 && codePoint <= 0xd7ff) ||
+    (codePoint >= 0xe000 && codePoint <= 0xfffd) ||
+    (codePoint >= 0x10000 && codePoint <= 0x10ffff)
+  );
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

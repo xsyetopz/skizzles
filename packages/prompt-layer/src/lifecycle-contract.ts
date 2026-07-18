@@ -19,7 +19,7 @@ export const PROMPT_LAYER_SOURCE_PATHS = {
   compact: "packages/prompt-layer/assets/instructions/compact-prompt.md",
   descriptor: "packages/prompt-layer/assets/integrations/prompt-policy.json",
   shippedLanguagePolicy:
-    "packages/prompt-layer/assets/evaluations/shipped-language-policy.v1.json",
+    "packages/prompt-layer/assets/evaluations/shipped-language-policy.v2.json",
 } as const;
 
 export const PROMPT_POLICY_DESCRIPTOR_PATHS = {
@@ -29,7 +29,7 @@ export const PROMPT_POLICY_DESCRIPTOR_PATHS = {
 
 export const SHIPPED_LANGUAGE_POLICY_PATHS = {
   canonicalWorkspacePath: PROMPT_LAYER_SOURCE_PATHS.shippedLanguagePolicy,
-  packagedPath: "evaluations/shipped-language-policy.v1.json",
+  packagedPath: "evaluations/shipped-language-policy.v2.json",
 } as const;
 
 export const PROMPT_LAYER_PACKAGE_FILES = [

@@ -1,7 +1,16 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import {
+  copyFile,
+  link,
+  mkdir,
+  open,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { SHIPPED_LANGUAGE_POLICY_PATHS } from "@skizzles/prompt-layer";
 import { stagePromptPolicyPackage } from "../src/prompt-policy-package.ts";
 import {
@@ -15,6 +24,10 @@ import {
 } from "./plugin-package-fixture.ts";
 
 const { cleanup, fixture } = createTestWorkspace();
+const canonicalLogoFixturePath = resolve(
+  import.meta.dir,
+  "../template/assets/logo.png",
+);
 afterEach(cleanup);
 
 async function mutateJson(
@@ -27,6 +40,33 @@ async function mutateJson(
   );
   mutate(value);
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function prepareLanguageStage(
+  root: string,
+  staged: string,
+): Promise<void> {
+  await stagePromptPolicyPackage(root, staged);
+}
+
+async function enableIntendedLogo(root: string): Promise<void> {
+  const manifestPath = join(
+    root,
+    "packages/plugin-builder/template/.codex-plugin/plugin.json",
+  );
+  await mutateJson(manifestPath, (manifest) => {
+    const interfaceContract = requiredTestRecord(
+      manifest["interface"],
+      "plugin interface",
+    );
+    interfaceContract["logo"] = "./assets/logo.png";
+  });
+  const logoPath = join(
+    root,
+    "packages/plugin-builder/template/assets/logo.png",
+  );
+  await mkdir(dirname(logoPath), { recursive: true });
+  await copyFile(canonicalLogoFixturePath, logoPath);
 }
 
 describe("plugin shipped-language composition", () => {
@@ -92,7 +132,7 @@ describe("plugin shipped-language composition", () => {
     const root = await fixture();
     const staged = join(root, "language-stage");
     await mkdir(staged, { recursive: true });
-    await stagePromptPolicyPackage(root, staged);
+    await prepareLanguageStage(root, staged);
     for (const [path, text] of [
       ["skills/example/SKILL.md", "I can inspect repository evidence.\n"],
       ["config/example.yaml", "message: I can report a result\n"],
@@ -135,6 +175,14 @@ describe("plugin shipped-language composition", () => {
       ],
       ["skills/example/escaped.yaml", `message: "${escapedClaim}"\n`],
       [
+        "skills/example/tagged-overwritten.yaml",
+        `message: !!str "${escapedClaim}"\nmessage: neutral\n`,
+      ],
+      [
+        "skills/example/anchored.yaml",
+        `message: &hidden "${escapedClaim}"\nother: neutral\n`,
+      ],
+      [
         "skills/example/overwritten.yaml",
         `message: "${escapedClaim}"\nmessage: neutral\n`,
       ],
@@ -147,6 +195,7 @@ describe("plugin shipped-language composition", () => {
         `export const message = "${escapedClaim}";\n`,
       ],
       ["skills/example/normalized.json", `{"message":"${normalizedClaim}"}\n`],
+      ["skills/example/entity.md", "I am &#x73;entient.\n"],
     ] as const;
 
     for (const [path, content] of injections) {
@@ -174,6 +223,40 @@ describe("plugin shipped-language composition", () => {
     }
   });
 
+  test("accepts YAML DAG aliases and rejects actual alias cycles", async () => {
+    const root = await fixture();
+    const staged = join(root, "language-stage");
+    await mkdir(staged, { recursive: true });
+    await prepareLanguageStage(root, staged);
+    await write(
+      root,
+      "language-stage/config/dag.yaml",
+      "base: &shared\n  message: neutral\nfirst: *shared\nsecond: *shared\n",
+    );
+    await expect(
+      validateStagedShippedLanguage(root, staged),
+    ).resolves.toBeUndefined();
+
+    await write(
+      root,
+      "language-stage/config/cycle.yaml",
+      "cycle: &self [*self]\n",
+    );
+    await expect(validateStagedShippedLanguage(root, staged)).rejects.toThrow(
+      "exceeds semantic scan bounds",
+    );
+
+    await rm(join(staged, "config/cycle.yaml"));
+    await write(
+      root,
+      "language-stage/config/deep.yaml",
+      `deep: ${"[".repeat(66)}neutral${"]".repeat(66)}\n`,
+    );
+    await expect(validateStagedShippedLanguage(root, staged)).rejects.toThrow(
+      "exceeds semantic scan bounds",
+    );
+  });
+
   test("rejects singular canonical symlinks before destination mutation", async () => {
     const { stagePlugin } = await import("../src/plugin-package.ts");
     const root = await fixture();
@@ -191,11 +274,106 @@ describe("plugin shipped-language composition", () => {
     );
   });
 
+  test("rejects hardlinked and oversized canonical surfaces before destination mutation", async () => {
+    const { stagePlugin } = await import("../src/plugin-package.ts");
+    const hardlinkRoot = await fixture();
+    const outsideRoot = await fixture();
+    const hardlinkSource = join(
+      hardlinkRoot,
+      "packages/command-hook/assets/hooks.json",
+    );
+    const outside = join(outsideRoot, "outside.json");
+    const hardlinkDestination = join(
+      hardlinkRoot,
+      "existing-hardlink-destination",
+    );
+    await writeFile(outside, '{"outside":true}\n');
+    await rm(hardlinkSource);
+    await link(outside, hardlinkSource);
+    await write(
+      hardlinkRoot,
+      "existing-hardlink-destination/marker.txt",
+      "keep\n",
+    );
+    await expect(
+      stagePlugin(hardlinkRoot, hardlinkDestination),
+    ).rejects.toThrow("must be a contained non-symlink regular file");
+    expect(
+      await readFile(join(hardlinkDestination, "marker.txt"), "utf8"),
+    ).toBe("keep\n");
+
+    const sparseRoot = await fixture();
+    const sparseSource = join(
+      sparseRoot,
+      "packages/command-hook/assets/hooks.json",
+    );
+    const sparseDestination = join(sparseRoot, "existing-sparse-destination");
+    const handle = await open(sparseSource, "w");
+    try {
+      await handle.truncate(64 * 1024 * 1024);
+    } finally {
+      await handle.close();
+    }
+    await write(sparseRoot, "existing-sparse-destination/marker.txt", "keep\n");
+    await expect(stagePlugin(sparseRoot, sparseDestination)).rejects.toThrow(
+      "bounded byte length",
+    );
+    expect(await readFile(join(sparseDestination, "marker.txt"), "utf8")).toBe(
+      "keep\n",
+    );
+  });
+
+  test("rejects noncanonical bytes at canonical and staged logo paths", async () => {
+    const { stagePlugin } = await import("../src/plugin-package.ts");
+    const canonicalRoot = await fixture();
+    const destination = join(canonicalRoot, "existing-logo-destination");
+    await enableIntendedLogo(canonicalRoot);
+    await write(
+      canonicalRoot,
+      "packages/plugin-builder/template/assets/logo.png",
+      "I am sentient.\n",
+    );
+    await write(
+      canonicalRoot,
+      "existing-logo-destination/marker.txt",
+      "keep\n",
+    );
+    await expect(stagePlugin(canonicalRoot, destination)).rejects.toThrow(
+      "pinned canonical PNG asset",
+    );
+    expect(await readFile(join(destination, "marker.txt"), "utf8")).toBe(
+      "keep\n",
+    );
+
+    const stagedRoot = await fixture();
+    const staged = join(stagedRoot, "language-stage");
+    await enableIntendedLogo(stagedRoot);
+    await mkdir(staged, { recursive: true });
+    await prepareLanguageStage(stagedRoot, staged);
+    await mkdir(join(staged, ".codex-plugin"), { recursive: true });
+    await copyFile(
+      join(
+        stagedRoot,
+        "packages/plugin-builder/template/.codex-plugin/plugin.json",
+      ),
+      join(staged, ".codex-plugin/plugin.json"),
+    );
+    await mkdir(join(staged, "assets"), { recursive: true });
+    await copyFile(
+      join(stagedRoot, "packages/plugin-builder/template/assets/logo.png"),
+      join(staged, "assets/logo.png"),
+    );
+    await write(stagedRoot, "language-stage/assets/logo.png", "not a PNG\n");
+    await expect(
+      validateStagedShippedLanguage(stagedRoot, staged),
+    ).rejects.toThrow("pinned canonical PNG asset");
+  });
+
   test("rejects staged nested language and altered or unclassified policy surfaces", async () => {
     const root = await fixture();
     const staged = join(root, "language-stage");
     await mkdir(staged, { recursive: true });
-    await stagePromptPolicyPackage(root, staged);
+    await prepareLanguageStage(root, staged);
     await write(
       root,
       "language-stage/skills/example/nested/instruction.md",
@@ -224,11 +402,21 @@ describe("plugin shipped-language composition", () => {
     );
   });
 
-  test("decodes staged plist entities and program literals with control hygiene", async () => {
+  test("parses staged plist content without resolving declarations", async () => {
     const root = await fixture();
     const staged = join(root, "language-stage");
     await mkdir(staged, { recursive: true });
-    await stagePromptPolicyPackage(root, staged);
+    await prepareLanguageStage(root, staged);
+    await write(
+      root,
+      "language-stage/assets/example.plist",
+      // biome-ignore lint/security/noSecrets: Deliberate prohibited-language CDATA fixture, not a credential.
+      "<plist><dict><key><![CDATA[I am sentient]]></key></dict></plist>\n",
+    );
+    await expect(validateStagedShippedLanguage(root, staged)).rejects.toThrow(
+      "consciousness-sentience-embodiment",
+    );
+
     await write(
       root,
       "language-stage/assets/example.plist",
@@ -238,21 +426,24 @@ describe("plugin shipped-language composition", () => {
       "consciousness-sentience-embodiment",
     );
 
+    for (const malformed of [
+      "<plist><string>neutral</plist>\n",
+      '<!DOCTYPE plist SYSTEM "file:///etc/passwd"><plist/>\n',
+      '<!ENTITY hidden SYSTEM "file:///etc/passwd"><plist/>\n',
+      // biome-ignore lint/security/noSecrets: Deliberate unresolved entity fixture, not a credential.
+      "<plist><string>&custom;</string></plist>\n",
+    ]) {
+      await write(root, "language-stage/assets/example.plist", malformed);
+      await expect(validateStagedShippedLanguage(root, staged)).rejects.toThrow(
+        "plist/XML",
+      );
+    }
+
     await write(
       root,
       "language-stage/assets/example.plist",
       "<plist><string>neutral</string></plist>\n",
     );
-    await write(
-      root,
-      "language-stage/assets/unresolved.plist",
-      // biome-ignore lint/security/noSecrets: Deliberate unresolved entity fixture, not a credential.
-      "<plist><string>&custom;</string></plist>\n",
-    );
-    await expect(validateStagedShippedLanguage(root, staged)).rejects.toThrow(
-      "plist entity policy",
-    );
-    await rm(join(staged, "assets/unresolved.plist"));
     const escapePrefix = "\\";
     await write(
       root,
@@ -264,28 +455,39 @@ describe("plugin shipped-language composition", () => {
     );
 
     await rm(join(staged, "runtime/escaped.ts"));
-    await write(
-      root,
-      "language-stage/config/controls.json",
-      // biome-ignore lint/security/noSecrets: Deliberate escaped control fixture, not a credential.
-      '{"message":"before\\u0085after"}\n',
-    );
-    let controlMessage = "";
-    try {
-      await validateStagedShippedLanguage(root, staged);
-    } catch (error) {
-      controlMessage = error instanceof Error ? error.message : String(error);
+    for (const encoded of [
+      "before\\u0085after",
+      "sen\\u200btient",
+      "sen\\ufefftient",
+    ]) {
+      await write(
+        root,
+        "language-stage/config/controls.json",
+        `{"message":"${encoded}"}\n`,
+      );
+      let controlMessage = "";
+      try {
+        await validateStagedShippedLanguage(root, staged);
+      } catch (error) {
+        controlMessage = error instanceof Error ? error.message : String(error);
+      }
+      expect(controlMessage).toContain("has unsafe path or text controls");
+      expect(controlMessage).not.toContain("sentient");
     }
-    expect(controlMessage).toContain("has unsafe path or text controls");
-    expect(controlMessage).not.toContain("before");
   });
 
   test("redacts unsafe Unicode diagnostic paths", async () => {
-    for (const separator of ["\u0085", "\u2028", "\u2029"]) {
+    for (const separator of [
+      "\u0085",
+      "\u200b",
+      "\u2028",
+      "\u2029",
+      "\ufeff",
+    ]) {
       const root = await fixture();
       const staged = join(root, "language-stage");
       await mkdir(staged, { recursive: true });
-      await stagePromptPolicyPackage(root, staged);
+      await prepareLanguageStage(root, staged);
       await write(
         root,
         `language-stage/config/unsafe${separator}name.json`,
@@ -326,7 +528,7 @@ describe("plugin shipped-language composition", () => {
     const root = await fixture();
     const staged = join(root, "language-stage");
     await mkdir(staged, { recursive: true });
-    await stagePromptPolicyPackage(root, staged);
+    await prepareLanguageStage(root, staged);
     await write(root, "language-stage/scripts/unlisted", "neutral\n");
     await expect(validateStagedShippedLanguage(root, staged)).rejects.toThrow(
       "has no explicit language-policy surface classification",

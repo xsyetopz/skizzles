@@ -75,8 +75,8 @@ describe("versioned shipped-language policy", () => {
   test("publishes one exact canonical-to-staged evaluation path", () => {
     expect(SHIPPED_LANGUAGE_POLICY_PATHS).toEqual({
       canonicalWorkspacePath:
-        "packages/prompt-layer/assets/evaluations/shipped-language-policy.v1.json",
-      packagedPath: "evaluations/shipped-language-policy.v1.json",
+        "packages/prompt-layer/assets/evaluations/shipped-language-policy.v2.json",
+      packagedPath: "evaluations/shipped-language-policy.v2.json",
     });
     expect(
       PROMPT_LAYER_PACKAGE_FILES.filter(
@@ -93,6 +93,15 @@ describe("versioned shipped-language policy", () => {
 
   test("rejects every prohibited fixture and accepts every allowed fixture", async () => {
     const policy = parseShippedLanguagePolicy(await policyBytes());
+    expect({
+      matchMode: policy.matchMode,
+      schema: policy.schema,
+      version: policy.version,
+    }).toEqual({
+      matchMode: "literal-candidate-unicode-lexical-context-boundary-per-line",
+      schema: "skizzles.shipped-language-policy.v2",
+      version: 2,
+    });
     expect(policy.taxonomies.map(({ id }) => id)).toEqual([
       "feelings-internal-experience",
       "consciousness-sentience-embodiment",
@@ -131,6 +140,17 @@ describe("versioned shipped-language policy", () => {
         "instructions/service.md",
       ),
     ).toEqual([]);
+    for (const neutral of [
+      "Do not leave memory uninitialized.",
+      "I need you to stay within the repository boundary.",
+      "I am your friendly coding assistant.",
+      "𐐀i am sentient",
+      "I am sentient𐐀",
+    ]) {
+      expect(
+        validateShippedLanguageText(policy, neutral, "instructions/service.md"),
+      ).toEqual([]);
+    }
     expect(
       validateShippedLanguageText(
         policy,
@@ -193,6 +213,8 @@ describe("versioned shipped-language policy", () => {
       "nested/next\u0085line.md",
       "nested/next\u2028line.md",
       "nested/next\u2029line.md",
+      "nested/zero\u200bwidth.md",
+      "nested/mid\ufeffword.md",
     ]) {
       expect(() =>
         validateShippedLanguageText(policy, "neutral", unsafePath),
@@ -221,6 +243,10 @@ describe("versioned shipped-language policy", () => {
       "before\u0085after",
       "before\u2028after",
       "before\u2029after",
+      "sen\u200btient",
+      "sen\ufefftient",
+      "sen\u2060tient",
+      "sen\u202etient",
     ]) {
       expect(() =>
         validateShippedLanguageText(policy, unsafeText, "controls.md"),
@@ -241,7 +267,7 @@ describe("versioned shipped-language policy", () => {
   test("rejects unsupported, reordered, duplicate, and malformed corpus data", async () => {
     const mutations: Array<(value: Record<string, unknown>) => void> = [
       (value) => {
-        value["version"] = 2;
+        value["version"] = 3;
       },
       (value) => {
         value["unknown"] = true;

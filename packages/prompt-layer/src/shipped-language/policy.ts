@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 import { PromptLayerError } from "../lifecycle-contract.ts";
 
-const POLICY_SCHEMA = "skizzles.shipped-language-policy";
-const POLICY_VERSION = 1;
+const POLICY_SCHEMA = "skizzles.shipped-language-policy.v2";
+const POLICY_VERSION = 2;
 const POLICY_SHA256 =
   // biome-ignore lint/security/noSecrets: This is an integrity digest for the public evaluation corpus.
-  "c7e282a6863e35cedfc782463169f2f6fdde46dac8be5fe55d3f1374a6094dc4";
+  "c77277abd15169d8a9cafc83a520c7c7b54054e59b8be7a36360bf386c4a0467";
 const MAX_POLICY_BYTES = 64 * 1024;
 const MAX_DIAGNOSTIC_PATH_UNITS = 512;
 const CONTROL_CHARACTER_MAX = 31;
@@ -17,6 +17,9 @@ const LOW_SURROGATE_MAX = 0xdfff;
 const LINE_SEPARATOR = 0x2028;
 const PARAGRAPH_SEPARATOR = 0x2029;
 const LINE_BREAK_PATTERN = /\r\n?|\n/u;
+const FORMAT_CONTROL_PATTERN = /\p{Cf}/u;
+const LEXICAL_END_PATTERN = /[\p{L}\p{M}\p{N}_]$/u;
+const LEXICAL_START_PATTERN = /^[\p{L}\p{M}\p{N}_]/u;
 const EXPECTED_TAXONOMY_IDS = [
   "feelings-internal-experience",
   "consciousness-sentience-embodiment",
@@ -44,7 +47,7 @@ const TAXONOMY_KEYS = [
 const POLICY_LITERALS = {
   normalization:
     "unicode-nfkc-lowercase-collapse-horizontal-whitespace-per-line",
-  matchMode: "literal-substring-per-line",
+  matchMode: "literal-candidate-unicode-lexical-context-boundary-per-line",
   quotedText: "scan",
   negatedText: "scan-lexically",
   codeBlocks: "scan",
@@ -180,7 +183,11 @@ export function validateShippedLanguageText(
       continue;
     }
     for (const taxonomy of policy.taxonomies) {
-      if (!taxonomy.patterns.some((pattern) => normalized.includes(pattern))) {
+      if (
+        !taxonomy.patterns.some((pattern) =>
+          matchesPattern(normalized, pattern),
+        )
+      ) {
         continue;
       }
       const key = `${taxonomy.id}\0${index + 1}`;
@@ -256,7 +263,11 @@ function validateFixtures(
     for (const fixture of taxonomy.prohibitedFixtures) {
       validateFixture(fixture, allFixtures, taxonomy.id);
       const normalized = normalizeLine(fixture);
-      if (!taxonomy.patterns.some((pattern) => normalized.includes(pattern))) {
+      if (
+        !taxonomy.patterns.some((pattern) =>
+          matchesPattern(normalized, pattern),
+        )
+      ) {
         throw new PromptLayerError(
           `Prohibited fixture for ${taxonomy.id} does not exercise its taxonomy.`,
         );
@@ -267,7 +278,9 @@ function validateFixtures(
       const normalized = normalizeLine(fixture);
       if (
         taxonomies.some((candidate) =>
-          candidate.patterns.some((pattern) => normalized.includes(pattern)),
+          candidate.patterns.some((pattern) =>
+            matchesPattern(normalized, pattern),
+          ),
         )
       ) {
         throw new PromptLayerError(
@@ -340,6 +353,35 @@ function normalizeLine(value: string): string {
   return normalized;
 }
 
+function matchesPattern(value: string, pattern: string): boolean {
+  let offset = 0;
+  while (offset <= value.length - pattern.length) {
+    const index = value.indexOf(pattern, offset);
+    if (index === -1) {
+      return false;
+    }
+    const end = index + pattern.length;
+    if (
+      !LEXICAL_END_PATTERN.test(value.slice(Math.max(0, index - 2), index)) &&
+      !LEXICAL_START_PATTERN.test(value.slice(end, end + 2)) &&
+      !isNeutralTechnicalContext(pattern, value.slice(end))
+    ) {
+      return true;
+    }
+    offset = index + 1;
+  }
+  return false;
+}
+
+function isNeutralTechnicalContext(pattern: string, suffix: string): boolean {
+  return (
+    pattern === "i need you to stay" &&
+    /^ within (?:the )?(?:repository|workspace|project|directory) boundary\b/u.test(
+      suffix,
+    )
+  );
+}
+
 function hasUnsafeCodePoint(value: string, allowTextLayout: boolean): boolean {
   for (const character of value) {
     const codePoint = character.codePointAt(0);
@@ -351,7 +393,8 @@ function hasUnsafeCodePoint(value: string, allowTextLayout: boolean): boolean {
         (codePoint >= C1_CONTROL_MIN && codePoint <= C1_CONTROL_MAX) ||
         (codePoint >= HIGH_SURROGATE_MIN && codePoint <= LOW_SURROGATE_MAX) ||
         codePoint === LINE_SEPARATOR ||
-        codePoint === PARAGRAPH_SEPARATOR)
+        codePoint === PARAGRAPH_SEPARATOR ||
+        FORMAT_CONTROL_PATTERN.test(character))
     ) {
       return true;
     }

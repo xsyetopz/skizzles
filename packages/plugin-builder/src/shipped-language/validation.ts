@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ShippedLanguageFinding } from "@skizzles/prompt-layer";
@@ -27,16 +28,21 @@ import {
 } from "./file-boundary.ts";
 import { semanticSurfaceTexts } from "./surface-content.ts";
 
+const CANONICAL_LOGO_PATH = "packages/plugin-builder/template/assets/logo.png";
+const STAGED_LOGO_PATH = "assets/logo.png";
+const PINNED_LOGO = {
+  bytes: 398_251,
+  // biome-ignore lint/security/noSecrets: public binary asset integrity digest.
+  sha256: "935cff1f26724714b784b26a4601bf46f96a673f94efeed26b9f2d833f7ab961",
+} as const;
 const CANONICAL_EXCLUSIONS = new Set([
   SHIPPED_LANGUAGE_POLICY_PATHS.canonicalWorkspacePath,
   "packages/container-lab/LICENSE",
-  "packages/plugin-builder/template/assets/logo.png",
   "packages/prompt-layer/assets/upstream/LICENSE",
   "packages/prompt-layer/assets/upstream/NOTICE",
 ]);
 const STAGED_EXCLUSIONS = new Set([
   SHIPPED_LANGUAGE_POLICY_PATHS.packagedPath,
-  "assets/logo.png",
   "packages/container-lab/LICENSE",
   "third_party/openai-codex/LICENSE",
   "third_party/openai-codex/NOTICE",
@@ -54,8 +60,17 @@ export async function validateCanonicalShippedLanguage(
   );
   const policy = parsePolicy(policyBytes, "canonical shipped-language policy");
   const paths = await canonicalSurfacePaths(repoRoot);
+  const hasPinnedLogo = paths.includes(CANONICAL_LOGO_PATH);
+  if (hasPinnedLogo) {
+    validatePinnedLogo(
+      await readContainedLanguageSurface(repoRoot, CANONICAL_LOGO_PATH),
+    );
+  }
   for (const path of paths) {
-    if (CANONICAL_EXCLUSIONS.has(path)) {
+    if (
+      CANONICAL_EXCLUSIONS.has(path) ||
+      (path === CANONICAL_LOGO_PATH && hasPinnedLogo)
+    ) {
       continue;
     }
     try {
@@ -94,9 +109,31 @@ export async function validateStagedShippedLanguage(
       "Staged shipped-language policy diverges from its canonical owner.",
     );
   }
+  const paths = await listFiles(pluginRoot);
+  const hasStagedLogo = paths.includes(STAGED_LOGO_PATH);
+  if (hasStagedLogo) {
+    const canonicalLogo = await readContainedLanguageSurface(
+      repoRoot,
+      CANONICAL_LOGO_PATH,
+    );
+    const stagedLogo = await readContainedLanguageSurface(
+      pluginRoot,
+      STAGED_LOGO_PATH,
+    );
+    validatePinnedLogo(canonicalLogo);
+    validatePinnedLogo(stagedLogo);
+    if (!canonicalLogo.equals(stagedLogo)) {
+      throw new PackagingError(
+        "Staged logo diverges from its pinned canonical asset.",
+      );
+    }
+  }
 
-  for (const path of await listFiles(pluginRoot)) {
-    if (STAGED_EXCLUSIONS.has(path)) {
+  for (const path of paths) {
+    if (
+      STAGED_EXCLUSIONS.has(path) ||
+      (path === STAGED_LOGO_PATH && hasStagedLogo)
+    ) {
       continue;
     }
     await validateFile(pluginRoot, path, policy, "staged");
@@ -223,6 +260,15 @@ function parsePolicy(
     return parseShippedLanguagePolicy(bytes);
   } catch {
     throw new PackagingError(`${label} failed strict validation.`);
+  }
+}
+
+function validatePinnedLogo(bytes: Uint8Array): void {
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  if (bytes.byteLength !== PINNED_LOGO.bytes || sha256 !== PINNED_LOGO.sha256) {
+    throw new PackagingError(
+      "Shipped logo does not match the pinned canonical PNG asset.",
+    );
   }
 }
 

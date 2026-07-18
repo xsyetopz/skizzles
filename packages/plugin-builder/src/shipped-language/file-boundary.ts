@@ -3,6 +3,9 @@ import { lstat, open, realpath } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { PackagingError } from "../plugin/contract.ts";
 
+const MAX_LANGUAGE_SURFACE_BYTES = 16 * 1024 * 1024;
+const FORMAT_CONTROL_PATTERN = /\p{Cf}/u;
+
 export class LanguageSurfaceBoundaryError extends PackagingError {}
 
 export async function readContainedLanguageSurface(
@@ -50,11 +53,54 @@ export async function readContainedLanguageSurface(
       opened.dev !== before.dev ||
       opened.ino !== before.ino ||
       after.dev !== before.dev ||
-      after.ino !== before.ino
+      after.ino !== before.ino ||
+      before.nlink !== 1 ||
+      opened.nlink !== 1 ||
+      after.nlink !== 1
     ) {
       throw boundaryError(relativePath);
     }
-    return await handle.readFile();
+    if (
+      !Number.isSafeInteger(opened.size) ||
+      opened.size < 0 ||
+      opened.size > MAX_LANGUAGE_SURFACE_BYTES
+    ) {
+      throw byteBoundsError(relativePath);
+    }
+    const bytes = Buffer.allocUnsafe(opened.size);
+    let offset = 0;
+    while (offset < bytes.byteLength) {
+      const result = await handle.read(
+        bytes,
+        offset,
+        bytes.byteLength - offset,
+        offset,
+      );
+      if (result.bytesRead === 0) {
+        throw boundaryError(relativePath);
+      }
+      offset += result.bytesRead;
+    }
+    const growthProbe = Buffer.allocUnsafe(1);
+    const growth = await handle.read(growthProbe, 0, 1, bytes.byteLength);
+    const completed = await handle.stat();
+    const completedPath = await inspectPath(path, relativePath);
+    if (
+      growth.bytesRead !== 0 ||
+      completed.dev !== opened.dev ||
+      completed.ino !== opened.ino ||
+      completed.nlink !== 1 ||
+      completed.size !== opened.size ||
+      completedPath.isSymbolicLink() ||
+      !completedPath.isFile() ||
+      completedPath.dev !== opened.dev ||
+      completedPath.ino !== opened.ino ||
+      completedPath.nlink !== 1 ||
+      completedPath.size !== opened.size
+    ) {
+      throw boundaryError(relativePath);
+    }
+    return bytes;
   } finally {
     await handle.close();
   }
@@ -120,6 +166,12 @@ function boundaryError(path: string): LanguageSurfaceBoundaryError {
   );
 }
 
+function byteBoundsError(path: string): LanguageSurfaceBoundaryError {
+  return new LanguageSurfaceBoundaryError(
+    `Shipped-language surface ${safeLanguageDiagnosticPath(path)} exceeds its bounded byte length.`,
+  );
+}
+
 export function safeLanguageDiagnosticPath(path: string): string {
   if (
     path.length > 0 &&
@@ -135,7 +187,8 @@ export function safeLanguageDiagnosticPath(path: string): string {
         !(codePoint >= 127 && codePoint <= 159) &&
         !(codePoint >= 0xd800 && codePoint <= 0xdfff) &&
         codePoint !== 0x2028 &&
-        codePoint !== 0x2029
+        codePoint !== 0x2029 &&
+        !FORMAT_CONTROL_PATTERN.test(character)
       );
     })
   ) {

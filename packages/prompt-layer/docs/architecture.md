@@ -129,7 +129,7 @@ generic upstream baseline.
 | `packages/prompt-layer/assets/instructions/developer-instructions.md` | Canonical static developer policy. |
 | `packages/prompt-layer/assets/instructions/compact-prompt.md` | Canonical local-compaction continuation policy. |
 | `packages/prompt-layer/assets/integrations/prompt-policy.json` | Canonical portable policy descriptor and packaged-path contract. |
-| `packages/prompt-layer/assets/evaluations/shipped-language-policy.v1.json` | Version-bound lexical taxonomy with prohibited and allowed fixtures, staged at `evaluations/shipped-language-policy.v1.json`. |
+| `packages/prompt-layer/assets/evaluations/shipped-language-policy.v2.json` | Version-bound lexical/context taxonomy with prohibited and allowed fixtures, staged at `evaluations/shipped-language-policy.v2.json`. |
 | `packages/prompt-layer/src/shipped-language/policy.ts` | Strict corpus parser, exact-byte integrity binding, deterministic literal matcher, and redacted finding contract. |
 
 Tests follow the contract owner rather than mirroring an obsolete source
@@ -155,34 +155,42 @@ distributed.
 
 ### Deterministic shipped-language scope
 
-The version 1 corpus uses no data-supplied regular expressions. Each canonical
+The version 2 corpus uses no data-supplied regular expressions. Each canonical
 ASCII phrase is normalized with Unicode NFKC, lowercase conversion, and
-collapsed horizontal whitespace, then matched as a literal substring on one
-physical line. Quoted text and fenced code are scanned. Negation has no semantic
-exemption: a negated sentence is accepted only when its normalized text does
-not contain a prohibited literal. Ordinary first-person service language
-remains permitted.
+collapsed horizontal whitespace, then matched on one physical line with
+Unicode letter, mark, number, and underscore boundaries. The dependency phrase
+also excludes the explicit neutral repository-boundary continuation. These
+lexical and narrow context boundaries prevent pattern prefixes from matching
+words such as `memory` or `friendly` without exempting prohibited fixtures.
+Quoted text and fenced code are scanned. Negation has no semantic exemption: a
+negated sentence is accepted only when its normalized text does not match a
+prohibited literal. Ordinary first-person service language remains permitted.
 
-The validator is a product-language fitness function, not a psychological
-effect measurement or a general semantic classifier. It can miss paraphrases,
-translations, phrases split across lines, and claims assembled dynamically from
-separate runtime fragments when the fixed transpiler does not emit the exact
-literal. It can reject quoted or policy-discussion text containing an exact
-prohibited phrase. Corpus changes therefore require a new version or an
-explicit digest update with review and must retain negative and allowed
-fixtures. Findings contain the taxonomy ID, bounded relative path, and line
-number, never the matched text. C0 controls
+The validator is a static product-language fitness function, not a
+psychological effect measurement or a general semantic classifier. Its
+deliberate static limitations are paraphrases, translations, phrases split
+across lines, and constant runtime constructions assembled from separate
+literals when the fixed transpiler does not emit the complete phrase. It can
+reject quoted or policy-discussion text containing an exact prohibited phrase.
+Corpus changes therefore require a new version or an explicit digest update
+with review and must retain negative and allowed fixtures. Findings contain the
+taxonomy ID, bounded relative path, and line number, never the matched text. C0 controls
 other than tab/CR/LF, DEL/C1 controls, unpaired surrogates, and Unicode
-line/paragraph separators are rejected before matching. This keeps line
-calculation limited to CR/LF text instead of accepting ambiguous separators.
+line/paragraph separators are rejected before matching. Unicode format controls,
+including zero-width, byte-order-mark, word-joining, and bidi controls, are also
+rejected rather than allowed to splice lexical tokens. This keeps line
+calculation limited to CR/LF text and prevents invisible mid-word bypasses.
 
 `@skizzles/plugin-builder` scans canonical runtime source and every staged
 textual plugin surface before accepting a distribution. The canonical scan
 intentionally over-approximates bundled TypeScript by scanning each composed
 package's `src/` tree before destination mutation; resulting staged bundles are
 scanned again. Every non-excluded canonical candidate is decoded and raw-scanned
-as text through a contained, identity-checked, no-follow read, so a new textual
-suffix cannot bypass the pre-mutation gate.
+as text through a contained, identity-checked, no-follow read. Descriptor size
+is bounded before allocation, reads are explicitly bounded, identity and size
+are rechecked after the read, growth is probed, and files with more than one
+hard link are rejected. A new textual suffix therefore cannot bypass the
+pre-mutation gate or import bytes through a link outside the owned tree.
 
 Format-aware scanning is additive to the raw scan and never executes shipped
 content:
@@ -190,15 +198,21 @@ content:
 - JSON and JSONC use Bun's parsers, bounded recursive traversal of every string
   key/value, and token decoding so duplicate overwritten keys cannot hide an
   escaped string.
-- YAML uses Bun's parser, the same bounded traversal, and independent decoding
-  of quoted scalars, including overwritten mappings.
+- YAML uses the declared `yaml` package's strict document AST and decoded JS
+  graph. Every scalar node is scanned before mapping overwrite, including
+  tagged and anchored scalars. Shared DAG aliases are accepted; actual graph
+  cycles, alias expansion, depth, node, and text bounds fail closed.
 - TypeScript and JavaScript use fixed Bun transpilers only to parse and reveal
   escaped runtime literals; the output is scanned without import resolution or
   execution.
-- Plist scanning decodes only the five predefined XML entities and numeric
-  entities. It never resolves external or user-defined entities.
-- Markdown and `.gitignore` use raw text. The only staged extensionless text
-  paths are `skills/codex-container-lab/scripts/codex-container-lab` and
+- Plist scanning uses a bounded non-resolving XML surface parser. It rejects
+  malformed XML, DTDs, processing instructions after the XML declaration, and
+  external or user-defined entity declarations; it decodes only predefined and
+  numeric references and scans decoded `string`, `key`, and CDATA content.
+- Markdown is additively scanned through Bun's fixed renderer so HTML character
+  references are decoded as rendered text; raw Markdown remains scanned as
+  well. `.gitignore` uses raw text. The only staged extensionless text paths are
+  `skills/codex-container-lab/scripts/codex-container-lab` and
   `skills/designer-runtime/scripts/designer-sim`.
 
 The canonical template probe
@@ -215,8 +229,9 @@ parse errors fail closed because no later owner can make that shipped content
 safe.
 
 The completed stage permits Markdown, YAML, JSON, JSONC, TypeScript, JavaScript,
-plist, `.gitignore`, and those two extensionless paths. The exact PNG logo is
-the only binary exclusion. The exact corpus and OpenAI/Container Lab legal files
+plist, `.gitignore`, and those two extensionless paths. The logo path is not a
+path-only binary exclusion: both canonical and staged bytes must match the one
+pinned canonical PNG digest and each other. The exact corpus and OpenAI/Container Lab legal files
 are policy/legal exclusions rather than binary classifications. Any other
 staged file type fails closed. Raw findings use the source-file line; findings
 from decoded strings or transpiled text use the line within that deterministic

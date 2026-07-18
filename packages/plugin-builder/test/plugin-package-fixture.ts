@@ -288,7 +288,7 @@ async function fixture(temporaryRoots: string[]): Promise<string> {
     "skills/completion-contract/contracts/acceptance.schema.json",
     "skills/completion-contract/fixtures/acceptance-incidents.json",
     "packages/prompt-layer/assets/integrations/prompt-policy.json",
-    "packages/prompt-layer/assets/evaluations/shipped-language-policy.v1.json",
+    "packages/prompt-layer/assets/evaluations/shipped-language-policy.v2.json",
     "packages/prompt-layer/assets/instructions/skizzles-base.md",
     "packages/prompt-layer/assets/instructions/skizzles-base.provenance.json",
     "packages/prompt-layer/assets/instructions/developer-instructions.md",

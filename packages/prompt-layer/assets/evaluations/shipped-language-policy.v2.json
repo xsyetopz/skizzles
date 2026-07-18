@@ -1,8 +1,8 @@
 {
-  "schema": "skizzles.shipped-language-policy",
-  "version": 1,
+  "schema": "skizzles.shipped-language-policy.v2",
+  "version": 2,
   "normalization": "unicode-nfkc-lowercase-collapse-horizontal-whitespace-per-line",
-  "matchMode": "literal-substring-per-line",
+  "matchMode": "literal-candidate-unicode-lexical-context-boundary-per-line",
   "quotedText": "scan",
   "negatedText": "scan-lexically",
   "codeBlocks": "scan",
