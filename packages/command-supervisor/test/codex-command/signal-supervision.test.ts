@@ -40,8 +40,11 @@ describe("signal forwarding and descendant supervision", () => {
     const status = JSON.parse(
       readFileSync(join(directory, "status.json"), "utf8"),
     );
-    expect(status.signal).toBe("SIGTERM");
-    expect(status.exitCode).toBe(42);
+    expect(status.lifecycle.state).toBe("completed");
+    expect(status.lifecycle.cancellationSignal).toBe("SIGTERM");
+    expect(status.lifecycle.exitCode).toBe(42);
+    expect(status.lifecycle.drain).toBe("complete");
+    expect(status.lifecycle.cleanup).toBe("terminated");
     expect(readFileSync(join(directory, "stderr.log"), "utf8")).toBe("handled");
   });
 
@@ -71,8 +74,10 @@ describe("signal forwarding and descendant supervision", () => {
     const status = JSON.parse(
       readFileSync(join(artifactPath(output), "status.json"), "utf8"),
     );
-    expect(status.signal).toBe("SIGTERM");
-    expect(status.exitCode).toBe(137);
+    expect(status.lifecycle.state).toBe("completed");
+    expect(status.lifecycle.cancellationSignal).toBe("SIGTERM");
+    expect(status.lifecycle.exitCode).toBe(137);
+    expect(status.lifecycle.cleanup).toBe("killed");
   });
 
   it("uses a repeated supervisor signal as immediate escalation", async () => {
@@ -101,7 +106,8 @@ describe("signal forwarding and descendant supervision", () => {
     const status = JSON.parse(
       readFileSync(join(artifactPath(output), "status.json"), "utf8"),
     );
-    expect(status.signal).toBe("SIGTERM");
+    expect(status.lifecycle.cancellationSignal).toBe("SIGTERM");
+    expect(status.lifecycle.cleanup).toBe("killed");
   });
 
   it("handles SIGTERM during post-shell drain and finalizes coherent artifacts", async () => {
@@ -142,10 +148,12 @@ describe("signal forwarding and descendant supervision", () => {
     const status = JSON.parse(
       readFileSync(join(directory, "status.json"), "utf8"),
     );
-    expect(status.signal).toBe("SIGTERM");
-    expect(status.exitCode).toBe(143);
-    expect(status.completedAt).toBeString();
-    expect(status.drainIncomplete).toBe(false);
+    expect(status.lifecycle.state).toBe("completed");
+    expect(status.lifecycle.cancellationSignal).toBe("SIGTERM");
+    expect(status.lifecycle.exitCode).toBe(143);
+    expect(status.lifecycle.completedAt).toBeString();
+    expect(status.lifecycle.drain).toBe("complete");
+    expect(status.lifecycle.cleanup).toBe("killed");
     expect(readFileSync(join(directory, "stdout.log"), "utf8")).toBe(
       "shell-output",
     );
@@ -188,8 +196,10 @@ describe("signal forwarding and descendant supervision", () => {
       const status = JSON.parse(
         readFileSync(join(artifactPath(output), "status.json"), "utf8"),
       );
-      expect(status.signal).toBe(signal);
-      expect(status.exitCode).toBe(expectedExitCode);
+      expect(status.lifecycle.state).toBe("completed");
+      expect(status.lifecycle.cancellationSignal).toBe(signal);
+      expect(status.lifecycle.exitCode).toBe(expectedExitCode);
+      expect(status.lifecycle.cleanup).toBe("killed");
     });
   }
 });

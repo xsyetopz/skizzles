@@ -2,7 +2,7 @@ import { accessSync, constants } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import process from "node:process";
-import type { RunSettings } from "./types.ts";
+import type { RunSettings } from "./command-contract.ts";
 
 const defaultMaximumBytes = 16 * 1024 * 1024;
 const defaultMaximumDiskBytes = 256 * 1024 * 1024;
@@ -70,7 +70,7 @@ export function loadRunSettings(): RunSettings {
     maximumBytes,
     maximumDiskBytes: integerEnvironment(
       "CODEX_COMMAND_MAX_DISK_BYTES",
-      defaultMaximumDiskBytes,
+      Math.max(defaultMaximumDiskBytes, maximumBytes),
       maximumBytes,
     ),
     heartbeatMilliseconds: integerEnvironment(

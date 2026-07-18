@@ -1,12 +1,14 @@
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import type { StreamName } from "./command-contract.ts";
 import { retainedOutputTailBytes } from "./run-artifacts.ts";
+import { verifyRunEvidence } from "./run-evidence.ts";
 import {
   isOwnedDirectory,
   isOwnedRegularFile,
   validateExistingRoot,
 } from "./run-root.ts";
-import type { StreamName } from "./types.ts";
+import { maximumStatusBytes, parseRunStatus } from "./run-status-codec.ts";
 
 const queryRunIdPattern = /^[A-Za-z0-9._-]+$/;
 
@@ -20,11 +22,12 @@ function requireRegularArtifact(
   directory: string,
   filename: string,
   label: string,
+  maximumBytes = Number.MAX_SAFE_INTEGER,
 ): string {
   const path = join(directory, filename);
   try {
     const info = lstatSync(path);
-    if (!isOwnedRegularFile(info, 0o600)) {
+    if (!isOwnedRegularFile(info, 0o600) || info.size > maximumBytes) {
       throw new Error("not an owned file");
     }
     return path;
@@ -64,9 +67,37 @@ export class RunStoreQueries {
 
   status(id: string): string {
     const directory = this.requireRunDirectory(id);
-    const path = requireRegularArtifact(directory, "status.json", "status");
+    const path = requireRegularArtifact(
+      directory,
+      "status.json",
+      "status",
+      maximumStatusBytes,
+    );
     try {
-      return readFileSync(path, "utf8");
+      const content = readFileSync(path, "utf8");
+      const status = parseRunStatus(content, id);
+      const stdoutPath = requireRegularArtifact(
+        directory,
+        status.evidence.stdout.reference,
+        "stdout log",
+        status.retention.maximumArtifactBytes,
+      );
+      const stderrPath = requireRegularArtifact(
+        directory,
+        status.evidence.stderr.reference,
+        "stderr log",
+        status.retention.maximumArtifactBytes,
+      );
+      if (
+        !verifyRunEvidence(
+          status,
+          readFileSync(stdoutPath),
+          readFileSync(stderrPath),
+        )
+      ) {
+        throw new Error("status evidence mismatch");
+      }
+      return content;
     } catch {
       throw new Error("status artifact unavailable");
     }

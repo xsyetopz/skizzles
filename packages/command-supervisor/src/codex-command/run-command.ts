@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import process from "node:process";
+import type { StreamCaptureState } from "./command-contract.ts";
 import {
   artifactContents,
   artifactTail,
@@ -8,6 +9,13 @@ import {
   prepareRunArtifacts,
   writeStatus,
 } from "./run-artifacts.ts";
+import {
+  completeRun,
+  createRunStatus,
+  failRunStart,
+  type RunStatus,
+  syncRunEvidence,
+} from "./run-status.ts";
 import { commandShell, loadRunSettings } from "./settings.ts";
 import { spawnSupervisedShell } from "./shell-process.ts";
 import {
@@ -16,20 +24,6 @@ import {
   printCaptured,
   type StreamCapture,
 } from "./stream-capture.ts";
-import type { RunStatus, StreamCaptureState } from "./types.ts";
-
-function syncStreamStatus(
-  status: RunStatus,
-  stdout: StreamCaptureState,
-  stderr: StreamCaptureState,
-): void {
-  status.stdoutObservedBytes = stdout.observedBytes;
-  status.stderrObservedBytes = stderr.observedBytes;
-  status.stdoutStoredBytes = stdout.storedBytes;
-  status.stderrStoredBytes = stderr.storedBytes;
-  status.stdoutTruncated = stdout.truncated;
-  status.stderrTruncated = stderr.truncated;
-}
 
 function progressReporter(
   startedAt: number,
@@ -84,11 +78,12 @@ function renderRetainedOutput(
   status: RunStatus,
   inlineBytes: number,
 ): void {
-  const combinedBytes = status.stdoutObservedBytes + status.stderrObservedBytes;
+  const combinedBytes =
+    status.evidence.stdout.observedBytes + status.evidence.stderr.observedBytes;
   const printFullOutput =
     combinedBytes <= inlineBytes &&
-    !status.stdoutTruncated &&
-    !status.stderrTruncated;
+    !status.evidence.stdout.truncated &&
+    !status.evidence.stderr.truncated;
   if (printFullOutput) {
     printCaptured("stdout", artifactContents(join(directory, "stdout.log")));
     printCaptured("stderr", artifactContents(join(directory, "stderr.log")));
@@ -99,15 +94,16 @@ function renderRetainedOutput(
 }
 
 function renderCompletion(status: RunStatus, processStartedAt: number): void {
-  if (status.stdoutTruncated || status.stderrTruncated) {
+  if (status.evidence.stdout.truncated || status.evidence.stderr.truncated) {
     console.log(
-      `[codex-command] retained out=${status.stdoutStoredBytes}/${status.stdoutObservedBytes}B err=${status.stderrStoredBytes}/${status.stderrObservedBytes}B`,
+      `[codex-command] retained out=${status.evidence.stdout.storedBytes}/${status.evidence.stdout.observedBytes}B err=${status.evidence.stderr.storedBytes}/${status.evidence.stderr.observedBytes}B`,
     );
   }
-  const outcome = status.signal
-    ? `signal ${status.signal}`
-    : `exit ${status.exitCode ?? "unknown"}`;
-  const incomplete = status.drainIncomplete ? " drain-incomplete" : "";
+  const outcome = status.lifecycle.cancellationSignal
+    ? `signal ${status.lifecycle.cancellationSignal}`
+    : `exit ${status.lifecycle.exitCode ?? "unknown"}`;
+  const incomplete =
+    status.lifecycle.drain === "incomplete" ? " drain-incomplete" : "";
   const elapsedSeconds = Math.floor(
     (performance.now() - processStartedAt) / 1_000,
   );
@@ -129,20 +125,13 @@ export async function runCommand(script: string): Promise<number> {
   }
 
   const shell = commandShell();
-  const status: RunStatus = {
+  const status = createRunStatus({
     id,
-    command: script,
-    startedAt: new Date().toISOString(),
+    script,
     shell,
-    stdoutObservedBytes: 0,
-    stderrObservedBytes: 0,
-    stdoutStoredBytes: 0,
-    stderrStoredBytes: 0,
-    stdoutTruncated: false,
-    stderrTruncated: false,
+    settings,
     artifactCapture: artifacts.available ? "active" : "unavailable",
-    drainIncomplete: false,
-  };
+  });
   writeStatus(artifacts.statusPath, status);
   console.log(
     `[codex-command] artifact: ${artifacts.directory ?? "unavailable"}`,
@@ -158,8 +147,7 @@ export async function runCommand(script: string): Promise<number> {
       settings.signalGraceMilliseconds,
     );
   } catch (error) {
-    status.completedAt = new Date().toISOString();
-    status.exitCode = 127;
+    failRunStart(status);
     writeStatus(artifacts.statusPath, status);
     closeRunArtifacts(artifacts);
     console.error(
@@ -199,7 +187,7 @@ export async function runCommand(script: string): Promise<number> {
     stderrState,
   );
   const heartbeat = setInterval(() => {
-    syncStreamStatus(status, stdoutState, stderrState);
+    syncRunEvidence(status, stdoutState, stderrState);
     writeStatus(artifacts.statusPath, status);
     reportProgress();
   }, settings.heartbeatMilliseconds);
@@ -216,16 +204,14 @@ export async function runCommand(script: string): Promise<number> {
   } finally {
     try {
       result = await supervisedShell.finish();
-      // A forced process-group cleanup means the post-shell drain did not
-      // complete naturally, even if the pipe readers happened to finish.
-      status.drainIncomplete = !drainedNaturally || result.forcedCleanup;
       await finishCaptures(captures);
-      status.completedAt = new Date().toISOString();
-      status.exitCode = result.exitCode;
-      if (result.signal !== undefined) {
-        status.signal = result.signal;
-      }
-      syncStreamStatus(status, stdoutState, stderrState);
+      completeRun(status, {
+        exitCode: result.exitCode,
+        signal: result.signal,
+        drainedNaturally,
+        cleanup: result.cleanup,
+      });
+      syncRunEvidence(status, stdoutState, stderrState);
       clearInterval(heartbeat);
       closeRunArtifacts(artifacts);
       writeStatus(artifacts.statusPath, status);

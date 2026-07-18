@@ -11,6 +11,17 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
+import type { RunSettings } from "../../src/codex-command/command-contract.ts";
+import {
+  completeRun,
+  createRunStatus,
+  syncRunEvidence,
+} from "../../src/codex-command/run-status.ts";
+import {
+  parseRunStatus,
+  serializeRunStatus,
+} from "../../src/codex-command/run-status-codec.ts";
+import { emptyCaptureState } from "../../src/codex-command/stream-capture.ts";
 
 export const packageRoot = resolve(import.meta.dir, "../..");
 export const runner = join(packageRoot, "src/codex-command.ts");
@@ -20,20 +31,15 @@ export const artifactCountPattern = /\[codex-command\] artifact:/g;
 export const progressPattern = /\| \d+s \| \d+B \| \d+B \|/;
 export const completionPattern = /\[codex-command\] exit 0 in \d+s\n$/;
 export const generatedRunIdPattern = /^[a-f0-9]{12}$/;
-const activeStatusKeys = [
-  "id",
-  "command",
-  "startedAt",
-  "shell",
-  "stdoutObservedBytes",
-  "stderrObservedBytes",
-  "stdoutStoredBytes",
-  "stderrStoredBytes",
-  "stdoutTruncated",
-  "stderrTruncated",
-  "artifactCapture",
-  "drainIncomplete",
-];
+const fixtureSettings: RunSettings = {
+  root: "/tmp/codex-command-fixture",
+  maximumBytes: 1024 * 1024,
+  maximumDiskBytes: 1024 * 1024,
+  heartbeatMilliseconds: 30_000,
+  drainMilliseconds: 750,
+  inlineBytes: 10 * 1024,
+  signalGraceMilliseconds: 750,
+};
 
 export function temporaryDirectory(): string {
   const directory = mkdtempSync(join(tmpdir(), "codex-command-test-"));
@@ -169,54 +175,33 @@ export function writeCompletedRun(
   mkdirSync(directory, { mode: 0o700 });
   writeFileSync(join(directory, "stdout.log"), stdout, { mode: 0o600 });
   writeFileSync(join(directory, "stderr.log"), "", { mode: 0o600 });
-  const status = {
+  const stdoutState = emptyCaptureState();
+  stdoutState.observedBytes = Buffer.byteLength(stdout);
+  stdoutState.storedBytes = stdoutState.observedBytes;
+  stdoutState.retainedSha256.update(stdout);
+  const stderrState = emptyCaptureState();
+  const status = createRunStatus({
     id,
-    command: "completed fixture",
-    startedAt: "2026-01-01T00:00:00.000Z",
+    script: "completed fixture",
     shell: "/bin/sh",
-    stdoutObservedBytes: Buffer.byteLength(stdout),
-    stderrObservedBytes: 0,
-    stdoutStoredBytes: Buffer.byteLength(stdout),
-    stderrStoredBytes: 0,
-    stdoutTruncated: false,
-    stderrTruncated: false,
+    settings: fixtureSettings,
     artifactCapture: "active",
-    drainIncomplete: false,
-    completedAt: "2026-01-01T00:00:01.000Z",
+  });
+  syncRunEvidence(status, stdoutState, stderrState);
+  completeRun(status, {
     exitCode: 0,
-  };
-  writeFileSync(join(directory, "status.json"), `${JSON.stringify(status)}\n`, {
+    signal: undefined,
+    drainedNaturally: true,
+    cleanup: "not-required",
+  });
+  writeFileSync(join(directory, "status.json"), serializeRunStatus(status), {
     mode: 0o600,
   });
   return directory;
 }
 
-export function exactStatus(content: string): Record<string, unknown> {
-  if (content.length === 0) {
-    throw new Error("status snapshot was empty");
-  }
-  const status = JSON.parse(content) as Record<string, unknown>;
-  const keys = Object.keys(status);
-  const validKeys =
-    JSON.stringify(keys) === JSON.stringify(activeStatusKeys) ||
-    JSON.stringify(keys) ===
-      JSON.stringify([...activeStatusKeys, "completedAt", "exitCode"]);
-  if (!validKeys) {
-    throw new Error(`unexpected status keys: ${keys.join(",")}`);
-  }
-  if (typeof status["id"] !== "string") {
-    throw new Error("status id missing");
-  }
-  if (typeof status["command"] !== "string") {
-    throw new Error("status command missing");
-  }
-  if (typeof status["startedAt"] !== "string") {
-    throw new Error("status startedAt missing");
-  }
-  if (status["artifactCapture"] !== "active") {
-    throw new Error("status artifactCapture is not active");
-  }
-  return status;
+export function exactStatus(content: string, id: string) {
+  return parseRunStatus(content, id);
 }
 
 export async function queryStatus(root: string, id: string) {

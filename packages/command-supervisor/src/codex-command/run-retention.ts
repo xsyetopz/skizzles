@@ -6,6 +6,7 @@ import {
   rmSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { verifyRunEvidence } from "./run-evidence.ts";
 import {
   type FileIdentity,
   identity,
@@ -15,27 +16,10 @@ import {
   sameIdentity,
   validatedRootIdentity,
 } from "./run-root.ts";
+import { maximumStatusBytes, parseRunStatus } from "./run-status-codec.ts";
 
-const maximumStatusBytes = 1024 * 1024;
 const generatedRunIdPattern = /^[a-f0-9]{12}$/;
 const artifactNames = ["status.json", "stderr.log", "stdout.log"] as const;
-const allowedStatusKeys = new Set([
-  "id",
-  "command",
-  "startedAt",
-  "completedAt",
-  "exitCode",
-  "signal",
-  "shell",
-  "stdoutObservedBytes",
-  "stderrObservedBytes",
-  "stdoutStoredBytes",
-  "stderrStoredBytes",
-  "stdoutTruncated",
-  "stderrTruncated",
-  "artifactCapture",
-  "drainIncomplete",
-]);
 
 type ArtifactName = (typeof artifactNames)[number];
 
@@ -47,119 +31,6 @@ type RetainedRun = {
   directoryIdentity: FileIdentity;
   artifactIdentities: Readonly<Record<ArtifactName, FileIdentity>>;
 };
-
-type CompletedStatusMarker = {
-  stdoutStoredBytes: number;
-  stderrStoredBytes: number;
-};
-
-function isNonnegativeInteger(value: unknown): value is number {
-  return Number.isSafeInteger(value) && typeof value === "number" && value >= 0;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function statusCounter(
-  status: Record<string, unknown>,
-  key: string,
-): number | undefined {
-  const value = status[key];
-  return isNonnegativeInteger(value) ? value : undefined;
-}
-
-function validStatusStrings(
-  status: Record<string, unknown>,
-  id: string,
-): boolean {
-  return (
-    status["id"] === id &&
-    typeof status["command"] === "string" &&
-    typeof status["shell"] === "string" &&
-    typeof status["startedAt"] === "string" &&
-    !Number.isNaN(Date.parse(status["startedAt"])) &&
-    typeof status["completedAt"] === "string" &&
-    !Number.isNaN(Date.parse(status["completedAt"]))
-  );
-}
-
-function validStatusCounters(status: Record<string, unknown>): boolean {
-  return [
-    "stdoutObservedBytes",
-    "stderrObservedBytes",
-    "stdoutStoredBytes",
-    "stderrStoredBytes",
-  ].every((key) => isNonnegativeInteger(status[key]));
-}
-
-function validStatusFlags(status: Record<string, unknown>): boolean {
-  return (
-    typeof status["stdoutTruncated"] === "boolean" &&
-    typeof status["stderrTruncated"] === "boolean" &&
-    typeof status["drainIncomplete"] === "boolean" &&
-    status["artifactCapture"] === "active"
-  );
-}
-
-function completedStatus(
-  content: string,
-  id: string,
-): CompletedStatusMarker | undefined {
-  let status: unknown;
-  try {
-    status = JSON.parse(content);
-  } catch {
-    return undefined;
-  }
-  if (!isRecord(status)) {
-    return undefined;
-  }
-  const record = status;
-  if (Object.keys(record).some((key) => !allowedStatusKeys.has(key))) {
-    return undefined;
-  }
-  const signal = record["signal"];
-  const validSignal =
-    signal === undefined ||
-    signal === "SIGHUP" ||
-    signal === "SIGINT" ||
-    signal === "SIGTERM";
-  if (
-    !(
-      validSignal &&
-      validStatusStrings(record, id) &&
-      validStatusCounters(record) &&
-      validStatusFlags(record) &&
-      isNonnegativeInteger(record["exitCode"])
-    )
-  ) {
-    return undefined;
-  }
-  const stdoutStoredBytes = statusCounter(record, "stdoutStoredBytes");
-  const stderrStoredBytes = statusCounter(record, "stderrStoredBytes");
-  const stdoutObservedBytes = statusCounter(record, "stdoutObservedBytes");
-  const stderrObservedBytes = statusCounter(record, "stderrObservedBytes");
-  if (stdoutStoredBytes === undefined) {
-    return undefined;
-  }
-  if (stderrStoredBytes === undefined) {
-    return undefined;
-  }
-  if (stdoutObservedBytes === undefined) {
-    return undefined;
-  }
-  if (stderrObservedBytes === undefined) {
-    return undefined;
-  }
-  if (
-    stdoutStoredBytes > stdoutObservedBytes ||
-    stderrStoredBytes > stderrObservedBytes
-  ) {
-    return undefined;
-  }
-  return { stdoutStoredBytes, stderrStoredBytes };
-}
 
 function exactArtifactEntries(path: string): boolean {
   try {
@@ -193,14 +64,21 @@ function inspectCompletedRun(
     ) {
       return undefined;
     }
-    const marker = completedStatus(
+    const status = parseRunStatus(
       readFileSync(join(path, "status.json"), "utf8"),
       id,
     );
     if (
-      !marker ||
-      marker.stdoutStoredBytes !== stdoutInfo.size ||
-      marker.stderrStoredBytes !== stderrInfo.size
+      status.lifecycle.state === "running" ||
+      stdoutInfo.size !== status.evidence.stdout.storedBytes ||
+      stderrInfo.size !== status.evidence.stderr.storedBytes ||
+      stdoutInfo.size > status.retention.maximumArtifactBytes ||
+      stderrInfo.size > status.retention.maximumArtifactBytes ||
+      !verifyRunEvidence(
+        status,
+        readFileSync(join(path, "stdout.log")),
+        readFileSync(join(path, "stderr.log")),
+      )
     ) {
       return undefined;
     }

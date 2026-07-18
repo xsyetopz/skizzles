@@ -30,7 +30,8 @@ describe("shell selection and operator presentation", () => {
       "process-substitution",
     );
     expect(
-      JSON.parse(readFileSync(join(path, "status.json"), "utf8")).shell,
+      JSON.parse(readFileSync(join(path, "status.json"), "utf8")).execution
+        .shell,
     ).toBe("/bin/zsh");
   });
 

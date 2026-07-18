@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { writeSync } from "node:fs";
 import process from "node:process";
-import type { StreamCaptureState, StreamName } from "./types.ts";
+import type { StreamCaptureState, StreamName } from "./command-contract.ts";
 
 export type StreamCapture = {
   done: Promise<void>;
@@ -13,6 +14,7 @@ export function emptyCaptureState(): StreamCaptureState {
     storedBytes: 0,
     truncated: false,
     finished: false,
+    retainedSha256: createHash("sha256"),
   };
 }
 
@@ -35,6 +37,7 @@ function retainChunk(
   try {
     const written = writeSync(artifact, stored);
     state.storedBytes += written;
+    state.retainedSha256.update(stored.subarray(0, written));
     if (written !== chunk.length) {
       state.truncated = true;
     }

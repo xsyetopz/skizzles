@@ -80,7 +80,7 @@ describe("artifact query and validation", () => {
 
     for (let batch = 0; batch < 20; batch += 1) {
       for (let read = 0; read < 50; read += 1) {
-        exactStatus(readFileSync(statusPath, "utf8"));
+        exactStatus(readFileSync(statusPath, "utf8"), id);
       }
       const responses = await Promise.all(
         Array.from({ length: 12 }, () => queryStatus(root, id)),
@@ -88,13 +88,13 @@ describe("artifact query and validation", () => {
       for (const response of responses) {
         expect(response.exitCode).toBe(0);
         expect(response.stderr).toBe("");
-        exactStatus(response.stdout);
+        exactStatus(response.stdout, id);
       }
       await Bun.sleep(5);
     }
 
     expect(await run.exited).toBe(0);
-    exactStatus(readFileSync(statusPath, "utf8"));
+    exactStatus(readFileSync(statusPath, "utf8"), id);
     expect(readdirSync(directory).sort()).toEqual([
       "status.json",
       "stderr.log",

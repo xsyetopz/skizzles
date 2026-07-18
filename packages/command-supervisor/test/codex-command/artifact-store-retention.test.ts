@@ -116,7 +116,8 @@ describe("artifact-store safety and retention", () => {
     const initialStatus = JSON.parse(
       readFileSync(join(activeDirectory, "status.json"), "utf8"),
     );
-    expect(initialStatus.completedAt).toBeUndefined();
+    expect(initialStatus.lifecycle.completedAt).toBeNull();
+    expect(initialStatus.lifecycle.state).toBe("running");
 
     const cleanup = invoke(
       runner,
@@ -146,7 +147,9 @@ describe("artifact-store safety and retention", () => {
     const finalStatus = JSON.parse(
       readFileSync(join(activeDirectory, "status.json"), "utf8"),
     );
-    expect(finalStatus.completedAt).toBeString();
-    expect(finalStatus.exitCode).toBe(137);
+    expect(finalStatus.lifecycle.completedAt).toBeString();
+    expect(finalStatus.lifecycle.exitCode).toBe(137);
+    expect(finalStatus.lifecycle.cancellationSignal).toBe("SIGTERM");
+    expect(finalStatus.lifecycle.cleanup).toBe("killed");
   });
 });

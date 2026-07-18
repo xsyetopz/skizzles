@@ -37,24 +37,25 @@ describe("command execution and stream capture", () => {
     expect(readFileSync(join(path, "stdout.log"), "utf8")).toContain("visible");
     expect(readFileSync(join(path, "stderr.log"), "utf8")).toContain("failure");
     const status = JSON.parse(readFileSync(join(path, "status.json"), "utf8"));
-    expect(status.exitCode).toBe(23);
-    expect(status.stdoutObservedBytes).toBe(8);
-    expect(status.stdoutStoredBytes).toBe(8);
+    expect(status.lifecycle.state).toBe("completed");
+    expect(status.lifecycle.exitCode).toBe(23);
+    expect(status.lifecycle.cancellationSignal).toBeNull();
+    expect(status.lifecycle.drain).toBe("complete");
+    expect(status.lifecycle.cleanup).toBe("not-required");
+    expect(status.evidence.stdout.observedBytes).toBe(8);
+    expect(status.evidence.stdout.storedBytes).toBe(8);
+    expect(status.evidence.stdout.truncated).toBe(false);
+    expect(status.lifecycle.completedAt).toBeString();
     expect(Object.keys(status)).toEqual([
+      "schema",
+      "version",
       "id",
-      "command",
-      "startedAt",
-      "shell",
-      "stdoutObservedBytes",
-      "stderrObservedBytes",
-      "stdoutStoredBytes",
-      "stderrStoredBytes",
-      "stdoutTruncated",
-      "stderrTruncated",
+      "action",
+      "execution",
+      "retention",
+      "evidence",
+      "lifecycle",
       "artifactCapture",
-      "drainIncomplete",
-      "completedAt",
-      "exitCode",
     ]);
     expect(statSync(root).mode & 0o777).toBe(0o700);
     expect(statSync(path).mode & 0o777).toBe(0o700);
@@ -121,9 +122,11 @@ describe("command execution and stream capture", () => {
     const path = artifactPath(text(result.stdout));
     const status = JSON.parse(readFileSync(join(path, "status.json"), "utf8"));
     expect(readFileSync(join(path, "stdout.log")).length).toBe(12);
-    expect(status.stdoutObservedBytes).toBe(30);
-    expect(status.stdoutStoredBytes).toBe(12);
-    expect(status.stdoutTruncated).toBe(true);
+    expect(status.lifecycle.state).toBe("completed");
+    expect(status.lifecycle.drain).toBe("complete");
+    expect(status.evidence.stdout.observedBytes).toBe(30);
+    expect(status.evidence.stdout.storedBytes).toBe(12);
+    expect(status.evidence.stdout.truncated).toBe(true);
     expect(text(result.stdout)).toMatch(progressPattern);
   });
 
@@ -137,7 +140,9 @@ describe("command execution and stream capture", () => {
     expect(performance.now() - startedAt).toBeLessThan(500);
     const path = artifactPath(text(result.stdout));
     const status = JSON.parse(readFileSync(join(path, "status.json"), "utf8"));
-    expect(status.drainIncomplete).toBe(true);
+    expect(status.lifecycle.state).toBe("completed");
+    expect(status.lifecycle.drain).toBe("incomplete");
+    expect(status.lifecycle.cleanup).toBe("terminated");
   });
 
   it("settles background descendants after a normal shell exit", async () => {
@@ -175,9 +180,11 @@ describe("command execution and stream capture", () => {
     const status = JSON.parse(
       readFileSync(join(directory, "status.json"), "utf8"),
     );
-    expect(status.exitCode).toBe(0);
-    expect(status.completedAt).toBeString();
-    expect(status.drainIncomplete).toBe(true);
+    expect(status.lifecycle.state).toBe("completed");
+    expect(status.lifecycle.exitCode).toBe(0);
+    expect(status.lifecycle.completedAt).toBeString();
+    expect(status.lifecycle.drain).toBe("incomplete");
+    expect(status.lifecycle.cleanup).toBe("killed");
     expect(readFileSync(join(directory, "stdout.log"), "utf8")).toBe(
       "shell-output",
     );

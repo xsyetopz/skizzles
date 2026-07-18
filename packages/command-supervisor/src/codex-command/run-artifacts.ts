@@ -24,7 +24,8 @@ import {
   sameIdentity,
   validatedRootIdentity,
 } from "./run-root.ts";
-import type { RunStatus } from "./types.ts";
+import type { RunStatus } from "./run-status.ts";
+import { serializeRunStatus } from "./run-status-codec.ts";
 
 export const retainedOutputTailBytes = 1_200;
 
@@ -210,7 +211,7 @@ export function writeStatus(
   let temporaryPath: string | undefined;
   try {
     const boundary = statusWriteBoundary(statusPath, status);
-    const content = Buffer.from(`${JSON.stringify(status)}\n`);
+    const content = Buffer.from(serializeRunStatus(status));
     temporaryPath = join(
       boundary.directory,
       `.status-${crypto.randomUUID()}.tmp`,

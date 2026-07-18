@@ -1,8 +1,8 @@
 import process from "node:process";
+import type { StreamName } from "./command-contract.ts";
 import { runCommand } from "./run-command.ts";
 import { RunStoreQueries } from "./run-queries.ts";
 import { runRoot } from "./settings.ts";
-import type { StreamName } from "./types.ts";
 
 const usage =
   "usage: codex-command run --base64url <script> | status <run-id> | tail <run-id> [stdout|stderr] | errors <run-id> | search <text> [run-id]";
