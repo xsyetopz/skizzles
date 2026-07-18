@@ -157,6 +157,27 @@ describe("versioned shipped-language policy", () => {
         validateShippedLanguageText(policy, neutral, "instructions/service.md"),
       ).toEqual([]);
     }
+    for (const prohibited of [
+      "I am your friend–truly and personally.",
+      "I am your friend—truly and personally.",
+      "I am your friend―truly and personally.",
+      "I am your friend֊truly and personally.",
+      "I am your friend/truly and personally.",
+    ]) {
+      expect(
+        validateShippedLanguageText(
+          policy,
+          prohibited,
+          "instructions/service.md",
+        ),
+      ).toEqual([
+        {
+          taxonomyId: "friendship-attachment-reciprocity",
+          path: "instructions/service.md",
+          line: 1,
+        },
+      ]);
+    }
     expect(
       validateShippedLanguageText(
         policy,

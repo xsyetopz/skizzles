@@ -30,6 +30,21 @@ describe("plugin shipped-language composition and structured formats", () => {
         text: "I need you to stay within the repository boundary and keep talking to me.\n",
         taxonomy: "personal-need-dependency",
       },
+      {
+        path: "skills/example/en-dash-claim.md",
+        text: "I am your friend–truly and personally.\n",
+        taxonomy: "friendship-attachment-reciprocity",
+      },
+      {
+        path: "skills/example/em-dash-claim.md",
+        text: "I am your friend—truly and personally.\n",
+        taxonomy: "friendship-attachment-reciprocity",
+      },
+      {
+        path: "skills/example/horizontal-bar-claim.md",
+        text: "I am your friend―truly and personally.\n",
+        taxonomy: "friendship-attachment-reciprocity",
+      },
     ] as const;
 
     for (const injection of injections) {
@@ -157,6 +172,19 @@ describe("plugin shipped-language composition and structured formats", () => {
         "skills/example/aria-attribute.md",
         '<span aria-label="I am &#x73;entient"></span>\n',
       ],
+      [
+        "skills/example/alt-semicolonless-attribute.md",
+        // biome-ignore lint/security/noSecrets: Deliberate entity-obfuscated visible claim fixture, not a credential.
+        '<img alt="I am &#115entient">\n',
+      ],
+      [
+        "skills/example/title-semicolonless-attribute.md",
+        '<span title="I am &#115entient"></span>\n',
+      ],
+      [
+        "skills/example/aria-semicolonless-attribute.md",
+        '<span aria-label="I am &#115entient"></span>\n',
+      ],
     ] as const;
 
     for (const [path, content] of injections) {
@@ -234,6 +262,12 @@ describe("plugin shipped-language composition and structured formats", () => {
       '<a href="javascript:alert(1)">neutral</a>\n',
       // biome-ignore lint/security/noSecrets: Deliberate entity-obfuscated URL fixture, not a credential.
       '<a href="java&#x73;cript:alert(1)">neutral</a>\n',
+      // biome-ignore lint/security/noSecrets: Deliberate semicolonless entity-obfuscated URL fixture, not a credential.
+      '<a href="jav&#x61script:alert(1)">neutral</a>\n',
+      // biome-ignore lint/security/noSecrets: Deliberate semicolonless entity-obfuscated URL fixture, not a credential.
+      '<a href="jav&#97script:alert(1)">neutral</a>\n',
+      // biome-ignore lint/security/noSecrets: Deliberate semicolonless entity-obfuscated URL fixture, not a credential.
+      '<a href="javascript&#58alert(1)">neutral</a>\n',
       // biome-ignore lint/security/noSecrets: Deliberate NFKC-obfuscated URL fixture, not a credential.
       '<a href="ｊａｖａｓｃｒｉｐｔ：alert(1)">neutral</a>\n',
       // biome-ignore lint/security/noSecrets: Deliberate duplicate attribute fixture, not a credential.
@@ -258,6 +292,12 @@ describe("plugin shipped-language composition and structured formats", () => {
       '<a href="javascript:alert(1)">neutral</a>\n',
       // biome-ignore lint/security/noSecrets: Deliberate entity-obfuscated URL fixture, not a credential.
       '<a href="java&#x73;cript:alert(1)">neutral</a>\n',
+      // biome-ignore lint/security/noSecrets: Deliberate semicolonless entity-obfuscated URL fixture, not a credential.
+      '<a href="jav&#x61script:alert(1)">neutral</a>\n',
+      // biome-ignore lint/security/noSecrets: Deliberate semicolonless entity-obfuscated URL fixture, not a credential.
+      '<a href="jav&#97script:alert(1)">neutral</a>\n',
+      // biome-ignore lint/security/noSecrets: Deliberate semicolonless entity-obfuscated URL fixture, not a credential.
+      '<a href="javascript&#58alert(1)">neutral</a>\n',
     ]) {
       const root = await fixture();
       const destination = join(root, "existing-html-destination");
@@ -290,6 +330,13 @@ describe("plugin shipped-language composition and structured formats", () => {
         '![neutral alt](./image.png "neutral image")',
         "- [x] neutral task",
         '<span aria-label="neutral label">neutral</span>',
+        // biome-ignore lint/security/noSecrets: Deliberate greedy semicolonless numeric-reference fixture, not a credential.
+        '<span title="I am &#x73entient">neutral</span>',
+        '<span title="I am &amp;#115;entient">neutral</span>',
+        '<span title="neutral &#128; value">neutral</span>',
+        "| Left | Center | Right |",
+        "| :--- | :----: | ----: |",
+        "| one | two | three |",
         "```text",
         "cargo check -p <package>",
         "```",
@@ -298,5 +345,47 @@ describe("plugin shipped-language composition and structured formats", () => {
     await expect(
       validateStagedShippedLanguage(root, staged),
     ).resolves.toBeUndefined();
+  });
+
+  test("accepts aligned GFM tables through full staging and rejects non-cell alignment", async () => {
+    const { stagePlugin } = await import("../src/plugin-package.ts");
+    const acceptedRoot = await fixture();
+    const acceptedDestination = join(acceptedRoot, "aligned-table-plugin");
+    await write(
+      acceptedRoot,
+      "skills/example/aligned-table.md",
+      "| Left | Center | Right |\n| :--- | :----: | ----: |\n| one | two | three |\n",
+    );
+    await expect(
+      stagePlugin(acceptedRoot, acceptedDestination),
+    ).resolves.toBeUndefined();
+    expect(
+      await readFile(
+        join(acceptedDestination, "skills/example/aligned-table.md"),
+        "utf8",
+      ),
+    ).toContain("| :--- | :----: | ----: |");
+
+    for (const markup of [
+      // biome-ignore lint/security/noSecrets: Deliberate misplaced table alignment fixture, not a credential.
+      '<table align="left"><tr><td>neutral</td></tr></table>\n',
+      // biome-ignore lint/security/noSecrets: Deliberate misplaced table alignment fixture, not a credential.
+      '<table><tr align="center"><td>neutral</td></tr></table>\n',
+      // biome-ignore lint/security/noSecrets: Deliberate invalid table alignment fixture, not a credential.
+      '<table><tr><td align="justify">neutral</td></tr></table>\n',
+      // biome-ignore lint/security/noSecrets: Deliberate noncanonical table alignment fixture, not a credential.
+      '<table><tr><td align="LEFT">neutral</td></tr></table>\n',
+    ]) {
+      const root = await fixture();
+      const destination = join(root, "existing-table-destination");
+      await write(root, "skills/example/invalid-table.md", markup);
+      await write(root, "existing-table-destination/marker.txt", "preserve\n");
+      await expect(stagePlugin(root, destination)).rejects.toThrow(
+        "rendered Markdown HTML",
+      );
+      expect(await readFile(join(destination, "marker.txt"), "utf8")).toBe(
+        "preserve\n",
+      );
+    }
   });
 });
