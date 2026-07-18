@@ -150,18 +150,26 @@ Do not commit every child completion automatically. The root first inspects shar
 
 ## Versioned acceptance contract
 
-The [acceptance schema](contracts/acceptance.schema.json) requires requirement
-IDs, an explicit objective-gates-before-judge evaluation order, artifact
-SHA-256 hashes, causal evidence kinds, fixed retries/seeds, fixed judge version
-and prompt digest, and author/reviewer fields with self-review disabled. A
-conforming deterministic consumer also rejects duplicate requirement IDs,
-non-contiguous gate order, unknown requirement references, or equal
-author/reviewer identities; JSON Schema alone cannot compare identities or
-relate arbitrary array members. The
-[acceptance incident-regression corpus](fixtures/acceptance-incidents.json) is
-canonical public, implementation-visible regression input—not independent or
-private acceptance material—for verifier mutation, solution leakage, grader
-injection, hard-coded answers, fake effects, success-token spoofing, and
-deceptive completion.
+The published [acceptance schema](contracts/acceptance.schema.json) defines the
+portable v2 record: requirement IDs, objective-gate results, an explicit
+objective-gates-before-judge order, artifacts, evidence/effect bindings,
+integrity findings, fixed retries/seeds, policy/model/validator identity, fixed
+judge version and prompt digest, and author/reviewer fields.
 
-Schemas guide composition and deterministic validation; they cannot intercept native Codex handoffs or enforce host lifecycle.
+JSON Schema validates that shape; it does not prove that an effect occurred,
+compare identities, relate arbitrary references, or determine whether a
+verifier was hidden from an implementation. The repository's strict typed
+evaluator consumes trusted harness facts and explicit expected versions and
+digests. It rejects duplicate or unknown requirements, non-contiguous gates,
+self-review, mutated verifier/test artifacts, unbound or non-causal gate
+evidence, fake effects, retry overflow, judge-before-gate execution, solution
+leakage, grader injection, hard-coded answers, and deceptive completion. The
+canonical public
+[acceptance incident-regression corpus](fixtures/acceptance-incidents.json)
+contains a valid control plus executable mutations and stable rejection codes;
+it is implementation-visible regression input, not independent or private
+acceptance material.
+
+The schema and evaluator cannot intercept native Codex handoffs, attest that a
+host supplied truthful facts, or enforce host lifecycle. A trusted integration
+must collect the facts and invoke the deterministic evaluator explicitly.

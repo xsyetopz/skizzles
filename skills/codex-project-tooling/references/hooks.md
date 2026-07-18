@@ -197,9 +197,12 @@ Stop processing for prompt/session/compact/stop-style hooks:
 
 ## Trust-boundary contract
 
-Hook and MCP composition may validate the versioned Fourth Wall
+Hook and MCP composition may produce or consume the versioned Fourth Wall
 [context envelope](../../fourth-wall/contracts/context-envelope.schema.json)
 and [handoff/review](../../fourth-wall/contracts/handoff-review.schema.json),
-but schemas cannot intercept native Codex handoffs or enforce the host
-lifecycle. Keep raw secrets out of evidence; use references and SHA-256
-digests.
+but the published schemas only define portable document shape. Repository
+packaging pins those schema bytes and executes incident fixtures through a
+strict evaluator; that evaluator still depends on trusted caller-supplied
+clock, version, digest, and effect facts. Neither layer intercepts native Codex
+handoffs or enforces host lifecycle. Keep raw secrets out of evidence; use
+references and SHA-256 digests.

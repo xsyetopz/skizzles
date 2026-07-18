@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { AgentContractPackageError } from "./contract.ts";
 
 export type JsonPrimitive = boolean | null | number | string;
@@ -7,27 +6,11 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-export async function readJsonAsset(
-  path: string,
-  label: string,
-): Promise<{ bytes: Buffer; value: JsonValue }> {
-  let bytes: Buffer;
+export function parseJsonAsset(bytes: Buffer, label: string): JsonValue {
   try {
-    bytes = await readFile(path);
-  } catch (error) {
-    throw new AgentContractPackageError(
-      `${label} is missing or unreadable: ${errorMessage(error)}`,
-      { cause: error },
-    );
-  }
-
-  try {
-    return { bytes, value: JSON.parse(bytes.toString("utf8")) as JsonValue };
-  } catch (error) {
-    throw new AgentContractPackageError(
-      `${label} is not valid JSON: ${errorMessage(error)}`,
-      { cause: error },
-    );
+    return JSON.parse(bytes.toString("utf8")) as JsonValue;
+  } catch {
+    throw new AgentContractPackageError(`${label} is not valid JSON.`);
   }
 }
 
@@ -127,11 +110,4 @@ function compareCodeUnits(left: string, right: string): number {
     return 1;
   }
   return 0;
-}
-
-function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
 }

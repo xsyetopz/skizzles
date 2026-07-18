@@ -20,15 +20,23 @@ provides the repository CLI.
   facade; `src/prompt-policy/` owns its contract parsing, containment, layout,
   and packaged-surface validation.
 - `src/container-lab-package.ts` owns the Container Lab distribution contract.
-- `src/agent-contract/` strictly parses the versioned Fourth Wall and Completion
-  Contract schemas and public incident corpora, then proves staged copies are
-  byte-identical to their canonical skill owners.
+- `src/agent-contract/` pins exact published Fourth Wall and Completion
+  Contract schema bytes, strictly parses/evaluates contract instances, executes
+  every materialized public incident regression, rejects symlinked asset paths,
+  and proves staged copies are byte-identical to their canonical skill owners.
 - `test/` follows those capabilities; `plugin-package-fixture.ts` is the single
   canonical isolated-workspace fixture builder.
 
 The manifest declares every workspace package whose canonical entrypoint is
 composed into the distribution. Internal implementation modules are not
 package exports.
+
+The schema-byte digests in `src/agent-contract/contract.ts` are the plugin
+composition authority and must change atomically with a deliberate published
+schema revision. Plugin-builder does not claim to be a general JSON Schema
+meta-validator. The typed evaluators own repository acceptance semantics that
+JSON Schema cannot express, using explicit clock/version/digest options and
+trusted harness facts.
 
 Executable package sources are bundled to the four stable plugin entrypoints
 plus the installer CLI. The generated bundles are dependency-self-contained

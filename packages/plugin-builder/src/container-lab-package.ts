@@ -10,12 +10,12 @@ import {
 import { dirname, join, relative, sep } from "node:path";
 import process from "node:process";
 
-const CONTAINER_LAB_SOURCE_PATH = "packages/container-lab";
+export const CONTAINER_LAB_SOURCE_PATH = "packages/container-lab";
 
 // biome-ignore lint/security/noSecrets: This is a public source-provenance commit digest.
 const CONTAINER_LAB_PROVENANCE = "a2f44416ef467d9f54b3cb228e3bd050987a3c4c";
 const CONTAINER_LAB_ENTRYPOINTS = ["src/cli.ts", "src/reaper-cli.ts"] as const;
-const CONTAINER_LAB_STATIC_INPUTS = [
+export const CONTAINER_LAB_STATIC_INPUTS = [
   "LICENSE",
   "install/com.openai.codex-container-lab-reaper.plist",
   "docs/architecture.md",

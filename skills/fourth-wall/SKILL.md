@@ -159,21 +159,29 @@ When observed behavior reveals a reusable routing or lifecycle caveat, follow [r
 
 ## Versioned trust contracts
 
-Context crossing boundaries uses the versioned
-[context-envelope schema](contracts/context-envelope.schema.json). Each
-property carries origin/time, trust, SHA-256 integrity,
-scope/objective/policy version, retention/expiry, sensitivity/redaction,
-transformations and producer, and deterministic validation status/evidence.
-LLM-transformed values remain untrusted until property-specific deterministic
-validation. Handoffs and reviews use
-[handoff-review](contracts/handoff-review.schema.json) to integrity-bind the
-objective, inputs, artifacts, acceptance contract, policy, model, actors, and
-evidence references without storing raw secrets. A conforming deterministic
-consumer additionally rejects expired handoffs, current-version or digest
-mismatches, and equal author/reviewer identities; JSON Schema alone cannot
-compare identities or wall-clock/current-version state. The canonical public
-[trust-boundary incident-regression corpus](fixtures/trust-boundary-incidents.json)
-is implementation-visible regression input, not independent or private
+The published [context-envelope schema](contracts/context-envelope.schema.json)
+defines the portable v2 JSON shape. Each property records origin/time, trust,
+canonical SHA-256 coverage, scope/objective/policy identity, retention/expiry,
+sensitivity/redaction, transformations and producers, and property-specific
+validation evidence. The published
+[handoff/review schema](contracts/handoff-review.schema.json) defines the
+portable objective, input, artifact, acceptance, policy/model, actor, and
+evidence-reference shape.
+
+JSON Schema validates document structure; it does not compare actor identities,
+recompute digests, consult current policy/model versions, or compare timestamps
+with a trusted clock. The repository's plugin composition checker pins the
+exact published schema bytes and runs strict typed evaluators with explicit
+clock and expected-version options. Those evaluators reject duplicate context
+properties, incomplete integrity coverage, stale data, unredacted secrets,
+self-review, reference mismatches, and model-transformed data presented as
+validated without property-matched deterministic evidence. The canonical
+public [trust-boundary incident-regression corpus](fixtures/trust-boundary-incidents.json)
+contains valid controls plus executable mutations and stable rejection codes.
+It is implementation-visible regression input, not independent or private
 acceptance material.
 
-These schemas guide tool/plugin composition and validation; they cannot intercept native Codex handoffs or enforce the host lifecycle.
+Neither the published schemas nor the repository evaluator intercept native
+Codex handoffs, attest that a host supplied truthful facts, or enforce the host
+lifecycle. Native integration must collect trusted facts and invoke a
+deterministic consumer explicitly.

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://xsyetopz.github.io/skizzles/contracts/acceptance/v1.schema.json",
+  "$id": "https://xsyetopz.github.io/skizzles/contracts/acceptance/v2.schema.json",
   "title": "Completion Contract acceptance",
   "type": "object",
   "additionalProperties": false,
@@ -11,12 +11,16 @@
     "evaluationOrder",
     "artifacts",
     "evidence",
+    "effects",
+    "findings",
     "execution",
+    "policy",
+    "validator",
     "judge",
     "authors"
   ],
   "properties": {
-    "schemaVersion": { "const": "1.0.0" },
+    "schemaVersion": { "const": "2.0.0" },
     "requirements": {
       "type": "array",
       "minItems": 1,
@@ -36,11 +40,23 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["order", "requirementId", "check"],
+        "required": [
+          "order",
+          "requirementId",
+          "check",
+          "result",
+          "evidenceRefs"
+        ],
         "properties": {
           "order": { "type": "integer", "minimum": 1 },
           "requirementId": { "type": "string", "minLength": 1 },
-          "check": { "type": "string", "minLength": 1 }
+          "check": { "type": "string", "minLength": 1 },
+          "result": { "type": "string", "enum": ["pass", "fail"] },
+          "evidenceRefs": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" }
+          }
         }
       }
     },
@@ -53,17 +69,90 @@
     },
     "artifacts": {
       "type": "array",
+      "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["ref", "sha256"],
+        "required": ["ref", "kind", "sha256"],
         "properties": {
           "ref": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
-          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          "kind": {
+            "type": "string",
+            "enum": ["implementation", "verifier", "test-suite"]
+          },
+          "sha256": { "$ref": "#/$defs/digest" }
         }
       }
     },
     "evidence": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "kind",
+          "ref",
+          "artifactRef",
+          "effectRef",
+          "sha256",
+          "outcome"
+        ],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "test-result",
+              "runtime-effect",
+              "artifact-hash",
+              "inspection",
+              "process-exit",
+              "success-token"
+            ]
+          },
+          "ref": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
+          "artifactRef": {
+            "anyOf": [
+              { "type": "null" },
+              { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" }
+            ]
+          },
+          "effectRef": {
+            "anyOf": [
+              { "type": "null" },
+              { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" }
+            ]
+          },
+          "sha256": {
+            "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": ["pass", "fail", "observed", "missing"]
+          }
+        }
+      }
+    },
+    "effects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "claimed", "observed", "evidenceRef"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
+          "claimed": { "type": "boolean" },
+          "observed": { "type": "boolean" },
+          "evidenceRef": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
+          }
+        }
+      }
+    },
+    "findings": {
       "type": "array",
       "items": {
         "type": "object",
@@ -72,7 +161,14 @@
         "properties": {
           "kind": {
             "type": "string",
-            "enum": ["test", "runtime", "inspection", "hash"]
+            "enum": [
+              "verifier-mutation",
+              "test-mutation",
+              "solution-leakage",
+              "grader-injection",
+              "hard-coded-answer",
+              "deceptive-completion"
+            ]
           },
           "ref": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" }
         }
@@ -83,18 +179,46 @@
       "additionalProperties": false,
       "required": ["retries", "seed"],
       "properties": {
-        "retries": { "type": "integer", "minimum": 0 },
+        "retries": { "type": "integer", "minimum": 0, "maximum": 3 },
         "seed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "digest", "modelVersion", "modelDigest"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "digest": { "$ref": "#/$defs/digest" },
+        "modelVersion": { "type": "string", "minLength": 1 },
+        "modelDigest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "validator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
       }
     },
     "judge": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "version", "promptSha256"],
+      "required": [
+        "enabled",
+        "version",
+        "promptSha256",
+        "ranAfterObjectiveGates",
+        "decision"
+      ],
       "properties": {
         "enabled": { "type": "boolean" },
         "version": { "type": "string", "minLength": 1 },
-        "promptSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        "promptSha256": { "$ref": "#/$defs/digest" },
+        "ranAfterObjectiveGates": { "type": "boolean" },
+        "decision": { "type": "string", "enum": ["not-run", "pass", "fail"] }
       }
     },
     "authors": {
@@ -107,5 +231,8 @@
         "selfReview": { "const": false }
       }
     }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
   }
 }

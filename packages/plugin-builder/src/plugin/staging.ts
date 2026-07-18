@@ -18,6 +18,10 @@ import {
   validatePromptPolicySource,
 } from "../prompt-policy-package.ts";
 import {
+  validateCanonicalShippedLanguage,
+  validateStagedShippedLanguage,
+} from "../shipped-language/validation.ts";
+import {
   CANONICAL_FILE_INPUTS,
   CANONICAL_TREE_INPUTS,
   GENERATED_PATH,
@@ -61,6 +65,7 @@ export async function stagePlugin(
   destination: string,
 ): Promise<void> {
   const paths = packagePaths(repoRoot);
+  await validateCanonicalShippedLanguage(paths.repoRoot);
   await asPackagingError(() => validateCanonicalAgentContracts(paths.repoRoot));
   await asPackagingError(() => validatePromptPolicySource(paths.repoRoot));
   await rm(destination, { force: true, recursive: true });
@@ -107,6 +112,7 @@ export async function stagePlugin(
     destination,
     paths.marketplacePath,
   );
+  await validateStagedShippedLanguage(paths.repoRoot, destination);
 }
 
 export async function buildPlugin(repoRoot = defaultRepoRoot()): Promise<void> {
