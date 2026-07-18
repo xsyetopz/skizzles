@@ -4,7 +4,8 @@ import { EventEmitter } from "node:events";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseLabConfig } from "./config";
+import { parseLabConfig } from "./config.ts";
+import * as dockerFacade from "./docker.ts";
 import {
   cleanupLabLabels,
   type DockerRunner,
@@ -16,9 +17,26 @@ import {
   stackLogs,
   stackStatus,
   terminateDockerRun,
-} from "./docker";
-import type { CommandResult, RunOptions } from "./process";
-import type { LabMetadata } from "./types";
+} from "./docker.ts";
+import type { CommandResult, RunOptions } from "./process.ts";
+import type { LabMetadata } from "./types.ts";
+
+test("Docker compatibility facade retains its runtime export surface", () => {
+  expect(Object.keys(dockerFacade).sort()).toEqual([
+    "cleanupLabLabels",
+    "composeCommand",
+    "defaultDockerRunner",
+    "destroyLabStack",
+    "dockerAvailable",
+    "launchDockerRun",
+    "prepareLabRuntime",
+    "provisionLabStack",
+    "runtimeFromLab",
+    "stackLogs",
+    "stackStatus",
+    "terminateDockerRun",
+  ]);
+});
 
 class MockDocker implements DockerRunner {
   calls: string[][] = [];
@@ -149,7 +167,7 @@ secret_environment: [REGISTRY_TOKEN]
         ),
       ).toBe(true);
       for (const call of docker.calls.filter(
-        (call) => !call.args.includes("config") && !call.args.includes("up"),
+        (call) => !(call.args.includes("config") || call.args.includes("up")),
       )) {
         expect(Object.hasOwn(call.options?.env ?? {}, "REGISTRY_TOKEN")).toBe(
           false,
