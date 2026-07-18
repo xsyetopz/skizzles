@@ -225,7 +225,7 @@ describe("plugin staging and discovery", () => {
     await write(
       root,
       "skills/example/SKILL.md",
-      "---\nname: example\ndescription: Example skill.\n---\n",
+      "---\nname: example\ndescription: Example skill.\n---\n\n# Example\n",
     );
     await write(root, "skills/example/dist/build.js", "build residue\n");
     await write(root, "README.md", "must not be packaged\n");

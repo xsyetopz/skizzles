@@ -21,6 +21,11 @@ import {
   validateCanonicalShippedLanguage,
   validateStagedShippedLanguage,
 } from "../shipped-language/validation.ts";
+import { SkillMetadataError } from "../skill-metadata/contract.ts";
+import {
+  validateCanonicalSkillMetadata,
+  validateStagedSkillMetadata,
+} from "../skill-metadata/validation.ts";
 import {
   CANONICAL_FILE_INPUTS,
   CANONICAL_TREE_INPUTS,
@@ -67,6 +72,7 @@ export async function stagePlugin(
   const paths = packagePaths(repoRoot);
   await validateCanonicalShippedLanguage(paths.repoRoot);
   await asPackagingError(() => validateCanonicalAgentContracts(paths.repoRoot));
+  await asPackagingError(() => validateCanonicalSkillMetadata(paths.repoRoot));
   await asPackagingError(() => validatePromptPolicySource(paths.repoRoot));
   await rm(destination, { force: true, recursive: true });
   await mkdir(destination, { recursive: true });
@@ -105,6 +111,9 @@ export async function stagePlugin(
 
   await asPackagingError(() =>
     validateStagedAgentContracts(paths.repoRoot, destination),
+  );
+  await asPackagingError(() =>
+    validateStagedSkillMetadata(paths.repoRoot, destination),
   );
 
   await validateGeneratedPlugin(
@@ -201,7 +210,8 @@ async function asPackagingError<T>(operation: () => Promise<T>): Promise<T> {
     if (
       error instanceof AgentContractPackageError ||
       error instanceof ContainerLabPackageError ||
-      error instanceof PromptPolicyPackageError
+      error instanceof PromptPolicyPackageError ||
+      error instanceof SkillMetadataError
     ) {
       throw new PackagingError(error.message);
     }

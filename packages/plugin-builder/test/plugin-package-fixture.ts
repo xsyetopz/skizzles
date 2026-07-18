@@ -54,7 +54,7 @@ async function fixture(temporaryRoots: string[]): Promise<string> {
   await write(
     root,
     "skills/example/SKILL.md",
-    "---\nname: example\ndescription: Fixture skill.\n---\n",
+    "---\nname: example\ndescription: Fixture skill.\n---\n\n# Example\n",
   );
   await write(
     root,
@@ -238,6 +238,17 @@ async function fixture(temporaryRoots: string[]): Promise<string> {
     "skills/codex-container-lab/scripts/codex-container-lab",
     "#!/usr/bin/env bun\nconsole.log('fixture');\n",
   );
+  for (const name of [
+    "codex-container-lab",
+    "completion-contract",
+    "fourth-wall",
+  ]) {
+    await write(
+      root,
+      `skills/${name}/SKILL.md`,
+      `---\nname: ${name}\ndescription: Fixture ${name} skill.\n---\n\n# ${name}\n`,
+    );
+  }
   await chmod(
     join(root, "skills/codex-container-lab/scripts/codex-container-lab"),
     0o755,
