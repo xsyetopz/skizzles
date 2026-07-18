@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import {
   mkdir,
   mkdtemp,
+  readdir,
   rename,
   rm,
   symlink,
@@ -13,19 +14,21 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import type { DockerRunner, DockerSpawnOptions } from "./docker";
-import type { CommandResult, RunOptions } from "./process";
-import { runCommand } from "./process";
-import { ContainerLabService } from "./service";
+import type { DockerRunner, DockerSpawnOptions } from "./docker.ts";
+import { withFileLock } from "./locks.ts";
+import type { CommandResult, RunOptions } from "./process.ts";
+import { runCommand } from "./process.ts";
+import { ContainerLabService } from "./service.ts";
 import {
   ensureOwner,
+  labLockPath,
   labManifestPath,
   ownerDirectory,
   ownerKey,
   readLab,
   writeLab,
-} from "./state";
-import type { LabMetadata } from "./types";
+} from "./state.ts";
+import type { LabMetadata } from "./types.ts";
 
 const temporary: string[] = [];
 afterEach(async () => {
@@ -149,6 +152,34 @@ class DestructiveDocker extends RecordingDocker {
       this.child!.emit("close", 137);
     }
     return { code: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
+  }
+}
+
+class TerminatingDocker extends RecordingDocker {
+  override async run(
+    args: string[],
+    options?: RunOptions,
+  ): Promise<CommandResult> {
+    const script = args.find((arg) =>
+      arg.includes("codex-container-lab-termination:"),
+    );
+    if (script) {
+      this.calls.push(args);
+      this.runCalls.push({
+        args,
+        ...(options === undefined ? {} : { options }),
+      });
+      const child = this.child;
+      if (!child) throw new Error("termination occurred before test launch");
+      Object.assign(child, { exitCode: 143 });
+      child.emit("close", 143);
+      return {
+        code: 0,
+        stdout: Buffer.from("codex-container-lab-termination:signaled\n"),
+        stderr: Buffer.alloc(0),
+      };
+    }
+    return await super.run(args, options);
   }
 }
 
@@ -520,6 +551,63 @@ describe("attached service lifecycle", () => {
     expect(docker.child).toBeUndefined();
   });
 
+  test("run request validation precedes durable-state reconciliation", async () => {
+    const fixture = await durableFixture(
+      "thread-invalid-run-order",
+      "ready",
+      true,
+    );
+    await rm(fixture.lab.runtimeRoot, { recursive: true, force: true });
+    const service = new ContainerLabService(
+      fixture.owner,
+      fixture.roots,
+      new RecordingDocker(),
+    );
+
+    await expect(
+      service.run(fixture.lab.id, [], ".", {}, 30, {
+        stdout: () => undefined,
+        stderr: () => undefined,
+      }),
+    ).rejects.toThrow("run argv must contain 1..256 bounded arguments");
+    expect(
+      (await readLab(fixture.roots, fixture.owner, fixture.lab.id)).state,
+    ).toBe("ready");
+  });
+
+  test("SIGTERM after launch terminates the exact attached run and returns 143", async () => {
+    const fixture = await durableFixture("thread-term-run", "ready", true);
+    const docker = new TerminatingDocker();
+    const controller = new AbortController();
+    const running = new ContainerLabService(
+      fixture.owner,
+      fixture.roots,
+      docker,
+    ).run(
+      fixture.lab.id,
+      ["sleep", "100"],
+      ".",
+      {},
+      0,
+      { stdout: () => undefined, stderr: () => undefined },
+      controller.signal,
+    );
+    await docker.waitForChildSpawn();
+
+    controller.abort("SIGTERM");
+
+    expect(await running).toBe(143);
+    expect(
+      docker.calls.some((args) =>
+        args.some(
+          (arg) =>
+            arg.includes("codex-container-lab-termination:") &&
+            arg.includes("kill -TERM"),
+        ),
+      ),
+    ).toBe(true);
+  });
+
   test("destroy removes exact containers first, then waits for attached activity before filesystem cleanup", async () => {
     const fixture = await durableFixture(
       "thread-destroy-active",
@@ -607,6 +695,13 @@ describe("attached service lifecycle", () => {
     await expect(
       readLab(fixture.roots, fixture.owner, fixture.lab.id),
     ).rejects.toMatchObject({ code: "ENOENT" });
+    expect(
+      await new ContainerLabService(
+        fixture.owner,
+        fixture.roots,
+        docker,
+      ).destroyLab(fixture.lab.id),
+    ).toEqual({ labId: fixture.lab.id, destroyed: false });
   });
 
   test("a replaced owner state directory fails closed before Docker or outside cleanup", async () => {
@@ -665,7 +760,154 @@ describe("attached service lifecycle", () => {
       "invalid secret environment",
     );
   });
+
+  test("recovers a crash journal before issuing a new service preview", async () => {
+    const fixture = await provisionedSyncFixture(
+      "thread-sync-preview-recovery",
+    );
+    await writeFile(join(fixture.lab.sourceRoot, "tracked.txt"), "changed\n");
+    const crashed = await fixture.service.preview(fixture.lab.id, "push");
+    await crashServiceApply(fixture.lab, crashed.token);
+    expect(
+      await Bun.file(join(fixture.lab.workspace, "tracked.txt")).text(),
+    ).toBe("changed\n");
+
+    const preview = await fixture.service.preview(fixture.lab.id, "push");
+
+    expect(preview.changes.map((change) => change.path)).toEqual([
+      "tracked.txt",
+    ]);
+    expect(
+      await Bun.file(join(fixture.lab.workspace, "tracked.txt")).text(),
+    ).toBe("base\n");
+    expect(await syncJournals(fixture.lab)).toEqual([]);
+  });
+
+  test("recovers a crash journal before consuming an existing service apply token", async () => {
+    const fixture = await provisionedSyncFixture("thread-sync-apply-recovery");
+    await writeFile(join(fixture.lab.sourceRoot, "tracked.txt"), "changed\n");
+    const crashed = await fixture.service.preview(fixture.lab.id, "push");
+    const pending = await fixture.service.preview(fixture.lab.id, "push");
+    await crashServiceApply(fixture.lab, crashed.token);
+
+    expect(
+      await fixture.service.apply(fixture.lab.id, "push", pending.token),
+    ).toEqual({ labId: fixture.lab.id, direction: "push", applied: 1 });
+    expect(
+      await Bun.file(join(fixture.lab.workspace, "tracked.txt")).text(),
+    ).toBe("changed\n");
+    expect(await syncJournals(fixture.lab)).toEqual([]);
+  });
+
+  test("serializes concurrent preview and apply with activity then lab lock ordering", async () => {
+    const fixture = await provisionedSyncFixture("thread-sync-lock-order");
+    const token = (await fixture.service.preview(fixture.lab.id, "push")).token;
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const held = withFileLock(
+      labLockPath(fixture.roots.stateRoot, fixture.owner, fixture.lab.id),
+      async () => {
+        entered.resolve();
+        await release.promise;
+      },
+    );
+    await entered.promise;
+    let previewSettled = false;
+    let applySettled = false;
+    const preview = fixture.service
+      .preview(fixture.lab.id, "push")
+      .finally(() => {
+        previewSettled = true;
+      });
+    const apply = fixture.service
+      .apply(fixture.lab.id, "push", token)
+      .finally(() => {
+        applySettled = true;
+      });
+    try {
+      await Bun.sleep(100);
+      expect(previewSettled).toBe(false);
+      expect(applySettled).toBe(false);
+    } finally {
+      release.resolve();
+    }
+    await held;
+    await Promise.all([preview, apply]);
+  });
 });
+
+async function provisionedSyncFixture(owner: string) {
+  const root = await mkdtemp(join(tmpdir(), "container-lab-sync-service-"));
+  temporary.push(root);
+  const source = join(root, "source");
+  await runCommand("git", ["init", source]);
+  await writeFile(
+    join(source, ".codex-container-lab.yaml"),
+    "image: { name: node:24, service: dev }\n",
+  );
+  await writeFile(join(source, "tracked.txt"), "base\n");
+  await runCommand("git", ["-C", source, "add", "."]);
+  await runCommand("git", [
+    "-C",
+    source,
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "-m",
+    "fixture",
+  ]);
+  const roots = {
+    stateRoot: join(root, "state"),
+    runtimeRoot: join(root, "runtime"),
+  };
+  const service = new ContainerLabService(owner, roots, new RecordingDocker());
+  const created = await service.createLab("sync", source);
+  const lab = await readLab(roots, owner, created.labId);
+  return { root, roots, owner, service, lab };
+}
+
+async function crashServiceApply(
+  lab: LabMetadata,
+  token: string,
+): Promise<void> {
+  const modulePath = join(import.meta.dir, "sync-apply.ts");
+  const script = `
+    const { applySyncWithHooks } = await import(${JSON.stringify(modulePath)});
+    const options = JSON.parse(process.env.SYNC_CRASH_OPTIONS);
+    await applySyncWithHooks(
+      { ...options, idleGuard: () => true },
+      { afterPathPublished: () => process.exit(86) },
+    );
+  `;
+  const child = Bun.spawn([process.execPath, "-e", script], {
+    env: {
+      ...process.env,
+      SYNC_CRASH_OPTIONS: JSON.stringify({
+        stateRoot: lab.runtimeRoot,
+        labId: lab.id,
+        direction: "push",
+        sourceRoot: lab.sourceRoot,
+        targetRoot: lab.workspace,
+        token,
+      }),
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [exitCode, stderr] = await Promise.all([
+    child.exited,
+    new Response(child.stderr).text(),
+  ]);
+  if (exitCode !== 86) {
+    throw new Error(`Crash fixture exited ${exitCode}: ${stderr}`);
+  }
+}
+
+async function syncJournals(lab: LabMetadata): Promise<string[]> {
+  return await readdir(join(lab.runtimeRoot, "sync", lab.id, "journals"));
+}
 
 async function durableFixture(
   owner: string,

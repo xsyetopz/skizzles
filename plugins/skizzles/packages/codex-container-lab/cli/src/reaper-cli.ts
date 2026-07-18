@@ -6948,9 +6948,9 @@ var require_public_api = __commonJS((exports) => {
 import { homedir as homedir2 } from "os";
 import { join as join5 } from "path";
 
-// packages/codex-container-lab/cli/src/archive-reaper.ts
+// packages/codex-container-lab/cli/src/reaper-domain.ts
 import { Database } from "bun:sqlite";
-import { lstat as lstat5, readdir as readdir3, rm as rm5 } from "fs/promises";
+import { lstat as lstat7, readdir as readdir3, rm as rm7 } from "fs/promises";
 import { join as join4 } from "path";
 
 // node_modules/.bun/yaml@2.9.0/node_modules/yaml/dist/index.js
@@ -7296,246 +7296,31 @@ async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultD
   await cleanupLabLabelsInDocker(metadata, removeInternalImage, runner, environment);
 }
 
-// packages/codex-container-lab/cli/src/locks.ts
-import {
-  link,
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  rm,
-  writeFile
-} from "fs/promises";
-import { dirname } from "path";
-async function withFileLock(path, operation, options = {}) {
-  const attempts = options.attempts ?? 100;
-  const delayMs = options.delayMs ?? 50;
-  const staleMs = options.staleMs ?? 5 * 60000;
-  await mkdir(dirname(path), { recursive: true, mode: 448 });
-  for (let attempt = 0;attempt < attempts; attempt++) {
-    if (options.signal?.aborted) {
-      throw new Error("operation was cancelled while waiting for a state lock");
-    }
-    const candidate = `${path}.candidate-${process.pid}-${crypto.randomUUID()}`;
-    let acquired = false;
-    try {
-      await writeFile(candidate, JSON.stringify({
-        pid: process.pid,
-        createdAt: new Date().toISOString()
-      }), { mode: 384, flag: "wx" });
-      try {
-        await link(candidate, path);
-        acquired = true;
-      } catch (error) {
-        if (error.code !== "EEXIST" && error.code !== "ENOTEMPTY")
-          throw error;
-      }
-      if (acquired) {
-        const candidateInfo = await lstat(candidate, { bigint: true });
-        const candidateIdentity = identity2(candidateInfo);
-        try {
-          return await operation();
-        } finally {
-          await claimAndRemoveLock(path, candidateIdentity, candidate, candidateIdentity, staleMs, options.processProbe ?? probeProcess);
-        }
-      }
-    } finally {
-      await rm(candidate, { force: true });
-    }
-    await removeConfirmedStaleLock(path, staleMs, options.processProbe ?? probeProcess);
-    if (attempt + 1 < attempts) {
-      if (options.signal?.aborted) {
-        throw new Error("operation was cancelled while waiting for a state lock");
-      }
-      await Bun.sleep(delayMs);
-    }
-  }
-  throw new Error("state is busy; another process holds the operation lock");
-}
-async function removeConfirmedStaleLock(path, staleMs, processProbe) {
-  let handle;
-  try {
-    try {
-      handle = await open(path, "r");
-    } catch (error) {
-      if (error.code === "ENOENT")
-        return;
-      throw error;
-    }
-    const info = await handle.stat({ bigint: true });
-    const inspectedIdentity = identity2(info);
-    if (inspectedIdentity === undefined)
-      return;
-    let record;
-    try {
-      const contents = info.isDirectory() ? await readFile(`${path}/owner.json`, "utf8") : await handle.readFile({ encoding: "utf8" });
-      const value = JSON.parse(contents);
-      if (isRecord2(value) && typeof value["pid"] === "number" && Number.isInteger(value["pid"]) && value["pid"] > 0 && typeof value["createdAt"] === "string") {
-        record = value;
-      }
-    } catch {}
-    if (record === undefined) {
-      if (Date.now() - Number(info.mtimeMs) < staleMs)
-        return;
-      await reclaimSameLock(path, inspectedIdentity, staleMs, processProbe);
-      return;
-    }
-    const age = Date.now() - Date.parse(record.createdAt);
-    if (!Number.isFinite(age) || age < staleMs)
-      return;
-    try {
-      processProbe(record.pid);
-      return;
-    } catch (error) {
-      if (error.code !== "ESRCH")
-        return;
-    }
-    await reclaimSameLock(path, inspectedIdentity, staleMs, processProbe);
-  } finally {
-    await handle?.close();
-  }
-}
-async function reclaimSameLock(path, inspected, staleMs, processProbe) {
-  const candidate = `${path}.reclaim-candidate-${process.pid}-${crypto.randomUUID()}`;
-  try {
-    await writeFile(candidate, JSON.stringify({
-      pid: process.pid,
-      createdAt: new Date().toISOString()
-    }), { mode: 384, flag: "wx" });
-    const candidateIdentity = identity2(await lstat(candidate, { bigint: true }));
-    await claimAndRemoveLock(path, inspected, candidate, candidateIdentity, staleMs, processProbe);
-  } finally {
-    await rm(candidate, { force: true });
-  }
-}
-async function claimAndRemoveLock(path, inspected, claimSource, claimIdentity, staleMs, processProbe) {
-  if (inspected === undefined || claimIdentity === undefined)
-    return;
-  const claimPath = `${path}.reclaim`;
-  let claimed = false;
-  try {
-    for (let attempt = 0;attempt < 2; attempt++) {
-      try {
-        await link(claimSource, claimPath);
-        claimed = true;
-        break;
-      } catch (error) {
-        if (error.code !== "EEXIST" && error.code !== "ENOTEMPTY")
-          throw error;
-        if (attempt > 0 || !await removeConfirmedOrphanClaim(claimPath, staleMs, processProbe))
-          return;
-      }
-    }
-    if (!claimed)
-      return;
-    if (!await hasIdentity(claimPath, claimIdentity) || !await hasIdentity(path, inspected))
-      return;
-    await rm(path, { recursive: true, force: true });
-  } finally {
-    if (claimed)
-      await removeIfSamePath(claimPath, claimIdentity);
-  }
-}
-async function removeConfirmedOrphanClaim(claimPath, staleMs, processProbe) {
-  let handle;
-  try {
-    try {
-      handle = await open(claimPath, "r");
-    } catch (error) {
-      if (error.code === "ENOENT")
-        return true;
-      throw error;
-    }
-    const info = await handle.stat({ bigint: true });
-    const inspected = identity2(info);
-    if (inspected === undefined || info.isDirectory())
-      return false;
-    let value;
-    try {
-      value = JSON.parse(await handle.readFile({ encoding: "utf8" }));
-    } catch {
-      return false;
-    }
-    if (!isRecord2(value) || typeof value["pid"] !== "number" || !Number.isInteger(value["pid"]) || value["pid"] <= 0 || typeof value["createdAt"] !== "string")
-      return false;
-    const age = Date.now() - Date.parse(value["createdAt"]);
-    if (!Number.isFinite(age) || age < staleMs)
-      return false;
-    try {
-      processProbe(value["pid"]);
-      return false;
-    } catch (error) {
-      if (error.code !== "ESRCH")
-        return false;
-    }
-    await handle.close();
-    handle = undefined;
-    await removeIfSamePath(claimPath, inspected);
-    return !await hasIdentity(claimPath, inspected);
-  } finally {
-    await handle?.close();
-  }
-}
-async function hasIdentity(path, expected) {
-  let current;
-  try {
-    current = await lstat(path, { bigint: true });
-  } catch (error) {
-    if (error.code === "ENOENT")
-      return false;
-    throw error;
-  }
-  const currentIdentity = identity2(current);
-  return currentIdentity !== undefined && currentIdentity.dev === expected.dev && currentIdentity.ino === expected.ino;
-}
-async function removeIfSamePath(path, inspected) {
-  if (!await hasIdentity(path, inspected))
-    return;
-  await rm(path, { recursive: true, force: true });
-}
-function identity2(info) {
-  if (info.dev < 0n || info.ino <= 0n)
-    return;
-  return { dev: info.dev, ino: info.ino };
-}
-function probeProcess(pid) {
-  process.kill(pid, 0);
-}
-function isRecord2(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// packages/codex-container-lab/cli/src/service.ts
+// packages/codex-container-lab/cli/src/lab-destruction.ts
 import { createHash as createHash3 } from "crypto";
-import { mkdir as mkdir5, readdir as readdir2, realpath as realpath2, stat } from "fs/promises";
+import { readdir as readdir2, realpath as realpath2, stat } from "fs/promises";
 import { join as join3 } from "path";
-
-// packages/codex-container-lab/cli/src/lab-manifest.ts
-var manifestName = ".codex-container-lab.yaml";
-
-// packages/codex-container-lab/cli/src/config.ts
-var manifestName2 = manifestName;
 
 // packages/codex-container-lab/cli/src/files.ts
 import { createHash, randomUUID } from "crypto";
 import { createReadStream } from "fs";
 import {
-  lstat as lstat3,
-  mkdir as mkdir2,
-  readFile as readFile2,
+  lstat as lstat2,
+  mkdir,
+  readFile,
   readlink,
   rename,
-  rm as rm2,
-  writeFile as writeFile2
+  rm,
+  writeFile
 } from "fs/promises";
 import path from "path";
 
 // packages/codex-container-lab/cli/src/trusted-filesystem.ts
-import { lstat as lstat2, realpath } from "fs/promises";
+import { lstat, realpath } from "fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "path";
 async function canonicalDirectoryRoot(root, label) {
   const canonical = await realpath(root);
-  const info = await lstat2(canonical);
+  const info = await lstat(canonical);
   if (!info.isDirectory()) {
     throw new Error(`${label} is not a directory: ${root}`);
   }
@@ -7560,7 +7345,7 @@ async function exactDirectoryChain(root, segments, label, options = {}) {
 }
 async function lstatIfPresent(candidate) {
   try {
-    return await lstat2(candidate);
+    return await lstat(candidate);
   } catch (error) {
     if (error.code === "ENOENT")
       return;
@@ -7627,7 +7412,7 @@ async function guardedPath(root, relative2, createParents = false) {
   for (const part of parts.slice(0, -1)) {
     parent = path.join(parent, part);
     try {
-      const stat = await lstat3(parent);
+      const stat = await lstat2(parent);
       if (stat.isSymbolicLink() || !stat.isDirectory()) {
         throw new Error(`Unsafe synchronization parent for ${relative2}`);
       }
@@ -7636,7 +7421,7 @@ async function guardedPath(root, relative2, createParents = false) {
         throw error;
       if (!createParents)
         break;
-      await mkdir2(parent);
+      await mkdir(parent);
     }
   }
   const result = path.join(canonical, ...parts);
@@ -7647,7 +7432,7 @@ async function guardedPath(root, relative2, createParents = false) {
 }
 async function describeSyncFile(root, relative2) {
   const absolute = await guardedPath(root, relative2);
-  const stat = await lstat3(absolute);
+  const stat = await lstat2(absolute);
   const mode = stat.mode & 511;
   if (stat.isSymbolicLink()) {
     const target = await readlink(absolute);
@@ -7682,14 +7467,223 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 async function readJson(file) {
-  return JSON.parse(await readFile2(file, "utf8"));
+  return JSON.parse(await readFile(file, "utf8"));
 }
 async function writeJsonAtomic(file, value) {
-  await mkdir2(path.dirname(file), { recursive: true, mode: 448 });
+  await mkdir(path.dirname(file), { recursive: true, mode: 448 });
   const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile2(temporary, `${JSON.stringify(value)}
+  await writeFile(temporary, `${JSON.stringify(value)}
 `, { mode: 384 });
   await rename(temporary, file);
+}
+
+// packages/codex-container-lab/cli/src/locks.ts
+import {
+  link,
+  lstat as lstat3,
+  mkdir as mkdir2,
+  open,
+  readFile as readFile2,
+  rm as rm2,
+  writeFile as writeFile2
+} from "fs/promises";
+import { dirname } from "path";
+async function withFileLock(path2, operation, options = {}) {
+  const attempts = options.attempts ?? 100;
+  const delayMs = options.delayMs ?? 50;
+  const staleMs = options.staleMs ?? 5 * 60000;
+  await mkdir2(dirname(path2), { recursive: true, mode: 448 });
+  for (let attempt = 0;attempt < attempts; attempt++) {
+    if (options.signal?.aborted) {
+      throw new Error("operation was cancelled while waiting for a state lock");
+    }
+    const candidate = `${path2}.candidate-${process.pid}-${crypto.randomUUID()}`;
+    let acquired = false;
+    try {
+      await writeFile2(candidate, JSON.stringify({
+        pid: process.pid,
+        createdAt: new Date().toISOString()
+      }), { mode: 384, flag: "wx" });
+      try {
+        await link(candidate, path2);
+        acquired = true;
+      } catch (error) {
+        if (error.code !== "EEXIST" && error.code !== "ENOTEMPTY")
+          throw error;
+      }
+      if (acquired) {
+        const candidateInfo = await lstat3(candidate, { bigint: true });
+        const candidateIdentity = identity2(candidateInfo);
+        try {
+          return await operation();
+        } finally {
+          await claimAndRemoveLock(path2, candidateIdentity, candidate, candidateIdentity, staleMs, options.processProbe ?? probeProcess);
+        }
+      }
+    } finally {
+      await rm2(candidate, { force: true });
+    }
+    await removeConfirmedStaleLock(path2, staleMs, options.processProbe ?? probeProcess);
+    if (attempt + 1 < attempts) {
+      if (options.signal?.aborted) {
+        throw new Error("operation was cancelled while waiting for a state lock");
+      }
+      await Bun.sleep(delayMs);
+    }
+  }
+  throw new Error("state is busy; another process holds the operation lock");
+}
+async function removeConfirmedStaleLock(path2, staleMs, processProbe) {
+  let handle;
+  try {
+    try {
+      handle = await open(path2, "r");
+    } catch (error) {
+      if (error.code === "ENOENT")
+        return;
+      throw error;
+    }
+    const info = await handle.stat({ bigint: true });
+    const inspectedIdentity = identity2(info);
+    if (inspectedIdentity === undefined)
+      return;
+    let record;
+    try {
+      const contents = info.isDirectory() ? await readFile2(`${path2}/owner.json`, "utf8") : await handle.readFile({ encoding: "utf8" });
+      const value = JSON.parse(contents);
+      if (isRecord2(value) && typeof value["pid"] === "number" && Number.isInteger(value["pid"]) && value["pid"] > 0 && typeof value["createdAt"] === "string") {
+        record = value;
+      }
+    } catch {}
+    if (record === undefined) {
+      if (Date.now() - Number(info.mtimeMs) < staleMs)
+        return;
+      await reclaimSameLock(path2, inspectedIdentity, staleMs, processProbe);
+      return;
+    }
+    const age = Date.now() - Date.parse(record.createdAt);
+    if (!Number.isFinite(age) || age < staleMs)
+      return;
+    try {
+      processProbe(record.pid);
+      return;
+    } catch (error) {
+      if (error.code !== "ESRCH")
+        return;
+    }
+    await reclaimSameLock(path2, inspectedIdentity, staleMs, processProbe);
+  } finally {
+    await handle?.close();
+  }
+}
+async function reclaimSameLock(path2, inspected, staleMs, processProbe) {
+  const candidate = `${path2}.reclaim-candidate-${process.pid}-${crypto.randomUUID()}`;
+  try {
+    await writeFile2(candidate, JSON.stringify({
+      pid: process.pid,
+      createdAt: new Date().toISOString()
+    }), { mode: 384, flag: "wx" });
+    const candidateIdentity = identity2(await lstat3(candidate, { bigint: true }));
+    await claimAndRemoveLock(path2, inspected, candidate, candidateIdentity, staleMs, processProbe);
+  } finally {
+    await rm2(candidate, { force: true });
+  }
+}
+async function claimAndRemoveLock(path2, inspected, claimSource, claimIdentity, staleMs, processProbe) {
+  if (inspected === undefined || claimIdentity === undefined)
+    return;
+  const claimPath = `${path2}.reclaim`;
+  let claimed = false;
+  try {
+    for (let attempt = 0;attempt < 2; attempt++) {
+      try {
+        await link(claimSource, claimPath);
+        claimed = true;
+        break;
+      } catch (error) {
+        if (error.code !== "EEXIST" && error.code !== "ENOTEMPTY")
+          throw error;
+        if (attempt > 0 || !await removeConfirmedOrphanClaim(claimPath, staleMs, processProbe))
+          return;
+      }
+    }
+    if (!claimed)
+      return;
+    if (!await hasIdentity(claimPath, claimIdentity) || !await hasIdentity(path2, inspected))
+      return;
+    await rm2(path2, { recursive: true, force: true });
+  } finally {
+    if (claimed)
+      await removeIfSamePath(claimPath, claimIdentity);
+  }
+}
+async function removeConfirmedOrphanClaim(claimPath, staleMs, processProbe) {
+  let handle;
+  try {
+    try {
+      handle = await open(claimPath, "r");
+    } catch (error) {
+      if (error.code === "ENOENT")
+        return true;
+      throw error;
+    }
+    const info = await handle.stat({ bigint: true });
+    const inspected = identity2(info);
+    if (inspected === undefined || info.isDirectory())
+      return false;
+    let value;
+    try {
+      value = JSON.parse(await handle.readFile({ encoding: "utf8" }));
+    } catch {
+      return false;
+    }
+    if (!isRecord2(value) || typeof value["pid"] !== "number" || !Number.isInteger(value["pid"]) || value["pid"] <= 0 || typeof value["createdAt"] !== "string")
+      return false;
+    const age = Date.now() - Date.parse(value["createdAt"]);
+    if (!Number.isFinite(age) || age < staleMs)
+      return false;
+    try {
+      processProbe(value["pid"]);
+      return false;
+    } catch (error) {
+      if (error.code !== "ESRCH")
+        return false;
+    }
+    await handle.close();
+    handle = undefined;
+    await removeIfSamePath(claimPath, inspected);
+    return !await hasIdentity(claimPath, inspected);
+  } finally {
+    await handle?.close();
+  }
+}
+async function hasIdentity(path2, expected) {
+  let current;
+  try {
+    current = await lstat3(path2, { bigint: true });
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return false;
+    throw error;
+  }
+  const currentIdentity = identity2(current);
+  return currentIdentity !== undefined && currentIdentity.dev === expected.dev && currentIdentity.ino === expected.ino;
+}
+async function removeIfSamePath(path2, inspected) {
+  if (!await hasIdentity(path2, inspected))
+    return;
+  await rm2(path2, { recursive: true, force: true });
+}
+function identity2(info) {
+  if (info.dev < 0n || info.ino <= 0n)
+    return;
+  return { dev: info.dev, ino: info.ino };
+}
+function probeProcess(pid) {
+  process.kill(pid, 0);
+}
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // packages/codex-container-lab/cli/src/state.ts
@@ -7706,6 +7700,14 @@ import {
   resolve as resolve2,
   sep as sep2
 } from "path";
+
+// packages/codex-container-lab/cli/src/lab-manifest.ts
+var manifestName = ".codex-container-lab.yaml";
+
+// packages/codex-container-lab/cli/src/config.ts
+var manifestName2 = manifestName;
+
+// packages/codex-container-lab/cli/src/state.ts
 var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
 var FINDING_SURFACES = new Set([
   "host-bind",
@@ -8044,75 +8046,170 @@ function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// packages/codex-container-lab/cli/src/sync.ts
-import {
-  chmod,
-  copyFile,
-  lstat as lstat4,
-  mkdir as mkdir4,
-  readlink as readlink2,
-  rename as rename2,
-  rm as rm4,
-  symlink
-} from "fs/promises";
-import path2 from "path";
-
 // packages/codex-container-lab/cli/src/git-manifest.ts
 import { execFile } from "child_process";
 import { promisify } from "util";
 var execFileAsync = promisify(execFile);
 var MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
+function manifestDigest(files) {
+  const compact = Object.keys(files).sort().map((name) => {
+    const file = files[name];
+    return [name, file.kind, file.sha256, file.size, file.mode];
+  });
+  return sha256(JSON.stringify(compact));
+}
+
+// packages/codex-container-lab/cli/src/sync-comparison.ts
+function sameSyncFile(a, b) {
+  return a === b || !!a && !!b && a.kind === b.kind && a.sha256 === b.sha256 && a.size === b.size && a.mode === b.mode;
+}
+
+// packages/codex-container-lab/cli/src/sync-durability.ts
+import { randomUUID as randomUUID2 } from "crypto";
+import { mkdir as mkdir4, open as open2, rename as rename2, rm as rm4, writeFile as writeFile3 } from "fs/promises";
+import path2 from "path";
+async function syncFile(file) {
+  const handle = await open2(file, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+async function syncDirectory(directory) {
+  const handle = await open2(directory, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+async function writeDurableJson(file, value) {
+  const directory = path2.dirname(file);
+  await mkdir4(directory, { recursive: true, mode: 448 });
+  const temporary = `${file}.${randomUUID2()}.tmp`;
+  try {
+    await writeFile3(temporary, `${JSON.stringify(value)}
+`, { mode: 384 });
+    await syncFile(temporary);
+    await rename2(temporary, file);
+    await syncDirectory(directory);
+  } finally {
+    await rm4(temporary, { force: true });
+  }
+}
 
 // packages/codex-container-lab/cli/src/public-json.ts
 var PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
 
-// packages/codex-container-lab/cli/src/sync.ts
-var DEFAULT_TTL_MS = 5 * 60 * 1000;
-async function recoverSyncTransactions(options) {
-  const state = await statePaths(options);
-  const allowedTargets = new Set(await Promise.all(options.allowedTargetRoots.map(canonicalRoot)));
-  const glob = new Bun.Glob("*.json");
-  let recovered = 0;
-  for await (const name of glob.scan({
-    cwd: state.journals,
-    onlyFiles: true
-  })) {
-    const journalPath = path2.join(state.journals, name);
-    const journal = await readRequiredJson(journalPath, `Invalid synchronization journal ${name}`);
-    const targetRoot = await canonicalRoot(journal.targetRoot);
-    if (!allowedTargets.has(targetRoot)) {
-      throw new Error(`Synchronization journal targets a root not owned by this lab: ${targetRoot}`);
+// packages/codex-container-lab/cli/src/sync-staging.ts
+import {
+  chmod,
+  copyFile,
+  lstat as lstat4,
+  mkdir as mkdir5,
+  readlink as readlink2,
+  rename as rename3,
+  rm as rm5,
+  rmdir,
+  symlink
+} from "fs/promises";
+import path3 from "path";
+async function assertDirectoryIdentities(targetRoot, identities, message2) {
+  for (const expected of identities) {
+    let actual;
+    try {
+      actual = await directoryIdentity(targetRoot, expected.path);
+    } catch {
+      throw new Error(message2(expected.path));
     }
-    const journalBaseline = path2.join(await canonicalRoot(path2.dirname(journal.baselinePath)), path2.basename(journal.baselinePath));
-    const expectedBaseline = path2.join(await canonicalRoot(path2.dirname(state.baseline)), path2.basename(state.baseline));
-    if (journalBaseline !== expectedBaseline) {
-      throw new Error("Synchronization journal baseline does not belong to this lab");
+    if (actual.device !== expected.device || actual.inode !== expected.inode) {
+      throw new Error(message2(expected.path));
     }
-    if (journal.state === "applied") {
-      await writeJsonAtomic(state.baseline, journal.newBaseline);
-    } else
-      await rollbackJournalSafely(targetRoot, journal);
-    await rm4(journalPath, { force: true });
-    await rm4(path2.join(state.backups, path2.basename(name, ".json")), {
-      recursive: true,
-      force: true
-    });
-    recovered++;
   }
-  return recovered;
 }
-function sameFile(a, b) {
-  return a === b || !!a && !!b && a.kind === b.kind && a.sha256 === b.sha256 && a.size === b.size && a.mode === b.mode;
+async function cleanupCreatedDirectories(targetRoot, directories) {
+  for (const identity3 of [...directories].reverse()) {
+    await assertDirectoryIdentities(targetRoot, [identity3], (relative3) => `recovery conflict at ${relative3}; divergent target directory preserved`);
+    const directory = await guardedPath(targetRoot, identity3.path);
+    try {
+      await rmdir(directory);
+      await syncDirectory(path3.dirname(directory));
+    } catch (error) {
+      const code = error.code;
+      if (code === "ENOTEMPTY" || code === "EEXIST") {
+        throw new Error(`recovery conflict at ${identity3.path}; divergent target directory preserved`);
+      }
+      throw error;
+    }
+  }
 }
-async function statePaths(identity3) {
+async function directoryIdentity(root, relative3) {
+  const directory = await guardedPath(root, relative3);
+  const stat = await lstat4(directory, { bigint: true });
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new Error(`Unsafe synchronization directory: ${relative3}`);
+  }
+  return {
+    path: relative3,
+    device: stat.dev.toString(),
+    inode: stat.ino.toString()
+  };
+}
+async function restoreBackups(targetRoot, backups) {
+  for (const record of backups) {
+    const target = await guardedPath(targetRoot, record.path, true);
+    if (!record.existed) {
+      await rm5(target, { force: true, recursive: false });
+      await syncDirectory(path3.dirname(target));
+      continue;
+    }
+    if (!(record.backup && record.publication)) {
+      throw new Error(`Missing synchronization backup for ${record.path}`);
+    }
+    await rm5(record.publication, { force: true, recursive: false });
+    if (record.kind === "symlink") {
+      await symlink(await readlink2(record.backup), record.publication);
+    } else {
+      await copyFile(record.backup, record.publication);
+      if (record.mode !== undefined)
+        await chmod(record.publication, record.mode);
+      await syncFile(record.publication);
+    }
+    await rename3(record.publication, target);
+    await syncDirectory(path3.dirname(target));
+  }
+}
+async function validateBackupArtifacts(backups) {
+  for (const record of backups) {
+    if (!(record.existed && record.backup && record.original))
+      continue;
+    const actual = await describeSyncFile(path3.dirname(record.backup), path3.basename(record.backup));
+    if (!sameSyncFile(actual, record.original)) {
+      throw new Error(`Invalid synchronization backup for ${record.path}`);
+    }
+  }
+}
+async function cleanupPublications(backups) {
+  for (const record of backups) {
+    if (!record.publication)
+      continue;
+    await rm5(record.publication, { force: true, recursive: false });
+  }
+}
+
+// packages/codex-container-lab/cli/src/sync-state.ts
+import { lstat as lstat5, mkdir as mkdir6 } from "fs/promises";
+import path4 from "path";
+async function syncStatePaths(identity3) {
   safeStateName(identity3.labId, "lab id");
-  await mkdir4(identity3.stateRoot, { recursive: true, mode: 448 });
+  await mkdir6(identity3.stateRoot, { recursive: true, mode: 448 });
   const stateRoot = await canonicalRoot(identity3.stateRoot);
-  const root = path2.join(stateRoot, "sync", identity3.labId);
-  const previews = path2.join(root, "previews");
-  const used = path2.join(root, "used");
-  const journals = path2.join(root, "journals");
-  const backups = path2.join(root, "backups");
+  const root = path4.join(stateRoot, "sync", identity3.labId);
+  const previews = path4.join(root, "previews");
+  const used = path4.join(root, "used");
+  const journals = path4.join(root, "journals");
+  const backups = path4.join(root, "backups");
   for (const relative3 of [
     "sync",
     `sync/${identity3.labId}`,
@@ -8129,39 +8226,650 @@ async function statePaths(identity3) {
     used,
     journals,
     backups,
-    baseline: path2.join(root, "baseline.json")
+    baseline: path4.join(root, "baseline.json")
   };
 }
 async function ensureStateDirectory(stateRoot, relative3) {
   const directory = await guardedPath(stateRoot, relative3, true);
-  await mkdir4(directory, { mode: 448 }).catch((error) => {
+  await mkdir6(directory, { mode: 448 }).catch((error) => {
     if (error.code !== "EEXIST")
       throw error;
   });
-  const stat = await lstat4(directory);
+  const stat = await lstat5(directory);
   if (stat.isSymbolicLink() || !stat.isDirectory()) {
     throw new Error(`Unsafe synchronization state directory: ${relative3}`);
   }
 }
-async function restoreBackups(targetRoot, backups) {
-  for (const record of backups) {
-    const target = await guardedPath(targetRoot, record.path, true);
-    await rm4(target, { force: true, recursive: false });
-    if (!record.existed)
-      continue;
-    if (!record.backup) {
-      throw new Error(`Missing synchronization backup for ${record.path}`);
+async function readRequiredJson(file, message2) {
+  try {
+    const stat = await lstat5(file);
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      throw new Error("Unsafe synchronization state file");
     }
-    if (record.kind === "symlink") {
-      await symlink(await readlink2(record.backup), target);
-    } else {
-      await copyFile(record.backup, target);
-      if (record.mode !== undefined)
-        await chmod(target, record.mode);
+    return await readJson(file);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new Error(message2);
+    }
+    throw error;
+  }
+}
+async function readRequiredUnknownJson(file, message2) {
+  return await readRequiredJson(file, message2);
+}
+
+// packages/codex-container-lab/cli/src/sync-validation.ts
+var SHA256 = /^[0-9a-f]{64}$/;
+var TOKEN = /^[0-9a-f]{64}$/;
+var DECIMAL = /^(?:0|[1-9][0-9]*)$/;
+function parseBaselineFile(value) {
+  const object = exactObject(value, "synchronization baseline", [
+    "version",
+    "files"
+  ]);
+  if (object.version !== 1)
+    invalid("synchronization baseline version");
+  return { version: 1, files: parseFileRecord(object.files, "baseline files") };
+}
+function parseStoredPreview(value) {
+  const object = exactObject(value, "synchronization preview", [
+    "version",
+    "token",
+    "expiresAt",
+    "sourceDigest",
+    "targetDigest",
+    "changes",
+    "conflicts",
+    "labId",
+    "direction",
+    "sourceRoot",
+    "targetRoot",
+    "baselineDigest",
+    "missingTargetDirectories",
+    "deleteParentDirectories",
+    "binding",
+    "expectedTargets"
+  ]);
+  if (object.version !== 1)
+    invalid("synchronization preview version");
+  const token = stringMatching(object.token, TOKEN, "preview token");
+  const expiresAt = parseIsoDate(object.expiresAt, "preview expiry");
+  const sourceDigest = digest(object.sourceDigest, "preview source digest");
+  const targetDigest = digest(object.targetDigest, "preview target digest");
+  const baselineDigest = digest(object.baselineDigest, "preview baseline digest");
+  const binding = digest(object.binding, "preview binding");
+  const labId = requiredString(object.labId, "preview lab id");
+  const direction = parseDirection(object.direction);
+  const sourceRoot = requiredString(object.sourceRoot, "preview source root");
+  const targetRoot = requiredString(object.targetRoot, "preview target root");
+  const changes = parseChanges(object.changes);
+  const conflicts = parseConflicts(object.conflicts);
+  assertDisjointPaths(changes, conflicts);
+  const expectedTargets = parseExpectedTargets(object.expectedTargets, changes);
+  const missingTargetDirectories = parsePathArray(object.missingTargetDirectories, "preview missing target directories");
+  const deleteParentDirectories = parseDirectoryIdentities(object.deleteParentDirectories, "preview delete parent directories");
+  if (missingTargetDirectories.some((directory) => !changes.some((change) => change.path.startsWith(`${directory}/`)))) {
+    invalid("preview missing target directory provenance");
+  }
+  if (JSON.stringify(deleteParentDirectories.map((entry) => entry.path)) !== JSON.stringify(expectedDeleteParentPaths(changes))) {
+    invalid("preview delete parent directory provenance");
+  }
+  return {
+    version: 1,
+    token,
+    expiresAt,
+    sourceDigest,
+    targetDigest,
+    baselineDigest,
+    binding,
+    labId,
+    direction,
+    sourceRoot,
+    targetRoot,
+    changes,
+    conflicts,
+    expectedTargets,
+    missingTargetDirectories,
+    deleteParentDirectories
+  };
+}
+function parseSyncJournal(value) {
+  const object = exactObject(value, "synchronization journal", [
+    "version",
+    "state",
+    "previewToken",
+    "previewBinding",
+    "targetRoot",
+    "baselinePath",
+    "newBaseline",
+    "backups",
+    "createdDirectories",
+    "deleteParentDirectories",
+    "mutatedPaths",
+    "appliedStates"
+  ], ["creatingDirectory"]);
+  if (object.version !== 1)
+    invalid("synchronization journal version");
+  if (object.state !== "preparing" && object.state !== "prepared" && object.state !== "applied" && object.state !== "rolledBack" && object.state !== "committed") {
+    invalid("synchronization journal state");
+  }
+  const backups = parseBackups(object.backups);
+  const paths = backups.map((item) => item.path);
+  const { createdDirectories, creatingDirectory, deleteParentDirectories } = parseJournalDirectories(object, paths, object.state);
+  const mutatedPaths = parsePathArray(object.mutatedPaths, "mutated paths");
+  if (object.state === "preparing" && mutatedPaths.length > 0) {
+    invalid("preparing synchronization journal mutations");
+  }
+  for (const mutated of mutatedPaths) {
+    if (!paths.includes(mutated))
+      invalid("journal mutated path provenance");
+  }
+  const appliedStates = parseNullableFileRecord(object.appliedStates, "journal applied states");
+  if (!sameStringSet(Object.keys(appliedStates), paths)) {
+    invalid("journal applied state coverage");
+  }
+  for (const backup of backups) {
+    const intended = appliedStates[backup.path];
+    if (intended === undefined)
+      invalid("journal applied state coverage");
+    if (!backup.publication)
+      invalid("journal publication provenance");
+  }
+  return {
+    version: 1,
+    state: object.state,
+    previewToken: stringMatching(object.previewToken, TOKEN, "journal preview token"),
+    previewBinding: digest(object.previewBinding, "journal preview binding"),
+    targetRoot: requiredString(object.targetRoot, "journal target root"),
+    baselinePath: requiredString(object.baselinePath, "journal baseline path"),
+    newBaseline: parseBaselineFile(object.newBaseline),
+    backups,
+    createdDirectories,
+    ...creatingDirectory === undefined ? {} : { creatingDirectory },
+    deleteParentDirectories,
+    mutatedPaths,
+    appliedStates
+  };
+}
+function parseJournalDirectories(object, paths, state) {
+  const createdDirectories = parseDirectoryIdentities(object.createdDirectories, "journal created directories");
+  if (createdDirectories.some((directory) => !paths.some((relative3) => relative3.startsWith(`${directory.path}/`)))) {
+    invalid("journal created directory provenance");
+  }
+  if (state === "preparing" && createdDirectories.length > 0) {
+    invalid("preparing synchronization journal directories");
+  }
+  const creatingDirectory = object.creatingDirectory === undefined ? undefined : syncPath(object.creatingDirectory, "journal creating directory");
+  if (creatingDirectory !== undefined && (state !== "prepared" || createdDirectories.some((entry) => entry.path === creatingDirectory) || !paths.some((relative3) => relative3.startsWith(`${creatingDirectory}/`)))) {
+    invalid("journal creating directory provenance");
+  }
+  return {
+    createdDirectories,
+    ...creatingDirectory === undefined ? {} : { creatingDirectory },
+    deleteParentDirectories: parseDirectoryIdentities(object.deleteParentDirectories, "journal delete parent directories")
+  };
+}
+function parseChanges(value) {
+  if (!Array.isArray(value))
+    invalid("preview changes");
+  const changes = value.map((entry, index) => {
+    const object = objectValue(entry, `preview change ${index}`);
+    const action = object.action;
+    if (action !== "upsert" && action !== "delete") {
+      invalid(`preview change ${index} action`);
+    }
+    const keys = action === "upsert" ? ["path", "action", "file"] : ["path", "action"];
+    assertExactKeys(object, `preview change ${index}`, keys);
+    const relative3 = syncPath(object.path, `preview change ${index} path`);
+    const change = action === "upsert" ? {
+      path: relative3,
+      action,
+      file: parseSyncFile(object.file, relative3, `preview change ${index} file`)
+    } : { path: relative3, action };
+    return change;
+  });
+  assertSortedUnique(changes.map((item) => item.path), "preview change paths");
+  return changes;
+}
+function parseConflicts(value) {
+  if (!Array.isArray(value))
+    invalid("preview conflicts");
+  const conflicts = value.map((entry, index) => {
+    const object = objectValue(entry, `preview conflict ${index}`);
+    assertExactKeys(object, `preview conflict ${index}`, ["path"], ["baseline", "source", "target"]);
+    const relative3 = syncPath(object.path, `preview conflict ${index} path`);
+    const result = { path: relative3 };
+    for (const side of ["baseline", "source", "target"]) {
+      if (object[side] !== undefined) {
+        result[side] = parseSyncFile(object[side], relative3, `preview conflict ${index} ${side}`);
+      }
+    }
+    return result;
+  });
+  assertSortedUnique(conflicts.map((item) => item.path), "preview conflict paths");
+  return conflicts;
+}
+function parseExpectedTargets(value, changes) {
+  const expected = parseNullableFileRecord(value, "preview expected targets");
+  if (!sameStringSet(Object.keys(expected), changes.map((item) => item.path))) {
+    invalid("preview expected target coverage");
+  }
+  return expected;
+}
+function parseBackups(value) {
+  if (!Array.isArray(value))
+    invalid("journal backups");
+  const backups = value.map((entry, index) => {
+    const object = objectValue(entry, `journal backup ${index}`);
+    const existed = object.existed;
+    if (typeof existed !== "boolean")
+      invalid(`journal backup ${index} existence`);
+    const required = existed ? ["path", "existed", "kind", "mode", "backup", "original"] : ["path", "existed", "original"];
+    assertExactKeys(object, `journal backup ${index}`, [
+      ...required,
+      "publication"
+    ]);
+    const relative3 = syncPath(object.path, `journal backup ${index} path`);
+    const publication = requiredString(object.publication, `journal backup ${index} publication`);
+    if (!existed) {
+      if (object.original !== null)
+        invalid(`journal backup ${index} original`);
+      const record2 = {
+        path: relative3,
+        existed: false,
+        original: null,
+        publication
+      };
+      return record2;
+    }
+    const kind = object.kind;
+    if (kind !== "file" && kind !== "symlink") {
+      invalid(`journal backup ${index} kind`);
+    }
+    const mode = parseMode(object.mode, `journal backup ${index} mode`);
+    const original = parseSyncFile(object.original, relative3, `journal backup ${index} original`);
+    if (original.kind !== kind || original.mode !== mode) {
+      invalid(`journal backup ${index} descriptor`);
+    }
+    const record = {
+      path: relative3,
+      existed: true,
+      kind,
+      mode,
+      backup: requiredString(object.backup, `journal backup ${index} path`),
+      original,
+      publication
+    };
+    return record;
+  });
+  assertSortedUnique(backups.map((item) => item.path), "journal backup paths");
+  return backups;
+}
+function parseFileRecord(value, label) {
+  const object = objectValue(value, label);
+  const result = Object.create(null);
+  for (const key of Object.keys(object).sort()) {
+    const relative3 = syncPath(key, `${label} path`);
+    result[relative3] = parseSyncFile(object[key], relative3, `${label} ${relative3}`);
+  }
+  return result;
+}
+function parseNullableFileRecord(value, label) {
+  const object = objectValue(value, label);
+  const result = Object.create(null);
+  for (const key of Object.keys(object).sort()) {
+    const relative3 = syncPath(key, `${label} path`);
+    result[relative3] = object[key] === null ? null : parseSyncFile(object[key], relative3, `${label} ${relative3}`);
+  }
+  return result;
+}
+function parseDirectoryIdentities(value, label) {
+  if (!Array.isArray(value))
+    invalid(label);
+  const identities = value.map((entry, index) => {
+    const object = exactObject(entry, `${label} ${index}`, [
+      "path",
+      "device",
+      "inode"
+    ]);
+    return {
+      path: syncPath(object.path, `${label} ${index} path`),
+      device: decimalString(object.device, `${label} ${index} device`),
+      inode: decimalString(object.inode, `${label} ${index} inode`)
+    };
+  });
+  assertSortedUnique(identities.map((entry) => entry.path), label);
+  return identities;
+}
+function expectedDeleteParentPaths(changes) {
+  const parents = new Set;
+  for (const change of changes) {
+    if (change.action !== "delete")
+      continue;
+    const parts = change.path.split("/").slice(0, -1);
+    for (let index = 1;index <= parts.length; index++) {
+      parents.add(parts.slice(0, index).join("/"));
+    }
+  }
+  return [...parents].sort();
+}
+function parseSyncFile(value, relative3, label) {
+  const object = exactObject(value, label, [
+    "path",
+    "kind",
+    "sha256",
+    "size",
+    "mode"
+  ]);
+  if (object.path !== relative3)
+    invalid(`${label} path`);
+  const kind = object.kind;
+  if (kind !== "file" && kind !== "symlink")
+    invalid(`${label} kind`);
+  const size = object.size;
+  if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0 || size > MAX_SYNC_FILE_BYTES) {
+    invalid(`${label} size`);
+  }
+  return {
+    path: relative3,
+    kind,
+    sha256: digest(object.sha256, `${label} digest`),
+    size,
+    mode: parseMode(object.mode, `${label} mode`)
+  };
+}
+function parsePathArray(value, label) {
+  if (!Array.isArray(value))
+    invalid(label);
+  const paths = value.map((entry, index) => syncPath(entry, `${label} ${index}`));
+  assertSortedUnique(paths, label);
+  return paths;
+}
+function assertDisjointPaths(changes, conflicts) {
+  const changed = new Set(changes.map((item) => item.path));
+  if (conflicts.some((item) => changed.has(item.path))) {
+    invalid("preview change and conflict paths");
+  }
+}
+function assertSortedUnique(values, label) {
+  const sorted = [...values].sort();
+  if (new Set(values).size !== values.length || values.some((value, index) => value !== sorted[index])) {
+    invalid(label);
+  }
+}
+function sameStringSet(left, right) {
+  return left.length === right.length && [...left].sort().every((value, index) => value === [...right].sort()[index]);
+}
+function exactObject(value, label, required, optional = []) {
+  const object = objectValue(value, label);
+  assertExactKeys(object, label, required, optional);
+  return object;
+}
+function objectValue(value, label) {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    invalid(label);
+  return value;
+}
+function assertExactKeys(object, label, required, optional = []) {
+  const keys = Object.keys(object);
+  if (required.some((key) => !keys.includes(key)) || keys.some((key) => !(required.includes(key) || optional.includes(key)))) {
+    invalid(`${label} fields`);
+  }
+}
+function syncPath(value, label) {
+  const relative3 = requiredString(value, label);
+  try {
+    return safeRelativePath(relative3);
+  } catch {
+    invalid(label);
+  }
+}
+function parseMode(value, label) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > 511)
+    invalid(label);
+  return value;
+}
+function parseDirection(value) {
+  if (value !== "push" && value !== "pull")
+    invalid("preview direction");
+  return value;
+}
+function digest(value, label) {
+  return stringMatching(value, SHA256, label);
+}
+function decimalString(value, label) {
+  return stringMatching(value, DECIMAL, label);
+}
+function stringMatching(value, pattern, label) {
+  const string = requiredString(value, label);
+  if (!pattern.test(string))
+    invalid(label);
+  return string;
+}
+function requiredString(value, label) {
+  if (typeof value !== "string" || value.length === 0)
+    invalid(label);
+  return value;
+}
+function parseIsoDate(value, label) {
+  const string = requiredString(value, label);
+  const milliseconds = Date.parse(string);
+  if (!Number.isFinite(milliseconds) || new Date(milliseconds).toISOString() !== string)
+    invalid(label);
+  return string;
+}
+function invalid(label) {
+  throw new Error(`Invalid ${label}`);
+}
+
+// packages/codex-container-lab/cli/src/sync-preview.ts
+var DEFAULT_TTL_MS = 5 * 60 * 1000;
+function previewBinding(preview) {
+  return sha256(JSON.stringify(previewSemanticPayload(preview)));
+}
+function previewSemanticPayload(preview) {
+  return {
+    version: preview.version,
+    token: preview.token,
+    expiresAt: preview.expiresAt,
+    labId: preview.labId,
+    direction: preview.direction,
+    sourceRoot: preview.sourceRoot,
+    targetRoot: preview.targetRoot,
+    sourceDigest: preview.sourceDigest,
+    targetDigest: preview.targetDigest,
+    baselineDigest: preview.baselineDigest,
+    missingTargetDirectories: preview.missingTargetDirectories,
+    deleteParentDirectories: preview.deleteParentDirectories,
+    changes: preview.changes,
+    conflicts: preview.conflicts,
+    expectedTargets: Object.fromEntries(Object.entries(preview.expectedTargets).sort(([left], [right]) => left.localeCompare(right)))
+  };
+}
+
+// packages/codex-container-lab/cli/src/sync-recovery.ts
+import { lstat as lstat6, rm as rm6 } from "fs/promises";
+import path5 from "path";
+var JOURNAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+async function recoverSyncTransactions(options) {
+  const state = await syncStatePaths(options);
+  const allowedTargets = new Set(await Promise.all(options.allowedTargetRoots.map(canonicalRoot)));
+  const glob = new Bun.Glob("*.json");
+  let recovered = 0;
+  for await (const name of glob.scan({
+    cwd: state.journals,
+    onlyFiles: true
+  })) {
+    await recoverJournal(state, name, allowedTargets, options.labId);
+    recovered++;
+  }
+  return recovered;
+}
+async function recoverJournal(state, name, allowedTargets, labId) {
+  const journalId = path5.basename(name, ".json");
+  if (!JOURNAL_ID.test(journalId)) {
+    throw new Error(`Invalid synchronization journal ${name}`);
+  }
+  const journalPath = path5.join(state.journals, name);
+  const journal = parseSyncJournal(await readRequiredUnknownJson(journalPath, `Invalid synchronization journal ${name}`));
+  const provenance = await validateJournalProvenance(state, journal, journalId, allowedTargets, labId);
+  const backupDir = path5.join(state.backups, journalId);
+  await recoverJournalState(state, journal, journalPath, backupDir, provenance);
+  await rm6(backupDir, { recursive: true, force: true });
+  await rm6(journalPath, { force: true });
+}
+async function recoverJournalState(state, journal, journalPath, backupDir, provenance) {
+  const { targetRoot } = provenance;
+  if (journal.state === "prepared" || journal.state === "applied" && !provenance.baselinePublished) {
+    await assertRecoveryDirectoryIdentities(targetRoot, journal);
+    await validateBackupDirectory(backupDir);
+    await validateBackupArtifacts(journal.backups);
+  }
+  if (journal.state === "applied" && !provenance.baselinePublished) {
+    await assertAppliedTargets(targetRoot, journal);
+    await writeDurableJson(state.baseline, journal.newBaseline);
+  } else if (journal.state === "prepared") {
+    await rollbackJournalSafely(targetRoot, journal);
+  }
+  if (journal.state === "prepared") {
+    await cleanupPublications(journal.backups.filter((backup) => journal.mutatedPaths.includes(backup.path)));
+    await cleanupCreatedDirectories(targetRoot, journal.createdDirectories);
+  }
+  if (journal.state === "prepared") {
+    journal.createdDirectories = [];
+    journal.state = "rolledBack";
+  } else if (journal.state === "applied")
+    journal.state = "committed";
+  if (journal.state === "rolledBack" || journal.state === "committed") {
+    await writeDurableJson(journalPath, journal);
+  }
+}
+async function assertAppliedTargets(targetRoot, journal) {
+  for (const backup of journal.backups) {
+    let actual = null;
+    try {
+      actual = await describeSyncFile(targetRoot, backup.path);
+    } catch (error) {
+      if (error.code !== "ENOENT")
+        throw error;
+    }
+    const intended = journal.appliedStates[backup.path] ?? null;
+    if (!sameSyncFile(actual ?? undefined, intended ?? undefined)) {
+      throw new Error(`recovery conflict at ${backup.path}; divergent target preserved`);
+    }
+  }
+}
+async function validateJournalProvenance(state, journal, journalId, allowedTargets, expectedLabId) {
+  const preview = parseStoredPreview(await readRequiredUnknownJson(path5.join(state.used, `${journal.previewToken}.json`), "Synchronization journal preview provenance is missing"));
+  if (preview.token !== journal.previewToken || preview.labId !== expectedLabId || preview.binding !== journal.previewBinding || preview.binding !== previewBinding(preview)) {
+    throw new Error("Invalid synchronization journal preview provenance");
+  }
+  const currentBaseline = parseBaselineFile(await readRequiredUnknownJson(state.baseline, "Synchronization journal baseline is missing"));
+  const currentBaselineDigest = manifestDigest(currentBaseline.files);
+  const baselinePublished = (journal.state === "applied" || journal.state === "committed") && currentBaselineDigest === preview.sourceDigest;
+  if (!baselinePublished && currentBaselineDigest !== preview.baselineDigest) {
+    throw new Error("Invalid synchronization journal baseline provenance");
+  }
+  if (journal.state === "committed" && !baselinePublished) {
+    throw new Error("Invalid committed synchronization journal baseline");
+  }
+  const targetRoot = await canonicalRoot(journal.targetRoot);
+  if (targetRoot !== journal.targetRoot || targetRoot !== preview.targetRoot || !allowedTargets.has(targetRoot)) {
+    throw new Error(`Synchronization journal targets a root not owned by this lab: ${targetRoot}`);
+  }
+  const expectedBaseline = path5.join(await canonicalRoot(path5.dirname(state.baseline)), path5.basename(state.baseline));
+  if (journal.baselinePath !== expectedBaseline) {
+    throw new Error("Synchronization journal baseline does not belong to this lab");
+  }
+  assertJournalMatchesPreview(journal, preview);
+  await resolveCreatingDirectory(targetRoot, journal, path5.join(state.journals, `${journalId}.json`));
+  if (journal.state === "prepared" || journal.state === "applied" && !baselinePublished) {
+    await assertRecoveryDirectoryIdentities(targetRoot, journal);
+  }
+  await validateJournalRecords(state, journal, journalId, targetRoot);
+  return { targetRoot, baselinePublished };
+}
+function assertJournalMatchesPreview(journal, preview) {
+  if (preview.conflicts.length > 0 || journal.backups.length !== preview.changes.length || !journalDirectoriesMatchPreview(journal, preview) || JSON.stringify(journal.deleteParentDirectories) !== JSON.stringify(preview.deleteParentDirectories) || manifestDigest(journal.newBaseline.files) !== preview.sourceDigest) {
+    throw new Error("Invalid synchronization journal semantic provenance");
+  }
+  for (const [index, change] of preview.changes.entries()) {
+    const backup = journal.backups[index];
+    if (!backup || backup.path !== change.path) {
+      throw new Error("Invalid synchronization journal backup coverage");
+    }
+    if (!(sameSyncFile(backup.original ?? undefined, preview.expectedTargets[change.path] ?? undefined) && sameSyncFile(journal.appliedStates[change.path] ?? undefined, change.file))) {
+      throw new Error(`Invalid synchronization journal descriptor provenance for ${change.path}`);
+    }
+  }
+}
+function journalDirectoriesMatchPreview(journal, preview) {
+  const createdPaths = journal.createdDirectories.map((entry) => entry.path);
+  if (journal.state === "applied" || journal.state === "committed") {
+    return JSON.stringify(createdPaths) === JSON.stringify(preview.missingTargetDirectories);
+  }
+  if (journal.creatingDirectory !== undefined && !preview.missingTargetDirectories.includes(journal.creatingDirectory)) {
+    return false;
+  }
+  if (journal.state === "preparing" || journal.state === "rolledBack") {
+    return createdPaths.length === 0;
+  }
+  return createdPaths.every((directory) => preview.missingTargetDirectories.includes(directory));
+}
+async function resolveCreatingDirectory(targetRoot, journal, journalPath) {
+  const relative3 = journal.creatingDirectory;
+  if (!relative3)
+    return;
+  try {
+    await lstat6(path5.join(targetRoot, ...relative3.split("/")));
+  } catch (error) {
+    if (error.code !== "ENOENT")
+      throw error;
+    delete journal.creatingDirectory;
+    await writeDurableJson(journalPath, journal);
+    return;
+  }
+  throw new Error(`recovery conflict at ${relative3}; unverified target directory preserved`);
+}
+async function validateJournalRecords(state, journal, journalId, targetRoot) {
+  const backupRoot = path5.join(state.backups, journalId, "target");
+  for (const [index, backup] of journal.backups.entries()) {
+    const expectedBackup = path5.join(backupRoot, String(index));
+    if (backup.existed ? backup.backup !== expectedBackup : backup.backup !== undefined) {
+      throw new Error(`Invalid synchronization backup provenance for ${backup.path}`);
+    }
+    const target = await guardedPath(targetRoot, backup.path);
+    const expectedPublication = path5.join(path5.dirname(target), `.skizzles-sync-${journalId}-${index}.tmp`);
+    if (backup.publication !== expectedPublication) {
+      throw new Error(`Invalid synchronization publication provenance for ${backup.path}`);
+    }
+    const intended = journal.appliedStates[backup.path];
+    const baselineValue = journal.newBaseline.files[backup.path];
+    if (!sameSyncFile(intended ?? undefined, baselineValue)) {
+      throw new Error(`Invalid synchronization baseline provenance for ${backup.path}`);
+    }
+  }
+  const expectedMutated = journal.backups.slice(0, journal.mutatedPaths.length).map((backup) => backup.path);
+  if (JSON.stringify(journal.mutatedPaths) !== JSON.stringify(expectedMutated)) {
+    throw new Error("Invalid synchronization mutation order");
+  }
+  if ((journal.state === "applied" || journal.state === "committed") && journal.mutatedPaths.length !== journal.backups.length) {
+    throw new Error("Invalid applied synchronization journal coverage");
+  }
+}
+async function validateBackupDirectory(backupDir) {
+  for (const directory of [backupDir, path5.join(backupDir, "target")]) {
+    const stat = await lstat6(directory);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      throw new Error("Invalid synchronization backup directory");
+    }
+    if (await canonicalRoot(directory) !== directory) {
+      throw new Error("Invalid synchronization backup directory provenance");
     }
   }
 }
 async function rollbackJournalSafely(targetRoot, journal) {
+  await assertRecoveryDirectoryIdentities(targetRoot, journal);
   const restorations = [];
   for (const backup of journal.backups.filter((item) => journal.mutatedPaths.includes(item.path))) {
     let actual = null;
@@ -8172,26 +8880,20 @@ async function rollbackJournalSafely(targetRoot, journal) {
         throw error;
     }
     const intended = journal.appliedStates[backup.path] ?? null;
-    if (sameFile(actual ?? undefined, intended ?? undefined)) {
+    if (sameSyncFile(actual ?? undefined, intended ?? undefined)) {
       restorations.push(backup);
-    } else if (!sameFile(actual ?? undefined, backup.original ?? undefined)) {
+    } else if (!sameSyncFile(actual ?? undefined, backup.original ?? undefined)) {
       throw new Error(`recovery conflict at ${backup.path}; divergent target preserved`);
     }
   }
   await restoreBackups(targetRoot, restorations);
 }
-async function readRequiredJson(file, message2) {
-  try {
-    return await readJson(file);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      throw new Error(message2);
-    }
-    throw error;
-  }
+async function assertRecoveryDirectoryIdentities(targetRoot, journal) {
+  const conflict = (relative3) => `recovery conflict at ${relative3}; divergent target directory preserved`;
+  await assertDirectoryIdentities(targetRoot, journal.createdDirectories, conflict);
+  await assertDirectoryIdentities(targetRoot, journal.deleteParentDirectories, conflict);
 }
-
-// packages/codex-container-lab/cli/src/service.ts
+// packages/codex-container-lab/cli/src/lab-destruction.ts
 async function recoverLabSync(roots, lab) {
   if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join3(lab.runtimeRoot, "workspace")) {
     throw new Error("lab runtime containment is invalid");
@@ -8235,8 +8937,12 @@ async function assertSourceRepositoryIdentity(lab) {
     throw new Error("lab source repository identity no longer matches durable state");
   }
 }
+async function cleanupManagedLabDockerResources(lab, docker, environment = process.env) {
+  await cleanupLabLabels(lab, lab.modeKind === "dockerfile", docker, environment);
+}
 
-// packages/codex-container-lab/cli/src/archive-reaper.ts
+// packages/codex-container-lab/cli/src/reaper-domain.ts
+var OWNER_KEY = /^[a-f0-9]{64}$/;
 async function reapArchivedOwners(options) {
   const roots = options.roots ?? resolveRoots();
   const result = {
@@ -8281,7 +8987,7 @@ async function reapArchivedOwners(options) {
     }
     const preflight = [];
     for (const entry of entries) {
-      const fallbackKey = /^[a-f0-9]{64}$/.test(entry.name) ? entry.name : "invalid";
+      const fallbackKey = OWNER_KEY.test(entry.name) ? entry.name : "invalid";
       if (!entry.isDirectory()) {
         result.retainedOwners.push({
           ownerKey: fallbackKey,
@@ -8410,9 +9116,9 @@ function validateThreadsSchema(database) {
 }
 function queryThreadState(database, owner) {
   const rows = database.query("SELECT id, archived, archived_at FROM threads WHERE id = ? LIMIT 2").all(owner);
-  if (rows.length !== 1 || rows[0].id !== owner)
-    return "uncertain";
   const row = rows[0];
+  if (rows.length !== 1 || row?.id !== owner)
+    return "uncertain";
   const archived = typeof row.archived === "bigint" ? Number(row.archived) : row.archived;
   if (archived === 0 && row.archived_at === null)
     return "active";
@@ -8464,7 +9170,7 @@ async function cleanupExactLab(roots, lab, docker, authorize) {
     }, { attempts: 600, delayMs: 50 });
     throw error;
   }
-  await cleanupLabLabels(lab, lab.modeKind === "dockerfile", docker);
+  await cleanupManagedLabDockerResources(lab, docker);
   await withFileLock(activityLock, async () => await withFileLock(labLock, async () => {
     lab = await readLab(roots, lab.owner, lab.id);
     await validateReaperLab(roots, lab.owner, lab.ownerKey, lab);
@@ -8474,7 +9180,7 @@ async function cleanupExactLab(roots, lab, docker, authorize) {
     await inspectTrustedLabRuntimeDirectories(roots, lab, {
       inspectWorkspace: false
     });
-    await cleanupLabLabels(lab, lab.modeKind === "dockerfile", docker);
+    await cleanupManagedLabDockerResources(lab, docker);
     if (await inspectTrustedLabRuntimeDirectories(roots, lab, {
       inspectWorkspace: false
     })) {
@@ -8498,10 +9204,10 @@ async function validateReaperLab(roots, owner, ownerKey2, lab) {
 }
 async function boundedRemove(root, maxEntries) {
   let count = 0;
-  async function scan(path3) {
+  async function scan(path6) {
     let info;
     try {
-      info = await lstat5(path3);
+      info = await lstat7(path6);
     } catch (error) {
       if (error.code === "ENOENT")
         return;
@@ -8510,22 +9216,21 @@ async function boundedRemove(root, maxEntries) {
     if (!info.isDirectory() || info.isSymbolicLink()) {
       return;
     }
-    for (const name of await readdir3(path3)) {
+    for (const name of await readdir3(path6)) {
       if (++count > maxEntries) {
         throw new Error("cleanup path exceeds bounded entry limit");
       }
-      await scan(join4(path3, name));
+      await scan(join4(path6, name));
     }
   }
   await scan(root);
-  await rm5(root, { recursive: true, force: true });
+  await rm7(root, { recursive: true, force: true });
 }
 function boundedMessage(prefix, error) {
   const message2 = error instanceof Error ? error.message : String(error);
   return `${prefix}: ${message2.split(`
 `).slice(-4).join(" ")}`.slice(0, 1000);
 }
-
 // packages/codex-container-lab/cli/src/reaper-cli.ts
 var REAPER_OUTPUT_MAX_BYTES = 1536;
 async function reaperMain(args = process.argv.slice(2)) {

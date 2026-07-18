@@ -1,0 +1,410 @@
+import {
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  readlink,
+  rename,
+  rm,
+  rmdir,
+  symlink,
+} from "node:fs/promises";
+import path from "node:path";
+import {
+  canonicalRoot,
+  describeSyncFile,
+  guardedPath,
+  type SyncFile,
+  sha256,
+} from "./files.ts";
+import { sameSyncFile } from "./sync-comparison.ts";
+import type {
+  BackupRecord,
+  DirectoryIdentity,
+  SyncChange,
+} from "./sync-contract.ts";
+import { syncDirectory, syncFile } from "./sync-durability.ts";
+
+export async function backupTargets(
+  targetRoot: string,
+  records: BackupRecord[],
+): Promise<void> {
+  for (const record of records) {
+    await assertExpectedEntry(
+      targetRoot,
+      record.path,
+      record.original,
+      "target",
+    );
+    if (
+      !(record.existed && record.backup && record.kind) ||
+      record.mode === undefined
+    ) {
+      continue;
+    }
+    const target = await guardedPath(targetRoot, record.path);
+    const stat = await lstat(target);
+    if (record.kind === "symlink" && stat.isSymbolicLink()) {
+      await symlink(await readlink(target), record.backup);
+    } else if (record.kind === "file" && stat.isFile()) {
+      await copyFile(target, record.backup);
+      await chmod(record.backup, record.mode);
+      await syncFile(record.backup);
+    } else {
+      throw new Error(
+        `Synchronization target is not a regular file or symlink: ${record.path}`,
+      );
+    }
+  }
+  const backupDirectory = records.find((record) => record.backup)?.backup;
+  if (backupDirectory) await syncDirectory(path.dirname(backupDirectory));
+}
+
+export async function planBackupRecords(
+  targetRoot: string,
+  changes: SyncChange[],
+  expected: Record<string, SyncFile | null>,
+  backupDir: string,
+  journalId: string,
+): Promise<BackupRecord[]> {
+  const records: BackupRecord[] = [];
+  for (const [index, change] of changes.entries()) {
+    const original = expected[change.path] ?? null;
+    const target = await guardedPath(targetRoot, change.path);
+    const publication = path.join(
+      path.dirname(target),
+      `.skizzles-sync-${journalId}-${index}.tmp`,
+    );
+    records.push({
+      path: change.path,
+      existed: original !== null,
+      ...(original
+        ? {
+            kind: original.kind,
+            mode: original.mode,
+            backup: path.join(backupDir, String(index)),
+          }
+        : {}),
+      publication,
+      original,
+    });
+  }
+  return records;
+}
+
+export async function planCreatedDirectories(
+  targetRoot: string,
+  changes: SyncChange[],
+): Promise<string[]> {
+  const canonical = await canonicalRoot(targetRoot);
+  const missing = new Set<string>();
+  for (const change of changes) {
+    for (const relative of await missingParentsForChange(canonical, change)) {
+      missing.add(relative);
+    }
+  }
+  return [...missing].sort();
+}
+
+export async function captureDeleteParentDirectories(
+  targetRoot: string,
+  changes: SyncChange[],
+): Promise<DirectoryIdentity[]> {
+  const canonical = await canonicalRoot(targetRoot);
+  const parents = new Set<string>();
+  for (const change of changes) {
+    if (change.action !== "delete") continue;
+    const parts = change.path.split("/").slice(0, -1);
+    for (let index = 1; index <= parts.length; index++) {
+      parents.add(parts.slice(0, index).join("/"));
+    }
+  }
+  const identities: DirectoryIdentity[] = [];
+  for (const relative of [...parents].sort()) {
+    identities.push(await directoryIdentity(canonical, relative));
+  }
+  return identities;
+}
+
+export async function assertDirectoryIdentities(
+  targetRoot: string,
+  identities: DirectoryIdentity[],
+  message: (relative: string) => string,
+): Promise<void> {
+  for (const expected of identities) {
+    let actual: DirectoryIdentity;
+    try {
+      actual = await directoryIdentity(targetRoot, expected.path);
+    } catch {
+      throw new Error(message(expected.path));
+    }
+    if (actual.device !== expected.device || actual.inode !== expected.inode) {
+      throw new Error(message(expected.path));
+    }
+  }
+}
+
+async function missingParentsForChange(
+  canonicalTarget: string,
+  change: SyncChange,
+): Promise<string[]> {
+  const missing: string[] = [];
+  const parts = change.path.split("/").slice(0, -1);
+  for (let index = 1; index <= parts.length; index++) {
+    const relative = parts.slice(0, index).join("/");
+    try {
+      const stat = await lstat(
+        path.join(canonicalTarget, ...parts.slice(0, index)),
+      );
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        throw new Error(`Unsafe synchronization parent for ${change.path}`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      missing.push(relative);
+    }
+  }
+  return missing;
+}
+
+export async function createPlannedDirectories(
+  targetRoot: string,
+  directories: string[],
+  onCreated: (identity: DirectoryIdentity) => void | Promise<void> = () =>
+    undefined,
+  beforeCreate: (relative: string) => void | Promise<void> = () => undefined,
+  afterCreated: (relative: string) => void | Promise<void> = () => undefined,
+): Promise<void> {
+  for (const relative of directories) {
+    await beforeCreate(relative);
+    const directory = await guardedPath(targetRoot, relative);
+    await mkdir(directory);
+    await syncDirectory(path.dirname(directory));
+    await afterCreated(relative);
+    await onCreated(await directoryIdentity(targetRoot, relative));
+  }
+}
+
+export async function cleanupCreatedDirectories(
+  targetRoot: string,
+  directories: DirectoryIdentity[],
+): Promise<void> {
+  for (const identity of [...directories].reverse()) {
+    await assertDirectoryIdentities(
+      targetRoot,
+      [identity],
+      (relative) =>
+        `recovery conflict at ${relative}; divergent target directory preserved`,
+    );
+    const directory = await guardedPath(targetRoot, identity.path);
+    try {
+      await rmdir(directory);
+      await syncDirectory(path.dirname(directory));
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOTEMPTY" || code === "EEXIST") {
+        throw new Error(
+          `recovery conflict at ${identity.path}; divergent target directory preserved`,
+        );
+      }
+      throw error;
+    }
+  }
+}
+
+async function directoryIdentity(
+  root: string,
+  relative: string,
+): Promise<DirectoryIdentity> {
+  const directory = await guardedPath(root, relative);
+  const stat = await lstat(directory, { bigint: true });
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new Error(`Unsafe synchronization directory: ${relative}`);
+  }
+  return {
+    path: relative,
+    device: stat.dev.toString(),
+    inode: stat.ino.toString(),
+  };
+}
+
+export async function stageSources(
+  sourceRoot: string,
+  changes: SyncChange[],
+  stagedRoot: string,
+): Promise<void> {
+  for (const change of changes) {
+    await stageSourceChange(sourceRoot, stagedRoot, change);
+  }
+}
+
+async function stageSourceChange(
+  sourceRoot: string,
+  stagedRoot: string,
+  change: SyncChange,
+): Promise<void> {
+  if (change.action === "delete") return;
+  if (!change.file) {
+    throw new Error(
+      `Synchronization preview is missing file details for ${change.path}`,
+    );
+  }
+  const source = await guardedPath(sourceRoot, change.path);
+  const target = await guardedPath(stagedRoot, change.path, true);
+  const stat = await lstat(source);
+  if (change.file.kind === "symlink" && stat.isSymbolicLink()) {
+    await stageSymlink(source, target, change.file);
+    return;
+  }
+  if (change.file.kind === "file" && stat.isFile()) {
+    await copyFile(source, target);
+    await chmod(target, change.file.mode);
+    const staged = await describeSyncFile(stagedRoot, change.path);
+    if (sameSyncFile(staged, change.file)) return;
+    throw new Error("Synchronization preview is stale; source changed");
+  }
+  throw new Error(
+    `Synchronization source changed type during apply: ${change.path}`,
+  );
+}
+
+async function stageSymlink(
+  source: string,
+  target: string,
+  expected: SyncFile,
+): Promise<void> {
+  const link = await readlink(source);
+  const bytes = Buffer.from(link);
+  if (bytes.byteLength !== expected.size || sha256(bytes) !== expected.sha256) {
+    throw new Error("Synchronization preview is stale; source changed");
+  }
+  await symlink(link, target);
+}
+
+export async function applyChange(
+  sourceRoot: string,
+  targetRoot: string,
+  change: SyncChange,
+  record: BackupRecord,
+  beforeRename?: () => void | Promise<void>,
+): Promise<void> {
+  const target = await guardedPath(targetRoot, change.path, true);
+  if (change.action === "delete") {
+    await rm(target, { force: true, recursive: false });
+    await syncDirectory(path.dirname(target));
+    return;
+  }
+  if (!record.publication) {
+    throw new Error(`Missing synchronization publication for ${change.path}`);
+  }
+  await assertPublicationAvailable(record.publication, change.path);
+  const source = await guardedPath(sourceRoot, change.path);
+  const stat = await lstat(source);
+  try {
+    if (change.file?.kind === "symlink" && stat.isSymbolicLink()) {
+      await symlink(await readlink(source), record.publication);
+    } else if (change.file?.kind === "file" && stat.isFile()) {
+      await copyFile(source, record.publication);
+      await chmod(record.publication, change.file.mode);
+      await syncFile(record.publication);
+    } else {
+      throw new Error(
+        `Synchronization source changed type during apply: ${change.path}`,
+      );
+    }
+    await beforeRename?.();
+    await rename(record.publication, target);
+    await syncDirectory(path.dirname(target));
+  } catch (error) {
+    await rm(record.publication, { force: true, recursive: false }).catch(
+      () => undefined,
+    );
+    throw error;
+  }
+}
+
+export async function assertExpectedEntry(
+  root: string,
+  relative: string,
+  expected: SyncFile | null,
+  side: string,
+): Promise<void> {
+  let actual: SyncFile | null = null;
+  try {
+    actual = await describeSyncFile(root, relative);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (!sameSyncFile(actual ?? undefined, expected ?? undefined)) {
+    throw new Error(
+      `Synchronization ${side} changed after preview: ${relative}`,
+    );
+  }
+}
+
+export async function restoreBackups(
+  targetRoot: string,
+  backups: BackupRecord[],
+): Promise<void> {
+  for (const record of backups) {
+    const target = await guardedPath(targetRoot, record.path, true);
+    if (!record.existed) {
+      await rm(target, { force: true, recursive: false });
+      await syncDirectory(path.dirname(target));
+      continue;
+    }
+    if (!(record.backup && record.publication)) {
+      throw new Error(`Missing synchronization backup for ${record.path}`);
+    }
+    await rm(record.publication, { force: true, recursive: false });
+    if (record.kind === "symlink") {
+      await symlink(await readlink(record.backup), record.publication);
+    } else {
+      await copyFile(record.backup, record.publication);
+      if (record.mode !== undefined)
+        await chmod(record.publication, record.mode);
+      await syncFile(record.publication);
+    }
+    await rename(record.publication, target);
+    await syncDirectory(path.dirname(target));
+  }
+}
+
+export async function validateBackupArtifacts(
+  backups: BackupRecord[],
+): Promise<void> {
+  for (const record of backups) {
+    if (!(record.existed && record.backup && record.original)) continue;
+    const actual = await describeSyncFile(
+      path.dirname(record.backup),
+      path.basename(record.backup),
+    );
+    if (!sameSyncFile(actual, record.original)) {
+      throw new Error(`Invalid synchronization backup for ${record.path}`);
+    }
+  }
+}
+
+export async function cleanupPublications(
+  backups: BackupRecord[],
+): Promise<void> {
+  for (const record of backups) {
+    if (!record.publication) continue;
+    await rm(record.publication, { force: true, recursive: false });
+  }
+}
+
+async function assertPublicationAvailable(
+  publication: string,
+  relative: string,
+): Promise<void> {
+  try {
+    await lstat(publication);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  throw new Error(
+    `Synchronization publication path already exists: ${relative}`,
+  );
+}

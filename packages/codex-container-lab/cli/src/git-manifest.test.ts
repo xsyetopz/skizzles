@@ -3,8 +3,8 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { guardedPath, safeRelativePath } from "./files";
-import { buildGitManifest } from "./git-manifest";
+import { guardedPath, safeRelativePath } from "./files.ts";
+import { buildGitManifest } from "./git-manifest.ts";
 
 const temporary: string[] = [];
 
@@ -61,6 +61,35 @@ describe("Git manifests", () => {
     const after = await buildGitManifest(root);
     expect(after.files["tool.sh"]?.mode).toBe(0o755);
     expect(after.digest).not.toBe(before.digest);
+  });
+
+  test("preserves tracked prototype-shaped paths as manifest files", async () => {
+    const root = await repository();
+    for (const name of ["__proto__", "constructor", "prototype"]) {
+      await writeFile(path.join(root, name), `${name}\n`);
+    }
+    execFileSync("git", [
+      "-C",
+      root,
+      "add",
+      "--",
+      "__proto__",
+      "constructor",
+      "prototype",
+    ]);
+
+    const manifest = await buildGitManifest(root);
+
+    expect(Object.keys(manifest.files)).toEqual([
+      "__proto__",
+      "constructor",
+      "prototype",
+    ]);
+    for (const name of ["__proto__", "constructor", "prototype"]) {
+      expect(Object.hasOwn(manifest.files, name)).toBe(true);
+      expect(manifest.files[name]?.kind).toBe("file");
+      expect(manifest.files[name]?.size).toBe(Buffer.byteLength(`${name}\n`));
+    }
   });
 });
 

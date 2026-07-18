@@ -8,7 +8,7 @@ import {
   type SyncFile,
   safeRelativePath,
   sha256,
-} from "./files";
+} from "./files.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -52,12 +52,14 @@ export async function eligibleGitPaths(root: string): Promise<string[]> {
 
 export async function buildGitManifest(root: string): Promise<GitManifest> {
   const canonical = await canonicalRoot(root);
-  const files: Record<string, SyncFile> = {};
+  // Git paths are untrusted keys. A null-prototype record keeps names such as
+  // `__proto__`, `constructor`, and `prototype` as ordinary own properties.
+  const files = Object.create(null) as Record<string, SyncFile>;
   let totalBytes = 0;
   for (const relative of await eligibleGitPaths(canonical)) {
     try {
       const stat = await lstat(await guardedPath(canonical, relative));
-      if (!stat.isFile() && !stat.isSymbolicLink()) continue;
+      if (!(stat.isFile() || stat.isSymbolicLink())) continue;
       const file = await describeSyncFile(canonical, relative);
       totalBytes += file.size;
       if (totalBytes > MAX_SYNC_TOTAL_BYTES) {
