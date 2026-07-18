@@ -1,0 +1,156 @@
+import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  ContainerLabPackageError,
+  stageContainerLabRuntime,
+} from "../container-lab-package.ts";
+import {
+  PromptPolicyPackageError,
+  stagePromptPolicyPackage,
+  validatePromptPolicySource,
+} from "../prompt-policy-package.ts";
+import {
+  CANONICAL_FILE_INPUTS,
+  CANONICAL_TREE_INPUTS,
+  GENERATED_PATH,
+  MARKETPLACE_PATH,
+  PackagingError,
+  PLUGIN_NAME,
+  TEMPLATE_PATH,
+} from "./contract.ts";
+import {
+  copyCanonicalFile,
+  copyCanonicalTree,
+  exists,
+  rejectFinderMetadata,
+} from "./distribution-files.ts";
+import {
+  bundleCanonicalEntrypoints,
+  validatePackagedInstaller,
+} from "./runtime-bundles.ts";
+import { compareTrees } from "./tree-comparison.ts";
+import { validateGeneratedPlugin } from "./validation.ts";
+
+export interface PackagePaths {
+  repoRoot: string;
+  templateRoot: string;
+  generatedRoot: string;
+  marketplacePath: string;
+}
+
+export function packagePaths(repoRoot = defaultRepoRoot()): PackagePaths {
+  const absoluteRoot = resolve(repoRoot);
+  return {
+    repoRoot: absoluteRoot,
+    templateRoot: join(absoluteRoot, TEMPLATE_PATH),
+    generatedRoot: join(absoluteRoot, GENERATED_PATH),
+    marketplacePath: join(absoluteRoot, MARKETPLACE_PATH),
+  };
+}
+
+export async function stagePlugin(
+  repoRoot: string,
+  destination: string,
+): Promise<void> {
+  const paths = packagePaths(repoRoot);
+  await asPackagingError(() => validatePromptPolicySource(paths.repoRoot));
+  await rm(destination, { force: true, recursive: true });
+  await mkdir(destination, { recursive: true });
+  await copyCanonicalTree(paths.templateRoot, destination, "plugin template");
+
+  for (const [sourcePath, destinationPath] of CANONICAL_TREE_INPUTS) {
+    const source = join(paths.repoRoot, sourcePath);
+    if (!(await exists(source))) {
+      continue;
+    }
+    await copyCanonicalTree(
+      source,
+      join(destination, destinationPath),
+      sourcePath,
+    );
+  }
+
+  for (const [sourcePath, destinationPath] of CANONICAL_FILE_INPUTS) {
+    await copyCanonicalFile(
+      join(paths.repoRoot, sourcePath),
+      join(destination, destinationPath),
+      sourcePath,
+    );
+  }
+
+  await bundleCanonicalEntrypoints(paths.repoRoot, destination);
+  await validatePackagedInstaller(paths.repoRoot, destination);
+
+  await asPackagingError(() =>
+    stagePromptPolicyPackage(paths.repoRoot, destination),
+  );
+
+  await asPackagingError(() =>
+    stageContainerLabRuntime(paths.repoRoot, destination),
+  );
+
+  await validateGeneratedPlugin(
+    paths.repoRoot,
+    destination,
+    paths.marketplacePath,
+  );
+}
+
+export async function buildPlugin(repoRoot = defaultRepoRoot()): Promise<void> {
+  const paths = packagePaths(repoRoot);
+  const stageParent = dirname(paths.generatedRoot);
+  await mkdir(stageParent, { recursive: true });
+  const stagingRoot = await mkdtemp(
+    join(stageParent, `.${PLUGIN_NAME}-stage-`),
+  );
+
+  try {
+    await stagePlugin(paths.repoRoot, stagingRoot);
+    await rm(paths.generatedRoot, { force: true, recursive: true });
+    await rename(stagingRoot, paths.generatedRoot);
+  } finally {
+    await rm(stagingRoot, { force: true, recursive: true });
+  }
+}
+
+export async function checkPlugin(repoRoot = defaultRepoRoot()): Promise<void> {
+  const paths = packagePaths(repoRoot);
+  const comparisonRoot = await mkdtemp(
+    join(tmpdir(), `${PLUGIN_NAME}-package-check-`),
+  );
+
+  try {
+    await stagePlugin(paths.repoRoot, comparisonRoot);
+    await rejectFinderMetadata(paths.generatedRoot, "generated plugin");
+    const drift = await compareTrees(comparisonRoot, paths.generatedRoot);
+    if (drift.length > 0) {
+      throw new PackagingError(
+        `Generated plugin diverges from canonical sources:\n${drift
+          .map((line) => `- ${line}`)
+          .join("\n")}\nRun \`bun run plugin:build\`.`,
+      );
+    }
+  } finally {
+    await rm(comparisonRoot, { force: true, recursive: true });
+  }
+}
+
+function defaultRepoRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+}
+
+async function asPackagingError<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (
+      error instanceof ContainerLabPackageError ||
+      error instanceof PromptPolicyPackageError
+    ) {
+      throw new PackagingError(error.message);
+    }
+    throw error;
+  }
+}

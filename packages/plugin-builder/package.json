@@ -16,7 +16,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@skizzles/prompt-layer": "workspace:*"
+    "@skizzles/command-hook": "workspace:*",
+    "@skizzles/command-supervisor": "workspace:*",
+    "@skizzles/container-lab": "workspace:*",
+    "@skizzles/installer": "workspace:*",
+    "@skizzles/model-catalog": "workspace:*",
+    "@skizzles/prompt-layer": "workspace:*",
+    "@skizzles/usage-analyzer": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

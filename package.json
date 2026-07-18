@@ -26,7 +26,7 @@
     "check": "bun run biome:check && bun run packages:check && bun run workspace:check && bun run prompt:check",
     "typecheck": "bun run --workspaces --sequential typecheck",
     "test": "bun run --workspaces --sequential test",
-    "test:packaging": "bun test packages/plugin-builder/test/plugin-package.test.ts",
+    "test:packaging": "bun test packages/plugin-builder/test",
     "verify": "bun run check && bun run typecheck && bun run test && bun run packages:build && bun run plugin:check"
   },
   "devDependencies": {

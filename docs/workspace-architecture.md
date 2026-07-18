@@ -15,14 +15,22 @@ explicit `workspace:*` dependency and exported entrypoint.
 The current workspace dependency edges are:
 
 ```text
+@skizzles/plugin-builder -> @skizzles/command-hook
+@skizzles/plugin-builder -> @skizzles/command-supervisor
+@skizzles/plugin-builder -> @skizzles/container-lab
+@skizzles/plugin-builder -> @skizzles/installer
+@skizzles/plugin-builder -> @skizzles/model-catalog
 @skizzles/plugin-builder -> @skizzles/prompt-layer
+@skizzles/plugin-builder -> @skizzles/usage-analyzer
 @skizzles/installer -> @skizzles/container-lab
+@skizzles/installer -> @skizzles/prompt-layer
 ```
 
-Other runtime relationships cross process or packaging boundaries rather than
-TypeScript imports. The installer consumes the Container Lab integration descriptor
-through the package's explicit `./integration-descriptor` export; it does not traverse
-into Container Lab's private filesystem paths.
+The plugin builder is the explicit composition owner for all seven canonical
+workspace packages whose public entrypoints or assets it distributes. Other runtime
+relationships cross process boundaries rather than TypeScript imports. The installer
+consumes provider-owned Container Lab and prompt-layer descriptor locations through
+their explicit package exports; it does not traverse sibling private filesystem paths.
 
 ## Canonical and generated paths
 
