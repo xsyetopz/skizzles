@@ -10,6 +10,9 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import process from "node:process";
+import containerLabIntegrationDescriptor from "@skizzles/container-lab/integration-descriptor" with {
+  type: "json",
+};
 import { skillsReceiptPath, uninstallSkills } from "./core.ts";
 import { harnessReceiptPath, uninstallHarness } from "./harness.ts";
 
@@ -35,8 +38,10 @@ interface ContainerLabContract {
 }
 
 function contract(descriptorPath?: string): ContainerLabContract {
-  const path = descriptorPath ?? defaultContainerLabDescriptor();
-  const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+  const value: unknown =
+    descriptorPath === undefined
+      ? containerLabIntegrationDescriptor
+      : JSON.parse(readFileSync(descriptorPath, "utf8"));
   const root = objectValue(value);
   const binaries = objectValue(root?.["binaries"]);
   const execution = objectValue(root?.["execution"]);
@@ -91,16 +96,6 @@ function contract(descriptorPath?: string): ContainerLabContract {
       documentation,
     },
   };
-}
-
-function defaultContainerLabDescriptor(): string {
-  const canonical = resolve(
-    import.meta.dir,
-    "../../container-lab/assets/integrations/container-lab.json",
-  );
-  return existsSync(canonical)
-    ? canonical
-    : resolve(import.meta.dir, "../../../integrations/container-lab.json");
 }
 
 function descriptorForBundle(bundleRoot: string): string {

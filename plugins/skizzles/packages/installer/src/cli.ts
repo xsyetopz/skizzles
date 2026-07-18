@@ -1187,6 +1187,48 @@ import {
 import { tmpdir as tmpdir2 } from "os";
 import { delimiter, join as join6, resolve as resolve6 } from "path";
 import process2 from "process";
+// packages/container-lab/assets/integrations/container-lab.json
+var container_lab_default = {
+  id: "codex-container-lab",
+  integrationContract: 1,
+  configuredRuntime: "0.1.0",
+  supportedRuntime: ">=0.1.0 <0.2.0",
+  versionVerification: "contract-fingerprint-only",
+  ownership: {
+    runtimeOwner: "skizzles",
+    canonicalSource: "packages/container-lab",
+    provenanceCommit: "a2f44416ef467d9f54b3cb228e3bd050987a3c4c"
+  },
+  bundled: {
+    operationalEntrypoint: "packages/container-lab/src/cli.ts",
+    reaperEntrypoint: "packages/container-lab/src/reaper-cli.ts",
+    launcher: "skills/codex-container-lab/scripts/codex-container-lab",
+    launchAgentTemplate: "packages/container-lab/install/com.openai.codex-container-lab-reaper.plist",
+    documentation: [
+      "packages/container-lab/docs/architecture.md",
+      "packages/container-lab/docs/completion-contract.md",
+      "packages/container-lab/docs/installation.md",
+      "packages/container-lab/docs/manifest.md",
+      "packages/container-lab/docs/safety.md"
+    ]
+  },
+  binaries: {
+    operational: "codex-container-lab",
+    reaper: "codex-container-lab-reaper"
+  },
+  execution: {
+    adminProtocol: "single-json-v1",
+    adminMaxBytes: 16384,
+    runProtocol: "attached-raw-v1",
+    runMustBeOutermost: true,
+    ownerEnvironment: "CODEX_THREAD_ID"
+  },
+  reaper: {
+    outputMaxBytes: 1536,
+    lifecycleOwner: "skizzles-explicit-host-wiring",
+    launchAgentLabel: "com.openai.codex-container-lab-reaper"
+  }
+};
 
 // packages/installer/src/harness.ts
 import {
@@ -1365,8 +1407,7 @@ function uninstallHarness(homeInput, dryRun = false, move = renameSync4) {
 var COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 var LINE_PATTERN = /\r?\n/;
 function contract(descriptorPath) {
-  const path = descriptorPath ?? defaultContainerLabDescriptor();
-  const value = JSON.parse(readFileSync5(path, "utf8"));
+  const value = descriptorPath === undefined ? container_lab_default : JSON.parse(readFileSync5(descriptorPath, "utf8"));
   const root = objectValue4(value);
   const binaries = objectValue4(root?.["binaries"]);
   const execution = objectValue4(root?.["execution"]);
@@ -1403,10 +1444,6 @@ function contract(descriptorPath) {
       documentation
     }
   };
-}
-function defaultContainerLabDescriptor() {
-  const canonical = resolve6(import.meta.dir, "../../container-lab/assets/integrations/container-lab.json");
-  return existsSync6(canonical) ? canonical : resolve6(import.meta.dir, "../../../integrations/container-lab.json");
 }
 function objectValue4(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;

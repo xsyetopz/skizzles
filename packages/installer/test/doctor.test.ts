@@ -1,14 +1,11 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
+import containerLabIntegrationDescriptor from "@skizzles/container-lab/integration-descriptor" with {
+  type: "json",
+};
 import { installSkills } from "../src/core.ts";
 import {
   bundledContainerLabPaths,
@@ -70,20 +67,11 @@ describe("Container Lab doctor", () => {
     expect(JSON.stringify(report)).not.toContain(process.cwd());
   });
   test("classifies ready and installed-not-ready", () => {
-    const descriptor = JSON.parse(
-      readFileSync(
-        resolve(
-          import.meta.dir,
-          "../../container-lab/assets/integrations/container-lab.json",
-        ),
-        "utf8",
-      ),
-    );
     expect(doctorContainerLab(stubs("ready"))).toMatchObject({
       installed: true,
       compatible: true,
       ready: true,
-      version: `configured-${descriptor.configuredRuntime}-unverified`,
+      version: `configured-${containerLabIntegrationDescriptor.configuredRuntime}-unverified`,
     });
     expect(doctorContainerLab(stubs("not-ready"))).toMatchObject({
       installed: true,
@@ -105,15 +93,7 @@ describe("Container Lab doctor", () => {
   test("uses the descriptor version and output cap", () => {
     const path = stubs("ready");
     const descriptorPath = join(path, "contract.json");
-    const descriptor = JSON.parse(
-      readFileSync(
-        resolve(
-          import.meta.dir,
-          "../../container-lab/assets/integrations/container-lab.json",
-        ),
-        "utf8",
-      ),
-    );
+    const descriptor = structuredClone(containerLabIntegrationDescriptor);
     descriptor.configuredRuntime = "9.8.7";
     descriptor.execution.adminMaxBytes = 8;
     writeFileSync(descriptorPath, JSON.stringify(descriptor));
@@ -122,6 +102,14 @@ describe("Container Lab doctor", () => {
       compatible: false,
       reason: "external command exceeded its public output limit",
     });
+  });
+  test("rejects invalid descriptor overrides before command execution", () => {
+    const path = stubs("ready");
+    const descriptorPath = join(path, "invalid-contract.json");
+    writeFileSync(descriptorPath, "{}\n");
+    expect(() => doctorContainerLab(path, descriptorPath)).toThrow(
+      "Skizzles Container Lab descriptor is invalid",
+    );
   });
   test("bounds hanging commands and stderr", () => {
     expect(doctorContainerLab(stubs("hang"), undefined, 50)).toMatchObject({

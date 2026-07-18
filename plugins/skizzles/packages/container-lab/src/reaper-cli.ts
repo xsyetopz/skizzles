@@ -9518,7 +9518,8 @@ var package_default = {
   private: true,
   type: "module",
   exports: {
-    ".": "./src/service.ts"
+    ".": "./src/service.ts",
+    "./integration-descriptor": "./assets/integrations/container-lab.json"
   },
   bin: {
     "codex-container-lab": "./src/cli.ts",
