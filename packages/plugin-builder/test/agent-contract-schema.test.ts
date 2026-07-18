@@ -346,6 +346,44 @@ describe("agent contract filesystem boundary", () => {
       }),
     ).rejects.toThrow("race asset ancestor identity changed during validation");
   });
+
+  it("rejects transient link-write-unlink mutation of the opened inode", async () => {
+    const root = await fixture();
+    const target = join(root, CONTEXT_SCHEMA);
+    const alias = `${target}.transient-link`;
+    const message = await rejectionMessage(
+      readContainedJsonAsset(
+        root,
+        CONTEXT_SCHEMA,
+        "transient asset",
+        async () => {
+          await link(target, alias);
+          await writeFile(alias, '{"changed":true}\n');
+          await rm(alias);
+        },
+      ).then(() => undefined),
+    );
+    expect(message).toBe("transient asset changed during identity-bound read.");
+    expect(message).not.toContain(root);
+  });
+
+  it("rejects an in-place rewrite between bounded descriptor reads", async () => {
+    const root = await fixture();
+    const target = join(root, HANDOFF_SCHEMA);
+    const message = await rejectionMessage(
+      readContainedJsonAsset(
+        root,
+        HANDOFF_SCHEMA,
+        "rewritten asset",
+        undefined,
+        async () => {
+          await writeFile(target, '{"changed":true}\n');
+        },
+      ).then(() => undefined),
+    );
+    expect(message).toBe("rewritten asset changed during identity-bound read.");
+    expect(message).not.toContain(root);
+  });
 });
 
 async function mutateJson(

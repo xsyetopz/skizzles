@@ -22,7 +22,8 @@
     },
     "acceptance": {
       "version": "acceptance-3",
-      "digest": "fa45921710ca6406998bd50dfe2cbad6f15a12ab4263b4dcb2337c199300002c"
+      "digest": "fa45921710ca6406998bd50dfe2cbad6f15a12ab4263b4dcb2337c199300002c",
+      "ref": "contracts/acceptance.json"
     },
     "judge": {
       "version": "judge-2",

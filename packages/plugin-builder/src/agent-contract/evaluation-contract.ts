@@ -64,7 +64,7 @@ export interface EvaluationOptions {
   model: VersionedDigest;
   validator: { id: string; version: string };
   objective: { id: string; version: string; digest: string };
-  acceptance: VersionedDigest;
+  acceptance: VersionedDigest & { ref: string };
   judge: {
     version: string;
     promptSha256: string;
@@ -224,10 +224,7 @@ export function parseEvaluationOptions(value: JsonValue): EvaluationOptions {
       options["objective"],
       "evaluation options.objective",
     ),
-    acceptance: versionedDigest(
-      options["acceptance"],
-      "evaluation options.acceptance",
-    ),
+    acceptance: acceptanceIdentity(options["acceptance"]),
     judge: judgeIdentity(options["judge"]),
     review: reviewIdentity(options["review"]),
     run: runIdentity(options["run"]),
@@ -371,6 +368,22 @@ function judgeIdentity(value: JsonValue | undefined): {
       "judge ordering",
     ),
     decision,
+  };
+}
+
+function acceptanceIdentity(
+  value: JsonValue | undefined,
+): EvaluationOptions["acceptance"] {
+  const record = assertRecord(value, "evaluation options.acceptance");
+  assertExactKeys(
+    record,
+    ["ref", "version", "digest"],
+    "evaluation options.acceptance",
+  );
+  return {
+    ref: nonempty(record["ref"], "expected acceptance ref"),
+    version: nonempty(record["version"], "expected acceptance version"),
+    digest: digest(record["digest"], "expected acceptance digest"),
   };
 }
 

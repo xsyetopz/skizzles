@@ -47,8 +47,10 @@ Supplied finding labels map to policy
 rejections; plugin-builder does not claim to discover leakage, injection, or
 deception from arbitrary content.
 Asset reads compare root, ancestor, and target device/inode identities before
-and after an identity-bound no-follow read; multi-link files and detected
-ancestor replacement races fail closed.
+and after an identity-bound no-follow read. Descriptor identity, link count,
+size, modification/change time, and two bounded positioned byte reads must
+remain stable; transient links, in-place rewrites, multi-link files, and
+detected ancestor replacement races fail closed.
 
 Executable package sources are bundled to the four stable plugin entrypoints
 plus the installer CLI. The generated bundles are dependency-self-contained

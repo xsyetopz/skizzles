@@ -181,7 +181,11 @@ as validated without property-matched deterministic evidence. Property names
 must match their containing property in every validation state, including
 untrusted, invalid, and unvalidated records. Contract publication reads bind
 the opened file identity and compare every ancestor identity before and after
-the read, rejecting symlinks, hardlinks, and detected replacement races. The canonical
+the read. Descriptor metadata is compared around two bounded positioned reads,
+so transient hardlinks and in-place rewrites fail even if the final pathname is
+restored. Handoff acceptance references must equal the exact repository-local
+reference supplied by trusted evaluator options; this is a local composition
+identity, not a global registry. The canonical
 public [trust-boundary incident-regression corpus](fixtures/trust-boundary-incidents.json)
 contains valid controls plus executable mutations and stable rejection codes.
 It is implementation-visible regression input, not independent or private

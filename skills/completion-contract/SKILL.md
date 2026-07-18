@@ -193,3 +193,6 @@ Reviewer eligibility here is an exact local allowlist supplied by that trusted
 integration, not a claim of global personhood or identity infrastructure. Run
 replay protection likewise compares the submitted run ID with trusted prior
 run IDs; persistence and synchronization of that set remain host obligations.
+Handoffs also bind the acceptance document's repository-local reference to the
+exact trusted reference. Matching version and digest bytes at an unrelated
+location do not satisfy that local composition contract.

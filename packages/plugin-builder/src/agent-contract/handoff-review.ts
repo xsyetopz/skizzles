@@ -146,7 +146,10 @@ function evaluateAcceptance(
     ["ref", "version", "digest"],
     "handoff.acceptance",
   );
-  nonempty(acceptance["ref"], "handoff.acceptance.ref");
+  const ref = nonempty(acceptance["ref"], "handoff.acceptance.ref");
+  if (ref !== options.acceptance.ref) {
+    reject("ACCEPTANCE_MISMATCH", "handoff acceptance ref does not match");
+  }
   assertVersionedMatch(
     {
       version: nonempty(acceptance["version"], "handoff.acceptance.version"),

@@ -1,4 +1,4 @@
-import { constants } from "node:fs";
+import { constants, type Stats } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { AgentContractPackageError } from "./contract.ts";
@@ -22,6 +22,7 @@ export async function readContainedJsonAsset(
   relativePath: string,
   label: string,
   afterOpen?: () => Promise<void>,
+  afterFirstRead?: () => Promise<void>,
 ): Promise<ParsedAsset> {
   assertFixedRelativePath(relativePath, label);
   const paths = assetPaths(root, relativePath);
@@ -30,7 +31,12 @@ export async function readContainedJsonAsset(
   if (target === undefined) {
     throw new AgentContractPackageError(`${label} is missing or inaccessible.`);
   }
-  const bytes = await readIdentityBound(target, label, afterOpen);
+  const bytes = await readIdentityBound(
+    target,
+    label,
+    afterOpen,
+    afterFirstRead,
+  );
   await verifySnapshot(before, label);
   return { bytes, value: parseJsonAsset(bytes, label) };
 }
@@ -128,6 +134,7 @@ async function readIdentityBound(
   expected: PathIdentity,
   label: string,
   afterOpen?: () => Promise<void>,
+  afterFirstRead?: () => Promise<void>,
 ): Promise<Buffer> {
   let handle: Awaited<ReturnType<typeof open>>;
   try {
@@ -139,19 +146,26 @@ async function readIdentityBound(
     throw new AgentContractPackageError(`${label} is missing or inaccessible.`);
   }
   try {
-    const metadata = await handle.stat();
+    const before = await handle.stat();
+    assertStableDescriptor(before, expected, label);
+    await afterOpen?.();
+    const first = await readAtStart(handle, before.size + 1);
+    await afterFirstRead?.();
+    const second = await readAtStart(handle, before.size + 1);
+    const after = await handle.stat();
+    assertStableDescriptor(after, expected, label);
     if (
-      !metadata.isFile() ||
-      metadata.nlink !== 1 ||
-      metadata.dev !== expected.dev ||
-      metadata.ino !== expected.ino
+      before.size !== after.size ||
+      before.mtimeMs !== after.mtimeMs ||
+      before.ctimeMs !== after.ctimeMs ||
+      first.length !== before.size ||
+      !first.equals(second)
     ) {
       throw new AgentContractPackageError(
-        `${label} changed identity or uses a hardlinked file.`,
+        `${label} changed during identity-bound read.`,
       );
     }
-    await afterOpen?.();
-    return await handle.readFile();
+    return first;
   } catch (error) {
     if (error instanceof AgentContractPackageError) {
       throw error;
@@ -160,6 +174,44 @@ async function readIdentityBound(
   } finally {
     await handle.close();
   }
+}
+
+function assertStableDescriptor(
+  metadata: Stats,
+  expected: PathIdentity,
+  label: string,
+): void {
+  if (
+    !metadata.isFile() ||
+    metadata.nlink !== 1 ||
+    metadata.dev !== expected.dev ||
+    metadata.ino !== expected.ino
+  ) {
+    throw new AgentContractPackageError(
+      `${label} changed identity or uses a hardlinked file.`,
+    );
+  }
+}
+
+async function readAtStart(
+  handle: Awaited<ReturnType<typeof open>>,
+  capacity: number,
+): Promise<Buffer> {
+  const buffer = Buffer.alloc(capacity);
+  let offset = 0;
+  while (offset < capacity) {
+    const { bytesRead } = await handle.read(
+      buffer,
+      offset,
+      capacity - offset,
+      offset,
+    );
+    if (bytesRead === 0) {
+      break;
+    }
+    offset += bytesRead;
+  }
+  return buffer.subarray(0, offset);
 }
 
 function assertFixedRelativePath(path: string, label: string): void {

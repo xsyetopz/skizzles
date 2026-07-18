@@ -209,6 +209,13 @@ describe("handoff relational evaluation", () => {
       },
     },
     {
+      name: "acceptance reference mismatch",
+      code: "ACCEPTANCE_MISMATCH",
+      mutate(input: JsonValue) {
+        recordAt(input, "acceptance")["ref"] = "contracts/unrelated.json";
+      },
+    },
+    {
       name: "evidence outside input/artifact references",
       code: "REFERENCE_MISSING",
       mutate(input: JsonValue) {
