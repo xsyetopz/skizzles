@@ -70,6 +70,9 @@ function terminalLifecycle(
   drain: unknown,
   cleanup: RunStatus["lifecycle"]["cleanup"],
 ): RunStatus["lifecycle"] | undefined {
+  if (completedAt < startedAt) {
+    return undefined;
+  }
   if (state === "failed-to-start") {
     if (
       exitCode !== 127 ||
@@ -92,7 +95,8 @@ function terminalLifecycle(
   if (
     state !== "completed" ||
     (drain !== "complete" && drain !== "incomplete") ||
-    cleanup === "pending"
+    cleanup === "pending" ||
+    (cancellationSignal !== null && cleanup === "not-required")
   ) {
     return undefined;
   }

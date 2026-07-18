@@ -28,12 +28,22 @@ raw script. The document records the shell, size-based retention bounds,
 terminal or failed-start state, cancellation signal, stream-drain result, and
 process-tree cleanup result.
 
+The retention policy caps each of `stdout.log` and `stderr.log` independently.
+Its completed-artifact threshold is evaluated before a new run is created; it
+is not an aggregate hard cap. The newly created run, status metadata, foreign
+entries, and concurrently active runs can make the store exceed that threshold.
+Cleanup considers only validated completed runs and never deletes an active or
+unrecognized directory to force the threshold.
+
 `stdout.log` and `stderr.log` are owner-only, size-bounded, operator-private
 artifacts. They are explicitly classified as unredacted rather than described
-as sanitized. Status evidence references bind the retained byte prefixes while
-a run is active and the exact files after termination. Status queries fail
-closed when the schema, version, permissions, byte counts, or evidence digests
-do not match.
+as sanitized. Status evidence references contain unauthenticated SHA-256
+integrity bindings for the retained byte prefixes while a run is active and the
+exact files after termination. They detect mismatches but do not provide
+authenticity or tamper-proof storage: the same operating-system user can rewrite
+an artifact and its status digest coherently, and that coherent replacement is
+accepted. Status queries fail closed when the schema, version, permissions,
+byte counts, or recorded evidence digests do not match the observed artifacts.
 
 Pre-v1 status files are intentionally unsupported. Runs live in a temporary,
 bounded local store and were not a documented interchange format; retaining a

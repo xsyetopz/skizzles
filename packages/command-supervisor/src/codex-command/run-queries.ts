@@ -80,13 +80,13 @@ export class RunStoreQueries {
         directory,
         status.evidence.stdout.reference,
         "stdout log",
-        status.retention.maximumArtifactBytes,
+        status.retention.maximumOutputArtifactBytes,
       );
       const stderrPath = requireRegularArtifact(
         directory,
         status.evidence.stderr.reference,
         "stderr log",
-        status.retention.maximumArtifactBytes,
+        status.retention.maximumOutputArtifactBytes,
       );
       if (
         !verifyRunEvidence(

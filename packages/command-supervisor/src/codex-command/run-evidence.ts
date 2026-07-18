@@ -13,7 +13,7 @@ function verifyEvidence(
   return (
     content.length >= evidence.storedBytes &&
     (!terminal || content.length === evidence.storedBytes) &&
-    content.length <= status.retention.maximumArtifactBytes &&
+    content.length <= status.retention.maximumOutputArtifactBytes &&
     sha256Digest(content.subarray(0, evidence.storedBytes)) === evidence.sha256
   );
 }

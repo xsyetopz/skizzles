@@ -16,6 +16,7 @@ interface EvidenceReference {
   reference: "stdout.log" | "stderr.log";
   sensitivity: "operator-private";
   redaction: "none";
+  integrity: "unauthenticated-sha256";
   observedBytes: number;
   storedBytes: number;
   truncated: boolean;
@@ -36,9 +37,9 @@ interface RunStatus {
     shell: string;
   };
   retention: {
-    policy: "size-bound";
-    maximumArtifactBytes: number;
-    maximumStoreBytes: number;
+    policy: "per-output-cap-with-pre-run-completed-cleanup";
+    maximumOutputArtifactBytes: number;
+    cleanupThresholdBytes: number;
     directoryMode: "0700";
     fileMode: "0600";
   };
@@ -84,6 +85,7 @@ function emptyEvidence(
     reference,
     sensitivity: "operator-private",
     redaction: "none",
+    integrity: "unauthenticated-sha256",
     observedBytes: 0,
     storedBytes: 0,
     truncated: false,
@@ -104,9 +106,9 @@ function createRunStatus(input: CreateRunStatusInput): RunStatus {
     },
     execution: { shell: input.shell },
     retention: {
-      policy: "size-bound",
-      maximumArtifactBytes: input.settings.maximumBytes,
-      maximumStoreBytes: input.settings.maximumDiskBytes,
+      policy: "per-output-cap-with-pre-run-completed-cleanup",
+      maximumOutputArtifactBytes: input.settings.maximumBytes,
+      cleanupThresholdBytes: input.settings.maximumDiskBytes,
       directoryMode: "0700",
       fileMode: "0600",
     },

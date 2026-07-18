@@ -37,6 +37,7 @@ function parseEvidence(
   if (
     !isRecord(value) ||
     !hasExactKeys(value, [
+      "integrity",
       "observedBytes",
       "redaction",
       "reference",
@@ -56,6 +57,7 @@ function parseEvidence(
     value["reference"] === reference &&
     value["sensitivity"] === "operator-private" &&
     value["redaction"] === "none" &&
+    value["integrity"] === "unauthenticated-sha256" &&
     isSafeInteger(observedBytes) &&
     isSafeInteger(storedBytes) &&
     storedBytes <= observedBytes &&
@@ -71,6 +73,7 @@ function parseEvidence(
     reference,
     sensitivity: "operator-private",
     redaction: "none",
+    integrity: "unauthenticated-sha256",
     observedBytes,
     storedBytes,
     truncated,
@@ -127,19 +130,20 @@ export function parseRunStatus(content: string, id: string): RunStatus {
     execution["shell"].length > 4_096 ||
     !isRecord(retention) ||
     !hasExactKeys(retention, [
+      "cleanupThresholdBytes",
       "directoryMode",
       "fileMode",
-      "maximumArtifactBytes",
-      "maximumStoreBytes",
+      "maximumOutputArtifactBytes",
       "policy",
     ]) ||
-    retention["policy"] !== "size-bound" ||
+    retention["policy"] !== "per-output-cap-with-pre-run-completed-cleanup" ||
     retention["directoryMode"] !== "0700" ||
     retention["fileMode"] !== "0600" ||
-    !isSafeInteger(retention["maximumArtifactBytes"]) ||
-    retention["maximumArtifactBytes"] < 1 ||
-    !isSafeInteger(retention["maximumStoreBytes"]) ||
-    retention["maximumStoreBytes"] < retention["maximumArtifactBytes"] ||
+    !isSafeInteger(retention["maximumOutputArtifactBytes"]) ||
+    retention["maximumOutputArtifactBytes"] < 1 ||
+    !isSafeInteger(retention["cleanupThresholdBytes"]) ||
+    retention["cleanupThresholdBytes"] <
+      retention["maximumOutputArtifactBytes"] ||
     !isRecord(evidence) ||
     !hasExactKeys(evidence, ["stderr", "stdout"])
   ) {
@@ -148,12 +152,12 @@ export function parseRunStatus(content: string, id: string): RunStatus {
   const stdout = parseEvidence(
     evidence["stdout"],
     "stdout.log",
-    retention["maximumArtifactBytes"],
+    retention["maximumOutputArtifactBytes"],
   );
   const stderr = parseEvidence(
     evidence["stderr"],
     "stderr.log",
-    retention["maximumArtifactBytes"],
+    retention["maximumOutputArtifactBytes"],
   );
   const lifecycle = parseRunLifecycle(value["lifecycle"]);
   if (!(stdout && stderr && lifecycle)) {
@@ -171,9 +175,9 @@ export function parseRunStatus(content: string, id: string): RunStatus {
     },
     execution: { shell: execution["shell"] },
     retention: {
-      policy: "size-bound",
-      maximumArtifactBytes: retention["maximumArtifactBytes"],
-      maximumStoreBytes: retention["maximumStoreBytes"],
+      policy: "per-output-cap-with-pre-run-completed-cleanup",
+      maximumOutputArtifactBytes: retention["maximumOutputArtifactBytes"],
+      cleanupThresholdBytes: retention["cleanupThresholdBytes"],
       directoryMode: "0700",
       fileMode: "0600",
     },

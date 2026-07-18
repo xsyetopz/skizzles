@@ -13,6 +13,7 @@ import {
 import { join } from "node:path";
 import process from "node:process";
 import {
+  artifactPath,
   encode,
   exitWithin,
   invoke,
@@ -27,6 +28,51 @@ import {
 } from "./runner-fixture.ts";
 
 describe("artifact-store safety and retention", () => {
+  it("caps each output and treats the disk setting as a pre-run completed cleanup threshold", () => {
+    const root = temporaryDirectory();
+    const environment = {
+      CODEX_COMMAND_OUTPUT_DIR: root,
+      CODEX_COMMAND_MAX_BYTES: "12",
+      CODEX_COMMAND_MAX_DISK_BYTES: "12",
+    };
+    const first = invoke(
+      runner,
+      [
+        "run",
+        "--base64url",
+        encode("printf 123456789012; printf abcdefghijkl >&2"),
+      ],
+      { env: environment },
+    );
+    expect(first.exitCode).toBe(0);
+    const firstDirectory = artifactPath(text(first.stdout));
+    const firstStatus = JSON.parse(
+      readFileSync(join(firstDirectory, "status.json"), "utf8"),
+    );
+    expect(firstStatus.retention).toEqual({
+      policy: "per-output-cap-with-pre-run-completed-cleanup",
+      maximumOutputArtifactBytes: 12,
+      cleanupThresholdBytes: 12,
+      directoryMode: "0700",
+      fileMode: "0600",
+    });
+    expect(statSync(join(firstDirectory, "stdout.log")).size).toBe(12);
+    expect(statSync(join(firstDirectory, "stderr.log")).size).toBe(12);
+    const retainedBytes = readdirSync(firstDirectory).reduce(
+      (total, name) => total + statSync(join(firstDirectory, name)).size,
+      0,
+    );
+    expect(retainedBytes).toBeGreaterThan(12);
+
+    const second = invoke(
+      runner,
+      ["run", "--base64url", encode("printf next")],
+      { env: environment },
+    );
+    expect(second.exitCode).toBe(0);
+    expect(existsSync(firstDirectory)).toBe(false);
+  });
+
   it("rejects a symlink output root without mutating its target", () => {
     const container = temporaryDirectory();
     const outside = temporaryDirectory();
@@ -131,6 +177,11 @@ describe("artifact-store safety and retention", () => {
       },
     );
     expect(cleanup.exitCode).toBe(0);
+    const cleanupDirectory = artifactPath(text(cleanup.stdout));
+    const cleanupStatus = JSON.parse(
+      readFileSync(join(cleanupDirectory, "status.json"), "utf8"),
+    );
+    expect(cleanupStatus.retention.cleanupThresholdBytes).toBe(1);
     const retained = existsSync(activeDirectory);
     const transcript = retained
       ? readFileSync(join(activeDirectory, "stdout.log"), "utf8")
@@ -142,6 +193,10 @@ describe("artifact-store safety and retention", () => {
       stopProcess(active.pid);
     }
     expect(retained).toBe(true);
+    expect(
+      statSync(join(activeDirectory, "status.json")).size +
+        statSync(join(cleanupDirectory, "status.json")).size,
+    ).toBeGreaterThan(1);
     expect(transcript).toBe("active-transcript");
     expect(exitCode).toBe(137);
     const finalStatus = JSON.parse(

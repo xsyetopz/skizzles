@@ -86,9 +86,9 @@ describe("versioned privacy-preserving action evidence", () => {
     const stderr = readFileSync(join(run.directory, "stderr.log"));
 
     expect(run.status.retention).toEqual({
-      policy: "size-bound",
-      maximumArtifactBytes: 16 * 1024 * 1024,
-      maximumStoreBytes: 256 * 1024 * 1024,
+      policy: "per-output-cap-with-pre-run-completed-cleanup",
+      maximumOutputArtifactBytes: 16 * 1024 * 1024,
+      cleanupThresholdBytes: 256 * 1024 * 1024,
       directoryMode: "0700",
       fileMode: "0600",
     });
@@ -96,6 +96,7 @@ describe("versioned privacy-preserving action evidence", () => {
       reference: "stdout.log",
       sensitivity: "operator-private",
       redaction: "none",
+      integrity: "unauthenticated-sha256",
       observedBytes: stdout.length,
       storedBytes: stdout.length,
       truncated: false,
@@ -105,6 +106,7 @@ describe("versioned privacy-preserving action evidence", () => {
       reference: "stderr.log",
       sensitivity: "operator-private",
       redaction: "none",
+      integrity: "unauthenticated-sha256",
       observedBytes: stderr.length,
       storedBytes: stderr.length,
       truncated: false,
@@ -130,6 +132,38 @@ describe("versioned privacy-preserving action evidence", () => {
     expect(text(query.stderr)).toContain("status artifact unavailable");
   });
 
+  it("accepts a same-user coherent artifact and unauthenticated digest rewrite", () => {
+    const run = completedRun("printf original-evidence");
+    const replacement = "coherent-replacement";
+    writeFileSync(join(run.directory, "stdout.log"), replacement, {
+      mode: 0o600,
+    });
+    const replacementBytes = Buffer.byteLength(replacement);
+    const rewritten = {
+      ...run.status,
+      evidence: {
+        ...run.status.evidence,
+        stdout: {
+          ...run.status.evidence.stdout,
+          observedBytes: replacementBytes,
+          storedBytes: replacementBytes,
+          truncated: false,
+          sha256: digest(replacement),
+        },
+      },
+    };
+    writeFileSync(run.statusPath, `${JSON.stringify(rewritten)}\n`, {
+      mode: 0o600,
+    });
+
+    const query = invoke(runner, ["status", run.id], {
+      env: { [outputDirectoryEnvironment]: run.root },
+    });
+    expect(query.exitCode).toBe(0);
+    expect(text(query.stdout)).toBe(`${JSON.stringify(rewritten)}\n`);
+    expect(rewritten.evidence.stdout.integrity).toBe("unauthenticated-sha256");
+  });
+
   it("rejects unknown, malformed, and unsupported-version status fields", () => {
     const run = completedRun("printf schema-bound");
     const invalidStatuses = [
@@ -138,6 +172,36 @@ describe("versioned privacy-preserving action evidence", () => {
       {
         ...run.status,
         lifecycle: { ...run.status.lifecycle, cleanup: "pending" },
+      },
+      {
+        ...run.status,
+        lifecycle: {
+          ...run.status.lifecycle,
+          completedAt: "1970-01-01T00:00:00.000Z",
+        },
+      },
+      {
+        ...run.status,
+        lifecycle: {
+          ...run.status.lifecycle,
+          cancellationSignal: "SIGTERM",
+          cleanup: "not-required",
+        },
+      },
+      {
+        ...run.status,
+        lifecycle: { ...run.status.lifecycle, state: "running" },
+      },
+      {
+        ...run.status,
+        lifecycle: {
+          ...run.status.lifecycle,
+          state: "failed-to-start",
+          exitCode: 126,
+          cancellationSignal: null,
+          drain: "complete",
+          cleanup: "not-required",
+        },
       },
     ];
 
@@ -194,7 +258,7 @@ describe("versioned privacy-preserving action evidence", () => {
     );
   });
 
-  it("keeps the store bound at least as large as an enlarged artifact bound", () => {
+  it("keeps the pre-run cleanup threshold at least as large as an enlarged output cap", () => {
     const root = temporaryDirectory();
     const maximumBytes = 300 * 1024 * 1024;
     const result = invoke(
@@ -217,7 +281,7 @@ describe("versioned privacy-preserving action evidence", () => {
       readFileSync(join(directory, "status.json"), "utf8"),
       id,
     );
-    expect(status.retention.maximumArtifactBytes).toBe(maximumBytes);
-    expect(status.retention.maximumStoreBytes).toBe(maximumBytes);
+    expect(status.retention.maximumOutputArtifactBytes).toBe(maximumBytes);
+    expect(status.retention.cleanupThresholdBytes).toBe(maximumBytes);
   });
 });

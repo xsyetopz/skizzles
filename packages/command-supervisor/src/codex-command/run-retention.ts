@@ -72,8 +72,8 @@ function inspectCompletedRun(
       status.lifecycle.state === "running" ||
       stdoutInfo.size !== status.evidence.stdout.storedBytes ||
       stderrInfo.size !== status.evidence.stderr.storedBytes ||
-      stdoutInfo.size > status.retention.maximumArtifactBytes ||
-      stderrInfo.size > status.retention.maximumArtifactBytes ||
+      stdoutInfo.size > status.retention.maximumOutputArtifactBytes ||
+      stderrInfo.size > status.retention.maximumOutputArtifactBytes ||
       !verifyRunEvidence(
         status,
         readFileSync(join(path, "stdout.log")),
