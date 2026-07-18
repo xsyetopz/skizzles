@@ -25,6 +25,8 @@ interface RemovalHooks {
   beforeRename?: () => Promise<void> | void;
 }
 
+type CleanupOutcome = { failure: unknown; removed: boolean };
+
 async function acquireLock(target: TransactionTarget): Promise<OwnedDirectory> {
   await revalidateAncestors(target.ancestors);
   const path = transactionLockPath(target);
@@ -232,20 +234,22 @@ async function cleanupOwned(
   owned: OwnedDirectory | undefined,
   failure: unknown,
   hooks?: RemovalHooks,
-): Promise<unknown> {
+): Promise<CleanupOutcome> {
   if (owned === undefined || !owned.present) {
-    return failure;
+    return { failure, removed: true };
   }
   try {
     await removeOwnedDirectory(owned, hooks);
-    return failure;
+    return { failure, removed: true };
   } catch {
-    return (
-      failure ??
-      new PackagingError(
-        "Plugin staging could not clean up its private artifact.",
-      )
-    );
+    return {
+      failure:
+        failure ??
+        new PackagingError(
+          "Plugin staging could not clean up its private artifact.",
+        ),
+      removed: false,
+    };
   }
 }
 
@@ -278,7 +282,7 @@ async function quarantineTransactionLock(
   }
 }
 
-export type { OwnedDirectory, RemovalHooks };
+export type { CleanupOutcome, OwnedDirectory, RemovalHooks };
 export {
   acquireLock,
   assertOwnedDirectory,

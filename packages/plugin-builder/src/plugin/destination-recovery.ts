@@ -8,7 +8,6 @@ import {
   inspectOwnedVariant,
   quarantineTransactionLock,
   readOwnedJson,
-  writeOwnedJson,
 } from "./destination-artifacts.ts";
 import type { LockOwner, TransactionJournal } from "./destination-journal.ts";
 import {
@@ -22,7 +21,10 @@ import {
   temporaryName,
   UUID_PATTERN,
 } from "./destination-journal.ts";
-import { cleanupOwnedLock } from "./destination-lock-disposal.ts";
+import {
+  cleanupOwnedLock,
+  deferLockCleanup,
+} from "./destination-lock-disposal.ts";
 import { lockedDestinationError, lstatBigInt } from "./destination-parent.ts";
 import type { TransactionTarget } from "./destination-path.ts";
 import {
@@ -34,8 +36,6 @@ import {
 } from "./destination-path.ts";
 
 export const PROMOTED_DIRECTORY_MODE = 0o755;
-
-export class IncompleteRollbackError extends PackagingError {}
 
 export async function recoverStaleTransaction(target: TransactionTarget) {
   await recoverDeferredCleanup(target);
@@ -63,56 +63,56 @@ export async function recoverStaleTransaction(target: TransactionTarget) {
     await recoverMissingJournal(target, lock, owner);
     return;
   }
-  if (journal.state === "active" && ownerIsActive(owner)) {
-    throw lockedDestinationError();
-  }
+  if (ownerIsActive(owner)) throw lockedDestinationError();
   await recoverJournal(target, lock, owner, journal);
 }
 
 async function recoverDeferredCleanup(target: TransactionTarget) {
   const prefix = `.skizzles-package-${target.key}-cleanup-`;
-  const tokens = new Set<string>();
-  for (const name of await readdir(target.parent)) {
-    const suffix = name.startsWith(prefix) ? name.slice(prefix.length) : "";
-    const token = suffix.endsWith(".dispose") ? suffix.slice(0, -8) : suffix;
-    if (UUID_PATTERN.test(token)) tokens.add(token);
+  const candidates = (await readdir(target.parent))
+    .filter((name) => name.startsWith(prefix))
+    .sort();
+  if (candidates.length === 0) return;
+  if (candidates.length !== 1) throw lockedDestinationError();
+  const candidate = candidates[0];
+  if (candidate === undefined) throw lockedDestinationError();
+  const suffix = candidate.slice(prefix.length);
+  const disposed = suffix.endsWith(".dispose");
+  const token = disposed ? suffix.slice(0, -8) : suffix;
+  if (!UUID_PATTERN.test(token)) throw lockedDestinationError();
+  const canonical = join(target.parent, `${prefix}${token}`);
+  const lock = await inspectOwnedVariant(canonical);
+  if (
+    lock === undefined ||
+    ((await lstatBigInt(lock.path)).mode & 0o777n) !== 0o700n
+  ) {
+    throw lockedDestinationError();
   }
-  for (const token of tokens) {
-    const lock = await inspectOwnedVariant(
-      join(target.parent, `${prefix}${token}`),
-    );
-    if (
-      lock === undefined ||
-      ((await lstatBigInt(lock.path)).mode & 0o777n) !== 0o700n
-    ) {
-      continue;
+  let owner: LockOwner;
+  try {
+    owner = await readOwner(lock);
+  } catch {
+    if (disposed && (await readdir(lock.path)).length === 0) {
+      await requireLockCleanup(lock, token);
+      return;
     }
-    let owner: LockOwner;
-    try {
-      owner = await readOwner(lock);
-    } catch {
-      if ((await readdir(lock.path)).length === 0) {
-        await requireLockCleanup(lock);
-      }
-      continue;
-    }
-    let journal: TransactionJournal;
-    try {
-      journal = await readJournal(lock, owner.token);
-    } catch {
-      if (
-        owner.token === token &&
-        !ownerIsActive(owner) &&
-        !(await hasTransactionArtifacts(target, owner.token))
-      ) {
-        await requireLockCleanup(lock);
-      }
-      continue;
-    }
-    if (owner.token === token && journal.state === "cleanup-pending") {
-      await recoverJournal(target, lock, owner, journal);
-    }
+    throw lockedDestinationError();
   }
+  if (owner.token !== token || ownerIsActive(owner)) {
+    throw lockedDestinationError();
+  }
+  let journal: TransactionJournal;
+  try {
+    journal = await readJournal(lock, token);
+  } catch {
+    if (!(await transactionArtifactsRemain(target, token))) {
+      await requireLockCleanup(lock, token);
+      return;
+    }
+    throw lockedDestinationError();
+  }
+  if (journal.state !== "cleanup-pending") throw lockedDestinationError();
+  await recoverJournal(target, lock, owner, journal);
 }
 
 async function recoverUnknownLock(lock: OwnedDirectory): Promise<void> {
@@ -134,15 +134,15 @@ async function recoverMissingJournal(
   lock: OwnedDirectory,
   owner: LockOwner,
 ): Promise<void> {
-  if (await hasTransactionArtifacts(target, owner.token))
+  if (await transactionArtifactsRemain(target, owner.token))
     throw lockedDestinationError();
   if (!(await quarantineTransactionLock(target, lock, owner.token))) {
     throw lockedDestinationError();
   }
-  await requireLockCleanup(lock);
+  await requireLockCleanup(lock, owner.token);
 }
 
-async function hasTransactionArtifacts(
+export async function transactionArtifactsRemain(
   target: TransactionTarget,
   token: string,
 ) {
@@ -196,20 +196,21 @@ async function recoverJournal(
   } else if (!journal.original.present && destination.present) {
     throw changedRecoveryDestinationError();
   }
-  await cleanupOwned(stage, undefined);
-  const backupFailure = await cleanupOwned(backup, undefined);
-  if (backupFailure !== undefined) {
-    if (!(await quarantineTransactionLock(target, lock, owner.token))) {
-      throw lockedDestinationError();
-    }
-    return;
+  const stageCleanup = await cleanupOwned(stage, undefined);
+  const backupCleanup = await cleanupOwned(backup, undefined);
+  if (!stageCleanup.removed || !backupCleanup.removed) {
+    await deferLockCleanup(target, lock, owner.token);
+    throw stageCleanup.removed ? backupCleanup.failure : stageCleanup.failure;
   }
-  await requireLockCleanup(lock);
+  await requireLockCleanup(lock, owner.token);
 }
 
-async function requireLockCleanup(lock: OwnedDirectory): Promise<void> {
-  const failure = await cleanupOwnedLock(lock, undefined);
-  if (failure !== undefined) throw failure;
+async function requireLockCleanup(
+  lock: OwnedDirectory,
+  token: string,
+): Promise<void> {
+  const outcome = await cleanupOwnedLock(lock, token, undefined);
+  if (!outcome.removed) throw outcome.failure;
 }
 
 async function readOwner(lock: OwnedDirectory): Promise<LockOwner> {
@@ -277,20 +278,4 @@ async function recoverableArtifact(
     );
   }
   return artifact;
-}
-
-export async function preserveIncompleteRollback(
-  lock: OwnedDirectory,
-  owner: LockOwner,
-  journal: TransactionJournal,
-  cause: unknown,
-): Promise<IncompleteRollbackError> {
-  journal.state = "cleanup-pending";
-  await writeOwnedJson(lock, JOURNAL_FILE, journal, owner.token).catch(
-    () => undefined,
-  );
-  return new IncompleteRollbackError(
-    "Plugin staging promotion failed and rollback could not complete safely.",
-    { cause },
-  );
 }

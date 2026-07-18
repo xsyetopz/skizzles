@@ -34,7 +34,7 @@ afterEach(async () => {
 });
 
 describe("plugin destination lock disposal", () => {
-  it("does not delete a cleanup path whose owner token differs", async () => {
+  it("blocks on a cleanup path whose owner token differs", async () => {
     const parent = await temporaryRoot("skizzles-cleanup-token-");
     const destination = join(parent, "plugin");
     const target = await inspectTarget(destination);
@@ -49,10 +49,15 @@ describe("plugin destination lock disposal", () => {
     );
     await writeFile(join(cleanup, "unrelated"), "preserved\n");
 
-    await replaceDirectoryTransaction(destination, (stage) =>
-      writeFile(join(stage, "new"), "new\n"),
-    );
+    let constructed = false;
+    await expect(
+      replaceDirectoryTransaction(destination, () => {
+        constructed = true;
+        return Promise.resolve();
+      }),
+    ).rejects.toThrow("locked by another operation");
 
+    expect(constructed).toBe(false);
     expect(await readFile(join(cleanup, "unrelated"), "utf8")).toBe(
       "preserved\n",
     );
@@ -145,6 +150,73 @@ describe("plugin destination lock disposal", () => {
     const artifacts = await transactionArtifacts(parent);
     expect(artifacts).toHaveLength(1);
     expect(artifacts[0]?.endsWith(".lock.dispose")).toBe(true);
+  });
+
+  it("retains foreign-token temporary lock metadata", async () => {
+    const parent = await temporaryRoot("skizzles-cleanup-foreign-temp-");
+    const destination = join(parent, "plugin");
+    await writeFile(destinationSeed(parent), "old\n");
+    let foreign = "";
+    await replaceDirectoryTransaction(
+      destination,
+      (stage) => writeFile(join(stage, "new"), "new\n"),
+      {
+        beforeLockCleanup: async (lock) => {
+          const owner = parseOwner(
+            parsePrivateJson(await readFile(join(lock, "owner.json"), "utf8")),
+          );
+          const token = owner.token === TOKEN_X ? TOKEN_Y : TOKEN_X;
+          const name = temporaryName(JOURNAL_FILE, token);
+          foreign = join(`${lock}.dispose`, name);
+          await writeFile(join(lock, name), "preserved\n");
+        },
+      },
+    );
+    await expect(
+      replaceDirectoryTransaction(destination, () => Promise.resolve()),
+    ).rejects.toThrow("could not clean up its private lock");
+    expect(await readFile(foreign, "utf8")).toBe("preserved\n");
+  });
+
+  it("treats every invalid cleanup namespace as lock-equivalent", async () => {
+    for (const [label, candidates] of [
+      ["malformed", [["not-a-token", 0o700]]],
+      ["wrong-mode", [[TOKEN_X, 0o755]]],
+      [
+        "multiple",
+        [
+          [TOKEN_X, 0o700],
+          [TOKEN_Y, 0o700],
+        ],
+      ],
+      [
+        "conflict",
+        [
+          [TOKEN_X, 0o700],
+          [`${TOKEN_X}.dispose`, 0o700],
+        ],
+      ],
+    ] as const) {
+      const parent = await temporaryRoot(`skizzles-cleanup-${label}-`);
+      const destination = join(parent, "plugin");
+      const { key } = await inspectTarget(destination);
+      for (const [suffix, mode] of candidates) {
+        // biome-ignore lint/performance/noAwaitInLoops: each candidate is an ordered filesystem fixture.
+        await mkdir(
+          join(parent, `.skizzles-package-${key}-cleanup-${suffix}`),
+          { mode },
+        );
+      }
+      let constructed = false;
+      // biome-ignore lint/performance/noAwaitInLoops: each namespace case is isolated and verified before cleanup.
+      await expect(
+        replaceDirectoryTransaction(destination, () => {
+          constructed = true;
+          return Promise.resolve();
+        }),
+      ).rejects.toThrow("locked by another operation");
+      expect(constructed).toBe(false);
+    }
   });
 });
 

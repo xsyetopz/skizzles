@@ -10,6 +10,7 @@ const PRIVATE_JSON_DEPTH_LIMIT = 32;
 const DECIMAL_IDENTITY_PATTERN = /^(?:0|[1-9][0-9]*)$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const activeOwnerTokens = new Set<string>();
 
 interface LockOwner {
   pid: number;
@@ -166,7 +167,8 @@ function processIdentity(pid: number): string | undefined {
 }
 
 function ownerIsActive(owner: LockOwner): boolean {
-  return processIdentity(owner.pid) === owner.processStartIdentity;
+  if (processIdentity(owner.pid) !== owner.processStartIdentity) return false;
+  return owner.pid !== process.pid || activeOwnerTokens.has(owner.token);
 }
 
 function currentOwner(): LockOwner {
@@ -174,12 +176,18 @@ function currentOwner(): LockOwner {
   if (processStartIdentity === undefined) {
     throw new PackagingError("Plugin staging could not identify lock owner.");
   }
-  return {
+  const owner = {
     version: PROTOCOL_VERSION,
     pid: process.pid,
     processStartIdentity,
     token: randomUUID(),
   };
+  activeOwnerTokens.add(owner.token);
+  return owner;
+}
+
+function releaseOwner(owner: LockOwner): void {
+  activeOwnerTokens.delete(owner.token);
 }
 
 function temporaryName(name: string, token: string): string {
@@ -198,6 +206,7 @@ export {
   parseJournal,
   parseOwner,
   parsePrivateJson,
+  releaseOwner,
   serialized,
   temporaryName,
   UUID_PATTERN,
