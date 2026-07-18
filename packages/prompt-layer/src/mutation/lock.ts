@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdir, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import process from "node:process";
-import { validateText } from "../assets/manifest.ts";
+import { validateText } from "../content-integrity.ts";
 import type {
   MutationLockHooks,
   MutationOptions,

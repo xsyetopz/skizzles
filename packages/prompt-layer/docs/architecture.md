@@ -110,13 +110,38 @@ generic upstream baseline.
 | `packages/prompt-layer/assets/upstream/LICENSE` | Checksum-locked upstream license text. |
 | `packages/prompt-layer/assets/upstream/NOTICE` | Checksum-locked upstream notice text. |
 | `packages/prompt-layer/assets/skizzles-base.patch` | Canonical one-file Git patch against the exact upstream path. |
-| `packages/prompt-layer/src/prompt-layer.ts` | Build, check, patch-authoring, rebase, locking, and transaction implementation. |
-| `packages/prompt-layer/test/prompt-layer.test.ts` | Focused integrity, recovery, concurrency, and path-safety coverage. |
+| `packages/prompt-layer/src/prompt-layer.ts` | Thin public package facade and CLI composition root; preserves the package export and binary surface without owning lifecycle policy. |
+| `packages/prompt-layer/src/lifecycle-contract.ts` | Public asset paths, packaged descriptor paths, mutation options, lifecycle operation types, and exact ordered write-set contracts. |
+| `packages/prompt-layer/src/content-integrity.ts` | Shared trust-boundary rules for SHA-256 facts and non-empty LF-only text. |
+| `packages/prompt-layer/src/repository-boundary.ts` | Default repository-root topology, canonical containment, filesystem identity checks, and durable file operations. |
+| `packages/prompt-layer/src/prompt-lifecycle.ts` | Build, check, patch-authoring, and immutable-rebase orchestration over inward-owned contracts. |
+| `packages/prompt-layer/src/assets/manifest.ts` | Strict manifest decoding, checksum facts, provenance construction, and generated-output comparison. |
+| `packages/prompt-layer/src/assets/patch.ts` | Exact-position patch validation, Git blob identity checks, patch creation, and strict application. |
+| `packages/prompt-layer/src/assets/upstream.ts` | The sole network adapter for immutable official OpenAI prompt, license, and notice fetches. |
+| `packages/prompt-layer/src/mutation/process-identity.ts` | Cross-platform process-start identity and stale/live owner classification. |
+| `packages/prompt-layer/src/mutation/protocol.ts` | Mutation owner/reclaim record schemas, parsing, and ownership equality. |
+| `packages/prompt-layer/src/mutation/lock.ts` | Exclusive lock acquisition, stale-owner reclaim, ownership verification, and release. |
+| `packages/prompt-layer/src/mutation/quarantine.ts` | Identity-bound cleanup of stale and release quarantine trees. |
+| `packages/prompt-layer/src/transaction/journal.ts` | Transaction protocol version, strict journal schema, ordered-path validation, and serialization. |
+| `packages/prompt-layer/src/transaction/commit.ts` | Durable staging, promotion, rollback, preflight, recovery, and target-state verification. |
 | `packages/prompt-layer/assets/instructions/skizzles-base.md` | Generated applied prompt. |
 | `packages/prompt-layer/assets/instructions/skizzles-base.provenance.json` | Generated portable provenance and legal digests. |
 | `packages/prompt-layer/assets/instructions/developer-instructions.md` | Canonical static developer policy. |
 | `packages/prompt-layer/assets/instructions/compact-prompt.md` | Canonical local-compaction continuation policy. |
 | `packages/prompt-layer/assets/integrations/prompt-policy.json` | Canonical portable policy descriptor and packaged-path contract. |
+
+Tests follow the contract owner rather than mirroring an obsolete source
+monolith:
+
+| Test path | Contract proved |
+| --- | --- |
+| `packages/prompt-layer/test/prompt-assets.test.ts` | Manifest integrity, deterministic generation, provenance, patch validation, authoring, and descriptor-path publication. |
+| `packages/prompt-layer/test/prompt-rebase.test.ts` | Immutable ref validation, official fetch behavior, reviewed replay, rollback, and non-mutation on fetch failure. |
+| `packages/prompt-layer/test/mutation-lock.test.ts` | Exclusive ownership, stale reclaim, replacement preservation, clock skew, and quarantine recovery. |
+| `packages/prompt-layer/test/process-identity.test.ts` | PID reuse, Darwin identity normalization, locale/timezone stability, and fail-closed identity behavior. |
+| `packages/prompt-layer/test/prompt-transaction.test.ts` | Promotion-fault rollback, hostile journal rejection, crash recovery preflight, and symlink containment. |
+| `packages/prompt-layer/test/prompt-cli-hygiene.test.ts` | CLI argument rejection, LF enforcement, and machine-path hygiene. |
+| `packages/prompt-layer/test/prompt-fixture.ts` | Narrow package-owned fixture construction and cleanup shared by those contract suites; never imported by production code. |
 
 `@skizzles/plugin-builder` depends on `@skizzles/prompt-layer` through its
 workspace export. It validates the canonical asset set, then stages only the

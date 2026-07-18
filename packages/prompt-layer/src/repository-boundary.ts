@@ -9,6 +9,7 @@ import {
   rm,
 } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   CANONICAL_PATHS,
   LOCK_PATH,
@@ -21,6 +22,10 @@ const WINDOWS_ABSOLUTE_PATH = /^[A-Za-z]:/;
 export interface FileIdentity {
   dev: number | bigint;
   ino: number | bigint;
+}
+
+export function defaultPromptRepoRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 }
 
 export async function canonicalRepoRoot(repoRoot: string): Promise<string> {

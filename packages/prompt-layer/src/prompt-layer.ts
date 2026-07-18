@@ -1,6 +1,4 @@
-import { dirname, resolve } from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
 import { PromptLayerError } from "./lifecycle-contract.ts";
 import {
   authorPromptPatch,
@@ -8,7 +6,7 @@ import {
   checkPrompt,
   rebasePrompt,
 } from "./prompt-lifecycle.ts";
-import { errorMessage } from "./repository-boundary.ts";
+import { defaultPromptRepoRoot, errorMessage } from "./repository-boundary.ts";
 
 export { validatePatch } from "./assets/patch.ts";
 export type {
@@ -34,13 +32,9 @@ export {
   rebasePrompt,
 } from "./prompt-lifecycle.ts";
 
-function defaultRepoRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-}
-
 async function runCli(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
-  const root = defaultRepoRoot();
+  const root = defaultPromptRepoRoot();
   switch (command) {
     case "build":
       if (args.length > 0) {

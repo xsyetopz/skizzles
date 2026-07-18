@@ -1,5 +1,4 @@
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import {
   compareGenerated,
   fileFact,
@@ -7,9 +6,7 @@ import {
   provenanceBytes,
   readManifest,
   rejectMachinePaths,
-  sha256,
   validateOutputProvenance,
-  validateText,
   verifiedFile,
   verifyFact,
 } from "./assets/manifest.ts";
@@ -19,6 +16,7 @@ import {
   validatePatch,
 } from "./assets/patch.ts";
 import { fetchOfficial, networkFetcher } from "./assets/upstream.ts";
+import { sha256, validateText } from "./content-integrity.ts";
 import type {
   GeneratedPrompt,
   MutationLockHooks,
@@ -43,6 +41,7 @@ import { defaultProcessIdentityProvider } from "./mutation/process-identity.ts";
 import {
   assertCanonicalContainment,
   canonicalRepoRoot,
+  defaultPromptRepoRoot,
   errorMessage,
   readRequiredFile,
 } from "./repository-boundary.ts";
@@ -55,7 +54,7 @@ import {
 const COMMIT = /^[0-9a-f]{40}$/;
 
 export async function buildPrompt(
-  repoRoot = defaultRepoRoot(),
+  repoRoot = defaultPromptRepoRoot(),
   options: MutationOptions = {},
 ): Promise<void> {
   const root = await canonicalRepoRoot(repoRoot);
@@ -70,7 +69,7 @@ export async function buildPrompt(
 }
 
 export async function checkPrompt(
-  repoRoot = defaultRepoRoot(),
+  repoRoot = defaultPromptRepoRoot(),
   options: Pick<MutationOptions, "processIdentityProvider"> = {},
 ): Promise<void> {
   const root = await canonicalRepoRoot(repoRoot);
@@ -98,7 +97,7 @@ async function checkPromptContents(root: string): Promise<void> {
 }
 
 export async function authorPromptPatch(
-  repoRoot = defaultRepoRoot(),
+  repoRoot = defaultPromptRepoRoot(),
   candidatePath?: string,
   options: {
     transactionFault?: TransactionFault;
@@ -310,8 +309,4 @@ async function generatePrompt(root: string): Promise<GeneratedPrompt> {
     manifest.upstream.path,
   );
   return { output, provenance: provenanceBytes(manifest) };
-}
-
-function defaultRepoRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 }

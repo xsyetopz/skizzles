@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { validateText } from "../assets/manifest.ts";
+import { validateText } from "../content-integrity.ts";
 import {
   assertKeys,
   numberValue,
@@ -19,7 +19,7 @@ import {
   readRequiredFile,
 } from "../repository-boundary.ts";
 
-const TRANSACTION_VERSION = 1;
+export const TRANSACTION_VERSION = 1;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export interface TransactionEntry {

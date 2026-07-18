@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { validateText } from "../assets/manifest.ts";
+import { validateText } from "../content-integrity.ts";
 import {
   assertKeys,
   numberValue,

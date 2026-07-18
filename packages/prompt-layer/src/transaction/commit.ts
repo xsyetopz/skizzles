@@ -1,6 +1,6 @@
 import { mkdir, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { sha256, validateText } from "../assets/manifest.ts";
+import { sha256, validateText } from "../content-integrity.ts";
 import type {
   TransactionFault,
   TransactionOperation,
@@ -26,13 +26,12 @@ import {
 import type { TransactionEntry, TransactionJournal } from "./journal.ts";
 import {
   readTransactionJournal,
+  TRANSACTION_VERSION,
   transactionJournalBytes,
   validateTransactionPaths,
 } from "./journal.ts";
 
 type TransactionTargetState = "old" | "new" | "both";
-const TRANSACTION_VERSION = 1;
-
 export async function commitWriteSet(
   root: string,
   operation: TransactionOperation,

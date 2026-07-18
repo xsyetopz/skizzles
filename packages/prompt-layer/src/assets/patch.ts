@@ -1,13 +1,14 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import process from "node:process";
+import { validateText } from "../content-integrity.ts";
 import { PromptLayerError } from "../lifecycle-contract.ts";
 import {
   readRequiredFile,
   validateSafeRelativePath,
 } from "../repository-boundary.ts";
-import { gitBlobId, validateText } from "./manifest.ts";
 
 const BINARY_FILES = /^Binary files /mu;
 const FORBIDDEN_PATCH_METADATA =
@@ -21,6 +22,13 @@ interface ParsedHunk {
   newStart: number;
   newCount: number;
   body: string[];
+}
+
+function gitBlobId(bytes: Buffer): string {
+  return createHash("sha1")
+    .update(`blob ${bytes.byteLength}\0`)
+    .update(bytes)
+    .digest("hex");
 }
 
 export function validatePatch(
