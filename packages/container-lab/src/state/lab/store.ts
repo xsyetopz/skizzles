@@ -4,8 +4,8 @@ import {
   readTrustedDirectory,
   readTrustedUnknownJson,
 } from "../../trusted-filesystem.ts";
-import type { LabMetadata } from "../../types.ts";
 import { labManifestPath, ownerKey, type StateRoots } from "../layout.ts";
+import type { LabMetadata } from "./contract.ts";
 import { assertLabMetadata } from "./validation.ts";
 
 export async function writeLab(

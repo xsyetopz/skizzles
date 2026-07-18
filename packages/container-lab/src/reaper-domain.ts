@@ -367,8 +367,10 @@ function queryThreadState(database: Database, owner: string): ThreadState {
 
 async function prepareExactLab(
   roots: StateRoots,
-  snapshot: import("./types.ts").LabMetadata,
-  cleanup?: (claimed: import("./types.ts").LabMetadata) => Promise<void>,
+  snapshot: import("./state/lab/contract.ts").LabMetadata,
+  cleanup?: (
+    claimed: import("./state/lab/contract.ts").LabMetadata,
+  ) => Promise<void>,
 ): Promise<void> {
   const lock = labLockPath(roots.stateRoot, snapshot.owner, snapshot.id);
   const claimed = await withFileLock(
@@ -385,7 +387,7 @@ async function prepareExactLab(
 
 async function cleanupExactLab(
   roots: StateRoots,
-  lab: import("./types.ts").LabMetadata,
+  lab: import("./state/lab/contract.ts").LabMetadata,
   docker: DockerRunner,
   authorize: () => Promise<void>,
 ): Promise<void> {
@@ -394,7 +396,7 @@ async function cleanupExactLab(
   await authorize();
   let previous:
     | {
-        state: import("./types.ts").LabMetadata["state"];
+        state: import("./state/lab/contract.ts").LabMetadata["state"];
         updatedAt: string;
         error?: string;
       }
@@ -486,7 +488,7 @@ async function validateReaperLab(
   roots: StateRoots,
   owner: string,
   ownerKey: string,
-  lab: import("./types.ts").LabMetadata,
+  lab: import("./state/lab/contract.ts").LabMetadata,
 ): Promise<void> {
   const identity = {
     expectedOwner: owner,

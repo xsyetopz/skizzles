@@ -8,9 +8,9 @@ import {
   parseRunArguments,
 } from "./cli/arguments.ts";
 import { dispatchCliCommand } from "./cli/dispatch.ts";
-import { serializePublicJson } from "./public-json.ts";
-import { redactPublicText } from "./public-output.ts";
-import { ContainerLabService } from "./service.ts";
+import { ContainerLabService } from "./lab/orchestrator.ts";
+import { serializePublicJson } from "./public/json.ts";
+import { redactPublicText } from "./public/output.ts";
 import { resolveOwner, resolveRoots } from "./state/layout.ts";
 import { CONTAINER_LAB_VERSION } from "./version.ts";
 

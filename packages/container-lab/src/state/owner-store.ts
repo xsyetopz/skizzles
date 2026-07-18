@@ -5,7 +5,7 @@ import {
   readTrustedDirectory,
   readTrustedUnknownJson,
 } from "../trusted-filesystem.ts";
-import type { OwnerManifest } from "../types.ts";
+import type { OwnerManifest } from "./lab/contract.ts";
 import {
   ownerDirectory,
   ownerKey,

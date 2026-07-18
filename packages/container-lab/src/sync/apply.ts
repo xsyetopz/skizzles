@@ -20,7 +20,6 @@ import {
   canonicalPreviewRoots,
   previewBinding,
 } from "./preview.ts";
-import { parseBaselineFile, parseStoredPreview } from "./preview-validation.ts";
 import { rollbackJournalSafely } from "./recovery.ts";
 import {
   applyChange,
@@ -41,6 +40,7 @@ import {
   type SyncStatePaths,
   syncStatePaths,
 } from "./state.ts";
+import { parseBaselineFile, parseStoredPreview } from "./validation/preview.ts";
 
 interface ValidatedSync {
   sourceRoot: string;

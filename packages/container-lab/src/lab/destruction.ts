@@ -11,6 +11,7 @@ import {
 import { removeIfPresent } from "../files.ts";
 import { withFileLock } from "../locks.ts";
 import { runCommand } from "../process.ts";
+import type { LabMetadata } from "../state/lab/contract.ts";
 import {
   listLabs,
   readLab,
@@ -28,8 +29,7 @@ import {
   assertReadyLabFilesystem,
   inspectTrustedLabRuntimeDirectories,
 } from "../state/runtime-trust.ts";
-import { recoverSyncTransactions } from "../sync/service.ts";
-import type { LabMetadata } from "../types.ts";
+import { recoverSyncTransactions } from "../sync/api.ts";
 
 type DestructionContext = {
   owner: string;

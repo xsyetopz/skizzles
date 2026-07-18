@@ -4,6 +4,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LabMode } from "../src/config.ts";
+import type { LabMetadata } from "../src/state/lab/contract.ts";
 import { listLabs, readLab, writeLab } from "../src/state/lab/store.ts";
 import {
   activityLockPath,
@@ -15,7 +16,6 @@ import {
   resolveOwner,
 } from "../src/state/layout.ts";
 import { ensureOwner } from "../src/state/owner-store.ts";
-import type { LabMetadata } from "../src/types.ts";
 
 const temporary: string[] = [];
 afterEach(async () => {

@@ -19,7 +19,11 @@ import {
   runtimeFromMetadata,
 } from "./docker/runtime.ts";
 import { type CommandResult, type RunOptions, runCommand } from "./process.ts";
-import type { Endpoint, LabMetadata, PersistedLabRuntime } from "./types.ts";
+import type {
+  Endpoint,
+  LabMetadata,
+  PersistedLabRuntime,
+} from "./state/lab/contract.ts";
 
 export type LabRuntime = PersistedLabRuntime & { metadata: LabMetadata };
 

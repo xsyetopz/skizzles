@@ -1,0 +1,28 @@
+{
+  "naming_exceptions": [
+    {
+      "rule": "semantic-token-limit",
+      "path": "examples/compose/.codex-container-lab.yaml",
+      "reason": "The published manifest schema requires the external .codex-container-lab.yaml filename.",
+      "owner": "Container Lab manifest parser",
+      "control": "Config parser tests and example validation check the exact manifest filename.",
+      "review": "Remove only in a versioned public schema migration."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "examples/dockerfile/.codex-container-lab.yaml",
+      "reason": "The published manifest schema requires the external .codex-container-lab.yaml filename.",
+      "owner": "Container Lab manifest parser",
+      "control": "Config parser tests and example validation check the exact manifest filename.",
+      "review": "Remove only in a versioned public schema migration."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "examples/image/.codex-container-lab.yaml",
+      "reason": "The published manifest schema requires the external .codex-container-lab.yaml filename.",
+      "owner": "Container Lab manifest parser",
+      "control": "Config parser tests and example validation check the exact manifest filename.",
+      "review": "Remove only in a versioned public schema migration."
+    }
+  ]
+}

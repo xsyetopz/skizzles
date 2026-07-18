@@ -3,6 +3,7 @@ import { join } from "node:path";
 import process from "node:process";
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
 import { parse as parseYaml } from "yaml";
+import type { ComposeModel } from "../compose/contract.ts";
 import {
   composeCommandArgs,
   generateBaseCompose,
@@ -12,12 +13,11 @@ import {
   inspectComposeModel,
   validateSecretEnvironmentModel,
 } from "../compose/inspection.ts";
-import type { ComposeModel } from "../compose/model.ts";
 import type { LabConfig } from "../config.ts";
 import type { DockerRunner, LabRuntime } from "../docker.ts";
 import type { CommandResult } from "../process.ts";
-import { redactPublicText } from "../public-output.ts";
-import type { Endpoint, LabMetadata } from "../types.ts";
+import { redactPublicText } from "../public/output.ts";
+import type { Endpoint, LabMetadata } from "../state/lab/contract.ts";
 import {
   isRecord,
   scrubSecretEnvironment,

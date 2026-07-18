@@ -6,7 +6,7 @@ import {
   exactDirectoryChain as inspectExactDirectoryChain,
   realDirectory,
 } from "../trusted-filesystem.ts";
-import type { LabMetadata } from "../types.ts";
+import type { LabMetadata } from "./lab/contract.ts";
 import { expectedLabRuntimeRoot, ownerKey, type StateRoots } from "./layout.ts";
 
 export async function exactDirectoryChain(

@@ -1,5 +1,5 @@
 import process from "node:process";
-import { ContainerLabService } from "../service.ts";
+import { ContainerLabService } from "../lab/orchestrator.ts";
 import {
   CliUsageError,
   integerFlag,

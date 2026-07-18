@@ -12,6 +12,7 @@ import {
 } from "../docker.ts";
 import { withFileLock } from "../locks.ts";
 import { runCommand } from "../process.ts";
+import type { LabMetadata } from "../state/lab/contract.ts";
 import { listLabs, readLab, writeLab } from "../state/lab/store.ts";
 import {
   labLockPath,
@@ -25,8 +26,7 @@ import {
   initializeSyncBaseline,
   previewSync,
   recoverSyncTransactions,
-} from "../sync/service.ts";
-import type { LabMetadata } from "../types.ts";
+} from "../sync/api.ts";
 
 const LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 

@@ -1,4 +1,4 @@
-import type { ComposeModel } from "./model.ts";
+import type { ComposeModel } from "./contract.ts";
 
 export type PrivilegeSurface =
   | "host-bind"

@@ -1,7 +1,7 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
 import { stringify as stringifyYaml } from "yaml";
 import type { LabConfig } from "../config.ts";
-import type { ComposeModel } from "./model.ts";
+import type { ComposeModel } from "./contract.ts";
 
 export interface LabComposeContext {
   workspaceHostPath: string;

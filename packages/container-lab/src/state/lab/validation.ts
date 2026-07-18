@@ -17,13 +17,13 @@ import {
   manifestName,
 } from "../../config.ts";
 import { safeStateName } from "../../files.ts";
-import type { LabMetadata, PersistedLabRuntime } from "../../types.ts";
 import {
   expectedLabRuntimeRoot,
   ownerKey,
   resolveOwner,
   type StateRoots,
 } from "../layout.ts";
+import type { LabMetadata, PersistedLabRuntime } from "./contract.ts";
 
 const LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
 const LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;

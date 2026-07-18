@@ -15,9 +15,7 @@ import type {
 } from "./contract.ts";
 import { writeDurableJson } from "./durability.ts";
 import { manifestDigest } from "./git-manifest.ts";
-import { parseSyncJournal } from "./journal-validation.ts";
 import { previewBinding } from "./preview.ts";
-import { parseBaselineFile, parseStoredPreview } from "./preview-validation.ts";
 import {
   assertDirectoryIdentities,
   cleanupCreatedDirectories,
@@ -30,6 +28,8 @@ import {
   type SyncStatePaths,
   syncStatePaths,
 } from "./state.ts";
+import { parseSyncJournal } from "./validation/journal.ts";
+import { parseBaselineFile, parseStoredPreview } from "./validation/preview.ts";
 
 const JOURNAL_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;

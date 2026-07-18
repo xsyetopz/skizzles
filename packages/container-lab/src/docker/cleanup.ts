@@ -2,7 +2,7 @@ import process from "node:process";
 import { internalImageTag } from "../compose/generation.ts";
 import type { DockerRunner, LabRuntime } from "../docker.ts";
 import type { CommandResult } from "../process.ts";
-import type { LabMetadata } from "../types.ts";
+import type { LabMetadata } from "../state/lab/contract.ts";
 import { isRecord, scrubSecretEnvironment } from "./environment.ts";
 
 const IMMUTABLE_IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
