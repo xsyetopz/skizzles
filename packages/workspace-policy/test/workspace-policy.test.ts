@@ -58,6 +58,33 @@ describe("workspace policy", () => {
     expect(codes).toContain("missing-bin-target");
   });
 
+  test("resolves TypeScript exports through the package exports map", async () => {
+    const root = await fixture();
+    const packageRoot = join(root, "packages/example");
+    const manifest = packageManifest();
+    manifest.exports = { ".": "src/index.ts" };
+    await writeFile(
+      join(packageRoot, "package.json"),
+      JSON.stringify(manifest),
+    );
+
+    const codes = (await validateWorkspace(root)).map(({ code }) => code);
+    expect(codes).toContain("invalid-exports-target");
+    expect(codes).toContain("unsafe-export-import");
+  });
+
+  test.each([
+    ["process exit", "process.exit(23);\n"],
+    ["stdout output", 'console.log("import side effect");\n'],
+    ["stdin consumption", "await Bun.stdin.text();\n"],
+  ])("rejects a TypeScript export with import-time %s", async (_, source) => {
+    const root = await fixture();
+    await writeFile(join(root, "packages/example/src/index.ts"), source);
+
+    const codes = (await validateWorkspace(root)).map(({ code }) => code);
+    expect(codes).toContain("unsafe-export-import");
+  });
+
   test("rejects local Biome tooling and a check without inherited config", async () => {
     const root = await fixture();
     const packageRoot = join(root, "packages/example");
@@ -97,6 +124,51 @@ describe("workspace policy", () => {
       message:
         "package check must start with bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../..",
     });
+  });
+
+  test("accepts the portable FastMCP template's local Biome config command", async () => {
+    const root = await fixture();
+    const portableRoot = join(
+      root,
+      "skills/codex-project-tooling/assets/fastmcp-bun-template",
+    );
+    const rootPackage = rootManifest();
+    rootPackage["workspaces"] = [
+      "packages/*",
+      "skills/codex-project-tooling/assets/fastmcp-bun-template",
+    ];
+    await writeFile(join(root, "package.json"), JSON.stringify(rootPackage));
+    await mkdir(join(portableRoot, "src"), { recursive: true });
+    await mkdir(join(portableRoot, "test"), { recursive: true });
+    const manifest = packageManifest("codex-fastmcp-template");
+    manifest.scripts["check"] =
+      "bunx @biomejs/biome@2.5.4 check --config-path ./biome.jsonc ./biome.jsonc ./package.json ./tsconfig.json ./src ./test";
+    await writeFile(
+      join(portableRoot, "package.json"),
+      JSON.stringify(manifest),
+    );
+    await writeFile(join(portableRoot, "README.md"), "# Portable template\n");
+    await writeFile(join(portableRoot, "tsconfig.json"), "{}\n");
+    await writeFile(join(portableRoot, "src/index.ts"), "export {};\n");
+    await writeFile(join(portableRoot, "src/cli.ts"), "export {};\n");
+    await writeFile(join(portableRoot, "test/index.test.ts"), "export {};\n");
+
+    expect(await validateWorkspace(root)).toEqual([]);
+  });
+
+  test("rejects the portable local Biome command in an ordinary package", async () => {
+    const root = await fixture();
+    const packageRoot = join(root, "packages/example");
+    const manifest = packageManifest();
+    manifest.scripts["check"] =
+      "bunx @biomejs/biome@2.5.4 check --config-path biome.jsonc --vcs-root . .";
+    await writeFile(
+      join(packageRoot, "package.json"),
+      JSON.stringify(manifest),
+    );
+
+    const codes = (await validateWorkspace(root)).map(({ code }) => code);
+    expect(codes).toContain("invalid-biome-command");
   });
 });
 

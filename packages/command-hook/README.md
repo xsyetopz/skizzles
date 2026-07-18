@@ -6,6 +6,8 @@ potentially noisy commands to the generated plugin supervisor path.
 
 ## Entrypoints and assets
 
+- `@skizzles/command-hook` exports the import-safe `isManagedScript`
+  classifier.
 - `skizzles-manage-command-output` executes `src/manage-command-output.ts`.
 - `@skizzles/command-hook/hooks.json` exports the canonical descriptor stored
   at `assets/hooks.json`.

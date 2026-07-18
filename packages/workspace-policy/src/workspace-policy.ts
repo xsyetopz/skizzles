@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import process from "node:process";
 
 const TOOL_DEPENDENCIES = ["@types/bun", "@types/node", "typescript"] as const;
 export const SKIZZLES_PACKAGE_NAMES = [
@@ -16,6 +17,11 @@ export const SKIZZLES_PACKAGE_NAMES = [
 ] as const;
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const IMPORT_EXTENSIONS = new Set([...SOURCE_EXTENSIONS, ".json"]);
+const EXPORT_IMPORT_TIMEOUT_MS = 1_000;
+const PORTABLE_FASTMCP_ROOT =
+  "skills/codex-project-tooling/assets/fastmcp-bun-template";
+const PORTABLE_FASTMCP_CHECK =
+  "bunx @biomejs/biome@2.5.4 check --config-path ./biome.jsonc ./biome.jsonc ./package.json ./tsconfig.json ./src ./test";
 
 export interface WorkspaceFinding {
   code: string;
@@ -218,6 +224,7 @@ async function validatePackage(
   );
   validateEntrypoints(relativeRoot, packageRoot, "bin", manifest.bin, findings);
   await validateEntrypointBuilds(relativeRoot, packageRoot, manifest, findings);
+  await validateExportImports(relativeRoot, packageRoot, manifest, findings);
 }
 
 function validatePackageMetadata(
@@ -262,7 +269,13 @@ function validatePackageMetadata(
     const workspacePath = portable(relative(relativeRoot, "."));
     const configPath = `${workspacePath}/biome.jsonc`;
     const requiredPrefix = `bunx @biomejs/biome@2.5.4 check --config-path ${configPath} --vcs-root ${workspacePath}`;
-    if (!(check === requiredPrefix || check.startsWith(`${requiredPrefix} `))) {
+    const usesPortableFastMcpCheck =
+      relativeRoot === PORTABLE_FASTMCP_ROOT &&
+      check === PORTABLE_FASTMCP_CHECK;
+    if (
+      !usesPortableFastMcpCheck &&
+      !(check === requiredPrefix || check.startsWith(`${requiredPrefix} `))
+    ) {
       add(
         findings,
         "invalid-biome-command",
@@ -413,6 +426,72 @@ async function validateEntrypointBuilds(
     relativeRoot,
     diagnostic || "Bun could not build the declared entrypoints",
   );
+}
+
+async function validateExportImports(
+  relativeRoot: string,
+  packageRoot: string,
+  manifest: PackageManifest,
+  findings: WorkspaceFinding[],
+): Promise<void> {
+  for (const [name, target] of Object.entries(manifest.exports)) {
+    if (!SOURCE_EXTENSIONS.has(target.slice(target.lastIndexOf(".")))) {
+      continue;
+    }
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "--eval",
+        'const specifier = process.env.SKIZZLES_EXPORT_SPECIFIER; if (!specifier) throw new Error("missing export specifier"); await import(specifier);',
+      ],
+      {
+        cwd: packageRoot,
+        env: {
+          ...process.env,
+          SKIZZLES_EXPORT_SPECIFIER:
+            name === "." ? manifest.name : `${manifest.name}${name.slice(1)}`,
+        },
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+    const deadline = Promise.withResolvers<"deadline">();
+    const timeout = setTimeout(
+      () => deadline.resolve("deadline"),
+      EXPORT_IMPORT_TIMEOUT_MS,
+    );
+    const outcome = await Promise.race([child.exited, deadline.promise]);
+    clearTimeout(timeout);
+    if (outcome === "deadline") {
+      child.kill("SIGKILL");
+    }
+    child.stdin.end();
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    if (
+      outcome === "deadline" ||
+      exitCode !== 0 ||
+      stdout.length > 0 ||
+      stderr.length > 0
+    ) {
+      const reason =
+        outcome === "deadline"
+          ? "did not settle while stdin remained open"
+          : exitCode !== 0
+            ? `exited with status ${exitCode}`
+            : "wrote to stdout or stderr";
+      add(
+        findings,
+        "unsafe-export-import",
+        relativeRoot,
+        `${name} (${target}) ${reason} during import`,
+      );
+    }
+  }
 }
 
 async function validateImports(

@@ -20,18 +20,14 @@ The managed-output hook recognizes the launcher’s outer `run --lab ... -- COMM
 
 ## Optional host wiring — machine-local and reversible
 
-`codex-container-lab` and `codex-container-lab-reaper` PATH binaries are conveniences, not prerequisites. Host wiring is separate from skill/plugin installation: it is an explicit, reversible, machine-local operation with a recorded rollback target. Do not alter broad Codex hooks/configuration, Docker state, or SQLite while setting it up.
+`codex-container-lab` and `codex-container-lab-reaper` PATH binaries are conveniences, not prerequisites. Host wiring is separate from skill/plugin installation: it is an explicit, reversible, machine-local operation. Record every created link and rendered LaunchAgent path so the wiring can be removed exactly. Do not alter broad Codex hooks/configuration, Docker state, or SQLite while setting it up.
 
 When requested by the host owner, link the canonical workspace package from `packages/container-lab` after a frozen root install. The LaunchAgent template at `install/com.openai.codex-container-lab-reaper.plist` must be rendered into a user-owned temporary file with absolute Bun, bundled-or-canonical reaper, and log paths; validate it with `plutil` before loading. LaunchAgents have a minimal environment and must not rely on `PATH` or the `/usr/bin/env bun` shebang.
 
 Keep every doctor health probe on disposable owner, state, runtime, and database roots. The archive reaper defaults are live-host behavior and are not a test target. Any database, schema, busy, manifest, or archive-state uncertainty retains resources.
 
-## Verification and rollback
+## Verify or remove optional host wiring
 
-1. Finish or preserve active labs owned by the previous installation.
-2. Rebuild and validate the Skizzles plugin, then verify the bundled launcher from a fresh task.
-3. If approved, add the optional PATH links and verify both binary names from the Codex shell.
-4. Render, validate, and only then deliberately load the reaper LaunchAgent.
-5. Keep the former standalone checkout only as rollback history until an explicit cleanup decision; it is not live authority.
+After wiring, verify the bundled launcher from a fresh task, resolve both optional binary names from the Codex shell, and inspect the loaded LaunchAgent definition against the rendered file. Keep these checks on disposable owner, state, and runtime roots.
 
-The former standalone Container Lab repository may be retained as a rollback source. Rollback restores the recorded host wiring and unloads any newly loaded LaunchAgent; it never changes Codex’s database or broad Docker state.
+To remove host wiring, unload the exact rendered LaunchAgent first, delete that rendered file and its configured log files, then remove only the recorded PATH links. Removing host wiring does not remove the Skizzles package or plugin and must not change Codex databases, broad Docker state, or unrelated shell configuration.

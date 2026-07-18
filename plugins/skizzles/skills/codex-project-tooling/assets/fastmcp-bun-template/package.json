@@ -25,7 +25,7 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../../../biome.jsonc --vcs-root ../../../.. .",
+    "check": "bunx @biomejs/biome@2.5.4 check --config-path ./biome.jsonc ./biome.jsonc ./package.json ./tsconfig.json ./src ./test",
     "validate:stdio": "bun run src/validate-stdio.ts",
     "inspect:browser": "fastmcp inspect src/index.ts",
     "dev": "fastmcp dev src/index.ts"

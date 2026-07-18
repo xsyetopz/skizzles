@@ -20,6 +20,9 @@ reserved for MCP JSON-RPC and writes install diagnostics to stderr. Commit the
 copied project's generated `bun.lock`; this canonical template intentionally
 does not include a nested lockfile.
 
+`check` uses the copied template's `biome.jsonc` and a pinned Biome 2.5.4
+command. It does not depend on a parent repository's configuration or VCS root.
+
 ## Package boundary
 
 The package exposes `createServer` and `startServer` from its root export, and

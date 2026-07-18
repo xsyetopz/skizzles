@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/manage-command-output.ts",
+    ".": "./src/index.ts",
     "./hooks.json": "./assets/hooks.json"
   },
   "bin": {

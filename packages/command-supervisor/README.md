@@ -7,6 +7,10 @@ atomic within an owner-only run store.
 
 ## Entrypoint
 
+`@skizzles/command-supervisor` exports the import-safe `dispatchCommand`
+programmatic facade. Calling it may write command output; importing it does not
+dispatch the executable.
+
 The `codex-command` binary executes `src/codex-command.ts` and supports:
 
 ```text

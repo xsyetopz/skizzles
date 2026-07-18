@@ -47,8 +47,9 @@ Every workspace package declares:
 
 `@skizzles/workspace-policy` verifies these requirements, scans imports for
 dependency and containment violations, compiles declared TypeScript entrypoints
-in memory, rejects nested lockfiles/build-info, and rejects TypeScript sources
-outside a workspace package.
+in memory, imports TypeScript exports in isolated processes to reject
+import-time exit and stdio effects, rejects nested lockfiles/build-info, and
+rejects TypeScript sources outside a workspace package.
 
 ## Toolchain
 

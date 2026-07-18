@@ -8105,62 +8105,116 @@ function assertLabMetadata(value, roots, owner, labId) {
   }
 }
 function validatePersistedRuntime(lab, runtime) {
-  if (!(isRecord3(runtime) && isRecord3(runtime["config"]))) {
+  if (!isRecord3(runtime) || !hasOnlyKeys(runtime, [
+    "config",
+    "composeArgs",
+    "baseFile",
+    "overrideFile",
+    "findings"
+  ]) || !isRecord3(runtime["config"])) {
     throw new Error("invalid persisted runtime");
   }
-  const config = runtime["config"];
-  if (config["repoRoot"] !== lab["sourceRoot"] || config["manifestPath"] !== lab["manifestPath"] || !isRecord3(config["mode"]) || !isRecord3(config["runtime"])) {
-    throw new Error("runtime source identity mismatch");
+  const persistedConfig = runtime["config"];
+  const config = validatedPersistedConfig(lab, persistedConfig);
+  const mode = config.mode;
+  const runtimeRoot = lab["runtimeRoot"];
+  const composeProject = lab["composeProject"];
+  if (!isNormalizedAbsolute(runtimeRoot) || typeof composeProject !== "string" || !COMPOSE_PROJECT.test(composeProject)) {
+    throw new Error("invalid runtime identity");
   }
-  const mode = config["mode"];
-  if (mode["kind"] !== lab["modeKind"] || mode["commandService"] !== lab["commandService"] || typeof mode["commandService"] !== "string" || !SERVICE_NAME.test(mode["commandService"])) {
-    throw new Error("runtime mode identity mismatch");
-  }
-  if (mode["kind"] === "compose") {
-    if (!Array.isArray(mode["files"]) || mode["files"].length === 0 || !mode["files"].every((path2) => isPathInside(lab["sourceRoot"], path2))) {
-      throw new Error("invalid Compose source files");
-    }
-  } else if (mode["kind"] === "dockerfile") {
-    if (!(isPathInside(lab["sourceRoot"], mode["dockerfile"]) && isPathInside(lab["sourceRoot"], mode["context"], true))) {
-      throw new Error("invalid Dockerfile source paths");
-    }
-  } else if (mode["kind"] === "image") {
-    if (!isBoundedString(mode["image"], 1024) || mode["image"].includes("\x00") || mode["image"].trim() !== mode["image"]) {
-      throw new Error("invalid image name");
-    }
-  } else {
-    throw new Error("invalid runtime mode");
-  }
-  if (!(isBoundedString(config["runtime"]["workspace"], 1024) && posix.isAbsolute(config["runtime"]["workspace"])) || posix.normalize(config["runtime"]["workspace"]) !== config["runtime"]["workspace"] || config["runtime"]["workspace"] === "/" || !Array.isArray(config["runtime"]["shell"]) || config["runtime"]["shell"].length === 0 || config["runtime"]["shell"].length > 64 || !config["runtime"]["shell"].every((part) => isBoundedString(part, 4096) && !part.includes("\x00")) || !posix.isAbsolute(config["runtime"]["shell"][0]) || posix.normalize(config["runtime"]["shell"][0]) !== config["runtime"]["shell"][0]) {
-    throw new Error("invalid container runtime");
-  }
-  if (!(Array.isArray(config["ports"]) && config["ports"].every(isDeclaredPort))) {
-    throw new Error("invalid declared ports");
-  }
-  if (!Array.isArray(config["forwardEnvironment"]) || config["forwardEnvironment"].length > 64 || !config["forwardEnvironment"].every((key) => typeof key === "string" && ENVIRONMENT_NAME.test(key)) || new Set(config["forwardEnvironment"]).size !== config["forwardEnvironment"].length) {
-    throw new Error("invalid forwarded environment");
-  }
-  const forwardedEnvironment = new Set(config["forwardEnvironment"]);
-  if (!isEnvironmentNames(config["secretEnvironment"]) || config["secretEnvironment"].some((key) => forwardedEnvironment.has(key))) {
-    throw new Error("invalid secret environment");
-  }
-  if (JSON.stringify(config["secretEnvironment"]) !== JSON.stringify(lab["secretEnvironment"])) {
+  if (JSON.stringify(config.secretEnvironment) !== JSON.stringify(lab["secretEnvironment"])) {
     throw new Error("secret environment metadata mismatch");
   }
-  const runtimeRoot = lab["runtimeRoot"];
   const expectedOverride = join2(runtimeRoot, "override.compose.yaml");
-  const expectedBase = mode["kind"] === "compose" ? undefined : join2(runtimeRoot, "base.compose.yaml");
+  const expectedBase = mode.kind === "compose" ? undefined : join2(runtimeRoot, "base.compose.yaml");
   if (runtime["overrideFile"] !== expectedOverride || runtime["baseFile"] !== expectedBase || !Array.isArray(runtime["findings"]) || !runtime["findings"].every(isFinding) || JSON.stringify(runtime["findings"]) !== JSON.stringify(lab["findings"])) {
     throw new Error("invalid runtime files or findings");
   }
   const expectedArgs = composeCommandArgs2(config, {
-    projectName: lab["composeProject"],
+    projectName: composeProject,
     overrideFile: expectedOverride,
     ...expectedBase === undefined ? {} : { baseFile: expectedBase }
   });
   if (!Array.isArray(runtime["composeArgs"]) || runtime["composeArgs"].length !== expectedArgs.length || !runtime["composeArgs"].every((arg, index) => arg === expectedArgs[index])) {
     throw new Error("invalid Compose arguments");
   }
+}
+function validatedPersistedConfig(lab, config) {
+  const sourceRoot = lab["sourceRoot"];
+  const manifestPath = lab["manifestPath"];
+  if (!(isNormalizedAbsolute(sourceRoot) && isNormalizedAbsolute(manifestPath)) || config["repoRoot"] !== sourceRoot || config["manifestPath"] !== manifestPath || !hasOnlyKeys(config, [
+    "repoRoot",
+    "manifestPath",
+    "mode",
+    "runtime",
+    "ports",
+    "forwardEnvironment",
+    "secretEnvironment"
+  ]) || !isRecord3(config["mode"]) || !isRecord3(config["runtime"])) {
+    throw new Error("runtime source identity mismatch");
+  }
+  const mode = validatedPersistedMode(lab, sourceRoot, config["mode"]);
+  const runtime = config["runtime"];
+  if (!(hasOnlyKeys(runtime, ["workspace", "shell"]) && isBoundedString(runtime["workspace"], 1024) && posix.isAbsolute(runtime["workspace"])) || posix.normalize(runtime["workspace"]) !== runtime["workspace"] || runtime["workspace"] === "/" || !isRuntimeShell(runtime["shell"])) {
+    throw new Error("invalid container runtime");
+  }
+  if (!(Array.isArray(config["ports"]) && config["ports"].every(isDeclaredPort))) {
+    throw new Error("invalid declared ports");
+  }
+  if (!isEnvironmentNames(config["forwardEnvironment"])) {
+    throw new Error("invalid forwarded environment");
+  }
+  const forwardedEnvironment = new Set(config["forwardEnvironment"]);
+  if (!isEnvironmentNames(config["secretEnvironment"]) || config["secretEnvironment"].some((key) => forwardedEnvironment.has(key))) {
+    throw new Error("invalid secret environment");
+  }
+  return {
+    repoRoot: sourceRoot,
+    manifestPath,
+    mode,
+    runtime: {
+      workspace: runtime["workspace"],
+      shell: [...runtime["shell"]]
+    },
+    ports: config["ports"].map((port) => ({ ...port })),
+    forwardEnvironment: [...config["forwardEnvironment"]],
+    secretEnvironment: [...config["secretEnvironment"]]
+  };
+}
+function validatedPersistedMode(lab, sourceRoot, mode) {
+  if (mode["kind"] !== lab["modeKind"] || mode["commandService"] !== lab["commandService"] || typeof mode["commandService"] !== "string" || !SERVICE_NAME.test(mode["commandService"])) {
+    throw new Error("runtime mode identity mismatch");
+  }
+  const commandService = mode["commandService"];
+  if (mode["kind"] === "compose") {
+    if (!(hasOnlyKeys(mode, ["kind", "files", "commandService"]) && Array.isArray(mode["files"])) || mode["files"].length === 0 || !mode["files"].every((path2) => isPathInside(sourceRoot, path2))) {
+      throw new Error("invalid Compose source files");
+    }
+    return { kind: "compose", files: [...mode["files"]], commandService };
+  }
+  if (mode["kind"] === "dockerfile") {
+    if (!(hasOnlyKeys(mode, [
+      "kind",
+      "dockerfile",
+      "context",
+      "commandService"
+    ]) && isPathInside(sourceRoot, mode["dockerfile"]) && isPathInside(sourceRoot, mode["context"], true))) {
+      throw new Error("invalid Dockerfile source paths");
+    }
+    return {
+      kind: "dockerfile",
+      dockerfile: mode["dockerfile"],
+      context: mode["context"],
+      commandService
+    };
+  }
+  if (mode["kind"] === "image") {
+    if (!(hasOnlyKeys(mode, ["kind", "image", "commandService"]) && isBoundedString(mode["image"], 1024)) || mode["image"].includes("\x00") || mode["image"].trim() !== mode["image"]) {
+      throw new Error("invalid image name");
+    }
+    return { kind: "image", image: mode["image"], commandService };
+  }
+  throw new Error("invalid runtime mode");
 }
 function normalizeSecretEnvironment(lab) {
   let runtimeNames;
@@ -8191,7 +8245,14 @@ function isEndpoint(value) {
   return isRecord3(value) && typeof value["name"] === "string" && SERVICE_NAME.test(value["name"]) && typeof value["service"] === "string" && SERVICE_NAME.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && isBoundedString(value["url"], 2048);
 }
 function isDeclaredPort(value) {
-  return isRecord3(value) && typeof value["name"] === "string" && SERVICE_NAME.test(value["name"]) && typeof value["service"] === "string" && SERVICE_NAME.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && (value["scheme"] === undefined || typeof value["scheme"] === "string" && URL_SCHEME.test(value["scheme"]));
+  return isRecord3(value) && hasOnlyKeys(value, ["name", "service", "target", "scheme"]) && typeof value["name"] === "string" && SERVICE_NAME.test(value["name"]) && typeof value["service"] === "string" && SERVICE_NAME.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && (value["scheme"] === undefined || typeof value["scheme"] === "string" && URL_SCHEME.test(value["scheme"]));
+}
+function isRuntimeShell(value) {
+  return Array.isArray(value) && value.length > 0 && value.length <= 64 && value.every((part) => isBoundedString(part, 4096) && !part.includes("\x00")) && posix.isAbsolute(value[0]) && posix.normalize(value[0]) === value[0];
+}
+function hasOnlyKeys(value, allowed) {
+  const allowedKeys = new Set(allowed);
+  return Object.keys(value).every((key) => allowedKeys.has(key));
 }
 function isFinding(value) {
   return isRecord3(value) && (value["service"] === undefined || isBoundedString(value["service"], 128)) && typeof value["surface"] === "string" && FINDING_SURFACES.has(value["surface"]) && isBoundedString(value["detail"], 1024);
