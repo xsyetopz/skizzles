@@ -183,7 +183,9 @@ untrusted, invalid, and unvalidated records. Contract publication reads bind
 the opened file identity and compare every ancestor identity before and after
 the read. Descriptor metadata is compared around two bounded positioned reads,
 so transient hardlinks and in-place rewrites fail even if the final pathname is
-restored. Handoff acceptance references must equal the exact repository-local
+restored. Device, inode, link, size, and nanosecond timestamps remain bigint
+throughout; supported runtimes must expose exact bigint stats or validation
+fails closed. Handoff acceptance references must equal the exact repository-local
 reference supplied by trusted evaluator options; this is a local composition
 identity, not a global registry. The canonical
 public [trust-boundary incident-regression corpus](fixtures/trust-boundary-incidents.json)

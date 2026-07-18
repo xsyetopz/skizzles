@@ -11,7 +11,10 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { readContainedJsonAsset } from "../src/agent-contract/asset-boundary.ts";
+import {
+  exactFilesystemMetadataMatches,
+  readContainedJsonAsset,
+} from "../src/agent-contract/asset-boundary.ts";
 import {
   validateCanonicalAgentContracts,
   validateStagedAgentContracts,
@@ -265,6 +268,29 @@ describe("executable incident corpus composition", () => {
 });
 
 describe("agent contract filesystem boundary", () => {
+  it("compares filesystem identities without narrowing high bigint values", () => {
+    const base = {
+      dev: 9_007_199_254_740_993n,
+      ino: 18_446_744_073_709_551_615n,
+      nlink: 1n,
+      size: 1024n,
+      mtimeNs: 9_007_199_254_740_997n,
+      ctimeNs: 9_007_199_254_740_999n,
+    };
+    expect(exactFilesystemMetadataMatches(base, { ...base })).toBe(true);
+    expect(
+      exactFilesystemMetadataMatches(base, {
+        ...base,
+        ino: 18_446_744_073_709_551_614n,
+      }),
+    ).toBe(false);
+    expect(
+      exactFilesystemMetadataMatches(base, {
+        ...base,
+        mtimeNs: 9_007_199_254_740_996n,
+      }),
+    ).toBe(false);
+  });
   it("rejects a canonical asset symlink before destination mutation", async () => {
     const root = await fixture();
     const destination = join(root, "stage");

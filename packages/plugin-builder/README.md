@@ -51,6 +51,9 @@ and after an identity-bound no-follow read. Descriptor identity, link count,
 size, modification/change time, and two bounded positioned byte reads must
 remain stable; transient links, in-place rewrites, multi-link files, and
 detected ancestor replacement races fail closed.
+Filesystem identity uses bigint `dev`, `ino`, `nlink`, `size`, `mtimeNs`, and
+`ctimeNs` end to end. Runtimes without exact bigint stat fields fail closed;
+there is no lossy numeric fallback.
 Agent contract assets are capped at 1 MiB before allocation. Their JSON is
 lexically validated before parsing, including decoded duplicate-key rejection,
 so escaped and literal spellings cannot collapse into one trusted member.

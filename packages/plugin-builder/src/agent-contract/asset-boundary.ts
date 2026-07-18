@@ -1,4 +1,4 @@
-import { constants, type Stats } from "node:fs";
+import { type BigIntStats, constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { AgentContractPackageError } from "./contract.ts";
@@ -10,17 +10,21 @@ export interface ParsedAsset {
   value: JsonValue;
 }
 
-export const MAX_AGENT_CONTRACT_ASSET_BYTES = 1_048_576;
+export const MAX_AGENT_CONTRACT_ASSET_BYTES = 1_048_576n;
 
-interface PathIdentity {
+export interface ExactFilesystemMetadata {
+  dev: bigint;
+  ino: bigint;
+  nlink: bigint;
+  size: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+}
+
+interface PathIdentity extends ExactFilesystemMetadata {
   path: string;
-  dev: number | bigint;
-  ino: number | bigint;
   target: boolean;
-  nlink: number;
-  size: number;
-  mtimeMs: number;
-  ctimeMs: number;
+  allocationSize: number;
 }
 
 export async function readContainedJsonAsset(
@@ -80,25 +84,16 @@ async function snapshotPaths(
         `${label} must be a non-symlink regular file.`,
       );
     }
-    if (target && metadata.nlink !== 1 && metadata.nlink !== 1n) {
+    if (target && metadata.nlink !== 1n) {
       throw new AgentContractPackageError(`${label} uses a hardlinked file.`);
     }
-    const size = statNumber(metadata.size, label);
-    const nlink = statNumber(metadata.nlink, label);
-    const mtimeMs = statTime(metadata.mtimeMs, label);
-    const ctimeMs = statTime(metadata.ctimeMs, label);
-    if (target) {
-      assertSafeTargetSize(size, label);
-    }
+    const exact = exactMetadata(metadata, label);
+    const allocationSize = target ? boundedTargetSize(exact.size, label) : 0;
     result.push({
       path,
-      dev: metadata.dev,
-      ino: metadata.ino,
       target,
-      nlink,
-      size,
-      mtimeMs,
-      ctimeMs,
+      allocationSize,
+      ...exact,
     });
   }
   return result;
@@ -116,14 +111,8 @@ async function verifySnapshot(
     if (
       actual.some(
         (identity, index) =>
-          identity.dev !== expected[index]?.dev ||
-          identity.ino !== expected[index]?.ino ||
           identity.target !== expected[index]?.target ||
-          (identity.target &&
-            (identity.nlink !== expected[index]?.nlink ||
-              identity.size !== expected[index]?.size ||
-              identity.mtimeMs !== expected[index]?.mtimeMs ||
-              identity.ctimeMs !== expected[index]?.ctimeMs)),
+          !exactFilesystemMetadataMatches(identity, expected[index]),
       )
     ) {
       throw new AgentContractPackageError(
@@ -143,12 +132,9 @@ async function verifySnapshot(
   }
 }
 
-async function safeLstat(
-  path: string,
-  label: string,
-): Promise<Awaited<ReturnType<typeof lstat>>> {
+async function safeLstat(path: string, label: string): Promise<BigIntStats> {
   try {
-    return await lstat(path);
+    return await lstat(path, { bigint: true });
   } catch {
     throw new AgentContractPackageError(`${label} is missing or inaccessible.`);
   }
@@ -170,15 +156,15 @@ async function readIdentityBound(
     throw new AgentContractPackageError(`${label} is missing or inaccessible.`);
   }
   try {
-    const before = await handle.stat();
+    const before = await handle.stat({ bigint: true });
     assertStableDescriptor(before, expected, label);
     await afterOpen?.();
-    const first = await readAtStart(handle, expected.size + 1);
+    const first = await readAtStart(handle, expected.allocationSize + 1);
     await afterFirstRead?.();
-    const second = await readAtStart(handle, expected.size + 1);
-    const after = await handle.stat();
+    const second = await readAtStart(handle, expected.allocationSize + 1);
+    const after = await handle.stat({ bigint: true });
     assertStableDescriptor(after, expected, label);
-    if (first.length !== expected.size || !first.equals(second)) {
+    if (first.length !== expected.allocationSize || !first.equals(second)) {
       throw new AgentContractPackageError(
         `${label} changed during identity-bound read.`,
       );
@@ -195,18 +181,14 @@ async function readIdentityBound(
 }
 
 function assertStableDescriptor(
-  metadata: Stats,
+  metadata: BigIntStats,
   expected: PathIdentity,
   label: string,
 ): void {
   if (
     !metadata.isFile() ||
-    metadata.nlink !== 1 ||
-    metadata.dev !== expected.dev ||
-    metadata.ino !== expected.ino ||
-    metadata.size !== expected.size ||
-    metadata.mtimeMs !== expected.mtimeMs ||
-    metadata.ctimeMs !== expected.ctimeMs
+    metadata.nlink !== 1n ||
+    !exactFilesystemMetadataMatches(exactMetadata(metadata, label), expected)
   ) {
     throw new AgentContractPackageError(
       `${label} changed identity or uses a hardlinked file.`,
@@ -214,36 +196,55 @@ function assertStableDescriptor(
   }
 }
 
-function assertSafeTargetSize(size: number, label: string): void {
-  if (
-    !Number.isSafeInteger(size) ||
-    size < 1 ||
-    size > MAX_AGENT_CONTRACT_ASSET_BYTES
-  ) {
+function boundedTargetSize(size: bigint, label: string): number {
+  if (size < 1n || size > MAX_AGENT_CONTRACT_ASSET_BYTES) {
     throw new AgentContractPackageError(
       `${label} exceeds the bounded contract asset size.`,
     );
   }
+  return Number(size);
 }
 
-function statNumber(value: number | bigint, label: string): number {
-  const number = typeof value === "bigint" ? Number(value) : value;
-  if (!Number.isSafeInteger(number) || number < 0) {
+function exactMetadata(
+  metadata: BigIntStats,
+  label: string,
+): ExactFilesystemMetadata {
+  const values = [
+    metadata.dev,
+    metadata.ino,
+    metadata.nlink,
+    metadata.size,
+    metadata.mtimeNs,
+    metadata.ctimeNs,
+  ];
+  if (values.some((value) => typeof value !== "bigint" || value < 0n)) {
     throw new AgentContractPackageError(
-      `${label} has unsafe filesystem metadata.`,
+      `${label} lacks exact bigint filesystem metadata.`,
     );
   }
-  return number;
+  return {
+    dev: metadata.dev,
+    ino: metadata.ino,
+    nlink: metadata.nlink,
+    size: metadata.size,
+    mtimeNs: metadata.mtimeNs,
+    ctimeNs: metadata.ctimeNs,
+  };
 }
 
-function statTime(value: number | bigint, label: string): number {
-  const number = typeof value === "bigint" ? Number(value) : value;
-  if (!Number.isFinite(number) || number < 0) {
-    throw new AgentContractPackageError(
-      `${label} has unsafe filesystem metadata.`,
-    );
-  }
-  return number;
+export function exactFilesystemMetadataMatches(
+  left: ExactFilesystemMetadata,
+  right: ExactFilesystemMetadata | undefined,
+): boolean {
+  return (
+    right !== undefined &&
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.nlink === right.nlink &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
 }
 
 async function readAtStart(
