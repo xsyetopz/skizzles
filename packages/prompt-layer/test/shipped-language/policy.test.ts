@@ -8,12 +8,12 @@ import {
   parseShippedLanguagePolicy,
   SHIPPED_LANGUAGE_POLICY_PATHS,
   validateShippedLanguageText,
-} from "../src/prompt-layer.ts";
-import { cleanupFixtures, fixture } from "./prompt-fixture.ts";
+} from "../../src/cli.ts";
+import { cleanupFixtures, fixture } from "../lifecycle/fixture.ts";
 
 afterEach(cleanupFixtures);
 
-const repoRoot = resolve(import.meta.dir, "../../..");
+const repoRoot = resolve(import.meta.dir, "../../../..");
 const policyPath = resolve(
   repoRoot,
   SHIPPED_LANGUAGE_POLICY_PATHS.canonicalWorkspacePath,

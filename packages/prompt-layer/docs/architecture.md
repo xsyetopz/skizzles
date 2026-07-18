@@ -110,11 +110,11 @@ generic upstream baseline.
 | `packages/prompt-layer/assets/upstream/LICENSE` | Checksum-locked upstream license text. |
 | `packages/prompt-layer/assets/upstream/NOTICE` | Checksum-locked upstream notice text. |
 | `packages/prompt-layer/assets/skizzles-base.patch` | Canonical one-file Git patch against the exact upstream path. |
-| `packages/prompt-layer/src/prompt-layer.ts` | Thin public package facade and CLI composition root; preserves the package export and binary surface without owning lifecycle policy. |
-| `packages/prompt-layer/src/lifecycle-contract.ts` | Public asset paths, packaged descriptor paths, mutation options, lifecycle operation types, and exact ordered write-set contracts. |
+| `packages/prompt-layer/src/cli.ts` | Thin public package facade and CLI composition root; preserves the package export and binary surface without owning lifecycle policy. |
+| `packages/prompt-layer/src/lifecycle/contract.ts` | Public asset paths, packaged descriptor paths, mutation options, lifecycle operation types, and exact ordered write-set contracts. |
 | `packages/prompt-layer/src/content-integrity.ts` | Shared trust-boundary rules for SHA-256 facts and non-empty LF-only text. |
 | `packages/prompt-layer/src/repository-boundary.ts` | Default repository-root topology, canonical containment, filesystem identity checks, and durable file operations. |
-| `packages/prompt-layer/src/prompt-lifecycle.ts` | Build, check, patch-authoring, and immutable-rebase orchestration over inward-owned contracts. |
+| `packages/prompt-layer/src/lifecycle/operations.ts` | Build, check, patch-authoring, and immutable-rebase orchestration over inward-owned contracts. |
 | `packages/prompt-layer/src/assets/manifest.ts` | Strict manifest decoding, checksum facts, provenance construction, and generated-output comparison. |
 | `packages/prompt-layer/src/assets/patch.ts` | Exact-position patch validation, Git blob identity checks, patch creation, and strict application. |
 | `packages/prompt-layer/src/assets/upstream.ts` | The sole network adapter for immutable official OpenAI prompt, license, and notice fetches. |
@@ -137,14 +137,36 @@ monolith:
 
 | Test path | Contract proved |
 | --- | --- |
-| `packages/prompt-layer/test/prompt-assets.test.ts` | Manifest integrity, deterministic generation, provenance, patch validation, authoring, and descriptor-path publication. |
-| `packages/prompt-layer/test/prompt-rebase.test.ts` | Immutable ref validation, official fetch behavior, reviewed replay, rollback, and non-mutation on fetch failure. |
-| `packages/prompt-layer/test/mutation-lock.test.ts` | Exclusive ownership, stale reclaim, replacement preservation, clock skew, and quarantine recovery. |
-| `packages/prompt-layer/test/process-identity.test.ts` | PID reuse, Darwin identity normalization, locale/timezone stability, and fail-closed identity behavior. |
-| `packages/prompt-layer/test/prompt-transaction.test.ts` | Promotion-fault rollback, hostile journal rejection, crash recovery preflight, and symlink containment. |
-| `packages/prompt-layer/test/prompt-cli-hygiene.test.ts` | CLI argument rejection, LF enforcement, and machine-path hygiene. |
-| `packages/prompt-layer/test/shipped-language-policy.test.ts` | Corpus shape and byte binding, ordered taxonomy coverage, allowed/prohibited fixtures, and lexical context behavior. |
-| `packages/prompt-layer/test/prompt-fixture.ts` | Narrow package-owned fixture construction and cleanup shared by those contract suites; never imported by production code. |
+| `packages/prompt-layer/test/lifecycle/assets.test.ts` | Manifest integrity, deterministic generation, provenance, patch validation, authoring, and descriptor-path publication. |
+| `packages/prompt-layer/test/lifecycle/rebase.test.ts` | Immutable ref validation, official fetch behavior, reviewed replay, rollback, and non-mutation on fetch failure. |
+| `packages/prompt-layer/test/lifecycle/mutation-lock.test.ts` | Exclusive ownership, stale reclaim, replacement preservation, clock skew, and quarantine recovery. |
+| `packages/prompt-layer/test/lifecycle/process-identity.test.ts` | PID reuse, Darwin identity normalization, locale/timezone stability, and fail-closed identity behavior. |
+| `packages/prompt-layer/test/lifecycle/transaction.test.ts` | Promotion-fault rollback, hostile journal rejection, crash recovery preflight, and symlink containment. |
+| `packages/prompt-layer/test/cli.test.ts` | CLI argument rejection, LF enforcement, and machine-path hygiene. |
+| `packages/prompt-layer/test/shipped-language/policy.test.ts` | Corpus shape and byte binding, ordered taxonomy coverage, allowed/prohibited fixtures, and lexical context behavior. |
+| `packages/prompt-layer/test/lifecycle/fixture.ts` | Narrow package-owned fixture construction and cleanup shared by those contract suites; never imported by production code. |
+
+### Structural audit disposition
+
+The externally observed asset names
+`evaluations/shipped-language-policy.v2.json`,
+`instructions/skizzles-base.provenance.json`, and
+`integrations/prompt-policy.json` are preserved because the versioned corpus
+schema, prompt manifest, portable descriptor, installer validation, and plugin
+parity checks bind their exact canonical and packaged paths. Their naming
+exceptions belong to the repository-level architecture policy and must be
+removed only through a versioned schema or plugin-layout migration.
+
+The single-file `assets/evaluations`, `assets/integrations`, and
+`assets/upstream` directories are stable distribution or provenance
+boundaries, not speculative source layers. The package-local `docs` directory
+owns the one complete prompt architecture record. The matching
+`src/shipped-language` and `test/shipped-language` directories preserve one
+security-sensitive policy owner and its contract suite without mixing them
+into lifecycle orchestration. The shipped-language parser remains cohesive at
+477 physical lines: it owns one exact corpus grammar, normalization pipeline,
+lexical matcher, and redacted finding contract; it is below the extraction-plan
+threshold and its adversarial suite exercises the combined boundary.
 
 `@skizzles/plugin-builder` depends on `@skizzles/prompt-layer` through its
 workspace export. It validates the canonical asset set, then stages only the

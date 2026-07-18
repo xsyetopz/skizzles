@@ -6,7 +6,7 @@ import {
   record,
   stringValue,
 } from "../json-contract.ts";
-import type { FileFact, PromptManifest } from "../lifecycle-contract.ts";
+import type { FileFact, PromptManifest } from "../lifecycle/contract.ts";
 import {
   BASELINE_PATH,
   LICENSE_PATH,
@@ -20,7 +20,7 @@ import {
   PROVENANCE_PATH,
   PromptLayerError,
   UPSTREAM_PATH,
-} from "../lifecycle-contract.ts";
+} from "../lifecycle/contract.ts";
 import { errorMessage, readRequiredFile } from "../repository-boundary.ts";
 
 const SHA256 = /^[0-9a-f]{64}$/;

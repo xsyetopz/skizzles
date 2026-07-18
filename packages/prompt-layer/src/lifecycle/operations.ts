@@ -9,14 +9,29 @@ import {
   validateOutputProvenance,
   verifiedFile,
   verifyFact,
-} from "./assets/manifest.ts";
+} from "../assets/manifest.ts";
 import {
   applyPatchStrict,
   createPatch,
   validatePatch,
-} from "./assets/patch.ts";
-import { fetchOfficial, networkFetcher } from "./assets/upstream.ts";
-import { sha256, validateText } from "./content-integrity.ts";
+} from "../assets/patch.ts";
+import { fetchOfficial, networkFetcher } from "../assets/upstream.ts";
+import { sha256, validateText } from "../content-integrity.ts";
+import { assertNoActiveMutation, withMutationLock } from "../mutation/lock.ts";
+import { defaultProcessIdentityProvider } from "../mutation/process-identity.ts";
+import {
+  assertCanonicalContainment,
+  canonicalRepoRoot,
+  defaultPromptRepoRoot,
+  errorMessage,
+  readRequiredFile,
+} from "../repository-boundary.ts";
+import { parseShippedLanguagePolicy } from "../shipped-language/policy.ts";
+import {
+  assertNoPendingTransaction,
+  commitWriteSet,
+  recoverPendingTransaction,
+} from "../transaction/commit.ts";
 import type {
   GeneratedPrompt,
   MutationLockHooks,
@@ -24,7 +39,7 @@ import type {
   ProcessIdentityProvider,
   PromptFetcher,
   TransactionFault,
-} from "./lifecycle-contract.ts";
+} from "./contract.ts";
 import {
   BASELINE_PATH,
   LICENSE_PATH,
@@ -36,22 +51,7 @@ import {
   PromptLayerError,
   SHIPPED_LANGUAGE_POLICY_PATHS,
   UPSTREAM_PATH,
-} from "./lifecycle-contract.ts";
-import { assertNoActiveMutation, withMutationLock } from "./mutation/lock.ts";
-import { defaultProcessIdentityProvider } from "./mutation/process-identity.ts";
-import {
-  assertCanonicalContainment,
-  canonicalRepoRoot,
-  defaultPromptRepoRoot,
-  errorMessage,
-  readRequiredFile,
-} from "./repository-boundary.ts";
-import { parseShippedLanguagePolicy } from "./shipped-language/policy.ts";
-import {
-  assertNoPendingTransaction,
-  commitWriteSet,
-  recoverPendingTransaction,
-} from "./transaction/commit.ts";
+} from "./contract.ts";
 
 const COMMIT = /^[0-9a-f]{40}$/;
 

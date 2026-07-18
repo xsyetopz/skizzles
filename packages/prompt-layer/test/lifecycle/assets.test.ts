@@ -11,7 +11,7 @@ import {
   PROMPT_POLICY_DESCRIPTOR_PATHS,
   PromptLayerError,
   validatePatch,
-} from "../src/prompt-layer.ts";
+} from "../../src/cli.ts";
 import {
   canonicalHeader,
   cleanupFixtures,
@@ -24,7 +24,7 @@ import {
   pathExistsForTest,
   snapshot,
   updateManifestFact,
-} from "./prompt-fixture.ts";
+} from "./fixture.ts";
 
 afterEach(cleanupFixtures);
 
@@ -163,7 +163,7 @@ describe("prompt asset and patch contracts", () => {
     const expected =
       "codex-rs/protocol/src/prompts/base_instructions/default.md";
     const baseline = await readFile(
-      resolve(import.meta.dir, "../assets/upstream/default.md"),
+      resolve(import.meta.dir, "../../assets/upstream/default.md"),
     );
     const invalid = [
       "diff --git a/../../escape b/../../escape\n--- a/../../escape\n+++ b/../../escape\n@@ -1 +1 @@\n-a\n+b\n",

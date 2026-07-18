@@ -15,7 +15,7 @@ import {
   buildPrompt,
   checkPrompt,
   PromptLayerError,
-} from "../src/prompt-layer.ts";
+} from "../../src/cli.ts";
 import {
   changedCandidate,
   cleanupFixtures,
@@ -27,7 +27,7 @@ import {
   type TransactionEntryFixture,
   type TransactionJournalFixture,
   trackFixtureRoot,
-} from "./prompt-fixture.ts";
+} from "./fixture.ts";
 
 afterEach(cleanupFixtures);
 

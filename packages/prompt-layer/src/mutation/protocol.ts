@@ -6,11 +6,11 @@ import {
   record,
   stringValue,
 } from "../json-contract.ts";
-import type { TransactionOperation } from "../lifecycle-contract.ts";
+import type { TransactionOperation } from "../lifecycle/contract.ts";
 import {
   isTransactionOperation,
   PromptLayerError,
-} from "../lifecycle-contract.ts";
+} from "../lifecycle/contract.ts";
 import {
   assertContainedPath,
   errorMessage,

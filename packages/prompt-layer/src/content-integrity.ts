@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PromptLayerError } from "./lifecycle-contract.ts";
+import { PromptLayerError } from "./lifecycle/contract.ts";
 
 export function sha256(bytes: Buffer): string {
   return createHash("sha256").update(bytes).digest("hex");

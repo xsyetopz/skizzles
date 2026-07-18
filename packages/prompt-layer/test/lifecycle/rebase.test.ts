@@ -8,7 +8,7 @@ import {
   PromptLayerError,
   parseImmutableCommit,
   rebasePrompt,
-} from "../src/prompt-layer.ts";
+} from "../../src/cli.ts";
 import {
   canonicalHeader,
   changedCandidate,
@@ -22,7 +22,7 @@ import {
   pathExistsForTest,
   REBASE_PROBE_DIAGNOSTIC,
   snapshot,
-} from "./prompt-fixture.ts";
+} from "./fixture.ts";
 
 afterEach(cleanupFixtures);
 

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PromptLayerError } from "../lifecycle-contract.ts";
+import { PromptLayerError } from "../lifecycle/contract.ts";
 
 const POLICY_SCHEMA = "skizzles.shipped-language-policy.v2";
 const POLICY_VERSION = 2;

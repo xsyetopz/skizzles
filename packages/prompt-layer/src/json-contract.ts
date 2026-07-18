@@ -1,4 +1,4 @@
-import { PromptLayerError } from "./lifecycle-contract.ts";
+import { PromptLayerError } from "./lifecycle/contract.ts";
 
 export function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {

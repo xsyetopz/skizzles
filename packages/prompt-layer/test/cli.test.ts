@@ -2,12 +2,12 @@
 import { describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { MACHINE_PATH } from "./prompt-fixture.ts";
+import { MACHINE_PATH } from "./lifecycle/fixture.ts";
 
 describe("prompt CLI and repository hygiene contracts", () => {
   test("CLI rejects malformed authoring and rebase arguments before side effects", () => {
     const repoRoot = resolve(import.meta.dir, "../../..");
-    const source = join(repoRoot, "packages/prompt-layer/src/prompt-layer.ts");
+    const source = join(repoRoot, "packages/prompt-layer/src/cli.ts");
     for (const args of [
       ["build", "extra"],
       ["patch", "one", "two"],

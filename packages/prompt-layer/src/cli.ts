@@ -1,11 +1,11 @@
 import process from "node:process";
-import { PromptLayerError } from "./lifecycle-contract.ts";
+import { PromptLayerError } from "./lifecycle/contract.ts";
 import {
   authorPromptPatch,
   buildPrompt,
   checkPrompt,
   rebasePrompt,
-} from "./prompt-lifecycle.ts";
+} from "./lifecycle/operations.ts";
 import { defaultPromptRepoRoot, errorMessage } from "./repository-boundary.ts";
 
 export { validatePatch } from "./assets/patch.ts";
@@ -15,7 +15,7 @@ export type {
   ProcessIdentityProvider,
   PromptFetcher,
   TransactionFault,
-} from "./lifecycle-contract.ts";
+} from "./lifecycle/contract.ts";
 export {
   PROMPT_LAYER_ASSET_ROOT,
   PROMPT_LAYER_PACKAGE_FILES,
@@ -23,15 +23,15 @@ export {
   PROMPT_POLICY_DESCRIPTOR_PATHS,
   PromptLayerError,
   SHIPPED_LANGUAGE_POLICY_PATHS,
-} from "./lifecycle-contract.ts";
-export { normalizeDarwinProcessStartOutput } from "./mutation/process-identity.ts";
+} from "./lifecycle/contract.ts";
 export {
   authorPromptPatch,
   buildPrompt,
   checkPrompt,
   parseImmutableCommit,
   rebasePrompt,
-} from "./prompt-lifecycle.ts";
+} from "./lifecycle/operations.ts";
+export { normalizeDarwinProcessStartOutput } from "./mutation/process-identity.ts";
 export type {
   ShippedLanguageFinding,
   ShippedLanguagePolicy,

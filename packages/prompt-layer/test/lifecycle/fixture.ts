@@ -15,7 +15,7 @@ import process from "node:process";
 import {
   authorPromptPatch,
   type ProcessIdentityProvider,
-} from "../src/prompt-layer.ts";
+} from "../../src/cli.ts";
 
 const roots: string[] = [];
 
@@ -95,7 +95,7 @@ export function gitBlobId(bytes: Buffer): string {
 }
 
 export async function fixture(): Promise<string> {
-  const source = resolve(import.meta.dir, "../../..");
+  const source = resolve(import.meta.dir, "../../../..");
   const root = await mkdtemp(join(tmpdir(), "skizzles-prompt-layer-test-"));
   roots.push(root);
   await cp(

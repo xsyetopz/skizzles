@@ -302,7 +302,7 @@ describe("plugin staging and discovery", () => {
       "packages/prompt-layer/assets/upstream/default.md",
       "packages/prompt-layer/assets/skizzles-base.patch",
       "packages/prompt-layer/assets/.transaction/journal.json",
-      "packages/prompt-layer/src/prompt-layer.ts",
+      "packages/prompt-layer/src/cli.ts",
       "packages/prompt-layer/src/assets/manifest.ts",
       "packages/prompt-layer/test/nested/transaction.test.ts",
     ] as const) {

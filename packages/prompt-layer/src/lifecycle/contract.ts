@@ -1,3 +1,4 @@
+/** Stable public and persistence contracts for prompt lifecycle operations. */
 export const PROMPT_SCHEMA = "skizzles.prompt-layer";
 export const PROMPT_SCHEMA_VERSION = 1;
 export const OFFICIAL_REPOSITORY = "https://github.com/openai/codex";

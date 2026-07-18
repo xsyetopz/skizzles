@@ -1,5 +1,5 @@
-import type { FetchResponse, PromptFetcher } from "../lifecycle-contract.ts";
-import { PromptLayerError } from "../lifecycle-contract.ts";
+import type { FetchResponse, PromptFetcher } from "../lifecycle/contract.ts";
+import { PromptLayerError } from "../lifecycle/contract.ts";
 import { errorMessage } from "../repository-boundary.ts";
 
 const RAW_ORIGIN = "https://raw.githubusercontent.com/openai/codex";

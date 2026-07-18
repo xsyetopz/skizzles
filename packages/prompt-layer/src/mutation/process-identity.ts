@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import process from "node:process";
-import type { ProcessIdentityProvider } from "../lifecycle-contract.ts";
-import { PromptLayerError } from "../lifecycle-contract.ts";
+import type { ProcessIdentityProvider } from "../lifecycle/contract.ts";
+import { PromptLayerError } from "../lifecycle/contract.ts";
 import { isNodeError } from "../repository-boundary.ts";
 
 const WHITESPACE = /\s+/u;

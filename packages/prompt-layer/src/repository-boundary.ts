@@ -15,7 +15,7 @@ import {
   LOCK_PATH,
   PromptLayerError,
   TRANSACTION_PATH,
-} from "./lifecycle-contract.ts";
+} from "./lifecycle/contract.ts";
 
 const WINDOWS_ABSOLUTE_PATH = /^[A-Za-z]:/;
 

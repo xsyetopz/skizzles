@@ -5,13 +5,13 @@ import type {
   TransactionFault,
   TransactionOperation,
   WriteEntry,
-} from "../lifecycle-contract.ts";
+} from "../lifecycle/contract.ts";
 import {
   PromptLayerError,
   SimulatedTransactionCrash,
   TRANSACTION_JOURNAL_PATH,
   TRANSACTION_PATH,
-} from "../lifecycle-contract.ts";
+} from "../lifecycle/contract.ts";
 import {
   assertCanonicalContainment,
   assertContainedPath,

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import process from "node:process";
 import { validateText } from "../content-integrity.ts";
-import { PromptLayerError } from "../lifecycle-contract.ts";
+import { PromptLayerError } from "../lifecycle/contract.ts";
 import {
   readRequiredFile,
   validateSafeRelativePath,

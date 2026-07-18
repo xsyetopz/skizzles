@@ -3,10 +3,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
-import {
-  buildPrompt,
-  type ProcessIdentityProvider,
-} from "../src/prompt-layer.ts";
+import { buildPrompt, type ProcessIdentityProvider } from "../../src/cli.ts";
 import {
   CURRENT_PROCESS_IDENTITY_ERROR,
   cleanupFixtures,
@@ -17,7 +14,7 @@ import {
   restoreEnvironment,
   UNVERIFIABLE_PROCESS_IDENTITY_ERROR,
   writeMutationOwner,
-} from "./prompt-fixture.ts";
+} from "./fixture.ts";
 
 afterEach(cleanupFixtures);
 

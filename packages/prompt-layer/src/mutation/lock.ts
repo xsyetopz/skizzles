@@ -8,13 +8,13 @@ import type {
   MutationOptions,
   ProcessIdentityProvider,
   TransactionOperation,
-} from "../lifecycle-contract.ts";
+} from "../lifecycle/contract.ts";
 import {
   LOCK_OWNER_PATH,
   LOCK_PATH,
   PROMPT_LAYER_ASSET_ROOT,
   PromptLayerError,
-} from "../lifecycle-contract.ts";
+} from "../lifecycle/contract.ts";
 import type { FileIdentity } from "../repository-boundary.ts";
 import {
   assertCanonicalContainment,

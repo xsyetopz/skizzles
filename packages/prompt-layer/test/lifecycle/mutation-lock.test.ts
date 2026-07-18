@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
-import { buildPrompt, checkPrompt } from "../src/prompt-layer.ts";
+import { buildPrompt, checkPrompt } from "../../src/cli.ts";
 import {
   ACTIVE_MUTATION_ERROR,
   BOUNDED_GRACE_ERROR,
@@ -28,7 +28,7 @@ import {
   REPLACEMENT_OWNER_ERROR,
   snapshot,
   writeMutationOwner,
-} from "./prompt-fixture.ts";
+} from "./fixture.ts";
 
 afterEach(cleanupFixtures);
 
