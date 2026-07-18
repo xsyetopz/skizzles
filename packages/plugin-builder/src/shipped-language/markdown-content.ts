@@ -59,6 +59,12 @@ const DEFAULT_IGNORABLE_PATTERN = /\p{Default_Ignorable_Code_Point}/u;
 const URL_SCHEME_PATTERN = /^(?<scheme>[a-z][a-z0-9+.-]*):/u;
 const NUMERIC_CHARACTER_REFERENCE_PATTERN =
   /&#(?:(?<hexMarker>[xX])(?<hex>[0-9A-Fa-f]+)|(?<decimal>[0-9]+));?/gu;
+const MAX_NAMED_REFERENCE_NAME_UNITS = 31;
+const MAX_LEGACY_REFERENCE_NAME_UNITS = 6;
+// 106 semicolon-optional WHATWG entities.json name=hex entries; SHA-256 d741d877ac77c4194c4ad526b5b4a19aef8dfe411ab840a466891cdbb9f362e6.
+const LEGACY_NAMED_CHARACTER_REFERENCES = parseLegacyReferences(
+  "AElig=c6 AMP=26 Aacute=c1 Acirc=c2 Agrave=c0 Aring=c5 Atilde=c3 Auml=c4 COPY=a9 Ccedil=c7 ETH=d0 Eacute=c9 Ecirc=ca Egrave=c8 Euml=cb GT=3e Iacute=cd Icirc=ce Igrave=cc Iuml=cf LT=3c Ntilde=d1 Oacute=d3 Ocirc=d4 Ograve=d2 Oslash=d8 Otilde=d5 Ouml=d6 QUOT=22 REG=ae THORN=de Uacute=da Ucirc=db Ugrave=d9 Uuml=dc Yacute=dd aacute=e1 acirc=e2 acute=b4 aelig=e6 agrave=e0 amp=26 aring=e5 atilde=e3 auml=e4 brvbar=a6 ccedil=e7 cedil=b8 cent=a2 copy=a9 curren=a4 deg=b0 divide=f7 eacute=e9 ecirc=ea egrave=e8 eth=f0 euml=eb frac12=bd frac14=bc frac34=be gt=3e iacute=ed icirc=ee iexcl=a1 igrave=ec iquest=bf iuml=ef laquo=ab lt=3c macr=af micro=b5 middot=b7 nbsp=a0 not=ac ntilde=f1 oacute=f3 ocirc=f4 ograve=f2 ordf=aa ordm=ba oslash=f8 otilde=f5 ouml=f6 para=b6 plusmn=b1 pound=a3 quot=22 raquo=bb reg=ae sect=a7 shy=ad sup1=b9 sup2=b2 sup3=b3 szlig=df thorn=fe times=d7 uacute=fa ucirc=fb ugrave=f9 uml=a8 uuml=fc yacute=fd yen=a5 yuml=ff",
+);
 const WINDOWS_1252_REFERENCE_REPLACEMENTS = new Map<number, number>([
   [0x80, 0x20ac],
   [0x82, 0x201a],
@@ -98,6 +104,17 @@ interface ParsedHtmlTag {
   readonly visibleText: readonly string[];
 }
 
+function parseLegacyReferences(encoded: string): ReadonlyMap<string, string> {
+  const references = new Map<string, string>();
+  for (const entry of encoded.split(" ")) {
+    const separator = entry.indexOf("=");
+    const name = entry.slice(0, separator);
+    const scalar = Number.parseInt(entry.slice(separator + 1), 16);
+    references.set(name, String.fromCodePoint(scalar));
+  }
+  return references;
+}
+
 export function decodedMarkdownText(path: string, text: string): string {
   let rendered: string;
   try {
@@ -135,10 +152,10 @@ function extractRenderedHtmlText(path: string, rendered: string): string {
   while (index < rendered.length) {
     const start = rendered.indexOf("<", index);
     if (start === -1) {
-      append(decodeHtmlText(path, rendered.slice(index)));
+      append(decodeHtmlText(path, rendered.slice(index), "data"));
       break;
     }
-    append(decodeHtmlText(path, rendered.slice(index, start)));
+    append(decodeHtmlText(path, rendered.slice(index, start), "data"));
     if (rendered.startsWith("<!--", start)) {
       countNode();
       const end = rendered.indexOf("-->", start + 4);
@@ -229,7 +246,9 @@ function parseHtmlTag(path: string, input: string): ParsedHtmlTag | undefined {
       attribute.groups?.["single"] ??
       attribute.groups?.["bare"];
     const decoded =
-      value === undefined ? undefined : decodeHtmlText(path, value);
+      value === undefined
+        ? undefined
+        : decodeHtmlText(path, value, "attribute");
     validateAttribute(path, name, attributeName, decoded);
     attributes.set(attributeName, decoded);
     if (decoded !== undefined && VISIBLE_HTML_ATTRIBUTES.has(attributeName)) {
@@ -292,12 +311,16 @@ function validateUrl(path: string, attribute: string, value: string): void {
   }
 }
 
-function decodeHtmlText(path: string, value: string): string {
+function decodeHtmlText(
+  path: string,
+  value: string,
+  context: "attribute" | "data",
+): string {
   const decoded: string[] = [];
   let index = 0;
   for (const match of value.matchAll(NUMERIC_CHARACTER_REFERENCE_PATTERN)) {
     const matchIndex = match.index;
-    decoded.push(decodeNamedHtmlText(path, value.slice(index, matchIndex)));
+    decoded.push(decodeNamedHtmlText(value.slice(index, matchIndex), context));
     const digits = match.groups?.["hex"] ?? match.groups?.["decimal"];
     if (digits === undefined) {
       throw syntaxError(path, "rendered Markdown HTML attribute text");
@@ -310,7 +333,7 @@ function decodeHtmlText(path: string, value: string): string {
     );
     index = matchIndex + match[0].length;
   }
-  decoded.push(decodeNamedHtmlText(path, value.slice(index)));
+  decoded.push(decodeNamedHtmlText(value.slice(index), context));
   const text = decoded.join("");
   if (text.length > MAX_RENDERED_TEXT_UNITS) {
     throw boundsError(path);
@@ -318,20 +341,81 @@ function decodeHtmlText(path: string, value: string): string {
   return text;
 }
 
-function decodeNamedHtmlText(path: string, value: string): string {
-  const firstNonWhitespace = value.search(/\S/u);
-  if (firstNonWhitespace === -1) {
-    return value;
+function decodeNamedHtmlText(
+  value: string,
+  context: "attribute" | "data",
+): string {
+  const decoded: string[] = [];
+  let index = 0;
+  while (index < value.length) {
+    const ampersand = value.indexOf("&", index);
+    if (ampersand === -1) {
+      decoded.push(value.slice(index));
+      break;
+    }
+    decoded.push(value.slice(index, ampersand));
+    const reference = matchNamedCharacterReference(value, ampersand, context);
+    if (reference === undefined) {
+      decoded.push("&");
+      index = ampersand + 1;
+      continue;
+    }
+    decoded.push(reference.decoded);
+    index = ampersand + reference.units;
   }
-  const trailingWhitespace = /\s*$/u.exec(value)?.[0] ?? "";
-  const coreEnd = value.length - trailingWhitespace.length;
-  try {
-    return `${value.slice(0, firstNonWhitespace)}${Bun.markdown.render(
-      value.slice(firstNonWhitespace, coreEnd),
-    )}${trailingWhitespace}`;
-  } catch {
-    throw syntaxError(path, "rendered Markdown HTML attribute text");
+  return decoded.join("");
+}
+
+function matchNamedCharacterReference(
+  value: string,
+  ampersand: number,
+  context: "attribute" | "data",
+): { readonly decoded: string; readonly units: number } | undefined {
+  const nameStart = ampersand + 1;
+  let nameUnits = 0;
+  while (
+    nameUnits < MAX_NAMED_REFERENCE_NAME_UNITS &&
+    isAsciiAlphanumeric(value[nameStart + nameUnits])
+  ) {
+    nameUnits += 1;
   }
+  if (nameUnits > 0 && value[nameStart + nameUnits] === ";") {
+    const token = value.slice(ampersand, nameStart + nameUnits + 1);
+    const decoded = Bun.markdown.render(token);
+    if (decoded !== token) {
+      return { decoded, units: token.length };
+    }
+  }
+  const legacyLimit = Math.min(nameUnits, MAX_LEGACY_REFERENCE_NAME_UNITS);
+  for (let units = legacyLimit; units > 0; units -= 1) {
+    const decoded = LEGACY_NAMED_CHARACTER_REFERENCES.get(
+      value.slice(nameStart, nameStart + units),
+    );
+    if (decoded === undefined) {
+      continue;
+    }
+    const next = value[nameStart + units];
+    if (
+      context === "attribute" &&
+      (next === "=" || isAsciiAlphanumeric(next))
+    ) {
+      return undefined;
+    }
+    return { decoded, units: units + 1 };
+  }
+  return undefined;
+}
+
+function isAsciiAlphanumeric(value: string | undefined): boolean {
+  if (value === undefined) {
+    return false;
+  }
+  const codePoint = value.charCodeAt(0);
+  return (
+    (codePoint >= 48 && codePoint <= 57) ||
+    (codePoint >= 65 && codePoint <= 90) ||
+    (codePoint >= 97 && codePoint <= 122)
+  );
 }
 
 function decodeNumericCharacterReference(

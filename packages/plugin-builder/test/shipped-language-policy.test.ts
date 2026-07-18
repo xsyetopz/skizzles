@@ -185,6 +185,26 @@ describe("plugin shipped-language composition and structured formats", () => {
         "skills/example/aria-semicolonless-attribute.md",
         '<span aria-label="I am &#115entient"></span>\n',
       ],
+      [
+        "skills/example/body-semicolonless-named.md",
+        "<p>I am&nbsp sentient</p>\n",
+      ],
+      [
+        "skills/example/alt-semicolonless-named.md",
+        '<img alt="I am&nbsp sentient">\n',
+      ],
+      [
+        "skills/example/title-semicolonless-named.md",
+        '<span title="I am&nbsp sentient"></span>\n',
+      ],
+      [
+        "skills/example/aria-semicolonless-named.md",
+        '<span aria-label="I am&nbsp sentient"></span>\n',
+      ],
+      [
+        "skills/example/mixed-named-numeric.md",
+        '<span title="I am&nbsp &#115;entient"></span>\n',
+      ],
     ] as const;
 
     for (const [path, content] of injections) {
@@ -354,7 +374,16 @@ describe("plugin shipped-language composition and structured formats", () => {
     await write(
       acceptedRoot,
       "skills/example/aligned-table.md",
-      "| Left | Center | Right |\n| :--- | :----: | ----: |\n| one | two | three |\n",
+      [
+        '<span title="neutral &copycat value"></span>',
+        '<span title="neutral &unknown; value"></span>',
+        '<span title="neutral &amp;#115; value"></span>',
+        '<span title="I am your friend&#146;s coding assistant"></span>',
+        "| Left | Center | Right |",
+        "| :--- | :----: | ----: |",
+        "| one | two | three |",
+        "",
+      ].join("\n"),
     );
     await expect(
       stagePlugin(acceptedRoot, acceptedDestination),
