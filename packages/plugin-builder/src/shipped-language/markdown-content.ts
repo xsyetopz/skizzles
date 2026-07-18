@@ -56,6 +56,7 @@ const ELEMENT_HTML_ATTRIBUTES = new Map<string, ReadonlySet<string>>([
 const BOOLEAN_HTML_ATTRIBUTES = new Set(["checked", "disabled"]);
 const TABLE_ALIGNMENT_VALUES = new Set(["center", "left", "right"]);
 const DEFAULT_IGNORABLE_PATTERN = /\p{Default_Ignorable_Code_Point}/u;
+const RENDERED_C1_PATTERN = /[\u0080-\u009f]/gu;
 const URL_SCHEME_PATTERN = /^(?<scheme>[a-z][a-z0-9+.-]*):/u;
 const NUMERIC_CHARACTER_REFERENCE_PATTERN =
   /&#(?:(?<hexMarker>[xX])(?<hex>[0-9A-Fa-f]+)|(?<decimal>[0-9]+));?/gu;
@@ -316,11 +317,16 @@ function decodeHtmlText(
   value: string,
   context: "attribute" | "data",
 ): string {
+  const renderedValue = normalizeRenderedC1CodePoints(value);
   const decoded: string[] = [];
   let index = 0;
-  for (const match of value.matchAll(NUMERIC_CHARACTER_REFERENCE_PATTERN)) {
+  for (const match of renderedValue.matchAll(
+    NUMERIC_CHARACTER_REFERENCE_PATTERN,
+  )) {
     const matchIndex = match.index;
-    decoded.push(decodeNamedHtmlText(value.slice(index, matchIndex), context));
+    decoded.push(
+      decodeNamedHtmlText(renderedValue.slice(index, matchIndex), context),
+    );
     const digits = match.groups?.["hex"] ?? match.groups?.["decimal"];
     if (digits === undefined) {
       throw syntaxError(path, "rendered Markdown HTML attribute text");
@@ -333,12 +339,23 @@ function decodeHtmlText(
     );
     index = matchIndex + match[0].length;
   }
-  decoded.push(decodeNamedHtmlText(value.slice(index), context));
+  decoded.push(decodeNamedHtmlText(renderedValue.slice(index), context));
   const text = decoded.join("");
   if (text.length > MAX_RENDERED_TEXT_UNITS) {
     throw boundsError(path);
   }
   return text;
+}
+
+function normalizeRenderedC1CodePoints(value: string): string {
+  return value.replace(RENDERED_C1_PATTERN, (character) => {
+    const replacement = WINDOWS_1252_REFERENCE_REPLACEMENTS.get(
+      character.charCodeAt(0),
+    );
+    return replacement === undefined
+      ? character
+      : String.fromCodePoint(replacement);
+  });
 }
 
 function decodeNamedHtmlText(

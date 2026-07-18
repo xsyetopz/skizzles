@@ -21,8 +21,7 @@ const DEFAULT_IGNORABLE_PATTERN = /\p{Default_Ignorable_Code_Point}/u;
 const LEXICAL_END_PATTERN = /[\p{L}\p{M}\p{N}_]$/u;
 const LEXICAL_START_PATTERN = /^[\p{L}\p{M}\p{N}_]/u;
 const LEXICAL_SUFFIX_CONTINUATION_PATTERN =
-  /^(?:(?:['’\-\u2010\u2011]|&#(?:x0*92|0*146);?)\p{L})/iu;
-const MAX_LEXICAL_SUFFIX_CONTEXT_UNITS = 12;
+  /^(?:(?:['’\-\u2010\u2011]|&#(?:0*(?:39|146|8217)|[xX]0*(?:27|92|2019));?)\p{L})/u;
 const NEUTRAL_REPOSITORY_BOUNDARY_PATTERN =
   /^ within (?:the )?(?:repository|workspace) boundary[.!]?$/u;
 const EXPECTED_TAXONOMY_IDS = [
@@ -369,9 +368,7 @@ function matchesPattern(value: string, pattern: string): boolean {
     if (
       !LEXICAL_END_PATTERN.test(value.slice(Math.max(0, index - 2), index)) &&
       !LEXICAL_START_PATTERN.test(value.slice(end, end + 2)) &&
-      !LEXICAL_SUFFIX_CONTINUATION_PATTERN.test(
-        value.slice(end, end + MAX_LEXICAL_SUFFIX_CONTEXT_UNITS),
-      ) &&
+      !LEXICAL_SUFFIX_CONTINUATION_PATTERN.test(value.slice(end)) &&
       !isNeutralTechnicalContext(pattern, value.slice(end))
     ) {
       return true;

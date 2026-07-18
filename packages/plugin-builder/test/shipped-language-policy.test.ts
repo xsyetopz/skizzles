@@ -417,4 +417,64 @@ describe("plugin shipped-language composition and structured formats", () => {
       );
     }
   });
+
+  test("preserves C1 reference provenance through full Markdown staging", async () => {
+    const { stagePlugin } = await import("../src/plugin-package.ts");
+    const longZeros = "0".repeat(1024);
+    const root = await fixture();
+    const destination = join(root, "plain-markdown-apostrophes");
+    await write(
+      root,
+      "skills/example/plain-apostrophes.md",
+      [
+        "I am your friend&#39;s coding assistant.",
+        "I am your friend&#x27s coding assistant.",
+        "I am your friend&#X00027;s coding assistant.",
+        "I am your friend&#146;s coding assistant.",
+        "I am your friend&#x92s coding assistant.",
+        "I am your friend&#X00092;s coding assistant.",
+        "I am your friend&#8217;s coding assistant.",
+        // biome-ignore lint/security/noSecrets: Deliberate encoded apostrophe fixture, not a credential.
+        "I am your friend&#x2019s coding assistant.",
+        `I am your friend&#${longZeros}8217;s coding assistant.`,
+        `I am your friend&#X${longZeros}2019s coding assistant.`,
+        "",
+      ].join("\n"),
+    );
+    await expect(stagePlugin(root, destination)).resolves.toBeUndefined();
+
+    for (const [claim, diagnostic] of [
+      [
+        "I am your friend\u0092s coding assistant.\n",
+        "unsafe path or text controls",
+      ],
+      [
+        "I am your friend&#150;truly and personally.\n",
+        "friendship-attachment-reciprocity",
+      ],
+      [
+        "I am your friend&#x97;truly and personally.\n",
+        "friendship-attachment-reciprocity",
+      ],
+      [
+        "I am your friend&#39; truly and personally.\n",
+        "friendship-attachment-reciprocity",
+      ],
+    ] as const) {
+      const rejectedRoot = await fixture();
+      const rejectedDestination = join(rejectedRoot, "existing-c1-destination");
+      await write(rejectedRoot, "skills/example/c1.md", claim);
+      await write(
+        rejectedRoot,
+        "existing-c1-destination/marker.txt",
+        "preserve\n",
+      );
+      await expect(
+        stagePlugin(rejectedRoot, rejectedDestination),
+      ).rejects.toThrow(diagnostic);
+      expect(
+        await readFile(join(rejectedDestination, "marker.txt"), "utf8"),
+      ).toBe("preserve\n");
+    }
+  });
 });

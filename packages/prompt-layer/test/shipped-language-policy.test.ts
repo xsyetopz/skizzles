@@ -133,6 +133,7 @@ describe("versioned shipped-language policy", () => {
 
   test("permits neutral first person and scans quotes, code, and lexical negation", async () => {
     const policy = parseShippedLanguagePolicy(await policyBytes());
+    const longZeros = "0".repeat(1024);
     expect(
       validateShippedLanguageText(
         policy,
@@ -152,6 +153,13 @@ describe("versioned shipped-language policy", () => {
       "I am your friend‑shaped coding assistant.",
       "I am your friend&#x92;s coding assistant.",
       "I am your friend&#146s coding assistant.",
+      "I am your friend&#39;s coding assistant.",
+      "I am your friend&#x27s coding assistant.",
+      "I am your friend&#8217;s coding assistant.",
+      // biome-ignore lint/security/noSecrets: Deliberate encoded apostrophe fixture, not a credential.
+      "I am your friend&#x2019s coding assistant.",
+      `I am your friend&#${longZeros}8217;s coding assistant.`,
+      `I am your friend&#X${longZeros}2019s coding assistant.`,
       "𐐀i am sentient",
       "I am sentient𐐀",
     ]) {
