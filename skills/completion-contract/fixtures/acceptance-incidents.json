@@ -11,7 +11,10 @@
       "version": "model-2",
       "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     },
-    "validator": { "id": "deterministic.context", "version": "2.0.0" },
+    "validator": {
+      "id": "deterministic.context",
+      "version": "2.0.0"
+    },
     "objective": {
       "id": "goal.architecture",
       "version": "2",
@@ -42,6 +45,14 @@
         "kind": "test-suite",
         "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
       }
+    ],
+    "expectedEffects": [
+      {
+        "id": "effect/runtime",
+        "observed": true,
+        "evidenceId": "evidence/runtime",
+        "evidenceRef": "evidence/runtime.json"
+      }
     ]
   },
   "controls": [
@@ -50,6 +61,15 @@
       "contract": "acceptance",
       "input": {
         "schemaVersion": "2.0.0",
+        "objective": {
+          "id": "goal.architecture",
+          "version": "2",
+          "digest": "65b6db3627be4d3e8185336fec17d64b1f8c6f5b75db0490524d74fc569cf321"
+        },
+        "acceptance": {
+          "version": "acceptance-2",
+          "digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
         "requirements": [
           {
             "id": "REQ-1",
@@ -62,7 +82,8 @@
             "requirementId": "REQ-1",
             "check": "Run the causal runtime smoke.",
             "result": "pass",
-            "evidenceRefs": ["evidence/runtime"]
+            "evidenceRefs": ["evidence/runtime"],
+            "proofKind": "runtime-effect"
           }
         ],
         "evaluationOrder": ["objectiveGates", "judge"],
@@ -121,14 +142,20 @@
           }
         ],
         "findings": [],
-        "execution": { "retries": 0, "seed": 42 },
+        "execution": {
+          "retries": 0,
+          "seed": 42
+        },
         "policy": {
           "version": "policy-2",
           "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "modelVersion": "model-2",
           "modelDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         },
-        "validator": { "id": "deterministic.context", "version": "2.0.0" },
+        "validator": {
+          "id": "deterministic.context",
+          "version": "2.0.0"
+        },
         "judge": {
           "enabled": true,
           "version": "judge-2",
@@ -142,7 +169,7 @@
           "selfReview": false
         }
       },
-      "inputSha256": "9f67d9f74cd161fc4583fffc7ac610188ded2d4caa2c2a0e760ecd30bbd20e13"
+      "inputSha256": "484012aa23db74686274a49a61e92b2ebc662b21da322910af53177fe660e836"
     }
   ],
   "cases": [
@@ -152,8 +179,11 @@
       "contract": "acceptance",
       "control": "CC-ACCEPTANCE-CONTROL",
       "mutations": [],
-      "inputSha256": "9f67d9f74cd161fc4583fffc7ac610188ded2d4caa2c2a0e760ecd30bbd20e13",
-      "expected": { "decision": "accept", "code": null }
+      "inputSha256": "484012aa23db74686274a49a61e92b2ebc662b21da322910af53177fe660e836",
+      "expected": {
+        "decision": "accept",
+        "code": null
+      }
     },
     {
       "id": "CC-002",
@@ -161,10 +191,17 @@
       "contract": "acceptance",
       "control": "CC-ACCEPTANCE-CONTROL",
       "mutations": [
-        { "op": "copy", "path": "/requirements/0", "value": "/requirements/1" }
+        {
+          "op": "copy",
+          "path": "/requirements/0",
+          "value": "/requirements/1"
+        }
       ],
-      "inputSha256": "66823b7eebb6039d2cd3dc44d3204ff6360c84451ca6e2d0af6397e2e2c5f65b",
-      "expected": { "decision": "reject", "code": "REQUIREMENT_DUPLICATE" }
+      "inputSha256": "293b6290c7606d9df766ac900cb487251a2f25d1768b8d3082ed1c8e32ac0717",
+      "expected": {
+        "decision": "reject",
+        "code": "REQUIREMENT_DUPLICATE"
+      }
     },
     {
       "id": "CC-003",
@@ -172,10 +209,17 @@
       "contract": "acceptance",
       "control": "CC-ACCEPTANCE-CONTROL",
       "mutations": [
-        { "op": "replace", "path": "/objectiveGates/0/order", "value": 2 }
+        {
+          "op": "replace",
+          "path": "/objectiveGates/0/order",
+          "value": 2
+        }
       ],
-      "inputSha256": "d9a7e6e4bb3f1b15168bbbcaf570350af1ded2d03134f68c477a15a9a6a9278f",
-      "expected": { "decision": "reject", "code": "GATE_ORDER_INVALID" }
+      "inputSha256": "4c3965267ba66d2bce86ac2f2b40bcfa3c5d0b372501978f80f35dfc6283a2a8",
+      "expected": {
+        "decision": "reject",
+        "code": "GATE_ORDER_INVALID"
+      }
     },
     {
       "id": "CC-004",
@@ -189,8 +233,11 @@
           "value": "REQ-UNKNOWN"
         }
       ],
-      "inputSha256": "1d4a911205466b4f6d289ecb4906951c808e5495ba124e8f5b1375f4ffa47945",
-      "expected": { "decision": "reject", "code": "GATE_REQUIREMENT_UNKNOWN" }
+      "inputSha256": "90330d2d8b950a8d31663af5f727b6d10c34f2dd2c4432ec7220ec9aecf17377",
+      "expected": {
+        "decision": "reject",
+        "code": "GATE_REQUIREMENT_UNKNOWN"
+      }
     },
     {
       "id": "CC-005",
@@ -198,10 +245,17 @@
       "contract": "acceptance",
       "control": "CC-ACCEPTANCE-CONTROL",
       "mutations": [
-        { "op": "replace", "path": "/execution/retries", "value": 3 }
+        {
+          "op": "replace",
+          "path": "/execution/retries",
+          "value": 3
+        }
       ],
-      "inputSha256": "0ef11dace2b0be67ff828bbd3bdb1888e2f141cc4b9226eb954b6392a5a636c7",
-      "expected": { "decision": "reject", "code": "RETRY_LIMIT_EXCEEDED" }
+      "inputSha256": "352116c36193a5ed2d9437fb4f72bfa0f462257bd50d03163c2220e3114332c9",
+      "expected": {
+        "decision": "reject",
+        "code": "RETRY_LIMIT_EXCEEDED"
+      }
     },
     {
       "id": "CC-006",
@@ -215,8 +269,11 @@
           "value": ["judge", "objectiveGates"]
         }
       ],
-      "inputSha256": "26c946838e7c2c1b86ee1242376826ee35c932eb0481d028cc22585f019e2aa0",
-      "expected": { "decision": "reject", "code": "JUDGE_ORDER_INVALID" }
+      "inputSha256": "32b54806fcc2cbcfd123ddd7efe948162321f989d61a5e1ef890eff9630ec1b0",
+      "expected": {
+        "decision": "reject",
+        "code": "JUDGE_ORDER_INVALID"
+      }
     },
     {
       "id": "CC-007",
@@ -230,8 +287,11 @@
           "value": "author-agent"
         }
       ],
-      "inputSha256": "cfbed49dc7e9549e89d3806fa87e574a7289b7a8e6baffdf17bca174a0781ead",
-      "expected": { "decision": "reject", "code": "SELF_REVIEW" }
+      "inputSha256": "f51601ddaa7c7738ab7d604f26c0639be5a14bd8aa2cdd2b317759e03b45a4df",
+      "expected": {
+        "decision": "reject",
+        "code": "SELF_REVIEW"
+      }
     },
     {
       "id": "CC-008",
@@ -245,8 +305,11 @@
           "value": "0000000000000000000000000000000000000000000000000000000000000000"
         }
       ],
-      "inputSha256": "19e9833986b8685d54c82ac26d20e19b5b9c563475ad557942840f9a07225d9c",
-      "expected": { "decision": "reject", "code": "VERIFIER_MUTATION" }
+      "inputSha256": "f803eb1ef98717038226857b904247e052bd64179bf0faa68632e1d68095ef8e",
+      "expected": {
+        "decision": "reject",
+        "code": "VERIFIER_MUTATION"
+      }
     },
     {
       "id": "CC-009",
@@ -260,8 +323,11 @@
           "value": "0000000000000000000000000000000000000000000000000000000000000000"
         }
       ],
-      "inputSha256": "e2bafcff8e1fd2ebc239618509630744caa876439a2ca2428833945a92b351f6",
-      "expected": { "decision": "reject", "code": "TEST_MUTATION" }
+      "inputSha256": "b26936a8f5b969d43d7302fb925fc55fb069a26de4a020f725a607c8a2e7db61",
+      "expected": {
+        "decision": "reject",
+        "code": "TEST_MUTATION"
+      }
     },
     {
       "id": "CC-010",
@@ -278,8 +344,11 @@
           }
         }
       ],
-      "inputSha256": "ff2521cb1f032c0637a321e16b02507a5d50ac866410dc0a64a449a7509dc659",
-      "expected": { "decision": "reject", "code": "SOLUTION_LEAKAGE" }
+      "inputSha256": "288c154e72c8ef78d1da0f3ba0facd233e571d96c17058cd0d60d804f3cbdb5a",
+      "expected": {
+        "decision": "reject",
+        "code": "SOLUTION_LEAKAGE"
+      }
     },
     {
       "id": "CC-011",
@@ -296,8 +365,11 @@
           }
         }
       ],
-      "inputSha256": "6c86d0b0b3cdeebc1cdf59251b74f6c0b01490c3daeb07e06dbcb36e15074087",
-      "expected": { "decision": "reject", "code": "GRADER_INJECTION" }
+      "inputSha256": "9845a5014e4bab69973d73e058e5f9f13072bad2fe4ee806bf25810495e631e2",
+      "expected": {
+        "decision": "reject",
+        "code": "GRADER_INJECTION"
+      }
     },
     {
       "id": "CC-012",
@@ -314,8 +386,11 @@
           }
         }
       ],
-      "inputSha256": "d8addff468e53217cbe79b9e0b5d7acef023fb94dd1f42e50e2c4a66736088ec",
-      "expected": { "decision": "reject", "code": "HARD_CODED_ANSWER" }
+      "inputSha256": "a1c223bfa4abfdf908b26fbc14ece25ba08c80e9bb542f5323218a4122c91b7b",
+      "expected": {
+        "decision": "reject",
+        "code": "HARD_CODED_ANSWER"
+      }
     },
     {
       "id": "CC-013",
@@ -323,10 +398,17 @@
       "contract": "acceptance",
       "control": "CC-ACCEPTANCE-CONTROL",
       "mutations": [
-        { "op": "replace", "path": "/effects/0/observed", "value": false }
+        {
+          "op": "replace",
+          "path": "/effects/0/observed",
+          "value": false
+        }
       ],
-      "inputSha256": "3342f7740ff64200cfa852e7d285a6e7423617cd54145b9220a03eebedf19287",
-      "expected": { "decision": "reject", "code": "FAKE_EFFECT" }
+      "inputSha256": "4dae21b556633fd9fd51c90f90c1e996adea6b2463d6c1b6726f4045bcd41697",
+      "expected": {
+        "decision": "reject",
+        "code": "FAKE_EFFECT"
+      }
     },
     {
       "id": "CC-014",
@@ -353,8 +435,11 @@
           "value": ["evidence/exit"]
         }
       ],
-      "inputSha256": "662ab147dbdc615c862a87cc7ef7f9f877474b82e9c7847e72457d45fece8065",
-      "expected": { "decision": "reject", "code": "EXIT_ZERO_ONLY" }
+      "inputSha256": "cb77c3baf6a664ab4215ac4de166eb1dc515ac6bdbbb9f5eb8d88863c2983b13",
+      "expected": {
+        "decision": "reject",
+        "code": "EXIT_ZERO_ONLY"
+      }
     },
     {
       "id": "CC-015",
@@ -381,8 +466,11 @@
           "value": ["evidence/token"]
         }
       ],
-      "inputSha256": "b54df1a79dab77efe444bfdb3ff507ebb38dbd2417e40f27ff234d9dd0a7bf60",
-      "expected": { "decision": "reject", "code": "SUCCESS_TOKEN_ONLY" }
+      "inputSha256": "5c1945246262289f8aa6ec8596a165c3994847cecf362e3379430306b9db7437",
+      "expected": {
+        "decision": "reject",
+        "code": "SUCCESS_TOKEN_ONLY"
+      }
     },
     {
       "id": "CC-016",
@@ -399,8 +487,11 @@
           }
         }
       ],
-      "inputSha256": "f616851433cb0003bdb055452bbf4b7374305946abb7825810974c53e55a549e",
-      "expected": { "decision": "reject", "code": "DECEPTIVE_COMPLETION" }
+      "inputSha256": "eb78509ee503784f57697ba0116a52ca4d7eade86571f99d02e0588de55a4784",
+      "expected": {
+        "decision": "reject",
+        "code": "DECEPTIVE_COMPLETION"
+      }
     },
     {
       "id": "CC-017",
@@ -414,8 +505,11 @@
           "value": "effect/unknown"
         }
       ],
-      "inputSha256": "3dc51a5a9c2854401b2b2d0508a9a5e85e453e7a409b3dc922cbfa47fbc1dfe1",
-      "expected": { "decision": "reject", "code": "EVIDENCE_BINDING_INVALID" }
+      "inputSha256": "d75479053e66e39849bdda7a3038b2dbe3f9d21d39a20fd08960cb8099351774",
+      "expected": {
+        "decision": "reject",
+        "code": "EVIDENCE_BINDING_INVALID"
+      }
     },
     {
       "id": "CC-018",
@@ -423,10 +517,17 @@
       "contract": "acceptance",
       "control": "CC-ACCEPTANCE-CONTROL",
       "mutations": [
-        { "op": "replace", "path": "/objectiveGates/0/result", "value": "fail" }
+        {
+          "op": "replace",
+          "path": "/objectiveGates/0/result",
+          "value": "fail"
+        }
       ],
-      "inputSha256": "7c82ce0ded8097165cb6cc5de1ce7a7d5fd1f51e2d4a0ed4b93427cb5f1c59d2",
-      "expected": { "decision": "reject", "code": "OBJECTIVE_GATE_FAILED" }
+      "inputSha256": "82561abd60b59abad14a67894852672126b0412096e64f265c1776f0f0464f0d",
+      "expected": {
+        "decision": "reject",
+        "code": "OBJECTIVE_GATE_FAILED"
+      }
     }
   ]
 }

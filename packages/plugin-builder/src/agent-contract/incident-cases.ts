@@ -100,7 +100,7 @@ const TRUST_CASES: readonly ExpectedCase[] = [
     id: "FW-016",
     contract: "context-envelope",
     decision: "reject",
-    code: "LLM_TRANSFORM_UNVALIDATED",
+    code: "VALIDATOR_MISMATCH",
   },
 ] as const;
 

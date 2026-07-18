@@ -108,6 +108,7 @@ function evaluateCases(
     );
   }
   const seenIds = new Set<string>();
+  const seenInputs = new Map<string, string>();
   cases.forEach((item, index) => {
     const expected = expectedCases[index];
     if (expected === undefined) {
@@ -115,7 +116,16 @@ function evaluateCases(
         `${label}.cases[${index}] is unexpected.`,
       );
     }
-    evaluateCase(item, index, expected, controls, options, seenIds, label);
+    evaluateCase(
+      item,
+      index,
+      expected,
+      controls,
+      options,
+      seenIds,
+      seenInputs,
+      label,
+    );
   });
 }
 
@@ -126,6 +136,7 @@ function evaluateCase(
   controls: ReadonlyMap<string, CorpusControl>,
   options: ReturnType<typeof parseEvaluationOptions>,
   seenIds: Set<string>,
+  seenInputs: Map<string, string>,
   label: string,
 ): void {
   const caseLabel = `${label}.cases[${index}]`;
@@ -172,6 +183,14 @@ function evaluateCase(
     caseLabel,
   );
   assertInputHash(incident["inputSha256"], input, caseLabel);
+  const inputHash = sha256Json(input);
+  const previousId = seenInputs.get(inputHash);
+  if (previousId !== undefined) {
+    throw new AgentContractPackageError(
+      `${caseLabel} duplicates materialized input from ${previousId}.`,
+    );
+  }
+  seenInputs.set(inputHash, id);
   assertExpectedResult(incident["expected"], expected, caseLabel);
   assertEvaluation(input, contract, options, expected, caseLabel);
 }

@@ -19,6 +19,9 @@ export async function readContainedJsonAsset(
   await assertDirectory(root, `${label} root`);
   const segments = relativePath.split("/");
   let current = root;
+  let targetIdentity:
+    | { dev: number | bigint; ino: number | bigint }
+    | undefined;
 
   for (const [index, segment] of segments.entries()) {
     current = join(current, segment);
@@ -37,9 +40,18 @@ export async function readContainedJsonAsset(
         `${label} must be a non-symlink regular file.`,
       );
     }
+    if (isTarget && metadata.nlink !== 1) {
+      throw new AgentContractPackageError(`${label} uses a hardlinked file.`);
+    }
+    if (isTarget) {
+      targetIdentity = { dev: metadata.dev, ino: metadata.ino };
+    }
   }
 
-  const bytes = await readWithoutFollowing(current, label);
+  if (targetIdentity === undefined) {
+    throw new AgentContractPackageError(`${label} is missing or inaccessible.`);
+  }
+  const bytes = await readWithoutFollowing(current, label, targetIdentity);
   return { bytes, value: parseJsonAsset(bytes, label) };
 }
 
@@ -66,6 +78,7 @@ async function safeLstat(
 async function readWithoutFollowing(
   path: string,
   label: string,
+  expected: { dev: number | bigint; ino: number | bigint },
 ): Promise<Buffer> {
   let handle: Awaited<ReturnType<typeof open>>;
   try {
@@ -74,8 +87,22 @@ async function readWithoutFollowing(
     throw new AgentContractPackageError(`${label} is missing or inaccessible.`);
   }
   try {
+    const metadata = await handle.stat();
+    if (
+      !metadata.isFile() ||
+      metadata.nlink !== 1 ||
+      metadata.dev !== expected.dev ||
+      metadata.ino !== expected.ino
+    ) {
+      throw new AgentContractPackageError(
+        `${label} changed identity or uses a hardlinked file.`,
+      );
+    }
     return await handle.readFile();
-  } catch {
+  } catch (error) {
+    if (error instanceof AgentContractPackageError) {
+      throw error;
+    }
     throw new AgentContractPackageError(`${label} is missing or inaccessible.`);
   } finally {
     await handle.close();

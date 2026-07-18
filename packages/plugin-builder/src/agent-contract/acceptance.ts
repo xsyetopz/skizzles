@@ -1,8 +1,10 @@
 import {
   type AcceptanceEvidence,
+  type CausalEvidenceKind,
   parseAcceptanceEvidence,
   requireCausalGateEvidence,
 } from "./acceptance-evidence.ts";
+import { evaluateAcceptanceIdentity } from "./acceptance-identity.ts";
 import {
   AgentContractPackageError,
   CONTRACT_SCHEMA_VERSION,
@@ -33,6 +35,7 @@ interface ObjectiveGate {
   requirementId: string;
   result: "fail" | "pass";
   evidenceRefs: string[];
+  proofKind: CausalEvidenceKind;
 }
 
 const FINDING_CODES: Readonly<Record<string, RejectionCode>> = {
@@ -54,6 +57,8 @@ export function evaluateAcceptance(
       acceptance,
       [
         "schemaVersion",
+        "objective",
+        "acceptance",
         "requirements",
         "objectiveGates",
         "evaluationOrder",
@@ -72,6 +77,11 @@ export function evaluateAcceptance(
     if (acceptance["schemaVersion"] !== CONTRACT_SCHEMA_VERSION) {
       reject("SCHEMA_VERSION_MISMATCH", "acceptance schema version is stale");
     }
+    evaluateAcceptanceIdentity(
+      acceptance["objective"],
+      acceptance["acceptance"],
+      options,
+    );
     const requirementIds = parseRequirements(acceptance["requirements"]);
     const gates = parseObjectiveGates(
       acceptance["objectiveGates"],
@@ -136,7 +146,14 @@ function parseObjectiveGates(
     const gate = assertRecord(item, label);
     assertExactKeys(
       gate,
-      ["order", "requirementId", "check", "result", "evidenceRefs"],
+      [
+        "order",
+        "requirementId",
+        "check",
+        "proofKind",
+        "result",
+        "evidenceRefs",
+      ],
       label,
     );
     const requirementId = nonempty(
@@ -151,6 +168,7 @@ function parseObjectiveGates(
     }
     nonempty(gate["check"], `${label}.check`);
     const result = parseGateResult(gate["result"], `${label}.result`);
+    const proofKind = parseProofKind(gate["proofKind"], `${label}.proofKind`);
     const evidenceRefs = assertArray(
       gate["evidenceRefs"],
       `${label}.evidenceRefs`,
@@ -166,10 +184,22 @@ function parseObjectiveGates(
       requirementId,
       result,
       evidenceRefs,
+      proofKind,
     };
   });
   validateGateTopology(gates, requirementIds);
   return gates;
+}
+
+function parseProofKind(
+  value: JsonValue | undefined,
+  label: string,
+): CausalEvidenceKind {
+  const kind = assertString(value, label);
+  if (kind !== "runtime-effect" && kind !== "test-result") {
+    throw new AgentContractPackageError(`${label} is unsupported.`);
+  }
+  return kind;
 }
 
 function parseGateResult(
@@ -321,6 +351,7 @@ function evaluateObjectiveGates(
       gate.evidenceRefs,
       evidence,
       `objective gate ${index + 1}`,
+      gate.proofKind,
     );
   }
 }

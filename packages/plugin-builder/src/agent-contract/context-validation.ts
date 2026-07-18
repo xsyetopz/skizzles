@@ -31,7 +31,7 @@ interface ContextValidationInput {
 }
 
 export function evaluateContextValidation(input: ContextValidationInput): void {
-  const modelTransformed = evaluateTransformations(
+  const transformations = evaluateTransformations(
     input.transformations,
     input.createdAt,
     input.options,
@@ -41,7 +41,8 @@ export function evaluateContextValidation(input: ContextValidationInput): void {
     input.validation,
     input.propertyName,
     input.trustClass,
-    modelTransformed,
+    transformations.modelTransformed,
+    transformations.finalAt,
     input.retrievedAt,
     input.options,
     input.label,
@@ -53,9 +54,10 @@ function evaluateTransformations(
   createdAt: number,
   options: EvaluationOptions,
   label: string,
-) {
+): { modelTransformed: boolean; finalAt: number } {
   const transformations = assertArray(value, `${label}.transformations`);
   let modelTransformed = false;
+  let finalAt = createdAt;
   for (const [index, item] of transformations.entries()) {
     const itemLabel = `${label}.transformations[${index}]`;
     const transformation = assertRecord(item, itemLabel);
@@ -77,6 +79,7 @@ function evaluateTransformations(
         `${label} transformation timestamp is invalid`,
       );
     }
+    finalAt = Math.max(finalAt, at);
     const producer = parseProducer(
       transformation["producer"],
       `${itemLabel}.producer`,
@@ -91,7 +94,7 @@ function evaluateTransformations(
       );
     }
   }
-  return modelTransformed;
+  return { modelTransformed, finalAt };
 }
 
 function evaluateValidation(
@@ -99,6 +102,7 @@ function evaluateValidation(
   propertyName: string,
   trustValue: JsonValue | undefined,
   modelTransformed: boolean,
+  finalTransformationAt: number,
   retrievedAt: number,
   options: EvaluationOptions,
   label: string,
@@ -151,6 +155,7 @@ function evaluateValidation(
     validator.version === options.validator.version;
   const timeMatched =
     validatedAt !== null &&
+    validatedAt >= finalTransformationAt &&
     validatedAt >= retrievedAt &&
     validatedAt <= options.now;
   const deterministicallyValid =
@@ -161,6 +166,9 @@ function evaluateValidation(
     evidence.length > 0;
   if (status === "valid" && !validatorMatched) {
     reject("VALIDATOR_MISMATCH", `${label} validator identity does not match`);
+  }
+  if (status === "valid" && !propertyMatched) {
+    reject("VALIDATOR_MISMATCH", `${label} validation property does not match`);
   }
   if (status === "valid" && validatedAt !== null && !timeMatched) {
     reject("CHRONOLOGY_INVALID", `${label} validation timestamp is invalid`);

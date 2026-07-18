@@ -160,10 +160,17 @@ JSON Schema validates that shape; it does not prove that an effect occurred,
 compare identities, relate arbitrary references, or determine whether a
 verifier was hidden from an implementation. The repository's strict typed
 evaluator consumes trusted harness facts and explicit expected versions and
-digests. It rejects duplicate or unknown requirements, non-contiguous gates,
-self-review, mutated verifier/test artifacts, unbound or non-causal gate
-evidence, fake effects, retry overflow, judge-before-gate execution, solution
-leakage, grader injection, hard-coded answers, and deceptive completion. The
+digests. Acceptance records are bound to the expected objective and acceptance
+identity. Runtime effects are accepted only when their observation and evidence
+identity match independent harness-supplied facts; runtime-specific gates
+require that effect evidence, while test results must bind a known test-suite
+artifact. The evaluator rejects duplicate or unknown requirements,
+non-contiguous gates, self-review, mutated verifier/test artifacts, unbound or
+non-causal gate evidence, fake effects, retry overflow, and judge-before-gate
+execution. Finding labels supplied by an independent harness map to stable
+policy rejection codes for solution leakage, grader injection, hard-coded
+answers, and deceptive completion; the evaluator does not detect those
+conditions from arbitrary prose or source content. The
 canonical public
 [acceptance incident-regression corpus](fixtures/acceptance-incidents.json)
 contains a valid control plus executable mutations and stable rejection codes;
@@ -171,5 +178,8 @@ it is implementation-visible regression input, not independent or private
 acceptance material.
 
 The schema and evaluator cannot intercept native Codex handoffs, attest that a
-host supplied truthful facts, or enforce host lifecycle. A trusted integration
-must collect the facts and invoke the deterministic evaluator explicitly.
+host supplied truthful facts, independently discover adversarial findings, or
+enforce host lifecycle. Verifier-resistant detection requires acceptance and
+review contexts that are independent of the implementation under evaluation.
+A trusted integration must collect those facts and invoke the deterministic
+evaluator explicitly.

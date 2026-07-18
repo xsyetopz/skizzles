@@ -3,6 +3,7 @@ import { AgentContractPackageError } from "./contract.ts";
 import type { JsonValue } from "./json-value.ts";
 import {
   assertArray,
+  assertBoolean,
   assertExactKeys,
   assertInteger,
   assertRecord,
@@ -67,6 +68,10 @@ export interface EvaluationOptions {
     string,
     { kind: "implementation" | "test-suite" | "verifier"; sha256: string }
   >;
+  expectedEffects: ReadonlyMap<
+    string,
+    { observed: boolean; evidenceId: string; evidenceRef: string }
+  >;
 }
 
 export interface VersionedDigest {
@@ -115,6 +120,7 @@ export function parseEvaluationOptions(value: JsonValue): EvaluationOptions {
       "judge",
       "maxRetries",
       "expectedArtifacts",
+      "expectedEffects",
     ],
     "evaluation options",
   );
@@ -140,6 +146,26 @@ export function parseEvaluationOptions(value: JsonValue): EvaluationOptions {
   const expectedArtifacts = uniqueMap(
     artifactEntries,
     "expected artifact refs",
+  );
+  const expectedEffects = uniqueEffectMap(
+    assertArray(
+      options["expectedEffects"],
+      "evaluation options.expectedEffects",
+    ).map((item, index) => {
+      const label = `evaluation options.expectedEffects[${index}]`;
+      const entry = assertRecord(item, label);
+      assertExactKeys(
+        entry,
+        ["id", "observed", "evidenceId", "evidenceRef"],
+        label,
+      );
+      return {
+        id: nonempty(entry["id"], `${label}.id`),
+        observed: assertBoolean(entry["observed"], `${label}.observed`),
+        evidenceId: nonempty(entry["evidenceId"], `${label}.evidenceId`),
+        evidenceRef: nonempty(entry["evidenceRef"], `${label}.evidenceRef`),
+      };
+    }),
   );
   const maxRetries = assertInteger(
     options["maxRetries"],
@@ -167,6 +193,7 @@ export function parseEvaluationOptions(value: JsonValue): EvaluationOptions {
     judge: judgeIdentity(options["judge"]),
     maxRetries,
     expectedArtifacts,
+    expectedEffects,
   };
 }
 
@@ -234,6 +261,13 @@ export function instant(value: JsonValue | undefined, label: string): number {
   if (!Number.isFinite(parsed)) {
     throw new AgentContractPackageError(`${label} must be a valid instant.`);
   }
+  const canonical = new Date(parsed).toISOString();
+  const expected = text.includes(".") ? text : text.replace(/Z$/u, ".000Z");
+  if (canonical !== expected) {
+    throw new AgentContractPackageError(
+      `${label} must be a real canonical calendar instant.`,
+    );
+  }
   return parsed;
 }
 
@@ -296,6 +330,31 @@ function uniqueMap(
       reject("REFERENCE_DUPLICATE", `${label} must be unique`);
     }
     result.set(value.ref, { kind: value.kind, sha256: value.sha256 });
+  }
+  return result;
+}
+
+function uniqueEffectMap(
+  values: readonly {
+    id: string;
+    observed: boolean;
+    evidenceId: string;
+    evidenceRef: string;
+  }[],
+): EvaluationOptions["expectedEffects"] {
+  const result = new Map<
+    string,
+    { observed: boolean; evidenceId: string; evidenceRef: string }
+  >();
+  for (const value of values) {
+    if (result.has(value.id)) {
+      reject("REFERENCE_DUPLICATE", "expected effect ids must be unique");
+    }
+    result.set(value.id, {
+      observed: value.observed,
+      evidenceId: value.evidenceId,
+      evidenceRef: value.evidenceRef,
+    });
   }
   return result;
 }

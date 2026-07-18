@@ -60,9 +60,32 @@ describe("context envelope relational evaluation", () => {
     },
     {
       name: "property-mismatched model validation",
-      code: "LLM_TRANSFORM_UNVALIDATED",
+      code: "VALIDATOR_MISMATCH",
       mutate(input: JsonValue) {
         recordAt(propertyAt(input), "validation")["property"] = "other";
+      },
+    },
+    {
+      name: "property mismatch even when the value is untrusted",
+      code: "VALIDATOR_MISMATCH",
+      mutate(input: JsonValue) {
+        propertyAt(input)["trustClass"] = "untrusted";
+        recordAt(propertyAt(input), "validation")["property"] = "other";
+      },
+    },
+    {
+      name: "validation before the final transformation",
+      code: "CHRONOLOGY_INVALID",
+      mutate(input: JsonValue) {
+        recordAt(propertyAt(input), "validation")["validatedAt"] =
+          "2026-07-18T10:01:30Z";
+      },
+    },
+    {
+      name: "normalized invalid calendar date",
+      code: "INSTANCE_SHAPE",
+      mutate(input: JsonValue) {
+        propertyAt(input)["createdAt"] = "2026-02-31T10:00:00Z";
       },
     },
     {
@@ -235,6 +258,20 @@ describe("acceptance causal evaluation", () => {
     acceptanceMutation("author self approval", "SELF_REVIEW", (input) => {
       recordAt(input, "authors")["reviewer"] = "author-agent";
     }),
+    acceptanceMutation(
+      "unrelated objective replay",
+      "OBJECTIVE_MISMATCH",
+      (input) => {
+        recordAt(input, "objective")["digest"] = ZERO_DIGEST;
+      },
+    ),
+    acceptanceMutation(
+      "unrelated acceptance replay",
+      "ACCEPTANCE_MISMATCH",
+      (input) => {
+        recordAt(input, "acceptance")["digest"] = ZERO_DIGEST;
+      },
+    ),
     acceptanceMutation("verifier mutation", "VERIFIER_MUTATION", (input) => {
       recordAt(requiredValue(arrayAt(input, "artifacts")[1]), "")["sha256"] =
         ZERO_DIGEST;
@@ -302,6 +339,75 @@ describe("acceptance causal evaluation", () => {
     );
     firstGate(control.input)["evidenceRefs"] = ["evidence/verifier"];
     expect(rejectionCode(control)).toBe("EVIDENCE_NON_CAUSAL");
+  });
+
+  it("accepts a test-specific gate only with trusted test-suite results", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    firstGate(control.input)["proofKind"] = "test-result";
+    firstGate(control.input)["evidenceRefs"] = ["evidence/tests"];
+    expect(() => evaluateControl(control)).not.toThrow();
+  });
+
+  it("rejects a runtime gate backed only by a test result", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    firstGate(control.input)["evidenceRefs"] = ["evidence/tests"];
+    expect(rejectionCode(control)).toBe("EVIDENCE_NON_CAUSAL");
+  });
+
+  it("rejects test-result evidence bound to implementation", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    const evidence = recordAt(
+      requiredValue(arrayAt(control.input, "evidence")[1]),
+      "",
+    );
+    evidence["artifactRef"] = "artifacts/implementation.js";
+    evidence["sha256"] = "1".repeat(64);
+    expect(rejectionCode(control)).toBe("EVIDENCE_BINDING_INVALID");
+  });
+
+  it("rejects fabricated observed effects against trusted negative facts", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    control.options = {
+      ...control.options,
+      expectedEffects: new Map([
+        [
+          "effect/runtime",
+          {
+            observed: false,
+            evidenceId: "evidence/runtime",
+            evidenceRef: "evidence/runtime.json",
+          },
+        ],
+      ]),
+    };
+    expect(rejectionCode(control)).toBe("FAKE_EFFECT");
+  });
+
+  it("rejects runtime evidence whose external reference differs from trusted facts", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    recordAt(requiredValue(arrayAt(control.input, "evidence")[2]), "")["ref"] =
+      "evidence/fabricated.json";
+    expect(rejectionCode(control)).toBe("EVIDENCE_BINDING_INVALID");
   });
 
   for (const nonCausal of [

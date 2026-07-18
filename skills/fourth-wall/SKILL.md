@@ -172,10 +172,12 @@ JSON Schema validates document structure; it does not compare actor identities,
 recompute digests, consult current policy/model versions, or compare timestamps
 with a trusted clock. The repository's plugin composition checker pins the
 exact published schema bytes and runs strict typed evaluators with explicit
-clock and expected-version options. Those evaluators reject duplicate context
-properties, incomplete integrity coverage, stale data, unredacted secrets,
-self-review, reference mismatches, and model-transformed data presented as
-validated without property-matched deterministic evidence. The canonical
+clock and expected-version options. Context validation timestamps must follow
+retrieval and every recorded transformation, and canonical calendar timestamps
+are checked without date normalization. Those evaluators reject duplicate
+context properties, incomplete integrity coverage, stale data, unredacted
+secrets, self-review, reference mismatches, and model-transformed data presented
+as validated without property-matched deterministic evidence. The canonical
 public [trust-boundary incident-regression corpus](fixtures/trust-boundary-incidents.json)
 contains valid controls plus executable mutations and stable rejection codes.
 It is implementation-visible regression input, not independent or private

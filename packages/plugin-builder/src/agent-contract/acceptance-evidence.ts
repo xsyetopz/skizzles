@@ -39,17 +39,14 @@ export interface AcceptanceEvidence {
   outcome: "fail" | "missing" | "observed" | "pass";
 }
 
+export type CausalEvidenceKind = "runtime-effect" | "test-result";
+
 interface AcceptanceEffect {
   id: string;
   claimed: boolean;
   observed: boolean;
   evidenceRef: string;
 }
-
-const CAUSAL_EVIDENCE = new Set<EvidenceKind>([
-  "runtime-effect",
-  "test-result",
-]);
 
 export function parseAcceptanceEvidence(
   artifactValue: JsonValue | undefined,
@@ -62,8 +59,8 @@ export function parseAcceptanceEvidence(
 } {
   const artifacts = parseArtifacts(artifactValue, options);
   const evidence = parseEvidence(evidenceValue);
-  const effects = parseEffects(effectValue);
-  validateEvidenceBindings(artifacts, evidence, effects);
+  const effects = parseEffects(effectValue, options);
+  validateEvidenceBindings(artifacts, evidence, effects, options);
   return { artifacts, evidence };
 }
 
@@ -71,6 +68,7 @@ export function requireCausalGateEvidence(
   evidenceRefs: readonly string[],
   evidence: ReadonlyMap<string, AcceptanceEvidence>,
   gateLabel: string,
+  requiredKind: CausalEvidenceKind,
 ): void {
   const records = evidenceRefs.map((ref) => {
     const record = evidence.get(ref);
@@ -86,7 +84,7 @@ export function requireCausalGateEvidence(
   ) {
     reject("OBJECTIVE_GATE_FAILED", `${gateLabel} evidence did not pass`);
   }
-  if (records.some((record) => CAUSAL_EVIDENCE.has(record.kind))) {
+  if (records.some((record) => record.kind === requiredKind)) {
     return;
   }
   if (records.every((record) => record.kind === "process-exit")) {
@@ -214,6 +212,7 @@ function parseEvidence(
 
 function parseEffects(
   value: JsonValue | undefined,
+  options: EvaluationOptions,
 ): ReadonlyMap<string, AcceptanceEffect> {
   const items = assertArray(value, "acceptance.effects");
   const effects = items.map((item, index) => {
@@ -230,8 +229,15 @@ function parseEffects(
       observed: assertBoolean(effect["observed"], `${label}.observed`),
       evidenceRef: nonempty(effect["evidenceRef"], `${label}.evidenceRef`),
     };
-    if (parsed.claimed && !parsed.observed) {
-      reject("FAKE_EFFECT", "claimed runtime effect was not observed");
+    const expected = options.expectedEffects.get(parsed.id);
+    if (
+      expected === undefined ||
+      !parsed.claimed ||
+      !parsed.observed ||
+      !expected.observed ||
+      parsed.evidenceRef !== expected.evidenceId
+    ) {
+      reject("FAKE_EFFECT", "runtime effect does not match trusted facts");
     }
     return parsed;
   });
@@ -239,13 +245,20 @@ function parseEffects(
     effects.map((effect) => effect.id),
     "acceptance effect ids",
   );
-  return new Map(effects.map((effect) => [effect.id, effect] as const));
+  const result = new Map(effects.map((effect) => [effect.id, effect] as const));
+  for (const id of options.expectedEffects.keys()) {
+    if (!result.has(id)) {
+      reject("REFERENCE_MISSING", "trusted runtime effect is absent");
+    }
+  }
+  return result;
 }
 
 function validateEvidenceBindings(
   artifacts: ReadonlyMap<string, AcceptanceArtifact>,
   evidence: ReadonlyMap<string, AcceptanceEvidence>,
   effects: ReadonlyMap<string, AcceptanceEffect>,
+  options: EvaluationOptions,
 ): void {
   for (const record of evidence.values()) {
     if (record.kind === "artifact-hash" || record.kind === "test-result") {
@@ -255,6 +268,7 @@ function validateEvidenceBindings(
           : artifacts.get(record.artifactRef);
       if (
         artifact === undefined ||
+        (record.kind === "test-result" && artifact.kind !== "test-suite") ||
         record.effectRef !== null ||
         record.sha256 !== artifact.sha256 ||
         record.outcome !== "pass"
@@ -269,11 +283,19 @@ function validateEvidenceBindings(
     if (record.kind === "runtime-effect") {
       const effect =
         record.effectRef === null ? undefined : effects.get(record.effectRef);
+      const expected =
+        record.effectRef === null
+          ? undefined
+          : options.expectedEffects.get(record.effectRef);
       if (
         effect === undefined ||
+        expected === undefined ||
+        record.id !== expected.evidenceId ||
+        record.ref !== expected.evidenceRef ||
         record.artifactRef !== null ||
         record.sha256 !== null ||
         record.outcome !== "observed" ||
+        !expected.observed ||
         !effect.observed ||
         effect.evidenceRef !== record.id
       ) {

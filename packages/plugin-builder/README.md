@@ -23,7 +23,8 @@ provides the repository CLI.
 - `src/agent-contract/` pins exact published Fourth Wall and Completion
   Contract schema bytes, strictly parses/evaluates contract instances, executes
   every materialized public incident regression, rejects symlinked asset paths,
-  and proves staged copies are byte-identical to their canonical skill owners.
+  rejects multi-link contract files, and proves staged copies are byte-identical
+  to their canonical skill owners.
 - `test/` follows those capabilities; `plugin-package-fixture.ts` is the single
   canonical isolated-workspace fixture builder.
 
@@ -37,6 +38,10 @@ schema revision. Plugin-builder does not claim to be a general JSON Schema
 meta-validator. The typed evaluators own repository acceptance semantics that
 JSON Schema cannot express, using explicit clock/version/digest options and
 trusted harness facts.
+Acceptance evaluation binds objective, acceptance, artifact, and runtime-effect
+identities to those trusted facts. Supplied finding labels map to policy
+rejections; plugin-builder does not claim to discover leakage, injection, or
+deception from arbitrary content.
 
 Executable package sources are bundled to the four stable plugin entrypoints
 plus the installer CLI. The generated bundles are dependency-self-contained

@@ -6,6 +6,8 @@
   "additionalProperties": false,
   "required": [
     "schemaVersion",
+    "objective",
+    "acceptance",
     "requirements",
     "objectiveGates",
     "evaluationOrder",
@@ -20,7 +22,41 @@
     "authors"
   ],
   "properties": {
-    "schemaVersion": { "const": "2.0.0" },
+    "schemaVersion": {
+      "const": "2.0.0"
+    },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "digest"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "digest"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
     "requirements": {
       "type": "array",
       "minItems": 1,
@@ -29,8 +65,14 @@
         "additionalProperties": false,
         "required": ["id", "obligation"],
         "properties": {
-          "id": { "type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,31}$" },
-          "obligation": { "type": "string", "minLength": 1 }
+          "id": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9-]{1,31}$"
+          },
+          "obligation": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
@@ -44,25 +86,52 @@
           "order",
           "requirementId",
           "check",
+          "proofKind",
           "result",
           "evidenceRefs"
         ],
         "properties": {
-          "order": { "type": "integer", "minimum": 1 },
-          "requirementId": { "type": "string", "minLength": 1 },
-          "check": { "type": "string", "minLength": 1 },
-          "result": { "type": "string", "enum": ["pass", "fail"] },
+          "order": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "requirementId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "check": {
+            "type": "string",
+            "minLength": 1
+          },
+          "result": {
+            "type": "string",
+            "enum": ["pass", "fail"]
+          },
           "evidenceRefs": {
             "type": "array",
             "minItems": 1,
-            "items": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" }
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
+            }
+          },
+          "proofKind": {
+            "type": "string",
+            "enum": ["runtime-effect", "test-result"]
           }
         }
       }
     },
     "evaluationOrder": {
       "type": "array",
-      "prefixItems": [{ "const": "objectiveGates" }, { "const": "judge" }],
+      "prefixItems": [
+        {
+          "const": "objectiveGates"
+        },
+        {
+          "const": "judge"
+        }
+      ],
       "items": false,
       "minItems": 2,
       "maxItems": 2
@@ -75,12 +144,17 @@
         "additionalProperties": false,
         "required": ["ref", "kind", "sha256"],
         "properties": {
-          "ref": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
+          "ref": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
+          },
           "kind": {
             "type": "string",
             "enum": ["implementation", "verifier", "test-suite"]
           },
-          "sha256": { "$ref": "#/$defs/digest" }
+          "sha256": {
+            "$ref": "#/$defs/digest"
+          }
         }
       }
     },
@@ -100,7 +174,10 @@
           "outcome"
         ],
         "properties": {
-          "id": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
+          },
           "kind": {
             "type": "string",
             "enum": [
@@ -112,21 +189,41 @@
               "success-token"
             ]
           },
-          "ref": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
+          "ref": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
+          },
           "artifactRef": {
             "anyOf": [
-              { "type": "null" },
-              { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" }
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
+              }
             ]
           },
           "effectRef": {
             "anyOf": [
-              { "type": "null" },
-              { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" }
+              {
+                "type": "null"
+              },
+              {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
+              }
             ]
           },
           "sha256": {
-            "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/digest" }]
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/$defs/digest"
+              }
+            ]
           },
           "outcome": {
             "type": "string",
@@ -142,9 +239,16 @@
         "additionalProperties": false,
         "required": ["id", "claimed", "observed", "evidenceRef"],
         "properties": {
-          "id": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
-          "claimed": { "type": "boolean" },
-          "observed": { "type": "boolean" },
+          "id": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
+          },
+          "claimed": {
+            "type": "boolean"
+          },
+          "observed": {
+            "type": "boolean"
+          },
           "evidenceRef": {
             "type": "string",
             "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
@@ -170,7 +274,10 @@
               "deceptive-completion"
             ]
           },
-          "ref": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" }
+          "ref": {
+            "type": "string",
+            "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
+          }
         }
       }
     },
@@ -179,8 +286,15 @@
       "additionalProperties": false,
       "required": ["retries", "seed"],
       "properties": {
-        "retries": { "type": "integer", "minimum": 0, "maximum": 3 },
-        "seed": { "type": "integer", "minimum": 0 }
+        "retries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        "seed": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     },
     "policy": {
@@ -188,10 +302,20 @@
       "additionalProperties": false,
       "required": ["version", "digest", "modelVersion", "modelDigest"],
       "properties": {
-        "version": { "type": "string", "minLength": 1 },
-        "digest": { "$ref": "#/$defs/digest" },
-        "modelVersion": { "type": "string", "minLength": 1 },
-        "modelDigest": { "$ref": "#/$defs/digest" }
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "modelVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "modelDigest": {
+          "$ref": "#/$defs/digest"
+        }
       }
     },
     "validator": {
@@ -199,8 +323,14 @@
       "additionalProperties": false,
       "required": ["id", "version"],
       "properties": {
-        "id": { "type": "string", "minLength": 1 },
-        "version": { "type": "string", "minLength": 1 }
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "judge": {
@@ -214,11 +344,23 @@
         "decision"
       ],
       "properties": {
-        "enabled": { "type": "boolean" },
-        "version": { "type": "string", "minLength": 1 },
-        "promptSha256": { "$ref": "#/$defs/digest" },
-        "ranAfterObjectiveGates": { "type": "boolean" },
-        "decision": { "type": "string", "enum": ["not-run", "pass", "fail"] }
+        "enabled": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "promptSha256": {
+          "$ref": "#/$defs/digest"
+        },
+        "ranAfterObjectiveGates": {
+          "type": "boolean"
+        },
+        "decision": {
+          "type": "string",
+          "enum": ["not-run", "pass", "fail"]
+        }
       }
     },
     "authors": {
@@ -226,13 +368,24 @@
       "additionalProperties": false,
       "required": ["author", "reviewer", "selfReview"],
       "properties": {
-        "author": { "type": "string", "minLength": 1 },
-        "reviewer": { "type": "string", "minLength": 1 },
-        "selfReview": { "const": false }
+        "author": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reviewer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "selfReview": {
+          "const": false
+        }
       }
     }
   },
   "$defs": {
-    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
   }
 }

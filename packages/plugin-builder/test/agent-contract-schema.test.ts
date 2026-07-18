@@ -1,6 +1,13 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
-import { readFile, rename, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  link,
+  readFile,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   validateCanonicalAgentContracts,
@@ -159,6 +166,22 @@ describe("executable incident corpus composition", () => {
       "has a stale corpusVersion",
     );
   });
+
+  it("rejects a case substituted with another case's materialized input", async () => {
+    const root = await fixture();
+    await mutateJson(root, TRUST_CORPUS, (corpus) => {
+      const source = corpusCase(corpus, 5);
+      const replacement = corpusCase(corpus, 15);
+      replacement["mutations"] = JSON.parse(
+        JSON.stringify(source["mutations"]),
+      ) as unknown;
+      replacement["inputSha256"] = source["inputSha256"];
+    });
+
+    await expect(validateCanonicalAgentContracts(root)).rejects.toThrow(
+      "duplicates materialized input from FW-006",
+    );
+  });
 });
 
 describe("agent contract filesystem boundary", () => {
@@ -209,6 +232,44 @@ describe("agent contract filesystem boundary", () => {
     await expect(
       validateStagedAgentContracts(root, destination),
     ).rejects.toThrow("staged Fourth Wall schema uses a symlinked path");
+  });
+
+  it("rejects a canonical asset hardlink before destination mutation", async () => {
+    const root = await fixture();
+    const destination = join(root, "stage");
+    const marker = join(destination, "preserved.txt");
+    await Bun.write(marker, "preserved\n");
+    await link(
+      join(root, CONTEXT_SCHEMA),
+      join(root, `${CONTEXT_SCHEMA}.link`),
+    );
+
+    await expect(validateCanonicalAgentContracts(root)).rejects.toThrow(
+      "canonical Fourth Wall schema uses a hardlinked file",
+    );
+    await expect(stagePlugin(root, destination)).rejects.toThrow(
+      "must be a contained non-symlink regular file",
+    );
+    expect(await readFile(marker, "utf8")).toBe("preserved\n");
+  });
+
+  it("rejects a staged asset hardlink without mutating the stage", async () => {
+    const root = await fixture();
+    const destination = join(root, "stage");
+    await stagePlugin(root, destination);
+    const marker = join(destination, "preserved.txt");
+    await Bun.write(marker, "preserved\n");
+    await link(
+      join(destination, ACCEPTANCE_CORPUS),
+      join(destination, `${ACCEPTANCE_CORPUS}.link`),
+    );
+
+    await expect(
+      validateStagedAgentContracts(root, destination),
+    ).rejects.toThrow(
+      "staged Completion Contract corpus uses a hardlinked file",
+    );
+    expect(await readFile(marker, "utf8")).toBe("preserved\n");
   });
 
   it("rejects byte drift after safe staged reads", async () => {

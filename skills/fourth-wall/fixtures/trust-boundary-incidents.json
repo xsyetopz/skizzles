@@ -11,7 +11,10 @@
       "version": "model-2",
       "digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     },
-    "validator": { "id": "deterministic.context", "version": "2.0.0" },
+    "validator": {
+      "id": "deterministic.context",
+      "version": "2.0.0"
+    },
     "objective": {
       "id": "goal.architecture",
       "version": "2",
@@ -42,7 +45,8 @@
         "kind": "test-suite",
         "sha256": "3333333333333333333333333333333333333333333333333333333333333333"
       }
-    ]
+    ],
+    "expectedEffects": []
   },
   "controls": [
     {
@@ -54,8 +58,13 @@
         "properties": [
           {
             "name": "summary",
-            "value": { "summary": "validated context" },
-            "origin": { "kind": "repository", "ref": "docs/architecture.md" },
+            "value": {
+              "summary": "validated context"
+            },
+            "origin": {
+              "kind": "repository",
+              "ref": "docs/architecture.md"
+            },
             "createdAt": "2026-07-18T10:00:00Z",
             "retrievedAt": "2026-07-18T10:01:00Z",
             "trustClass": "validated",
@@ -80,7 +89,11 @@
               "expiresAt": "2026-07-19T12:00:00Z"
             },
             "sensitivity": "internal",
-            "redaction": { "required": false, "applied": false, "method": "" },
+            "redaction": {
+              "required": false,
+              "applied": false,
+              "method": ""
+            },
             "transformations": [
               {
                 "kind": "summarize",
@@ -174,7 +187,10 @@
       "control": "FW-CONTEXT-CONTROL",
       "mutations": [],
       "inputSha256": "b258f7be68c53851baf61d97ef9ff3581939b46ebf7cbd93d6ef6eaf2c945079",
-      "expected": { "decision": "accept", "code": null }
+      "expected": {
+        "decision": "accept",
+        "code": null
+      }
     },
     {
       "id": "FW-002",
@@ -183,7 +199,10 @@
       "control": "FW-HANDOFF-CONTROL",
       "mutations": [],
       "inputSha256": "13c494b0f53a6e4d2e13bb0a88e9c3383e5ea4c9da3ef1368b431a726b90b52f",
-      "expected": { "decision": "accept", "code": null }
+      "expected": {
+        "decision": "accept",
+        "code": null
+      }
     },
     {
       "id": "FW-003",
@@ -191,10 +210,17 @@
       "contract": "context-envelope",
       "control": "FW-CONTEXT-CONTROL",
       "mutations": [
-        { "op": "remove", "path": "/properties/0/objective", "value": null }
+        {
+          "op": "remove",
+          "path": "/properties/0/objective",
+          "value": null
+        }
       ],
       "inputSha256": "9488c130b403866499b6690439849a32255bb7746c32423a38c54c5de14fe1b6",
-      "expected": { "decision": "reject", "code": "INSTANCE_SHAPE" }
+      "expected": {
+        "decision": "reject",
+        "code": "INSTANCE_SHAPE"
+      }
     },
     {
       "id": "FW-004",
@@ -202,10 +228,17 @@
       "contract": "context-envelope",
       "control": "FW-CONTEXT-CONTROL",
       "mutations": [
-        { "op": "copy", "path": "/properties/0", "value": "/properties/1" }
+        {
+          "op": "copy",
+          "path": "/properties/0",
+          "value": "/properties/1"
+        }
       ],
       "inputSha256": "d2940983d4534cc18dac6318ed286aeeb1817b229adab2ee8865b904350c54af",
-      "expected": { "decision": "reject", "code": "CONTEXT_PROPERTY_DUPLICATE" }
+      "expected": {
+        "decision": "reject",
+        "code": "CONTEXT_PROPERTY_DUPLICATE"
+      }
     },
     {
       "id": "FW-005",
@@ -220,7 +253,10 @@
         }
       ],
       "inputSha256": "ede6421aea5a19ac170703adb149720c9c10beaca8083ca990579029e64ec5c9",
-      "expected": { "decision": "reject", "code": "INTEGRITY_MISMATCH" }
+      "expected": {
+        "decision": "reject",
+        "code": "INTEGRITY_MISMATCH"
+      }
     },
     {
       "id": "FW-006",
@@ -235,7 +271,10 @@
         }
       ],
       "inputSha256": "ea3a169861cd0ab23635d87697a458a993bf5f4836d41679fb2cabee578b1060",
-      "expected": { "decision": "reject", "code": "LLM_TRANSFORM_UNVALIDATED" }
+      "expected": {
+        "decision": "reject",
+        "code": "LLM_TRANSFORM_UNVALIDATED"
+      }
     },
     {
       "id": "FW-007",
@@ -250,7 +289,10 @@
         }
       ],
       "inputSha256": "23cb3327e6bb5317699df74227d2abbd356c3e38bf422b2329f7fc424d130ffc",
-      "expected": { "decision": "reject", "code": "CONTEXT_EXPIRED" }
+      "expected": {
+        "decision": "reject",
+        "code": "CONTEXT_EXPIRED"
+      }
     },
     {
       "id": "FW-008",
@@ -265,7 +307,10 @@
         }
       ],
       "inputSha256": "07698e592ac0356975a2f30dffb81d4d15742f2dfd353db4598cc878e08dc24a",
-      "expected": { "decision": "reject", "code": "SECRET_REDACTION_REQUIRED" }
+      "expected": {
+        "decision": "reject",
+        "code": "SECRET_REDACTION_REQUIRED"
+      }
     },
     {
       "id": "FW-009",
@@ -280,7 +325,10 @@
         }
       ],
       "inputSha256": "ab0f9a9f9ddd553dd25f46c269c3a298ecc56547eca85a49a742b9358e50c857",
-      "expected": { "decision": "reject", "code": "POLICY_MISMATCH" }
+      "expected": {
+        "decision": "reject",
+        "code": "POLICY_MISMATCH"
+      }
     },
     {
       "id": "FW-010",
@@ -295,7 +343,10 @@
         }
       ],
       "inputSha256": "0ff24ff26dd4a34512a4286b5df04c76682c447d9fff52540e6aea344f2d1fc7",
-      "expected": { "decision": "reject", "code": "MODEL_MISMATCH" }
+      "expected": {
+        "decision": "reject",
+        "code": "MODEL_MISMATCH"
+      }
     },
     {
       "id": "FW-011",
@@ -310,7 +361,10 @@
         }
       ],
       "inputSha256": "b8a7effde68eecb0fd301af935429de5670726f29c2b3dc00012d8898bab31b3",
-      "expected": { "decision": "reject", "code": "SELF_REVIEW" }
+      "expected": {
+        "decision": "reject",
+        "code": "SELF_REVIEW"
+      }
     },
     {
       "id": "FW-012",
@@ -325,7 +379,10 @@
         }
       ],
       "inputSha256": "b6ec3c428035b472e358f2b10b2f0f9767caec25772fac297ff4a23af7fa87a6",
-      "expected": { "decision": "reject", "code": "OBJECTIVE_MISMATCH" }
+      "expected": {
+        "decision": "reject",
+        "code": "OBJECTIVE_MISMATCH"
+      }
     },
     {
       "id": "FW-013",
@@ -340,7 +397,10 @@
         }
       ],
       "inputSha256": "ba908220f06e3868283aa397a542696c14c91e013492086257f051234a691b57",
-      "expected": { "decision": "reject", "code": "ACCEPTANCE_MISMATCH" }
+      "expected": {
+        "decision": "reject",
+        "code": "ACCEPTANCE_MISMATCH"
+      }
     },
     {
       "id": "FW-014",
@@ -355,7 +415,10 @@
         }
       ],
       "inputSha256": "fcd6eb45bf4de253ada12f3b0f61db0178b98bb49182b0b7ecca97be84c08e02",
-      "expected": { "decision": "reject", "code": "REFERENCE_MISSING" }
+      "expected": {
+        "decision": "reject",
+        "code": "REFERENCE_MISSING"
+      }
     },
     {
       "id": "FW-015",
@@ -370,7 +433,10 @@
         }
       ],
       "inputSha256": "e87f724318e2342b7ba3695e18482c6395ca392ec80e2ff5c758dc90fedf708d",
-      "expected": { "decision": "reject", "code": "VALIDATOR_MISMATCH" }
+      "expected": {
+        "decision": "reject",
+        "code": "VALIDATOR_MISMATCH"
+      }
     },
     {
       "id": "FW-016",
@@ -385,7 +451,10 @@
         }
       ],
       "inputSha256": "a4474c4d8ea0319b3750c4408bf1c3b688f26ef2b3e6059a72cbf1957284670b",
-      "expected": { "decision": "reject", "code": "LLM_TRANSFORM_UNVALIDATED" }
+      "expected": {
+        "decision": "reject",
+        "code": "VALIDATOR_MISMATCH"
+      }
     }
   ]
 }
