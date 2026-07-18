@@ -13,11 +13,16 @@ import {
   removeOwnedDirectory,
   writeOwnedJson,
 } from "./destination-artifacts.ts";
-import type { LockOwner, TransactionJournal } from "./destination-parent.ts";
+import type { LockOwner, TransactionJournal } from "./destination-journal.ts";
+import {
+  JOURNAL_FILE,
+  OWNER_FILE,
+  PROTOCOL_VERSION,
+  serialized,
+} from "./destination-journal.ts";
 import {
   cleanupOwnedParents,
   ensureDestinationParent,
-  serialized,
 } from "./destination-parent.ts";
 import type {
   DestinationSnapshot,
@@ -35,15 +40,14 @@ import {
 } from "./destination-path.ts";
 import {
   IncompleteRollbackError,
-  JOURNAL_FILE,
-  OWNER_FILE,
   PROMOTED_DIRECTORY_MODE,
-  PROTOCOL_VERSION,
+  preserveIncompleteRollback,
   processIdentity,
   readJournal,
   recoverStaleTransaction,
-  rollbackOwnedPromotion,
 } from "./destination-recovery.ts";
+
+const PRIVATE_DIRECTORY_MODE = 0o700;
 
 interface DestinationTransactionHooks {
   afterParentCreated?: (path: string) => Promise<void> | void;
@@ -51,6 +55,15 @@ interface DestinationTransactionHooks {
   beforeLockCleanup?: (path: string) => Promise<void> | void;
   beforeLockRemovalRename?: () => Promise<void> | void;
   checkpoint?: (checkpoint: Checkpoint) => Promise<void> | void;
+}
+
+interface PromotionRollback {
+  backup: OwnedDirectory | undefined;
+  original: DestinationSnapshot;
+  previousMoved: boolean;
+  stage: OwnedDirectory;
+  stageMoved: boolean;
+  target: TransactionTarget;
 }
 
 function currentOwner(): LockOwner {
@@ -69,6 +82,7 @@ function currentOwner(): LockOwner {
 type Checkpoint =
   | "owner-ready"
   | "initial-journal-ready"
+  | "stage-created"
   | "stage-journal-ready"
   | "backup-journal-ready"
   | "backup-ready"
@@ -100,11 +114,12 @@ async function replaceDirectoryTransaction(
         hooks.checkpoint?.("owner-ready"),
       );
       const original = await inspectDestination(target.destination);
-      const journal = initialJournal(original, PROTOCOL_VERSION);
+      const journal = initialJournal(original);
       await writeOwnedJson(lock, JOURNAL_FILE, journal, owner.token, () =>
         hooks.checkpoint?.("initial-journal-ready"),
       );
       stage = await createPrivateSibling(target, "stage", owner.token);
+      await hooks.checkpoint?.("stage-created");
       journal.stage = serialized(stage.identity);
       await writeOwnedJson(lock, JOURNAL_FILE, journal, owner.token, () =>
         hooks.checkpoint?.("stage-journal-ready"),
@@ -176,9 +191,7 @@ async function promote(
           await assertPathAbsent(target.destination);
           await rename(join(backup.path, "previous"), target.destination);
           previousMoved = false;
-        } catch {
-          // The recovery journal retains both paths when restoration races.
-        }
+        } catch {}
         throw changedDestinationError();
       }
       await hooks.checkpoint?.("backup-renamed");
@@ -264,20 +277,24 @@ async function finishCommitted(
   await cleanupOwned(lock, undefined, hooks.beforeLockRemovalRename);
 }
 
-async function preserveIncompleteRollback(
-  lock: OwnedDirectory,
-  owner: LockOwner,
-  journal: TransactionJournal,
-  cause: unknown,
-): Promise<IncompleteRollbackError> {
-  journal.state = "cleanup-pending";
-  await writeOwnedJson(lock, JOURNAL_FILE, journal, owner.token).catch(
-    () => undefined,
-  );
-  return new IncompleteRollbackError(
-    "Plugin staging promotion failed and rollback could not complete safely.",
-    { cause },
-  );
+async function rollbackOwnedPromotion(rollback: PromotionRollback) {
+  const { backup, original, previousMoved, stage, stageMoved, target } =
+    rollback;
+  if (stageMoved) {
+    await assertPathIdentity(target.destination, stage.identity);
+    await rename(target.destination, stage.path);
+    stage.present = true;
+    await assertOwnedDirectory(stage, "private construction directory");
+    await chmod(stage.path, PRIVATE_DIRECTORY_MODE);
+    await assertOwnedDirectory(stage, "private construction directory");
+  }
+  if (previousMoved && backup !== undefined) {
+    await assertPathAbsent(target.destination);
+    const previous = join(backup.path, "previous");
+    await assertPathIdentity(previous, original.identity);
+    await rename(previous, target.destination);
+  }
+  await cleanupOwned(backup, undefined);
 }
 
 export { replaceDirectoryTransaction };

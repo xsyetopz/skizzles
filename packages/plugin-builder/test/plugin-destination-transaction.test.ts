@@ -24,11 +24,10 @@ import { PackagingError, stagePlugin } from "../src/plugin-package.ts";
 import { createTestWorkspace, write } from "./plugin-package-fixture.ts";
 
 const PRIVATE_MODE = 0o700;
-const PRESERVED_MODE = 0o751;
 const PERMISSION_BITS = 0o777;
 const ARTIFACT_PREFIX = ".skizzles-package-";
 const PRESERVED_BYTES = Buffer.from(
-  "\u0000\u0001\u0002\u007f\u0080\u00ff",
+  "\0\u0001\u0002\u007f\u0080\u00ff",
   "latin1",
 );
 const { cleanup, fixture, temporaryRoots } = createTestWorkspace();
@@ -39,7 +38,7 @@ describe("plugin destination transactions", () => {
     const root = await fixture();
     const destination = join(root, "existing-plugin");
     await mkdir(destination);
-    await chmod(destination, PRESERVED_MODE);
+    await chmod(destination, 0o751);
     await writeFile(join(destination, "preserved.bin"), PRESERVED_BYTES);
     await write(root, "skills/example/late-stage.unknown", "neutral\n");
     const originalMode = (await stat(destination)).mode & PERMISSION_BITS;
@@ -220,15 +219,17 @@ describe("plugin destination transactions", () => {
         },
       ),
     ).resolves.toBeUndefined();
-    expect(await Bun.file(join(destination, "new")).exists()).toBe(true);
     const artifacts = await transactionArtifacts(parent);
     expect(artifacts.some((name) => name.includes("-backup-"))).toBe(true);
     expect(artifacts.some((name) => name.includes("-cleanup-"))).toBe(true);
+    expect(await observeRecoveredDestination(destination)).toBe("new");
+    expect(await transactionArtifacts(parent)).toEqual([]);
   });
 
   it("recovers every promotion crash point and a stale unpublished lock", async () => {
     for (const [point, expected, exitCode] of [
       ["construction", "old", 72],
+      ["stage-created", "old", 71],
       ["backup-ready", "old", 71],
       ["backup-renamed", "old", 71],
       ["destination-ready", "old", 71],

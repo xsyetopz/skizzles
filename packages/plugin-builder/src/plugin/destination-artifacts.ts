@@ -2,8 +2,13 @@ import { randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PackagingError } from "./contract.ts";
-import type { SerializedIdentity } from "./destination-parent.ts";
-import { isNodeError, lstatBigInt, matches } from "./destination-parent.ts";
+import type { SerializedIdentity } from "./destination-journal.ts";
+import {
+  matches,
+  parsePrivateJson,
+  temporaryName,
+} from "./destination-journal.ts";
+import { isNodeError, lstatBigInt } from "./destination-parent.ts";
 import type { PathSnapshot, TransactionTarget } from "./destination-path.ts";
 import {
   identity,
@@ -15,10 +20,6 @@ import {
 } from "./destination-path.ts";
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
-
-function temporaryName(name: string, token: string): string {
-  return `.${name}.${token}.tmp`;
-}
 
 interface OwnedDirectory extends PathSnapshot {
   present: boolean;
@@ -118,7 +119,7 @@ async function readOwnedJson(
   name: string,
 ): Promise<unknown> {
   await assertOwnedDirectory(owned, "private artifact");
-  return JSON.parse(await readFile(join(owned.path, name), "utf8"));
+  return parsePrivateJson(await readFile(join(owned.path, name), "utf8"));
 }
 
 async function writeOwnedJson(

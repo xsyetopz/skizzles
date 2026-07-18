@@ -10,12 +10,12 @@ import {
   sep,
 } from "node:path";
 import { PackagingError } from "./contract.ts";
+import type { TransactionJournal } from "./destination-journal.ts";
+import { PROTOCOL_VERSION, serialized } from "./destination-journal.ts";
 import {
   assertLexicalAncestors,
   isNodeError,
   lstatBigInt,
-  serialized,
-  type TransactionJournal,
   unsafeDestinationAncestorError,
 } from "./destination-parent.ts";
 
@@ -92,7 +92,6 @@ async function snapshotAncestors(parent: string): Promise<PathSnapshot[]> {
     }
     let metadata: Awaited<ReturnType<typeof lstatBigInt>>;
     try {
-      // biome-ignore lint/performance/noAwaitInLoops: ordered ancestor inspection is the destination containment boundary.
       metadata = await lstatBigInt(current);
     } catch (error) {
       throw unsafeDestinationAncestorError(error);
@@ -111,7 +110,6 @@ async function revalidateAncestors(
   for (const snapshot of ancestors) {
     let metadata: Awaited<ReturnType<typeof lstatBigInt>>;
     try {
-      // biome-ignore lint/performance/noAwaitInLoops: ordered identity checks fail closed before pathname mutation.
       metadata = await lstatBigInt(snapshot.path);
     } catch (error) {
       throw changedAncestorError(error);
@@ -224,21 +222,6 @@ function changedDestinationError(): PackagingError {
   );
 }
 
-function initialJournal(
-  original: DestinationSnapshot,
-  version: number,
-): TransactionJournal {
-  const journal: TransactionJournal = {
-    version,
-    state: "active",
-    original: { present: original.present },
-  };
-  if (original.identity !== undefined) {
-    journal.original.identity = serialized(original.identity);
-  }
-  return journal;
-}
-
 function transactionLockPath(target: TransactionTarget): string {
   return join(target.parent, `.skizzles-package-${target.key}.lock`);
 }
@@ -254,10 +237,15 @@ function privateSiblingPath(
   );
 }
 
-function changedRecoveryDestinationError(): PackagingError {
-  return new PackagingError(
-    "Plugin staging recovery found a changed destination.",
-  );
+function initialJournal(original: DestinationSnapshot): TransactionJournal {
+  return {
+    version: PROTOCOL_VERSION,
+    state: "active",
+    original:
+      original.identity === undefined
+        ? { present: false }
+        : { identity: serialized(original.identity), present: true },
+  };
 }
 
 async function restoreQuarantinedPath(
@@ -267,9 +255,13 @@ async function restoreQuarantinedPath(
   try {
     await assertPathAbsent(original);
     await rename(quarantine, original);
-  } catch {
-    // Both paths are retained when restoration cannot be proven safe.
-  }
+  } catch {}
+}
+
+function changedRecoveryDestinationError(): PackagingError {
+  return new PackagingError(
+    "Plugin staging recovery found a changed destination.",
+  );
 }
 
 export type {

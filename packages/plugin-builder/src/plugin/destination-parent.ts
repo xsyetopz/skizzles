@@ -19,34 +19,11 @@ import {
 import { PackagingError } from "./contract.ts";
 
 const CREATED_PARENT_MODE = 0o755;
-const DECIMAL_IDENTITY_PATTERN = /^(?:0|[1-9][0-9]*)$/u;
 
 interface OwnedParent {
   dev: bigint;
   ino: bigint;
   path: string;
-}
-
-interface LockOwner {
-  pid: number;
-  processStartIdentity: string;
-  token: string;
-  version: number;
-}
-
-interface SerializedIdentity {
-  dev: string;
-  ino: string;
-}
-
-type JournalState = "active" | "committed" | "cleanup-pending";
-
-interface TransactionJournal {
-  backup?: SerializedIdentity;
-  original: { identity?: SerializedIdentity; present: boolean };
-  stage?: SerializedIdentity;
-  state: JournalState;
-  version: number;
 }
 
 async function ensureDestinationParent(
@@ -65,7 +42,6 @@ async function ensureDestinationParent(
   try {
     const missing: string[] = [];
     let existing = parent;
-    // biome-ignore lint/performance/noAwaitInLoops: discovery must stop at the first verified existing ancestor.
     while (!(await pathExists(existing))) {
       missing.push(existing);
       const ancestor = dirname(existing);
@@ -77,7 +53,6 @@ async function ensureDestinationParent(
     for (const lexicalPath of missing.reverse()) {
       physicalParent = join(physicalParent, basename(lexicalPath));
       try {
-        // biome-ignore lint/performance/noAwaitInLoops: parents are created and verified in containment order.
         await mkdir(physicalParent, { mode: CREATED_PARENT_MODE });
         const created = await lstatBigInt(physicalParent);
         owned.push({
@@ -109,7 +84,6 @@ async function cleanupOwnedParents(
   parents: readonly OwnedParent[],
 ): Promise<void> {
   for (const parent of [...parents].reverse()) {
-    // biome-ignore lint/performance/noAwaitInLoops: owned parents are released leaf-first.
     await cleanupOwnedParent(parent);
   }
 }
@@ -166,7 +140,6 @@ async function assertLexicalAncestors(parent: string): Promise<void> {
     current = join(current, component);
     let metadata: Awaited<ReturnType<typeof lstatBigInt>>;
     try {
-      // biome-ignore lint/performance/noAwaitInLoops: every caller-supplied component is classified before canonicalization.
       metadata = await lstatBigInt(current);
     } catch (error) {
       throw unsafeDestinationAncestorError(error);
@@ -203,97 +176,20 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
-function serialized(value: { dev: bigint; ino: bigint }): SerializedIdentity {
-  return { dev: String(value.dev), ino: String(value.ino) };
-}
-
-function deserialize(value: SerializedIdentity | undefined) {
-  if (value === undefined) return;
-  return { dev: BigInt(value.dev), ino: BigInt(value.ino) };
-}
-
-function matches(
-  actual: { dev: bigint; ino: bigint } | undefined,
-  expected: SerializedIdentity | undefined,
-): boolean {
-  return (
-    actual !== undefined &&
-    expected !== undefined &&
-    String(actual.dev) === expected.dev &&
-    String(actual.ino) === expected.ino
+const lockedDestinationError = () =>
+  new PackagingError(
+    "Plugin staging destination is locked by another operation.",
   );
-}
 
 const lstatBigInt = (path: string) => lstat(path, { bigint: true });
 
-function parseJournal(value: unknown, version: number): TransactionJournal {
-  const record = requiredRecord(value);
-  const original = requiredRecord(record["original"]);
-  const state = record["state"];
-  if (
-    Object.keys(record).length !==
-      3 + Number("backup" in record) + Number("stage" in record) ||
-    Object.keys(original).length !== 1 + Number("identity" in original) ||
-    record["version"] !== version ||
-    typeof original["present"] !== "boolean" ||
-    !isJournalState(state)
-  ) {
-    throw new Error("invalid journal");
-  }
-  const journal: TransactionJournal = {
-    version,
-    state,
-    original: { present: original["present"] },
-  };
-  const prior = parseIdentity(original["identity"]);
-  const stage = parseIdentity(record["stage"]);
-  const backup = parseIdentity(record["backup"]);
-  if (prior !== undefined) journal.original.identity = prior;
-  if (stage !== undefined) journal.stage = stage;
-  if (backup !== undefined) journal.backup = backup;
-  return journal;
-}
-
-function parseIdentity(value: unknown): SerializedIdentity | undefined {
-  if (value === undefined) return;
-  const record = requiredRecord(value);
-  if (
-    Object.keys(record).length !== 2 ||
-    typeof record["dev"] !== "string" ||
-    typeof record["ino"] !== "string" ||
-    !DECIMAL_IDENTITY_PATTERN.test(record["dev"]) ||
-    !DECIMAL_IDENTITY_PATTERN.test(record["ino"])
-  ) {
-    throw new Error("invalid identity");
-  }
-  return { dev: record["dev"], ino: record["ino"] };
-}
-
-function requiredRecord(value: unknown): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("invalid record");
-  }
-  return Object.fromEntries(Object.entries(value));
-}
-
-function isJournalState(value: unknown): value is JournalState {
-  return (
-    typeof value === "string" &&
-    ["active", "committed", "cleanup-pending"].includes(value)
-  );
-}
-
-export type { LockOwner, OwnedParent, SerializedIdentity, TransactionJournal };
+export type { OwnedParent };
 export {
   assertLexicalAncestors,
   cleanupOwnedParents,
-  deserialize,
   ensureDestinationParent,
   isNodeError,
+  lockedDestinationError,
   lstatBigInt,
-  matches,
-  parseJournal,
-  requiredRecord,
-  serialized,
   unsafeDestinationAncestorError,
 };

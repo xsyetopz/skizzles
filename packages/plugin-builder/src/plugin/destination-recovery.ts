@@ -11,22 +11,22 @@ import {
   quarantineTransactionLock,
   readOwnedJson,
   recoverableArtifact,
-  temporaryName,
+  writeOwnedJson,
 } from "./destination-artifacts.ts";
-import type { LockOwner, TransactionJournal } from "./destination-parent.ts";
+import type { LockOwner, TransactionJournal } from "./destination-journal.ts";
 import {
   deserialize,
-  lstatBigInt,
+  JOURNAL_FILE,
   matches,
+  OWNER_FILE,
   parseJournal,
-  requiredRecord,
-} from "./destination-parent.ts";
-import type {
-  DestinationSnapshot,
-  TransactionTarget,
-} from "./destination-path.ts";
+  parseOwner,
+  temporaryName,
+  UUID_PATTERN,
+} from "./destination-journal.ts";
+import { lockedDestinationError, lstatBigInt } from "./destination-parent.ts";
+import type { TransactionTarget } from "./destination-path.ts";
 import {
-  assertPathAbsent,
   assertPathIdentity,
   changedRecoveryDestinationError,
   inspectDestination,
@@ -34,35 +34,13 @@ import {
   transactionLockPath,
 } from "./destination-path.ts";
 
-const OWNER_FILE = "owner.json";
-const JOURNAL_FILE = "journal.json";
-const PROTOCOL_VERSION = 1;
-const PRIVATE_DIRECTORY_MODE = 0o700;
 const PROMOTED_DIRECTORY_MODE = 0o755;
 const INCOMPLETE_LOCK_STALE_MS = 30_000;
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 class IncompleteRollbackError extends PackagingError {}
 
-interface PromotionRollback {
-  backup: OwnedDirectory | undefined;
-  original: DestinationSnapshot;
-  previousMoved: boolean;
-  stage: OwnedDirectory;
-  stageMoved: boolean;
-  target: TransactionTarget;
-}
-
-function ownerIsActive(owner: LockOwner): boolean {
-  return processIdentity(owner.pid) === owner.processStartIdentity;
-}
-
-function lockedDestinationError(): PackagingError {
-  return new PackagingError(
-    "Plugin staging destination is locked by another operation.",
-  );
-}
+const ownerIsActive = (owner: LockOwner) =>
+  processIdentity(owner.pid) === owner.processStartIdentity;
 
 function processIdentity(pid: number): string | undefined {
   const result = Bun.spawnSync(["ps", "-o", "lstart=", "-p", String(pid)], {
@@ -75,9 +53,8 @@ function processIdentity(pid: number): string | undefined {
   return value === "" ? undefined : value;
 }
 
-async function recoverStaleTransaction(
-  target: TransactionTarget,
-): Promise<void> {
+async function recoverStaleTransaction(target: TransactionTarget) {
+  await recoverDeferredCleanup(target);
   const lock = await inspectOwnedDirectory(transactionLockPath(target));
   if (lock === undefined) return;
   let owner: LockOwner;
@@ -91,7 +68,14 @@ async function recoverStaleTransaction(
   try {
     journal = await readJournal(lock, owner.token);
   } catch {
-    if (ownerIsActive(owner)) throw lockedDestinationError();
+    const entries = await readdir(lock.path);
+    if (
+      ownerIsActive(owner) ||
+      entries.includes(JOURNAL_FILE) ||
+      entries.includes(temporaryName(JOURNAL_FILE, owner.token))
+    ) {
+      throw lockedDestinationError();
+    }
     await recoverMissingJournal(target, lock, owner);
     return;
   }
@@ -99,6 +83,32 @@ async function recoverStaleTransaction(
     throw lockedDestinationError();
   }
   await recoverJournal(target, lock, owner, journal);
+}
+
+async function recoverDeferredCleanup(target: TransactionTarget) {
+  const prefix = `.skizzles-package-${target.key}-cleanup-`;
+  for (const name of await readdir(target.parent)) {
+    const token = name.startsWith(prefix) ? name.slice(prefix.length) : "";
+    if (!UUID_PATTERN.test(token)) continue;
+    const lock = await inspectOwnedDirectory(join(target.parent, name));
+    if (
+      lock === undefined ||
+      ((await lstatBigInt(lock.path)).mode & 0o777n) !== 0o700n
+    ) {
+      continue;
+    }
+    let owner: LockOwner;
+    let journal: TransactionJournal;
+    try {
+      owner = await readOwner(lock);
+      journal = await readJournal(lock, owner.token);
+    } catch {
+      continue;
+    }
+    if (owner.token === token && journal.state === "cleanup-pending") {
+      await recoverJournal(target, lock, owner, journal);
+    }
+  }
 }
 
 async function recoverUnknownLock(
@@ -148,15 +158,19 @@ async function recoverJournal(
   owner: LockOwner,
   journal: TransactionJournal,
 ): Promise<void> {
-  const stage = await recoverableArtifact(
-    target,
-    "stage",
-    owner.token,
-    journal.stage,
-  );
+  if (
+    journal.stage === undefined &&
+    (journal.state !== "active" || journal.backup !== undefined)
+  ) {
+    throw lockedDestinationError();
+  }
+  const stage =
+    journal.stage === undefined
+      ? await inspectUnrecordedEmptyArtifact(target, "stage", owner.token)
+      : await recoverableArtifact(target, "stage", owner.token, journal.stage);
   const backup =
     journal.backup === undefined
-      ? await inspectUnrecordedEmptyBackup(target, owner.token)
+      ? await inspectUnrecordedEmptyArtifact(target, "backup", owner.token)
       : await recoverableArtifact(
           target,
           "backup",
@@ -184,51 +198,31 @@ async function recoverJournal(
   await cleanupOwned(stage, undefined);
   const backupFailure = await cleanupOwned(backup, undefined);
   if (backupFailure !== undefined) {
-    await quarantineTransactionLock(target, lock, owner.token);
+    if (!(await quarantineTransactionLock(target, lock, owner.token))) {
+      throw lockedDestinationError();
+    }
     return;
   }
   await cleanupOwned(lock, undefined);
 }
 
-async function rollbackOwnedPromotion(
-  rollback: PromotionRollback,
-): Promise<void> {
-  const { backup, original, previousMoved, stage, stageMoved, target } =
-    rollback;
-  if (stageMoved) {
-    await assertPathIdentity(target.destination, stage.identity);
-    await rename(target.destination, stage.path);
-    stage.present = true;
-    await assertOwnedDirectory(stage, "private construction directory");
-    await chmod(stage.path, PRIVATE_DIRECTORY_MODE);
-    await assertOwnedDirectory(stage, "private construction directory");
-  }
-  if (previousMoved && backup !== undefined) {
-    await assertPathAbsent(target.destination);
-    const previous = join(backup.path, "previous");
-    await assertPathIdentity(previous, original.identity);
-    await rename(previous, target.destination);
-  }
-  await cleanupOwned(backup, undefined);
-}
-
 async function readOwner(lock: OwnedDirectory): Promise<LockOwner> {
-  try {
+  const entries = await readdir(lock.path);
+  if (entries.includes(OWNER_FILE)) {
     return parseOwner(await readOwnedJson(lock, OWNER_FILE));
-  } catch {
-    const prefix = `.${OWNER_FILE}.`;
-    const candidates = (await readdir(lock.path)).filter(
-      (name) => name.startsWith(prefix) && name.endsWith(".tmp"),
-    );
-    if (candidates.length !== 1) throw new Error("invalid owner publication");
-    const candidate = candidates[0];
-    if (candidate === undefined) throw new Error("missing owner publication");
-    const owner = parseOwner(await readOwnedJson(lock, candidate));
-    if (candidate !== temporaryName(OWNER_FILE, owner.token)) {
-      throw new Error("owner publication token mismatch");
-    }
-    return owner;
   }
+  const prefix = `.${OWNER_FILE}.`;
+  const candidates = entries.filter(
+    (name) => name.startsWith(prefix) && name.endsWith(".tmp"),
+  );
+  if (candidates.length !== 1) throw new Error("invalid owner publication");
+  const candidate = candidates[0];
+  if (candidate === undefined) throw new Error("missing owner publication");
+  const owner = parseOwner(await readOwnedJson(lock, candidate));
+  if (candidate !== temporaryName(OWNER_FILE, owner.token)) {
+    throw new Error("owner publication token mismatch");
+  }
+  return owner;
 }
 
 async function readJournal(
@@ -238,62 +232,51 @@ async function readJournal(
   const temporary = temporaryName(JOURNAL_FILE, token);
   if ((await readdir(lock.path)).includes(temporary)) {
     try {
-      return parseJournal(
-        await readOwnedJson(lock, temporary),
-        PROTOCOL_VERSION,
-      );
-    } catch {
-      // A partial next publication leaves the last atomic journal authoritative.
-    }
+      return parseJournal(await readOwnedJson(lock, temporary));
+    } catch {}
   }
-  return parseJournal(
-    await readOwnedJson(lock, JOURNAL_FILE),
-    PROTOCOL_VERSION,
-  );
+  return parseJournal(await readOwnedJson(lock, JOURNAL_FILE));
 }
 
-async function inspectUnrecordedEmptyBackup(
+async function inspectUnrecordedEmptyArtifact(
   target: TransactionTarget,
+  kind: "backup" | "stage",
   token: string,
 ): Promise<OwnedDirectory | undefined> {
-  const backup = await inspectOwnedDirectory(
-    privateSiblingPath(target, "backup", token),
+  const artifact = await inspectOwnedDirectory(
+    privateSiblingPath(target, kind, token),
   );
-  if (backup !== undefined && (await readdir(backup.path)).length > 0) {
+  if (
+    artifact !== undefined &&
+    ((await readdir(artifact.path)).length > 0 ||
+      ((await lstatBigInt(artifact.path)).mode & 0o777n) !== 0o700n)
+  ) {
     throw lockedDestinationError();
   }
-  return backup;
+  return artifact;
 }
 
-function parseOwner(value: unknown): LockOwner {
-  const record = requiredRecord(value);
-  if (
-    Object.keys(record).length !== 4 ||
-    record["version"] !== PROTOCOL_VERSION ||
-    !Number.isSafeInteger(record["pid"]) ||
-    typeof record["processStartIdentity"] !== "string" ||
-    typeof record["token"] !== "string" ||
-    !UUID_PATTERN.test(record["token"])
-  ) {
-    throw new Error("invalid owner");
-  }
-  return {
-    version: PROTOCOL_VERSION,
-    pid: Number(record["pid"]),
-    processStartIdentity: record["processStartIdentity"],
-    token: record["token"],
-  };
+async function preserveIncompleteRollback(
+  lock: OwnedDirectory,
+  owner: LockOwner,
+  journal: TransactionJournal,
+  cause: unknown,
+): Promise<IncompleteRollbackError> {
+  journal.state = "cleanup-pending";
+  await writeOwnedJson(lock, JOURNAL_FILE, journal, owner.token).catch(
+    () => undefined,
+  );
+  return new IncompleteRollbackError(
+    "Plugin staging promotion failed and rollback could not complete safely.",
+    { cause },
+  );
 }
 
-export type { PromotionRollback };
 export {
   IncompleteRollbackError,
-  JOURNAL_FILE,
-  OWNER_FILE,
   PROMOTED_DIRECTORY_MODE,
-  PROTOCOL_VERSION,
+  preserveIncompleteRollback,
   processIdentity,
   readJournal,
   recoverStaleTransaction,
-  rollbackOwnedPromotion,
 };

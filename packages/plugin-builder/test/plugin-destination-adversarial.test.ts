@@ -17,7 +17,7 @@ import {
   matches,
   parseJournal,
   serialized,
-} from "../src/plugin/destination-parent.ts";
+} from "../src/plugin/destination-journal.ts";
 import {
   inspectTarget,
   transactionLockPath,
@@ -49,14 +49,11 @@ describe("plugin destination transaction adversarial recovery", () => {
       false,
     );
     expect(() =>
-      parseJournal(
-        {
-          original: { identity: { dev: "01", ino: "2" }, present: true },
-          state: "active",
-          version: 1,
-        },
-        1,
-      ),
+      parseJournal({
+        original: { identity: { dev: "01", ino: "2" }, present: true },
+        state: "active",
+        version: 1,
+      }),
     ).toThrow("invalid identity");
   });
 
@@ -135,7 +132,7 @@ describe("plugin destination transaction adversarial recovery", () => {
     }
   }, 20_000);
 
-  it("rejects a traversal-shaped owner token before deriving artifact paths", async () => {
+  it("rejects escaped duplicate owner keys before deriving artifact paths", async () => {
     const parent = await temporaryRoot("skizzles-invalid-owner-token-");
     const destination = join(parent, "plugin");
     const outside = join(parent, "outside-marker");
@@ -144,13 +141,31 @@ describe("plugin destination transaction adversarial recovery", () => {
     await mkdir(lock, { mode: 0o700 });
     await writeFile(
       join(lock, "owner.json"),
-      `${JSON.stringify({ version: 1, pid: 999_999_999, processStartIdentity: "dead", token: "../../outside-marker" })}\n`,
+      '{"version":1,"pid":999999999,"processStartIdentity":"dead","token":"../../outside-marker","\\u0074oken":"00000000-0000-4000-8000-000000000000"}\n',
+    );
+    await writeFile(
+      join(lock, ".owner.json.00000000-0000-4000-8000-000000000000.tmp"),
+      '{"version":1,"pid":999999999,"processStartIdentity":"dead","token":"00000000-0000-4000-8000-000000000000"}\n',
     );
 
     await expect(
       replaceDirectoryTransaction(destination, () => Promise.resolve()),
     ).rejects.toThrow("locked by another operation");
     expect(await readFile(outside, "utf8")).toBe("preserved\n");
+
+    await rm(lock, { recursive: true });
+    await mkdir(lock, { mode: 0o700 });
+    await writeFile(
+      join(lock, "owner.json"),
+      '{"version":1,"pid":999999999,"processStartIdentity":"dead","token":"00000000-0000-4000-8000-000000000000"}\n',
+    );
+    await writeFile(
+      join(lock, "journal.json"),
+      '{"version":1,"state":"committed","\\u0073tate":"active","original":{"present":false}}\n',
+    );
+    await expect(
+      replaceDirectoryTransaction(destination, () => Promise.resolve()),
+    ).rejects.toThrow("locked by another operation");
   });
 
   it("restores a replacement swapped after cleanup identity validation", async () => {
