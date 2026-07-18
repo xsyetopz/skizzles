@@ -20,7 +20,10 @@ output, publication, and live activation are distinct decisions.
 1. Run `bun run plugin:check` and record expected pre-regeneration drift.
 2. Run `bun run plugin:build`, then `bun run plugin:check`.
 3. Run `bun run verify` and reproduce it from a clean checkout.
-4. Inspect source, lockfile, and generated diffs for the intended version only.
+4. From a full-history checkout, run `bun run security:check` exactly once; this
+   networked gate is separate from `verify` and fails closed on acquisition,
+   checksum, workflow, tree, or history-scan failure.
+5. Inspect source, lockfile, and generated diffs for the intended version only.
 
 ## Release gate
 

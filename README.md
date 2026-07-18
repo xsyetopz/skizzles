@@ -95,7 +95,17 @@ bun run test            # canonical package-local suites only
 bun run packages:build  # every declared package build
 bun run plugin:check    # deterministic generated-plugin parity
 bun run verify          # complete aggregate gate
+bun run security:check  # networked workflow and credential gate
 ```
 
 Change canonical package inputs, run `bun run plugin:build`, and review the
 generated diff. Never repair `plugins/skizzles/` directly.
+
+`verify` does not acquire these security binaries and remains independent of
+their GitHub release-host availability. CI and release acceptance additionally
+run `security:check` exactly once. That command downloads
+repository-pinned actionlint 1.7.12, ShellCheck 0.11.0, and Gitleaks 8.30.1 release
+archives into an owner-only temporary directory, checks their SHA-256 digests and
+reported versions, validates the current Actions workflow, and scans both the
+working tree and complete Git history. Acquisition or GitHub availability failure
+fails closed; no tool cache or raw credential report is retained.

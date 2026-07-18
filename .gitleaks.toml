@@ -1,0 +1,21 @@
+title = "Skizzles repository credential policy"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Exact fake canary used by the usage-analyzer privacy-boundary test"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = ['''^sk-privacy-canary-4f9e2d7c$''']
+
+[[rules]]
+id = "skizzles-privacy-canary"
+description = "Detect adjacent privacy-fixture tokens while allowing the one documented fake canary"
+regex = '''\b(sk-privacy-canary-[a-f0-9]{8})\b'''
+keywords = ["sk-privacy-canary-"]
+
+[[rules.allowlists]]
+description = "Exact fake canary used by the usage-analyzer privacy-boundary test"
+regexTarget = "secret"
+regexes = ['''^sk-privacy-canary-4f9e2d7c$''']

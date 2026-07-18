@@ -1,0 +1,284 @@
+import { createHash } from "node:crypto";
+import { chmod, lstat, mkdir, realpath, writeFile } from "node:fs/promises";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "./bounded-process.ts";
+import {
+  type RepositorySecurityToolManifest,
+  type SecurityToolAsset,
+  type SecurityToolSpec,
+  type SecurityToolTarget,
+  validateArchiveMemberPath,
+} from "./security-tool-contract.ts";
+
+const MAXIMUM_ARCHIVE_BYTES = 67_108_864;
+const DOWNLOAD_TIMEOUT_MS = 60_000;
+const ARCHIVE_COMMAND_TIMEOUT_MS = 30_000;
+const VERSION_COMMAND_TIMEOUT_MS = 10_000;
+const VERSION_OUTPUT_LIMIT_BYTES = 16_384;
+const PRIVATE_DIRECTORY_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
+const CONTENT_LENGTH_PATTERN = /^\d+$/u;
+const LINE_PATTERN = /\r?\n/u;
+const TAR_EXECUTABLE = "/usr/bin/tar";
+const ALLOWED_DOWNLOAD_HOSTS = new Set([
+  "github.com",
+  "objects.githubusercontent.com",
+  "release-assets.githubusercontent.com",
+]);
+
+type FetchArchive = (input: string, init: RequestInit) => Promise<Response>;
+
+interface InstalledSecurityTools {
+  actionlint: string;
+  shellcheck: string;
+  gitleaks: string;
+}
+
+async function installRepositorySecurityTools(
+  manifest: RepositorySecurityToolManifest,
+  target: SecurityToolTarget,
+  temporaryRoot: string,
+  fetchArchive: FetchArchive = fetch,
+): Promise<InstalledSecurityTools> {
+  const actionlint = await installSecurityTool(
+    manifest.tools.actionlint,
+    manifest.tools.actionlint.assets[target],
+    temporaryRoot,
+    fetchArchive,
+  );
+  const shellcheck = await installSecurityTool(
+    manifest.tools.shellcheck,
+    manifest.tools.shellcheck.assets[target],
+    temporaryRoot,
+    fetchArchive,
+  );
+  const gitleaks = await installSecurityTool(
+    manifest.tools.gitleaks,
+    manifest.tools.gitleaks.assets[target],
+    temporaryRoot,
+    fetchArchive,
+  );
+  return {
+    actionlint,
+    shellcheck,
+    gitleaks,
+  };
+}
+
+async function downloadVerifiedArchive(
+  asset: SecurityToolAsset,
+  destination: string,
+  fetchArchive: FetchArchive = fetch,
+): Promise<void> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+  let bytes: Uint8Array;
+  try {
+    const response = await fetchArchive(asset.url, {
+      redirect: "follow",
+      signal: controller.signal,
+    });
+    if (!response.ok || response.body === null) {
+      throw new Error(
+        `security tool archive download returned HTTP ${response.status}`,
+      );
+    }
+    const finalUrl = new URL(response.url || asset.url);
+    if (
+      finalUrl.protocol !== "https:" ||
+      !ALLOWED_DOWNLOAD_HOSTS.has(finalUrl.hostname)
+    ) {
+      throw new Error(
+        "security tool archive redirected outside approved hosts",
+      );
+    }
+    const declaredLength = response.headers.get("content-length");
+    if (
+      declaredLength !== null &&
+      (!CONTENT_LENGTH_PATTERN.test(declaredLength) ||
+        Number(declaredLength) > MAXIMUM_ARCHIVE_BYTES)
+    ) {
+      throw new Error("security tool archive exceeds the download size limit");
+    }
+    bytes = await readDownload(response.body);
+  } catch (error) {
+    let reason = String(error);
+    if (error instanceof Error) {
+      reason = error.message;
+    }
+    throw new Error(`security tool archive download failed: ${reason}`, {
+      cause: error,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+  const actual = createHash("sha256").update(bytes).digest("hex");
+  if (actual !== asset.sha256) {
+    throw new Error(
+      `security tool archive checksum mismatch: expected ${asset.sha256}, received ${actual}`,
+    );
+  }
+  await writeFile(destination, bytes, { flag: "wx", mode: 0o600 });
+  await chmod(destination, PRIVATE_FILE_MODE);
+}
+
+function validateArchiveEntries(listing: string, executablePath: string): void {
+  const entries = listing.split(LINE_PATTERN).filter((entry) => entry !== "");
+  let executableCount = 0;
+  for (const entry of entries) {
+    let normalized = entry;
+    if (entry.endsWith("/")) {
+      normalized = entry.slice(0, -1);
+    }
+    validateArchiveMemberPath(normalized, "security tool archive member");
+    if (normalized === executablePath) {
+      executableCount += 1;
+    }
+  }
+  if (executableCount !== 1) {
+    throw new Error(
+      `security tool archive must contain executable ${executablePath} exactly once`,
+    );
+  }
+}
+
+async function installSecurityTool(
+  spec: SecurityToolSpec,
+  asset: SecurityToolAsset,
+  temporaryRoot: string,
+  fetchArchive: FetchArchive,
+): Promise<string> {
+  const toolRoot = join(temporaryRoot, spec.name);
+  const extractionRoot = join(toolRoot, "extracted");
+  const archive = join(toolRoot, "release.tar.gz");
+  await mkdir(extractionRoot, {
+    recursive: true,
+    mode: PRIVATE_DIRECTORY_MODE,
+  });
+  await Promise.all([
+    chmod(toolRoot, PRIVATE_DIRECTORY_MODE),
+    chmod(extractionRoot, PRIVATE_DIRECTORY_MODE),
+  ]);
+  await downloadVerifiedArchive(asset, archive, fetchArchive);
+
+  const listing = await runBoundedCommand(TAR_EXECUTABLE, ["-tzf", archive], {
+    label: `${spec.name} archive listing`,
+    timeoutMs: ARCHIVE_COMMAND_TIMEOUT_MS,
+    env: REPOSITORY_TOOL_ENV,
+  });
+  if (listing.exitCode !== 0 || listing.stderr !== "") {
+    throw new Error(`${spec.name} archive listing failed`);
+  }
+  validateArchiveEntries(listing.stdout, asset.executablePath);
+  const detail = await runBoundedCommand(
+    TAR_EXECUTABLE,
+    ["-tvzf", archive, asset.executablePath],
+    {
+      label: `${spec.name} executable metadata`,
+      timeoutMs: ARCHIVE_COMMAND_TIMEOUT_MS,
+      env: REPOSITORY_TOOL_ENV,
+    },
+  );
+  const detailLines = detail.stdout.split(LINE_PATTERN).filter(Boolean);
+  if (
+    detail.exitCode !== 0 ||
+    detail.stderr !== "" ||
+    detailLines.length !== 1 ||
+    !detailLines[0]?.startsWith("-") ||
+    !detailLines[0]?.endsWith(` ${asset.executablePath}`)
+  ) {
+    throw new Error(
+      `${spec.name} executable is not one regular archive member`,
+    );
+  }
+  const extraction = await runBoundedCommand(
+    TAR_EXECUTABLE,
+    ["-xzf", archive, "-C", extractionRoot, "--", asset.executablePath],
+    {
+      label: `${spec.name} archive extraction`,
+      timeoutMs: ARCHIVE_COMMAND_TIMEOUT_MS,
+      env: REPOSITORY_TOOL_ENV,
+    },
+  );
+  if (
+    extraction.exitCode !== 0 ||
+    extraction.stdout !== "" ||
+    extraction.stderr !== ""
+  ) {
+    throw new Error(`${spec.name} archive extraction failed`);
+  }
+  const executable = resolve(extractionRoot, asset.executablePath);
+  ensureContained(extractionRoot, executable);
+  const metadata = await lstat(executable);
+  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1) {
+    throw new Error(`${spec.name} executable must be a single regular file`);
+  }
+  await chmod(dirname(executable), PRIVATE_DIRECTORY_MODE);
+  await chmod(executable, PRIVATE_DIRECTORY_MODE);
+  ensureContained(await realpath(extractionRoot), await realpath(executable));
+
+  const version = await runBoundedCommand(executable, spec.versionCommand, {
+    label: `${spec.name} version verification`,
+    timeoutMs: VERSION_COMMAND_TIMEOUT_MS,
+    outputLimitBytes: VERSION_OUTPUT_LIMIT_BYTES,
+    env: REPOSITORY_TOOL_ENV,
+  });
+  if (
+    version.exitCode !== 0 ||
+    !new RegExp(spec.versionOutputPattern, "u").test(
+      `${version.stdout}${version.stderr}`,
+    )
+  ) {
+    throw new Error(
+      `${spec.name} executable did not report pinned version ${spec.version}`,
+    );
+  }
+  return executable;
+}
+
+async function readDownload(
+  stream: ReadableStream<Uint8Array>,
+): Promise<Uint8Array> {
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) {
+        break;
+      }
+      total += next.value.byteLength;
+      if (total > MAXIMUM_ARCHIVE_BYTES) {
+        await reader.cancel();
+        throw new Error(
+          "security tool archive exceeds the download size limit",
+        );
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
+function ensureContained(root: string, path: string): void {
+  const offset = relative(root, path);
+  if (offset.startsWith(`..${sep}`) || offset === "..") {
+    throw new Error("security tool extraction escaped its temporary root");
+  }
+}
+
+export type { FetchArchive, InstalledSecurityTools };
+export {
+  downloadVerifiedArchive,
+  installRepositorySecurityTools,
+  validateArchiveEntries,
+};

@@ -12,6 +12,7 @@ rewriting its rationale.
 | [0002](0002-executable-architecture-fitness.md) | Accepted | Enforce ownership and dependency rules with executable fitness checks and bounded exceptions. |
 | [0003](0003-agent-trust-and-evaluation.md) | Accepted | Keep agent judgment bounded by typed trust context, capability controls, and independent evaluation. |
 | [0004](0004-measurement-gated-rust.md) | Accepted | Admit Rust only through a measured, reversible parity gate. |
+| [0005](0005-ephemeral-repository-security-tools.md) | Accepted | Verify Actions and credential hygiene with ephemeral checksum-pinned tools. |
 
 ## Record contract
 

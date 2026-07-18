@@ -29,7 +29,7 @@ pages without immutable versions include the retrieval date.
 | Local `AIAnthropomorphism_PrePrint_V1_May2026.pdf` | Local 21-page preprint, SHA-256 `7d394aa92440dce1219525af6d19e2603b4adbdb7c433c0e64e4fb367233947a`; PDF text and metadata extracted locally on 2026-07-18. | Uses 2,000 WildChat responses plus 100 crafted prompts across four named GPT variants, qualitative thematic coding by two coders, and yields 17 behaviors in five categories. Authors call coding generous/interpretive and note model, language, modality, selection, and absent user-effect limitations. | **Adapt** its concrete taxonomy into negative output fixtures; distinguish reasoning/service grammar from unsupported inner experience, autonomy, embodiment, emotion, and relationship claims. **Reject** an indiscriminate first-person-language ban. |
 | Local `1-s2.0-S0001691826001903-main.pdf` | Peer-reviewed open-access Acta Psychologica article 263 (2026) 106389, DOI `10.1016/j.actpsy.2026.106389`, SHA-256 `40e9247ce0e7e37a2b332033a1976dc0a5b909bc2af41e1aec27f2a58f72e618`; PDF text/metadata inspected locally. | Five-week randomized AI-peer/human-peer ESL study: 88 students at one southwest-China university and 238 longitudinal observations. Enjoyment mediated willingness to communicate; shame did not. Product name was withheld; duration, population, self-selection, and adapted friendship measures limit generalization and reciprocal friendship was not shown. | **Reject** friendship/companion positioning for Skizzles. Retain only the caution that simulated relational cues can affect behavior; the study does not establish a safe general developer-tool design. |
 | Local `2409.17433v1.pdf` | Versioned HDFlow preprint, arXiv:2409.17433v1 (2024-09-25), SHA-256 `e0937bacf5898eebba0b9e0e6d96e428820bb5b52088f509464cc1cbecdca23e`; methods, experiments, and limitations inspected locally. | Combines complexity-routed fast/slow reasoning, explicit decomposition, specialized LLM/symbolic workers, and final review; evaluates four reasoning benchmarks and reports higher token cost for slow workflows. Generated-problem validity and broader generalization remain open, and its final reviewer is still an LLM in the same designed workflow. | **Adapt** complexity-aware routing, non-overlapping bounded work, dependency-ordered execution, symbolic tools, and explicit retry/error flow. **Reject** dynamic decomposition for routine work and same-workflow final review as independent acceptance. |
-| Local `cli_ecosystem_catalog.jsonl` | Local structured catalog, SHA-256 `e757e5076418e001bcf8a099378b731bb231038e7828d9fd54f01e662194f9df`; 274/274 JSON records parsed, all with `last_verified: 2026-07-16`. | Uniform records include command, category, platforms, interaction/output modes, suitability, safety flags, provenance URLs, and notes. Catalog assertions were not independently reverified here; 51 entries carry safety flags and two command names collide across 274 records. | **Defer** all integrations pending a demonstrated gap, primary provenance/license review, safe deterministic pilot, ADR, owner, and removal path. Initial candidates only: ast-grep, Semgrep, ShellCheck, markdownlint-cli2, actionlint, and gitleaks. |
+| Local `cli_ecosystem_catalog.jsonl` | Local structured catalog, SHA-256 `e757e5076418e001bcf8a099378b731bb231038e7828d9fd54f01e662194f9df`; 274/274 JSON records parsed, all with `last_verified: 2026-07-16`. | Uniform records include command, category, platforms, interaction/output modes, suitability, safety flags, provenance URLs, and notes. Catalog assertions were not independently reverified here; 51 entries carry safety flags and two command names collide across 274 records. | Catalog remains discovery only. After independent primary-source and causal-gap review, **adopt** actionlint 1.7.12 with ShellCheck 0.11.0 and Gitleaks 8.30.1 under [ADR 0005](../decisions/0005-ephemeral-repository-security-tools.md); **reject** ast-grep and Semgrep gates; **defer** markdownlint-cli2 and every other entry. |
 
 ## Cross-source applications
 
@@ -44,6 +44,8 @@ pages without immutable versions include the retrieval date.
   friendship/attachment, embodiment, and certainty claims.
 - Keep deterministic workflow code responsible for capabilities, lifecycle, failure,
   retries, cancellation, and terminal acceptance.
+- Validate Actions semantics and repository credential content with the ephemeral,
+  checksum-pinned tools and causal probes in ADR 0005.
 
 ### Adapt during implementation
 
@@ -60,8 +62,8 @@ pages without immutable versions include the retrieval date.
 
 - Headroom or any context proxy/wrapper/MCP integration: requires sanitized local
   measurement and host-state approval.
-- New CLI dependencies: requires a concrete verifier gap, provenance/license/safety
-  review, deterministic tests, an owner, and removal plan.
+- Any further CLI integration requires a concrete verifier gap,
+  provenance/license/safety review, deterministic tests, an owner, and removal plan.
 - Rust: requires all gates in [ADR 0004](../decisions/0004-measurement-gated-rust.md).
 
 ### Rejected directions

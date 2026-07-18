@@ -78,6 +78,10 @@ descendant detection.
   compiler and environment type dependencies.
 - Biome: version 2.5.4 invoked through `bunx`; no local Biome dependency.
 - Lockfile: root `bun.lock` only, using Bun's isolated linker.
+- Repository verification: `@skizzles/workspace-policy` acquires checksum-pinned
+  actionlint 1.7.12, ShellCheck 0.11.0, and Gitleaks 8.30.1 only in disposable
+  directories for the mandatory CI/release `security:check`; no binary is vendored
+  or installed persistently.
 
 ## Packaging and hygiene
 

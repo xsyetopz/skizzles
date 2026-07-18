@@ -23,6 +23,7 @@
     "packages:build": "bun run --workspaces --sequential build",
     "packages:check": "bun run --workspaces --sequential check",
     "workspace:check": "bun run packages/workspace-policy/src/cli.ts .",
+    "security:check": "bun run packages/workspace-policy/src/security-cli.ts .",
     "check": "bun run biome:check && bun run packages:check && bun run workspace:check && bun run prompt:check",
     "typecheck": "bun run --workspaces --sequential typecheck",
     "test": "bun run --workspaces --sequential test",

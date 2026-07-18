@@ -46,3 +46,30 @@ including private subpaths, remain fully checked from Bun's parsed import scan.
 The plugin builder is the explicit canonical-to-generated artifact composition
 owner and is exempt from the static path-literal rule. A direct package
 dependency alone does not grant filesystem reach-through authority.
+
+## Repository security tools
+
+This package also owns the networked repository security gate invoked by
+`bun run security:check`. The root
+`config/repository-security-tools.json` pins the exact actionlint, ShellCheck,
+and Gitleaks release provenance and Linux x64/macOS arm64 archive digests.
+Unsupported platforms fail deterministically. Archives are downloaded with byte
+and time bounds into an owner-only temporary directory, verified before selective
+tar extraction, checked for contained regular executable members, version-tested,
+and removed on success or failure. No package manifest carries these tools and no
+persistent tool cache is used.
+
+The gate passes every real `.github/workflows/*.{yml,yaml}` file to actionlint
+with an explicit pinned ShellCheck executable, parses actionlint JSON output, and
+runs invalid-event, invalid-expression, invalid-`needs`, unquoted-shell, and
+corrected-workflow causal probes. Gitleaks scans the current tree and complete Git
+history with 100% redaction and no report file, then proves provider-token,
+exact-canary, adjacent-token, and removed-history behavior in disposable probes.
+The `.gitleaks.toml` allowance is restricted to the one documented fake privacy
+canary; it does not allow the test path or disable a default rule.
+
+This gate requires network access to the pinned GitHub release assets and a full
+Git checkout. It is mandatory in CI/release acceptance but intentionally separate
+from `verify`, which does not acquire these security binaries. actionlint does not
+replace an actual GitHub Actions run, and Gitleaks is heuristic rather than proof
+that a tree contains no credential.
