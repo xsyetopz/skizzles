@@ -1,0 +1,26 @@
+{
+  "name": "@skizzles/plugin-builder",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/plugin-package.ts"
+  },
+  "bin": {
+    "skizzles-plugin-builder": "./src/plugin-package.ts"
+  },
+  "scripts": {
+    "build": "bun build src/plugin-package.ts --target=bun --outfile=dist/plugin-builder.js",
+    "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+    "test": "bun test test",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@skizzles/prompt-layer": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2"
+  }
+}

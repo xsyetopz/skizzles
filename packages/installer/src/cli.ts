@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 import { isAbsolute, resolve } from "node:path";
+import process from "node:process";
 import {
   configureCodex,
   type OrchestrationMode,
@@ -19,235 +20,427 @@ import {
   restorePromptPolicy,
 } from "./prompt-policy.ts";
 
-type Parsed = {
-  command:
-    | "install"
-    | "uninstall"
-    | "doctor"
-    | "configure"
-    | "unconfigure"
-    | "prompt-policy";
-  promptPolicyAction: "apply" | "restore" | undefined;
-  surface: "skills" | "harness" | undefined;
-  codexHome: string | undefined;
-  codexBinary: string | undefined;
-  orchestration: OrchestrationMode | undefined;
-  home: string | undefined;
-  sourceRoot: string | undefined;
-  transfer: Transfer;
+interface DryRunCommand {
   dryRun: boolean;
+}
+
+interface InstallSkillsCommand extends DryRunCommand {
+  command: "install";
+  surface: "skills";
+  codexHome: string;
+  sourceRoot: string;
+  transfer: Transfer;
+}
+
+interface InstallHarnessCommand extends DryRunCommand {
+  command: "install";
+  surface: "harness";
+  home: string;
+  sourceRoot: string;
+  transfer: Transfer;
+}
+
+interface UninstallSkillsCommand extends DryRunCommand {
+  command: "uninstall";
+  surface: "skills";
+  codexHome: string;
+}
+
+interface UninstallHarnessCommand extends DryRunCommand {
+  command: "uninstall";
+  surface: "harness";
+  home: string;
+}
+
+interface DoctorCommand {
+  command: "doctor";
+  home: string;
+  codexHome: string;
+}
+
+interface ConfigureCommand extends DryRunCommand {
+  command: "configure";
+  codexHome: string;
+  codexBinary: string;
+  orchestration: OrchestrationMode;
+}
+
+interface UnconfigureCommand extends DryRunCommand {
+  command: "unconfigure";
+  codexHome: string;
+  codexBinary: string;
+}
+
+interface ApplyPromptPolicyCommand extends DryRunCommand {
+  command: "prompt-policy";
+  action: "apply";
+  codexHome: string;
+  codexBinary: string;
+  sourceRoot: string;
+}
+
+interface RestorePromptPolicyCommand extends DryRunCommand {
+  command: "prompt-policy";
+  action: "restore";
+  codexHome: string;
+  codexBinary: string;
+}
+
+type ParsedCommand =
+  | InstallSkillsCommand
+  | InstallHarnessCommand
+  | UninstallSkillsCommand
+  | UninstallHarnessCommand
+  | DoctorCommand
+  | ConfigureCommand
+  | UnconfigureCommand
+  | ApplyPromptPolicyCommand
+  | RestorePromptPolicyCommand;
+
+type ValueFlag =
+  | "codexHome"
+  | "codexBinary"
+  | "orchestration"
+  | "home"
+  | "sourceRoot"
+  | "transfer"
+  | "surface";
+type Flag = ValueFlag | "dryRun";
+type ParsedFlags = Partial<Record<ValueFlag, string>> & { dryRun: boolean };
+
+const FLAG_NAMES: Record<string, Flag> = {
+  "--codex-home": "codexHome",
+  "--codex-binary": "codexBinary",
+  "--orchestration": "orchestration",
+  "--home": "home",
+  "--source-root": "sourceRoot",
+  "--transfer": "transfer",
+  "--mode": "transfer",
+  "--surface": "surface",
+  "--dry-run": "dryRun",
 };
 
 function usage(): never {
   console.error(
-    "usage: bun packages/installer/src/cli.ts <install|uninstall> --surface <skills|harness> [--codex-home PATH] [--home PATH] [--source-root PATH] [--transfer link|copy] [--dry-run] | configure --codex-home PATH --codex-binary PATH --orchestration <aggressive|passive> [--dry-run] | unconfigure --codex-home PATH --codex-binary PATH [--dry-run] | prompt-policy apply --codex-home PATH --codex-binary ABSOLUTE_PATH --source-root PATH [--dry-run] | prompt-policy restore --codex-home PATH --codex-binary ABSOLUTE_PATH [--dry-run] | doctor --home PATH --codex-home PATH",
+    "usage: skizzles-installer install --surface <skills|harness> [--codex-home PATH|--home PATH] [--source-root PATH] [--transfer link|copy] [--dry-run] | uninstall --surface <skills|harness> [--codex-home PATH|--home PATH] [--dry-run] | configure --codex-home PATH --codex-binary PATH --orchestration <aggressive|passive> [--dry-run] | unconfigure --codex-home PATH --codex-binary PATH [--dry-run] | prompt-policy apply --codex-home PATH --codex-binary ABSOLUTE_PATH --source-root PATH [--dry-run] | prompt-policy restore --codex-home PATH --codex-binary ABSOLUTE_PATH [--dry-run] | doctor --home PATH --codex-home PATH",
   );
   process.exit(2);
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
-function parse(argv: string[]): Parsed {
+function parse(argv: string[]): ParsedCommand {
   const command = argv.shift();
-  if (
-    ![
-      "install",
-      "uninstall",
-      "doctor",
-      "configure",
-      "unconfigure",
-      "prompt-policy",
-    ].includes(command ?? "")
-  )
-    usage();
-  let promptPolicyAction: "apply" | "restore" | undefined;
-  if (command === "prompt-policy") {
-    const action = argv.shift();
-    if (action !== "apply" && action !== "restore") usage();
-    promptPolicyAction = action;
+  switch (command) {
+    case "install":
+      return parseInstall(argv);
+    case "uninstall":
+      return parseUninstall(argv);
+    case "doctor":
+      return parseDoctor(argv);
+    case "configure":
+      return parseConfigure(argv);
+    case "unconfigure":
+      return parseUnconfigure(argv);
+    case "prompt-policy":
+      return parsePromptPolicy(argv);
+    default:
+      return usage();
   }
-  let codexHome: string | undefined;
-  let codexBinary: string | undefined;
-  let orchestration: OrchestrationMode | undefined;
-  let home: string | undefined;
-  let sourceRoot: string | undefined;
-  let transfer: Transfer = "link";
-  let surface: "skills" | "harness" | undefined;
-  let dryRun = false;
-  while (argv.length > 0) {
-    const flag = argv.shift();
-    if (flag === "--dry-run") dryRun = true;
-    else if (flag === "--codex-home") codexHome = argv.shift();
-    else if (flag === "--codex-binary") codexBinary = argv.shift();
-    else if (flag === "--orchestration") {
-      const value = argv.shift();
-      if (value !== "aggressive" && value !== "passive") usage();
-      orchestration = value;
-    } else if (flag === "--home") home = argv.shift();
-    else if (flag === "--source-root") {
-      sourceRoot = resolve(argv.shift() ?? usage());
-    } else if (flag === "--transfer" || flag === "--mode") {
-      const mode = argv.shift();
-      if (mode !== "link" && mode !== "copy") usage();
-      transfer = mode;
-    } else if (flag === "--surface") {
-      const value = argv.shift();
-      if (value !== "skills" && value !== "harness") usage();
-      surface = value;
-    } else usage();
-  }
-  if (command === "doctor") {
-    if (
-      !(home && codexHome) ||
-      surface ||
-      codexBinary ||
-      orchestration ||
-      sourceRoot
-    )
-      usage();
-  } else if (command === "configure") {
-    if (
-      !(codexHome && codexBinary && orchestration) ||
-      surface ||
-      home ||
-      sourceRoot
-    ) {
+}
+
+function parseInstall(
+  argv: string[],
+): InstallSkillsCommand | InstallHarnessCommand {
+  const flags = parseFlags(
+    argv,
+    allowed("surface", "codexHome", "home", "sourceRoot", "transfer", "dryRun"),
+  );
+  const surface = parseSurface(required(flags.surface));
+  const sourceRoot = resolve(flags.sourceRoot ?? defaultSourceRoot());
+  const transfer = parseTransfer(flags.transfer ?? "link");
+  if (surface === "skills") {
+    if (flags.home !== undefined) {
       usage();
     }
-  } else if (command === "unconfigure") {
-    if (
-      !(codexHome && codexBinary) ||
-      orchestration ||
-      surface ||
-      home ||
-      sourceRoot
-    )
-      usage();
-  } else if (command === "prompt-policy") {
-    if (
-      !(codexHome && codexBinary) ||
-      surface ||
-      home ||
-      orchestration ||
-      (promptPolicyAction === "apply"
-        ? !sourceRoot
-        : sourceRoot !== undefined) ||
-      !isAbsolute(codexBinary)
-    ) {
-      usage();
-    }
-  } else if (
-    !surface ||
-    (surface === "skills" && !codexHome) ||
-    (surface === "harness" && !home)
-  )
+    return {
+      command: "install",
+      surface,
+      codexHome: resolve(required(flags.codexHome)),
+      sourceRoot,
+      transfer,
+      dryRun: flags.dryRun,
+    };
+  }
+  if (flags.codexHome !== undefined) {
     usage();
+  }
   return {
-    command: command as Parsed["command"],
-    promptPolicyAction,
+    command: "install",
     surface,
-    codexHome: codexHome && resolve(codexHome),
-    codexBinary,
-    orchestration,
-    home: home && resolve(home),
-    sourceRoot:
-      sourceRoot ??
-      (command === "install"
-        ? resolve(import.meta.dir, "../../..")
-        : undefined),
+    home: resolve(required(flags.home)),
+    sourceRoot,
     transfer,
-    dryRun,
+    dryRun: flags.dryRun,
   };
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The command dispatcher keeps validation and one-shot surface routing cohesive.
+function parseUninstall(
+  argv: string[],
+): UninstallSkillsCommand | UninstallHarnessCommand {
+  const flags = parseFlags(
+    argv,
+    allowed("surface", "codexHome", "home", "dryRun"),
+  );
+  const surface = parseSurface(required(flags.surface));
+  if (surface === "skills") {
+    if (flags.home !== undefined) {
+      usage();
+    }
+    return {
+      command: "uninstall",
+      surface,
+      codexHome: resolve(required(flags.codexHome)),
+      dryRun: flags.dryRun,
+    };
+  }
+  if (flags.codexHome !== undefined) {
+    usage();
+  }
+  return {
+    command: "uninstall",
+    surface,
+    home: resolve(required(flags.home)),
+    dryRun: flags.dryRun,
+  };
+}
+
+function parseDoctor(argv: string[]): DoctorCommand {
+  const flags = parseFlags(argv, allowed("home", "codexHome"));
+  return {
+    command: "doctor",
+    home: resolve(required(flags.home)),
+    codexHome: resolve(required(flags.codexHome)),
+  };
+}
+
+function parseConfigure(argv: string[]): ConfigureCommand {
+  const flags = parseFlags(
+    argv,
+    allowed("codexHome", "codexBinary", "orchestration", "dryRun"),
+  );
+  return {
+    command: "configure",
+    codexHome: resolve(required(flags.codexHome)),
+    codexBinary: required(flags.codexBinary),
+    orchestration: parseOrchestration(required(flags.orchestration)),
+    dryRun: flags.dryRun,
+  };
+}
+
+function parseUnconfigure(argv: string[]): UnconfigureCommand {
+  const flags = parseFlags(argv, allowed("codexHome", "codexBinary", "dryRun"));
+  return {
+    command: "unconfigure",
+    codexHome: resolve(required(flags.codexHome)),
+    codexBinary: required(flags.codexBinary),
+    dryRun: flags.dryRun,
+  };
+}
+
+function parsePromptPolicy(
+  argv: string[],
+): ApplyPromptPolicyCommand | RestorePromptPolicyCommand {
+  const action = argv.shift();
+  if (action === "apply") {
+    const flags = parseFlags(
+      argv,
+      allowed("codexHome", "codexBinary", "sourceRoot", "dryRun"),
+    );
+    return {
+      command: "prompt-policy",
+      action,
+      codexHome: resolve(required(flags.codexHome)),
+      codexBinary: absoluteBinary(required(flags.codexBinary)),
+      sourceRoot: resolve(required(flags.sourceRoot)),
+      dryRun: flags.dryRun,
+    };
+  }
+  if (action === "restore") {
+    const flags = parseFlags(
+      argv,
+      allowed("codexHome", "codexBinary", "dryRun"),
+    );
+    return {
+      command: "prompt-policy",
+      action,
+      codexHome: resolve(required(flags.codexHome)),
+      codexBinary: absoluteBinary(required(flags.codexBinary)),
+      dryRun: flags.dryRun,
+    };
+  }
+  return usage();
+}
+
+function parseFlags(
+  argv: string[],
+  allowedFlags: ReadonlySet<Flag>,
+): ParsedFlags {
+  const parsed: ParsedFlags = { dryRun: false };
+  const seen = new Set<Flag>();
+  while (argv.length > 0) {
+    const spelling = argv.shift();
+    const flag = spelling === undefined ? undefined : FLAG_NAMES[spelling];
+    if (flag === undefined || !allowedFlags.has(flag) || seen.has(flag)) {
+      usage();
+    }
+    seen.add(flag);
+    if (flag === "dryRun") {
+      parsed.dryRun = true;
+      continue;
+    }
+    parsed[flag] = required(argv.shift());
+  }
+  return parsed;
+}
+
+function allowed(...flags: Flag[]): ReadonlySet<Flag> {
+  return new Set(flags);
+}
+
+function required(value: string | undefined): string {
+  return value ?? usage();
+}
+
+function parseSurface(value: string): "skills" | "harness" {
+  if (value === "skills" || value === "harness") {
+    return value;
+  }
+  return usage();
+}
+
+function parseTransfer(value: string): Transfer {
+  if (value === "link" || value === "copy") {
+    return value;
+  }
+  return usage();
+}
+
+function parseOrchestration(value: string): OrchestrationMode {
+  if (value === "aggressive" || value === "passive") {
+    return value;
+  }
+  return usage();
+}
+
+function absoluteBinary(value: string): string {
+  if (!isAbsolute(value)) {
+    usage();
+  }
+  return value;
+}
+
+function defaultSourceRoot(): string {
+  return resolve(import.meta.dir, "../../..");
+}
+
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const parsed = parse([...argv]);
-  if (parsed.command === "doctor") {
-    const report = doctor(parsed.home!, parsed.codexHome!);
-    console.log(JSON.stringify(report));
-    if (!report.ok) process.exitCode = 1;
-    return;
+  switch (parsed.command) {
+    case "doctor": {
+      const report = doctor(parsed.home, parsed.codexHome);
+      console.log(JSON.stringify(report));
+      if (!report.ok) {
+        process.exitCode = 1;
+      }
+      return;
+    }
+    case "configure": {
+      const receipt = await configureCodex(parsed);
+      printConfigSummary(receipt, parsed.dryRun);
+      return;
+    }
+    case "unconfigure": {
+      const receipt = await unconfigureCodex(parsed);
+      printConfigSummary(receipt, parsed.dryRun);
+      return;
+    }
+    case "prompt-policy": {
+      const outcome =
+        parsed.action === "apply"
+          ? await applyPromptPolicy(parsed)
+          : await restorePromptPolicy(parsed);
+      console.log(JSON.stringify(promptPolicySummary(outcome, parsed.dryRun)));
+      return;
+    }
+    case "install": {
+      if (parsed.surface === "skills") {
+        const receipt = installSkills(parsed);
+        console.log(
+          JSON.stringify({
+            ok: true,
+            dryRun: parsed.dryRun,
+            ...receiptSummary(receipt),
+          }),
+        );
+        return;
+      }
+      const receipt = installHarness(parsed);
+      printHarnessSummary(receipt, parsed.dryRun);
+      return;
+    }
+    case "uninstall": {
+      if (parsed.surface === "skills") {
+        const receipt = uninstallSkills(parsed.codexHome, parsed.dryRun);
+        console.log(
+          JSON.stringify({
+            ok: true,
+            dryRun: parsed.dryRun,
+            ...receiptSummary(receipt),
+          }),
+        );
+        return;
+      }
+      const receipt = uninstallHarness(parsed.home, parsed.dryRun);
+      printHarnessSummary(receipt, parsed.dryRun);
+      return;
+    }
+    default:
+      return assertNever(parsed);
   }
-  if (parsed.command === "configure" || parsed.command === "unconfigure") {
-    const receipt =
-      parsed.command === "configure"
-        ? await configureCodex({
-            codexHome: parsed.codexHome!,
-            codexBinary: parsed.codexBinary!,
-            orchestration: parsed.orchestration!,
-            dryRun: parsed.dryRun,
-          })
-        : await unconfigureCodex({
-            codexHome: parsed.codexHome!,
-            codexBinary: parsed.codexBinary!,
-            dryRun: parsed.dryRun,
-          });
-    console.log(
-      JSON.stringify({
-        ok: true,
-        dryRun: parsed.dryRun,
-        surface: "config",
-        orchestration: receipt.orchestration,
-        configPath: receipt.configPath,
-        keys: receipt.values.map(({ keyPath }) => keyPath),
-      }),
-    );
-    return;
-  }
-  if (parsed.command === "prompt-policy") {
-    const outcome =
-      parsed.promptPolicyAction === "apply"
-        ? await applyPromptPolicy({
-            codexHome: parsed.codexHome!,
-            codexBinary: parsed.codexBinary!,
-            sourceRoot: parsed.sourceRoot!,
-            dryRun: parsed.dryRun,
-          })
-        : await restorePromptPolicy({
-            codexHome: parsed.codexHome!,
-            codexBinary: parsed.codexBinary!,
-            dryRun: parsed.dryRun,
-          });
-    console.log(JSON.stringify(promptPolicySummary(outcome, parsed.dryRun)));
-    return;
-  }
-  if (parsed.surface === "skills") {
-    const receipt =
-      parsed.command === "install"
-        ? installSkills({
-            codexHome: parsed.codexHome!,
-            sourceRoot: parsed.sourceRoot!,
-            transfer: parsed.transfer,
-            dryRun: parsed.dryRun,
-          })
-        : uninstallSkills(parsed.codexHome!, parsed.dryRun);
-    console.log(
-      JSON.stringify({
-        ok: true,
-        dryRun: parsed.dryRun,
-        ...receiptSummary(receipt),
-      }),
-    );
-  } else {
-    const receipt =
-      parsed.command === "install"
-        ? installHarness({
-            home: parsed.home!,
-            sourceRoot: parsed.sourceRoot!,
-            transfer: parsed.transfer,
-            dryRun: parsed.dryRun,
-          })
-        : uninstallHarness(parsed.home!, parsed.dryRun);
-    console.log(
-      JSON.stringify({
-        ok: true,
-        dryRun: parsed.dryRun,
-        surface: "harness",
-        transfer: receipt.transfer,
-        pluginTarget: receipt.pluginTarget,
-      }),
-    );
-  }
+}
+
+function printConfigSummary(
+  receipt: Awaited<ReturnType<typeof configureCodex>>,
+  dryRun: boolean,
+): void {
+  console.log(
+    JSON.stringify({
+      ok: true,
+      dryRun,
+      surface: "config",
+      orchestration: receipt.orchestration,
+      configPath: receipt.configPath,
+      keys: receipt.values.map(({ keyPath }) => keyPath),
+    }),
+  );
+}
+
+function printHarnessSummary(
+  receipt: ReturnType<typeof installHarness>,
+  dryRun: boolean,
+): void {
+  console.log(
+    JSON.stringify({
+      ok: true,
+      dryRun,
+      surface: "harness",
+      transfer: receipt.transfer,
+      pluginTarget: receipt.pluginTarget,
+    }),
+  );
+}
+
+function assertNever(value: never): never {
+  throw new Error(`unreachable installer command: ${JSON.stringify(value)}`);
 }
 
 if (import.meta.main) {

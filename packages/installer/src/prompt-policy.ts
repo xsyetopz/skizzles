@@ -42,7 +42,9 @@ import {
 const RECEIPT_NAME = "prompt-policy-receipt.json";
 const MANAGED_DIRECTORY = "prompt-policy";
 const MANAGED_FILE = "skizzles-base.md";
-const DESCRIPTOR_PATH = "integrations/prompt-policy.json";
+const PROMPT_SOURCE_ROOT = "packages/prompt-layer/assets";
+const PACKAGED_DESCRIPTOR_PATH = "integrations/prompt-policy.json";
+const CANONICAL_DESCRIPTOR_PATH = `${PROMPT_SOURCE_ROOT}/${PACKAGED_DESCRIPTOR_PATH}`;
 const POLICY_KEYS = [
   "model_instructions_file",
   "developer_instructions",
@@ -224,7 +226,9 @@ async function applyPromptPolicyUnlocked(
       action: "apply",
       managedTargetClassification: "new-managed-copy",
     };
-    if (options.dryRun) return outcome;
+    if (options.dryRun) {
+      return outcome;
+    }
 
     const managedIdentity = createManagedTarget(context, source.applied);
     let receiptIdentity: FileIdentity;
@@ -278,14 +282,17 @@ async function resumeApply(
     const layer = selectedUserLayer(await rpc.read(), rpcSession.configPath);
     const atBefore = valuesMatchBefore(layer.config, receipt.values);
     const atAfter = valuesMatchAfter(layer.config, receipt.values);
-    if (!(atBefore || atAfter))
+    if (!(atBefore || atAfter)) {
       throwConfigDrift(layer.config, receipt, "resume");
+    }
     const outcome: PromptPolicyOutcome = {
       receipt,
       action: atAfter ? "activate-recovered" : "resume-apply",
       managedTargetClassification: "owned-managed-copy",
     };
-    if (options.dryRun) return outcome;
+    if (options.dryRun) {
+      return outcome;
+    }
     if (atBefore) {
       try {
         await rpc.batchWrite({
@@ -338,8 +345,9 @@ async function restorePromptPolicyUnlocked(
   }
   const receipt = readAndValidateReceipt(context);
   const managedTargetExists = pathEntryExists(context.managedTarget);
-  if (managedTargetExists) validateManagedTarget(context, receipt);
-  else if (receipt.state !== "restoring") {
+  if (managedTargetExists) {
+    validateManagedTarget(context, receipt);
+  } else if (receipt.state !== "restoring") {
     throw new Error(
       "prompt-policy managed target is missing; retaining receipt evidence",
     );
@@ -363,7 +371,9 @@ async function restorePromptPolicyUnlocked(
         action: "finish-restore",
         managedTargetClassification: "owned-managed-copy",
       };
-      if (!options.dryRun) cleanupOwnedPolicyFiles(context, receipt);
+      if (!options.dryRun) {
+        cleanupOwnedPolicyFiles(context, receipt);
+      }
       return outcome;
     }
     if (!managedTargetExists) {
@@ -377,17 +387,23 @@ async function restorePromptPolicyUnlocked(
         action: "discard-pending",
         managedTargetClassification: "owned-managed-copy",
       };
-      if (!options.dryRun) cleanupOwnedPolicyFiles(context, receipt);
+      if (!options.dryRun) {
+        cleanupOwnedPolicyFiles(context, receipt);
+      }
       return outcome;
     }
-    if (!atAfter) throwConfigDrift(layer.config, receipt, "restore");
+    if (!atAfter) {
+      throwConfigDrift(layer.config, receipt, "restore");
+    }
 
     const outcome: PromptPolicyOutcome = {
       receipt,
       action: "restore",
       managedTargetClassification: "owned-managed-copy",
     };
-    if (options.dryRun) return outcome;
+    if (options.dryRun) {
+      return outcome;
+    }
 
     receipt.state = "restoring";
     writePrivateJson(context.receiptPath, receipt);
@@ -526,9 +542,16 @@ function readPolicySource(sourceRootInput: string): PolicySource {
     );
   }
   const sourceRoot = realpathSync(requestedRoot);
+  const descriptorPath = pathEntryExists(
+    resolve(sourceRoot, CANONICAL_DESCRIPTOR_PATH),
+  )
+    ? CANONICAL_DESCRIPTOR_PATH
+    : PACKAGED_DESCRIPTOR_PATH;
+  const sourcePrefix =
+    descriptorPath === CANONICAL_DESCRIPTOR_PATH ? PROMPT_SOURCE_ROOT : "";
   const descriptorAbsolute = resolveContainedFile(
     sourceRoot,
-    DESCRIPTOR_PATH,
+    descriptorPath,
     "prompt-policy descriptor",
   );
   const descriptorBytes = readFileSync(descriptorAbsolute);
@@ -575,7 +598,7 @@ function readPolicySource(sourceRootInput: string): PolicySource {
   );
   const facts: PolicyFacts = {
     descriptor: {
-      path: DESCRIPTOR_PATH,
+      path: descriptorPath,
       ...digest(descriptorBytes),
     },
     role,
@@ -588,19 +611,27 @@ function readPolicySource(sourceRootInput: string): PolicySource {
     compactPrompt,
   };
 
-  const appliedBytes = readFactFile(sourceRoot, applied, "applied base prompt");
+  const appliedBytes = readFactFile(
+    sourceRoot,
+    sourcePrefix,
+    applied,
+    "applied base prompt",
+  );
   const provenanceBytes = readFactFile(
     sourceRoot,
+    sourcePrefix,
     provenance,
     "base provenance",
   );
   const developerBytes = readFactFile(
     sourceRoot,
+    sourcePrefix,
     developerInstructions,
     "developer instructions",
   );
   const compactBytes = readFactFile(
     sourceRoot,
+    sourcePrefix,
     compactPrompt,
     "compact prompt",
   );
@@ -657,9 +688,9 @@ function assertCanonicalLegalMappings(
   notice: LegalFact,
 ): void {
   if (
-    license.sourcePath !== "packages/core/prompt-layer/upstream/LICENSE" ||
+    license.sourcePath !== "packages/prompt-layer/assets/upstream/LICENSE" ||
     license.packagedPath !== "third_party/openai-codex/LICENSE" ||
-    notice.sourcePath !== "packages/core/prompt-layer/upstream/NOTICE" ||
+    notice.sourcePath !== "packages/prompt-layer/assets/upstream/NOTICE" ||
     notice.packagedPath !== "third_party/openai-codex/NOTICE"
   ) {
     throw new Error(
@@ -682,8 +713,9 @@ function parseUpstreamFact(value: unknown): UpstreamFact {
     );
   }
   const commit = stringValue(object["commit"], "upstream commit");
-  if (!IMMUTABLE_COMMIT_PATTERN.test(commit))
+  if (!IMMUTABLE_COMMIT_PATTERN.test(commit)) {
     throw new Error("upstream commit must be immutable lowercase SHA-1");
+  }
   return {
     repository,
     commit,
@@ -693,8 +725,14 @@ function parseUpstreamFact(value: unknown): UpstreamFact {
   };
 }
 
-function readFactFile(root: string, fact: FileFact, label: string): Buffer {
-  const bytes = readFileSync(resolveContainedFile(root, fact.path, label));
+function readFactFile(
+  root: string,
+  sourcePrefix: string,
+  fact: FileFact,
+  label: string,
+): Buffer {
+  const path = sourcePrefix ? join(sourcePrefix, fact.path) : fact.path;
+  const bytes = readFileSync(resolveContainedFile(root, path, label));
   assertDigest(bytes, fact, label);
   return bytes;
 }
@@ -714,7 +752,9 @@ function readLegalFile(root: string, fact: LegalFact, label: string): Buffer {
     assertDigest(bytes, fact, label);
     selected ??= bytes;
   }
-  if (!selected) throw new Error(`${label} has no readable policy input`);
+  if (!selected) {
+    throw new Error(`${label} has no readable policy input`);
+  }
   return selected;
 }
 
@@ -787,9 +827,12 @@ function createManagedTarget(
     chmodSync(context.managedTarget, 0o600);
     return createdTarget;
   } catch (error) {
-    if (createdTarget)
+    if (createdTarget) {
       removeOwnedIdentity(context.managedTarget, createdTarget);
-    if (createdDirectory) removeDirectoryIfEmpty(context.managedDirectory);
+    }
+    if (createdDirectory) {
+      removeDirectoryIfEmpty(context.managedDirectory);
+    }
     throw error;
   }
 }
@@ -823,29 +866,27 @@ function readAndValidateReceipt(context: PolicyContext): PromptPolicyReceipt {
   );
   if (
     value["schema"] !== "skizzles.prompt-policy-receipt" ||
-    value["version"] !== 1 ||
-    !["pending", "active", "restoring"].includes(String(value["state"]))
+    value["version"] !== 1
   ) {
     throw new Error("invalid prompt-policy receipt schema, version, or state");
   }
-  const receipt = value as unknown as PromptPolicyReceipt;
+  const state = receiptState(value["state"]);
+  const codexBinary = stringValue(value["codexBinary"], "receipt Codex binary");
   if (
-    !isAbsolute(receipt.codexBinary) ||
-    resolve(receipt.codexBinary) !== context.codexBinary
+    !isAbsolute(codexBinary) ||
+    resolve(codexBinary) !== context.codexBinary
   ) {
     throw new Error(
-      `use the Codex binary recorded by the prompt-policy receipt: ${receipt.codexBinary}`,
+      `use the Codex binary recorded by the prompt-policy receipt: ${codexBinary}`,
     );
   }
-  if (
-    !isAbsolute(receipt.configPath) ||
-    resolve(receipt.configPath) !== context.configPath
-  ) {
+  const configPath = stringValue(value["configPath"], "receipt config path");
+  if (!isAbsolute(configPath) || resolve(configPath) !== context.configPath) {
     throw new Error(
       "prompt-policy receipt config path is outside selected CODEX_HOME",
     );
   }
-  const targetObject = record(receipt.managedTarget, "receipt managed target");
+  const targetObject = record(value["managedTarget"], "receipt managed target");
   exactKeys(
     targetObject,
     ["path", "sha256", "bytes"],
@@ -867,10 +908,26 @@ function readAndValidateReceipt(context: PolicyContext): PromptPolicyReceipt {
       "prompt-policy receipt managed target is escaped or swapped",
     );
   }
-  receipt.managedTarget = target;
-  receipt.policy = validateReceiptPolicy(receipt.policy);
-  validateReceiptValues(receipt);
+  const policy = validateReceiptPolicy(value["policy"]);
+  const values = parseReceiptValues(value["values"], target, policy);
+  const receipt: PromptPolicyReceipt = {
+    schema: "skizzles.prompt-policy-receipt",
+    version: 1,
+    state,
+    codexBinary,
+    configPath,
+    managedTarget: target,
+    policy,
+    values,
+  };
   return receipt;
+}
+
+function receiptState(value: unknown): PromptPolicyReceipt["state"] {
+  if (value === "pending" || value === "active" || value === "restoring") {
+    return value;
+  }
+  throw new Error("invalid prompt-policy receipt schema, version, or state");
 }
 
 function validateReceiptPolicy(value: unknown): PolicyFacts {
@@ -911,53 +968,67 @@ function validateReceiptPolicy(value: unknown): PolicyFacts {
   return policy;
 }
 
-function validateReceiptValues(receipt: PromptPolicyReceipt): void {
-  if (
-    !Array.isArray(receipt.values) ||
-    receipt.values.length !== POLICY_KEYS.length
-  ) {
+function parseReceiptValues(
+  value: unknown,
+  managedTarget: FileFact,
+  policy: PolicyFacts,
+): OwnedConfigValue[] {
+  if (!Array.isArray(value) || value.length !== POLICY_KEYS.length) {
     throw new Error(
       "prompt-policy receipt must own exactly three config values",
     );
   }
+  const values: OwnedConfigValue[] = [];
   for (const [index, expectedKey] of POLICY_KEYS.entries()) {
-    const value = record(receipt.values[index], `receipt value ${expectedKey}`);
+    const owned = record(value[index], `receipt value ${expectedKey}`);
     exactKeys(
-      value,
+      owned,
       ["keyPath", "beforePresent", "before", "after"],
       `receipt value ${expectedKey}`,
     );
     if (
-      value["keyPath"] !== expectedKey ||
-      typeof value["beforePresent"] !== "boolean"
+      owned["keyPath"] !== expectedKey ||
+      typeof owned["beforePresent"] !== "boolean"
     ) {
       throw new Error(
         `prompt-policy receipt has invalid owned key ${expectedKey}`,
       );
     }
+    values.push({
+      keyPath: expectedKey,
+      beforePresent: owned["beforePresent"],
+      before: jsonValue(owned["before"], `receipt ${expectedKey} before`),
+      after: jsonValue(owned["after"], `receipt ${expectedKey} after`),
+    });
   }
-  if (receipt.values[0]?.after !== receipt.managedTarget.path) {
+  const modelInstructionsAfter = values[0]?.after;
+  if (typeof modelInstructionsAfter !== "string") {
+    throw new Error("receipt model instructions target must be a string");
+  }
+  if (modelInstructionsAfter !== managedTarget.path) {
     throw new Error(
       "prompt-policy receipt model instructions target is swapped",
     );
   }
   for (const [index, fact, label] of [
-    [1, receipt.policy.developerInstructions, "developer instructions"],
-    [2, receipt.policy.compactPrompt, "compact prompt"],
+    [1, policy.developerInstructions, "developer instructions"],
+    [2, policy.compactPrompt, "compact prompt"],
   ] as const) {
-    const after = receipt.values[index]?.after;
-    if (typeof after !== "string")
+    const after = values[index]?.after;
+    if (typeof after !== "string") {
       throw new Error(`receipt ${label} is not a string`);
+    }
     assertDigest(Buffer.from(after), fact, `receipt ${label}`);
   }
   if (
-    receipt.managedTarget.sha256 !== receipt.policy.applied.sha256 ||
-    receipt.managedTarget.bytes !== receipt.policy.applied.bytes
+    managedTarget.sha256 !== policy.applied.sha256 ||
+    managedTarget.bytes !== policy.applied.bytes
   ) {
     throw new Error(
       "receipt managed target fact does not match applied prompt fact",
     );
   }
+  return values;
 }
 
 function validateManagedTarget(
@@ -1003,8 +1074,12 @@ function cleanupNewPolicyFiles(
     context.managedTarget,
     managedIdentity,
   );
-  if (receiptPresent) rmSync(context.receiptPath);
-  if (managedPresent) rmSync(context.managedTarget);
+  if (receiptPresent) {
+    rmSync(context.receiptPath);
+  }
+  if (managedPresent) {
+    rmSync(context.managedTarget);
+  }
   removeDirectoryIfEmpty(context.managedDirectory);
 }
 
@@ -1021,7 +1096,9 @@ function cleanupOwnedPolicyFiles(
 }
 
 function removeDirectoryIfEmpty(path: string): void {
-  if (existsSync(path) && readdirSync(path).length === 0) rmdirSync(path);
+  if (existsSync(path) && readdirSync(path).length === 0) {
+    rmdirSync(path);
+  }
 }
 
 function fileIdentity(path: string): FileIdentity {
@@ -1030,12 +1107,16 @@ function fileIdentity(path: string): FileIdentity {
 }
 
 function removeOwnedIdentity(path: string, expected: FileIdentity): void {
-  if (!assertOwnedIdentity(path, expected)) return;
+  if (!assertOwnedIdentity(path, expected)) {
+    return;
+  }
   rmSync(path);
 }
 
 function assertOwnedIdentity(path: string, expected: FileIdentity): boolean {
-  if (!pathEntryExists(path)) return false;
+  if (!pathEntryExists(path)) {
+    return false;
+  }
   const actual = fileIdentity(path);
   if (actual.dev !== expected.dev || actual.ino !== expected.ino) {
     throw new Error(
@@ -1080,7 +1161,11 @@ function configValue(
     ) {
       return { present: false, value: null };
     }
-    current = current[segment] as JsonValue;
+    const next = current[segment];
+    if (next === undefined) {
+      return { present: false, value: null };
+    }
+    current = next;
   }
   return { present: true, value: current };
 }
@@ -1103,11 +1188,13 @@ function resolveContainedFile(
   let current = root;
   for (const segment of portable.split("/")) {
     current = join(current, segment);
-    if (!pathEntryExists(current))
+    if (!pathEntryExists(current)) {
       throw new Error(`${label} is missing: ${portable}`);
+    }
     const metadata = lstatSync(current);
-    if (metadata.isSymbolicLink())
+    if (metadata.isSymbolicLink()) {
       throw new Error(`${label} uses a symlink: ${portable}`);
+    }
   }
   if (!lstatSync(absolute).isFile() || realpathSync(absolute) !== absolute) {
     throw new Error(`${label} must be a contained regular file: ${portable}`);
@@ -1166,25 +1253,35 @@ function validateText(bytes: Buffer, label: string): void {
 function rejectMachinePaths(bytes: Buffer, label: string): void {
   const text = bytes.toString("utf8");
   const match = MACHINE_PATH_PATTERNS.find((pattern) => pattern.test(text));
-  if (match) throw new Error(`${label} contains a machine-specific path`);
+  if (match) {
+    throw new Error(`${label} contains a machine-specific path`);
+  }
 }
 
 function assertRegularPrivateFile(path: string, label: string): void {
-  if (!pathEntryExists(path)) throw new Error(`${label} is missing: ${path}`);
+  if (!pathEntryExists(path)) {
+    throw new Error(`${label} is missing: ${path}`);
+  }
   const metadata = lstatSync(path);
-  if (metadata.isSymbolicLink() || !metadata.isFile())
+  if (metadata.isSymbolicLink() || !metadata.isFile()) {
     throw new Error(`${label} must be a non-symlink regular file`);
-  if ((metadata.mode & 0o777) !== 0o600)
+  }
+  if ((metadata.mode & 0o777) !== 0o600) {
     throw new Error(`${label} must have owner-only mode 0600`);
+  }
 }
 
 function assertPrivateDirectory(path: string, label: string): void {
-  if (!pathEntryExists(path)) throw new Error(`${label} is missing: ${path}`);
+  if (!pathEntryExists(path)) {
+    throw new Error(`${label} is missing: ${path}`);
+  }
   const metadata = lstatSync(path);
-  if (metadata.isSymbolicLink() || !metadata.isDirectory())
+  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
     throw new Error(`${label} must be a non-symlink directory`);
-  if ((metadata.mode & 0o777) !== 0o700)
+  }
+  if ((metadata.mode & 0o777) !== 0o700) {
     throw new Error(`${label} must have owner-only mode 0700`);
+  }
 }
 
 function exactKeys(
@@ -1194,33 +1291,61 @@ function exactKeys(
 ): void {
   const actual = Object.keys(object).sort();
   const wanted = [...expected].sort();
-  if (actual.join("\0") !== wanted.join("\0"))
+  if (actual.join("\0") !== wanted.join("\0")) {
     throw new Error(`${label} has unexpected or missing fields`);
+  }
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new Error(`${label} must be an object`);
   }
-  return value as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(value));
+}
+
+function jsonValue(value: unknown, label: string): JsonValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item, index) => jsonValue(item, `${label}[${index}]`));
+  }
+  if (typeof value === "object") {
+    const result: Record<string, JsonValue> = {};
+    for (const [key, item] of Object.entries(value)) {
+      result[key] = jsonValue(item, `${label}.${key}`);
+    }
+    return result;
+  }
+  throw new Error(`${label} must be a JSON value`);
 }
 
 function stringValue(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0)
+  if (typeof value !== "string" || value.length === 0) {
     throw new Error(`${label} must be a non-empty string`);
+  }
   return value;
 }
 
 function sha256Value(value: unknown, label: string): string {
   const text = stringValue(value, label);
-  if (!SHA256_PATTERN.test(text))
+  if (!SHA256_PATTERN.test(text)) {
     throw new Error(`${label} must be lowercase SHA-256`);
+  }
   return text;
 }
 
 function bytesValue(value: unknown, label: string): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 1)
+  if (!Number.isSafeInteger(value) || (value as number) < 1) {
     throw new Error(`${label} must be a positive integer`);
+  }
   return value as number;
 }
 

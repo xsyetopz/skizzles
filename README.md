@@ -1,75 +1,101 @@
-# Skizzles ✨
+# Skizzles
 
-![Skizzles logo](assets/logo.png)
+![Skizzles logo](packages/plugin-builder/template/assets/logo.png)
 
-Skizzles is a friendly, reviewable Codex harness: reusable skills, helpful hooks, tiny runtime tools, and release packaging in one canonical source tree. It turns the fiddly parts of agent work into a tidy little toolkit. 🧰
+Skizzles is a portable Codex engineering harness distributed as a deterministic
+plugin. Its canonical implementation is a Bun workspace of strict TypeScript
+packages; `plugins/skizzles/` is generated output.
 
-## What’s inside
+## Capabilities
 
-- **Command-output management** — classifies useful build/test commands, keeps output bounded, and leaves a useful artifact when a command gets noisy.
-- **Fourth Wall orchestration** — native multi-agent dispatch with explicit roles, capability routing, useful context forks, and reusable specialist tasks.
-- **Usage analyzer** — privacy-conscious, read-only rollout analysis using an explicit `CODEX_HOME`.
-- **Container Lab, batteries included** — a skill, full canonical source project, bundled CLI/reaper, compatibility descriptor, and safe doctor boundary for disposable Docker Compose labs. 🔬
-- **Luna joins the V2 party** — an opt-in model-catalog overlay and tiny launchd refresher preserve the official catalog while enabling proven Luna workers in native MultiAgentV2. 🌙
-- **A practical skill shelf** — auth semantics, Cargo optimization, completion contracts, counterfactual engineering, design proof gates, legacy cleanup, Rinf boundaries, project tooling, and a gated designer runtime.
-- **Installation help** — the public `install-skizzles` skill guides an LLM through optional host wiring after a skill-only install.
-- **A polite config handshake** — enable the hooks, then choose passive native orchestration or the full proactive Fourth Wall experience without trampling the rest of `config.toml`. 🤝
-- **An explicit prompt policy** — preview, apply, and restore the checksum-locked base, developer policy, and local-compaction prompt as one drift-safe opt-in lifecycle.
+- reusable Codex skills and native Fourth Wall orchestration guidance;
+- a permission-neutral command hook and bounded command supervisor;
+- privacy-preserving rollout usage analysis;
+- disposable Docker Compose Container Lab tooling;
+- a validated model-catalog overlay with explicit host activation;
+- reversible Codex configuration and prompt-policy installers;
+- checksum-locked derivation of the Codex base-instruction layer.
 
-Everything is maintained once in the canonical roots and workspace packages, then staged into a versioned plugin. 🎯
+## Workspace
 
-## Pick your ride
+Production TypeScript is owned by packages under `packages/`. The FastMCP
+project template is also an explicit workspace at
+`skills/codex-project-tooling/assets/fastmcp-bun-template` so it cannot depend
+on undeclared root packages.
 
-### Stable plugin
+| Package | Responsibility |
+| --- | --- |
+| `command-hook` | Hook event validation and command classification |
+| `command-supervisor` | Bounded process execution, artifacts, retention, and queries |
+| `container-lab` | Container Lab CLI, reaper, durable state, synchronization, and docs |
+| `installer` | Skills/harness install, Codex configuration, doctor, and prompt-policy lifecycle |
+| `model-catalog` | Isolated catalog refresh and LaunchAgent rendering |
+| `plugin-builder` | Deterministic plugin staging, bundling, validation, and drift checks |
+| `prompt-layer` | Pinned upstream prompt, patch derivation, provenance, and recovery |
+| `usage-analyzer` | Read-only rollout discovery, aggregation, and reporting |
+| `workspace-policy` | Package, dependency, export, lockfile, and source-ownership enforcement |
 
-**WIP:** Use the official Codex marketplace/plugin flow to install a released `skizzles` plugin. It packages the skills, hooks, runtime helpers, branding, and runnable Container Lab CLI/reaper together.
+See [workspace architecture](docs/workspace-architecture.md) for package and
+generated-artifact boundaries. Prompt maintainers must also read the
+[prompt-layer architecture](packages/prompt-layer/docs/architecture.md).
+
+## Installation surfaces
+
+### Plugin
+
+Released plugins are installed through the Codex plugin/marketplace flow. The
+generated plugin contains bundled executable entrypoints and portable assets;
+it does not require this source workspace or its `node_modules`.
 
 ### Individual skills
 
-Install just the skills you want with the Skills CLI:
+Install selected public skills without activating the complete harness:
 
 ```sh
-bunx skills add https://github.com/robertmsale/skizzles --skill install-skizzles
+bunx skills add https://github.com/xsyetopz/skizzles --skill install-skizzles
 ```
 
-Add `--skill <name>` for another public skill, or omit it to choose interactively. Skill-only installs do not activate Skizzles hooks or runtime helpers; [install-skizzles](skills/install-skizzles/SKILL.md) explains the optional next steps.
+See [`install-skizzles`](skills/install-skizzles/SKILL.md) for explicit install,
+configuration, prompt-policy, and removal commands. Skill-only installation
+does not activate hooks, change Codex configuration, or wire host services.
 
-### Source-linked development
-
-For maintainer work, use a local checkout and point the Skills CLI at its canonical `skills/` directory:
+### Source development
 
 ```sh
-git clone https://github.com/robertmsale/skizzles.git
+git clone https://github.com/xsyetopz/skizzles.git
 cd skizzles
-bunx skills add ./skills --skill install-skizzles
-```
-
-Container Lab is fully included in this repository—not merely documented here. A source-linked installation runs the canonical CLI and reaper directly from the checkout, while the stable plugin carries dependency-self-contained bundles. If you install only a copied skill, `install-skizzles` guides Codex through obtaining a selected Skizzles version and installing the complete surface; the launcher can also use an existing `codex-container-lab` PATH command. Host PATH and LaunchAgent wiring are optional, explicit, reversible, and machine-local.
-
-After installing the complete plugin surface, Skizzles can safely finish the Codex-side handshake:
-
-- **Passive orchestration** enables the packaged hooks and leaves Codex’s native MultiAgentV2 defaults completely alone.
-- **Aggressive orchestration** also enables MultiAgentV2, keeps seven task slots available, and adds tiny root/subagent pointers to `$fourth-wall` plus the proactive quality-and-speed trigger. 🚀
-
-The orchestration configuration lifecycle previews before writing, uses Codex’s own atomic config editor, preserves comments and unrelated settings, and records only the keys it owns for drift-safe restoration. It never edits `AGENTS.md`, `developer_instructions`, approvals, permissions, goals, model defaults, or MCP registrations.
-
-Prompt policy is a separate explicit surface. `prompt-policy apply` atomically replaces the complete `model_instructions_file`, `developer_instructions`, and `compact_prompt` values after copying the validated base to an owner-only managed path below the selected `CODEX_HOME`. `prompt-policy restore` restores exact prior presence and values only when all three settings and the managed file still match the receipt. Both commands support selected-home-non-writing previews through a disposable isolated config snapshot that privately copies validated in-home relative read inputs and remaps resolved preview paths back to the selected home. Escaping or symlinked relative inputs fail closed. The commands require explicit roots and an absolute Codex binary and serialize the complete lifecycle with a recoverable identity-bound lock. Ambiguous app-server failures retain pending receipt and managed-file evidence for state inspection instead of assuming that a write did not commit. Start a new session after applying or restoring; provider-managed remote compaction may bypass `compact_prompt`. See [install-skizzles](skills/install-skizzles/SKILL.md) for the exact commands.
-
-The optional Luna V2 overlay lives in `runtime/model-catalog.ts`. It regenerates a complete static catalog from the newest valid normal cache or the installed Codex binary, changes only Luna's compatibility marker, and becomes a no-op when upstream enables V2 officially. Its launchd template watches both sources and runs every five minutes; catalog changes take effect after the next app-server restart. See `assets/model-catalog-installation.md` before activating it. 🚀
-
-## Keep the loop delightful
-
-Build and verify the generated plugin from source with:
-
-```sh
 bun install --frozen-lockfile
 bun run verify
 ```
 
-Maintainers working on the Codex base-instruction derivation should read the
-[prompt-layer architecture](docs/prompt-layer-architecture.md) before changing
-its pinned baseline, patch, or generated artifacts.
+The sole dependency lock is the root `bun.lock`. Biome is intentionally not a
+workspace dependency; format, lint, and check commands pin Biome 2.5.4 through
+`bunx`.
 
-Plugins and new tasks use cached, versioned content, so start a fresh task after an update. For ownership, release rules, and safety details, see [AGENTS.md](AGENTS.md).
+## Operational boundaries
 
-> **Pre-release note:** the Git-based examples become runnable once the repository and a versioned release are published. Stable marketplace publication remains a separate release step; host wiring is optional machine-local setup.
+Ordinary development and installation do not modify a live Codex home,
+installed plugin, `PATH`, launchd, or active Container Lab state. Host wiring
+for the model catalog and Container Lab is optional, explicit, reversible, and
+documented by the owning packages.
+
+Prompt-policy apply/restore uses explicit roots, an absolute Codex binary,
+validated artifacts, owner-only receipts, atomic writes, and a recoverable
+identity-bound lock. Start a new Codex session after applying or restoring a
+policy.
+
+## Maintainer commands
+
+```sh
+bun run format          # write formatting with Biome 2.5.4
+bun run lint            # lint the complete source/generated boundary
+bun run workspace:check # manifests, dependencies, exports, locks, and ownership
+bun run typecheck       # every workspace package
+bun run test            # canonical package-local suites only
+bun run packages:build  # every declared package build
+bun run plugin:check    # deterministic generated-plugin parity
+bun run verify          # complete aggregate gate
+```
+
+Change canonical package inputs, run `bun run plugin:build`, and review the
+generated diff. Never repair `plugins/skizzles/` directly.

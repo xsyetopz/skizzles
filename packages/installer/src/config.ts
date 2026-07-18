@@ -5,6 +5,7 @@ import {
   type ConfigRpc,
   canonicalExistingPath,
   isConfigVersionConflict,
+  type JsonValue,
   type OwnedConfigValue,
   openConfigRpcSession,
   readJsonFile,
@@ -100,21 +101,75 @@ function readReceipt(codexHome: string): ConfigReceipt {
   if (!existsSync(path)) {
     throw new Error(`Skizzles config receipt is missing: ${path}`);
   }
-  const receipt = readJsonFile(
-    path,
-    "Skizzles config receipt",
-  ) as Partial<ConfigReceipt>;
+  const parsed = readJsonFile(path, "Skizzles config receipt");
+  const receipt = objectValue(parsed);
   if (
-    receipt.version !== 1 ||
-    !["pending", "active", "restoring"].includes(receipt.state ?? "") ||
-    !["aggressive", "passive"].includes(receipt.orchestration ?? "") ||
-    typeof receipt.codexBinary !== "string" ||
-    typeof receipt.configPath !== "string" ||
-    !Array.isArray(receipt.values)
+    receipt?.["version"] !== 1 ||
+    !isReceiptState(receipt["state"]) ||
+    !isOrchestrationMode(receipt["orchestration"]) ||
+    typeof receipt["codexBinary"] !== "string" ||
+    typeof receipt["configPath"] !== "string" ||
+    !Array.isArray(receipt["values"])
   ) {
     throw new Error(`invalid Skizzles config receipt: ${path}`);
   }
-  return receipt as ConfigReceipt;
+  const values = receipt["values"].map((value) => {
+    const owned = objectValue(value);
+    if (
+      typeof owned?.["keyPath"] !== "string" ||
+      typeof owned["beforePresent"] !== "boolean" ||
+      !isJsonValue(owned["before"]) ||
+      !isJsonValue(owned["after"])
+    ) {
+      throw new Error(`invalid Skizzles config receipt: ${path}`);
+    }
+    return {
+      keyPath: owned["keyPath"],
+      beforePresent: owned["beforePresent"],
+      before: owned["before"],
+      after: owned["after"],
+    };
+  });
+  return {
+    version: 1,
+    state: receipt["state"],
+    orchestration: receipt["orchestration"],
+    codexBinary: receipt["codexBinary"],
+    configPath: receipt["configPath"],
+    values,
+  };
+}
+
+function isReceiptState(value: unknown): value is ConfigReceipt["state"] {
+  return value === "pending" || value === "active" || value === "restoring";
+}
+
+function isOrchestrationMode(value: unknown): value is OrchestrationMode {
+  return value === "aggressive" || value === "passive";
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value))
+    : undefined;
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+  const object = objectValue(value);
+  return object !== undefined && Object.values(object).every(isJsonValue);
 }
 
 function validateReceiptTarget(
@@ -146,7 +201,9 @@ function pendingConfigureReceipt(
   codexBinary: string,
   orchestration: OrchestrationMode,
 ): ConfigReceipt | undefined {
-  if (!pathEntryExists(receiptPath)) return undefined;
+  if (!pathEntryExists(receiptPath)) {
+    return undefined;
+  }
   const receipt = readReceipt(codexHome);
   validateReceiptTarget(receipt, codexHome, codexBinary);
   if (receipt.state === "active") {
@@ -202,7 +259,9 @@ async function recoverPendingConfigure(
       "refusing to recover pending configuration after owned keys drifted",
     );
   }
-  if (dryRun) return receipt;
+  if (dryRun) {
+    return receipt;
+  }
   if (!atAfter) {
     await writeConfigBatch(
       rpc,
@@ -260,7 +319,9 @@ export async function configureCodex(
       configPath,
       values: snapshotConfigValues(layer.config, edits),
     };
-    if (options.dryRun) return receipt;
+    if (options.dryRun) {
+      return receipt;
+    }
 
     writePrivateJson(receiptPath, receipt, true);
     await writeConfigBatch(rpc, edits, configPath, layer.version, receiptPath);
@@ -301,13 +362,17 @@ export async function unconfigureCodex(
       atBefore &&
       (receipt.state === "pending" || receipt.state === "restoring")
     ) {
-      if (!options.dryRun) rmSync(receiptPath);
+      if (!options.dryRun) {
+        rmSync(receiptPath);
+      }
       return receipt;
     }
     if (!atAfter) {
       throw new Error("refusing to restore drifted config keys");
     }
-    if (options.dryRun) return receipt;
+    if (options.dryRun) {
+      return receipt;
+    }
 
     receipt.state = "restoring";
     writePrivateJson(receiptPath, receipt);

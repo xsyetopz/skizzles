@@ -11,12 +11,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import process from "node:process";
 import {
-  assertManagedParentsAreReal as assertManagedParentsAreRealImpl,
-  copyDirectoryExclusive as copyDirectoryExclusiveImpl,
-  pathEntryExists as pathEntryExistsImpl,
+  assertManagedParentsAreReal,
+  copyDirectoryExclusive,
+  pathEntryExists,
   rollbackStagedMoves,
-  sameTree as sameTreeImpl,
+  sameTree,
 } from "./managed-files.ts";
 
 export type Transfer = "link" | "copy";
@@ -25,7 +26,7 @@ export interface SkillsReceipt {
   version: 1;
   sourceRoot: string;
   transfer: Transfer;
-  skills: Array<{ name: string; target: string }>;
+  skills: { name: string; target: string }[];
 }
 
 export interface SkillsOptions {
@@ -39,33 +40,6 @@ const receiptName = "skills-receipt.json";
 
 export function skillsReceiptPath(codexHome: string): string {
   return join(resolve(codexHome), ".skizzles", receiptName);
-}
-
-/** @deprecated Import from `managed-files.ts` for new installer code. */
-export function pathEntryExists(path: string): boolean {
-  return pathEntryExistsImpl(path);
-}
-
-/** @deprecated Import from `managed-files.ts` for new installer code. */
-export function copyDirectoryExclusive(
-  source: string,
-  target: string,
-  copyEntry: ((source: string, target: string) => void) | undefined = undefined,
-): void {
-  copyDirectoryExclusiveImpl(source, target, copyEntry);
-}
-
-/** @deprecated Import from `managed-files.ts` for new installer code. */
-export function assertManagedParentsAreReal(
-  rootInput: string,
-  managedParents: string[],
-): void {
-  assertManagedParentsAreRealImpl(rootInput, managedParents);
-}
-
-/** @deprecated Import from `managed-files.ts` for new installer code. */
-export function sameTree(left: string, right: string): boolean {
-  return sameTreeImpl(left, right);
 }
 
 function publicSkills(
@@ -89,17 +63,39 @@ function readReceipt(codexHome: string): SkillsReceipt {
   if (!existsSync(path)) {
     throw new Error(`Skizzles skills receipt is missing: ${path}`);
   }
-  const value = JSON.parse(
-    readFileSync(path, "utf8"),
-  ) as Partial<SkillsReceipt>;
+  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+  const value = objectValue(parsed);
   if (
-    value.version !== 1 ||
-    (value.transfer !== "link" && value.transfer !== "copy") ||
-    !Array.isArray(value.skills)
+    value?.["version"] !== 1 ||
+    (value["transfer"] !== "link" && value["transfer"] !== "copy") ||
+    typeof value["sourceRoot"] !== "string" ||
+    !Array.isArray(value["skills"])
   ) {
     throw new Error(`invalid Skizzles skills receipt: ${path}`);
   }
-  return value as SkillsReceipt;
+  const skills: { name: string; target: string }[] = [];
+  for (const item of value["skills"]) {
+    const skill = objectValue(item);
+    if (
+      typeof skill?.["name"] !== "string" ||
+      typeof skill["target"] !== "string"
+    ) {
+      throw new Error(`invalid Skizzles skills receipt: ${path}`);
+    }
+    skills.push({ name: skill["name"], target: skill["target"] });
+  }
+  return {
+    version: 1,
+    sourceRoot: value["sourceRoot"],
+    transfer: value["transfer"],
+    skills,
+  };
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value))
+    : undefined;
 }
 
 export function installSkills(options: SkillsOptions): SkillsReceipt {
@@ -116,7 +112,9 @@ export function installSkills(options: SkillsOptions): SkillsReceipt {
     source,
     target: join(codexHome, "skills", name),
   }));
-  if (skills.length === 0) throw new Error("no public skills were found");
+  if (skills.length === 0) {
+    throw new Error("no public skills were found");
+  }
   const conflict = skills.find(({ target }) => pathEntryExists(target));
   if (conflict) {
     throw new Error(`refusing to replace existing skill: ${conflict.target}`);
@@ -128,7 +126,9 @@ export function installSkills(options: SkillsOptions): SkillsReceipt {
     transfer: options.transfer,
     skills: skills.map(({ name, target }) => ({ name, target })),
   };
-  if (options.dryRun) return receipt;
+  if (options.dryRun) {
+    return receipt;
+  }
 
   mkdirSync(join(codexHome, "skills"), { recursive: true });
   const created: string[] = [];
@@ -136,7 +136,9 @@ export function installSkills(options: SkillsOptions): SkillsReceipt {
     for (const skill of skills) {
       if (options.transfer === "link") {
         symlinkSync(skill.source, skill.target, "dir");
-      } else copyDirectoryExclusive(skill.source, skill.target);
+      } else {
+        copyDirectoryExclusive(skill.source, skill.target);
+      }
       created.push(skill.target);
     }
     mkdirSync(dirname(receiptPath), { recursive: true });
@@ -182,7 +184,9 @@ export function uninstallSkills(
       throw new Error(`owned copied skill drifted: ${target}`);
     }
   }
-  if (dryRun) return receipt;
+  if (dryRun) {
+    return receipt;
+  }
   const quarantine = join(
     codexHome,
     ".skizzles",

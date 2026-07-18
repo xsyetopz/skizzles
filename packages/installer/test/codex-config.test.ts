@@ -1,3 +1,4 @@
+// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
@@ -8,14 +9,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import process from "node:process";
 import { openConfigRpcSession } from "../src/codex-config.ts";
 
 const roots: string[] = [];
-afterEach(() =>
-  roots.splice(0).forEach((root) => {
+afterEach(() => {
+  for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
-  }),
-);
+  }
+});
 function fixture(config: string) {
   const home = `/tmp/skizzles-preview-${crypto.randomUUID()}`;
   const binary = `${home}-codex.mjs`;
@@ -95,7 +97,9 @@ try {
     const f = fixture('[agents.a]\nconfig_file = "c0.toml"\n');
     for (let i = 0; i < chain.length; i++) {
       const path = chain[i];
-      if (!path) throw new Error("nested config fixture is incomplete");
+      if (!path) {
+        throw new Error("nested config fixture is incomplete");
+      }
       writeFileSync(
         join(f.home, path),
         `[agents.a]\nconfig_file = "${chain[i + 1] ?? "c0.toml"}"\n`,
@@ -117,7 +121,9 @@ try {
     const f = fixture('[agents.a]\nconfig_file = "c0.toml"\n');
     for (let i = 0; i < chain.length; i++) {
       const path = chain[i];
-      if (!path) throw new Error("nested config fixture is incomplete");
+      if (!path) {
+        throw new Error("nested config fixture is incomplete");
+      }
       writeFileSync(
         join(f.home, path),
         chain[i + 1]
@@ -143,7 +149,9 @@ try {
         (_, i) => `[agents.a${i}]\nconfig_file = "f${i}.md"`,
       ).join("\n"),
     );
-    for (let i = 0; i < 257; i++) writeFileSync(join(f.home, `f${i}.md`), "x");
+    for (let i = 0; i < 257; i++) {
+      writeFileSync(join(f.home, `f${i}.md`), "x");
+    }
     await expect(
       openConfigRpcSession({
         codexHome: f.home,
@@ -162,7 +170,9 @@ try {
         (_, i) => `[agents.a${i}]\nconfig_file = "f${i}.md"`,
       ).join("\n"),
     );
-    for (let i = 0; i < 256; i++) writeFileSync(join(f.home, `f${i}.md`), "x");
+    for (let i = 0; i < 256; i++) {
+      writeFileSync(join(f.home, `f${i}.md`), "x");
+    }
     const session = await openConfigRpcSession({
       codexHome: f.home,
       codexBinary: f.binary,

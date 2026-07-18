@@ -1,3 +1,4 @@
+// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
@@ -10,15 +11,28 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
+import process from "node:process";
 
 const roots: string[] = [];
-afterEach(() =>
-  roots.splice(0).forEach((root) => {
+afterEach(() => {
+  for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
-  }),
-);
+  }
+});
 
 describe("installer CLI target gates", () => {
+  test("reports topology-independent public usage", () => {
+    const result = runCli([]);
+    expect(result.exitCode).toBe(2);
+    expect(result.stdout.toString()).toBe("");
+    expect(result.stderr.toString()).toStartWith(
+      "usage: skizzles-installer install",
+    );
+    expect(result.stderr.toString()).not.toContain(
+      "packages/installer/src/cli.ts",
+    );
+  });
+
   for (const invocation of [
     ["install", "--surface", "skills"],
     ["uninstall", "--surface", "skills"],
@@ -101,6 +115,139 @@ describe("installer CLI target gates", () => {
       stderr: "pipe",
     });
     expect(result.exitCode).toBe(2);
+    expect(existsSync(root)).toBe(false);
+  });
+
+  test("rejects flags without values as usage errors", () => {
+    for (const invocation of [
+      ["install", "--surface"],
+      ["install", "--surface", "skills", "--codex-home"],
+      ["configure", "--codex-home", "/tmp/codex", "--codex-binary"],
+      [
+        "configure",
+        "--codex-home",
+        "/tmp/codex",
+        "--codex-binary",
+        "/tmp/codex-bin",
+        "--orchestration",
+      ],
+      [
+        "prompt-policy",
+        "apply",
+        "--codex-home",
+        "/tmp/codex",
+        "--codex-binary",
+        "/tmp/codex-bin",
+        "--source-root",
+      ],
+    ]) {
+      const result = runCli(invocation);
+      expect(result.exitCode, invocation.join(" ")).toBe(2);
+      expect(result.stderr.toString()).toStartWith("usage:");
+    }
+  });
+
+  test("rejects duplicate and per-command incompatible flags", () => {
+    const root = join(
+      process.env["TMPDIR"] ?? "/tmp",
+      `skizzles-cli-matrix-${crypto.randomUUID()}`,
+    );
+    roots.push(root);
+    const home = join(root, "home");
+    const codexHome = join(root, "codex");
+    const binary = resolve(process.execPath);
+    const sourceRoot = resolve(import.meta.dir, "../../..");
+    const invocations = [
+      [
+        "install",
+        "--surface",
+        "skills",
+        "--codex-home",
+        codexHome,
+        "--home",
+        home,
+        "--dry-run",
+      ],
+      [
+        "uninstall",
+        "--surface",
+        "skills",
+        "--codex-home",
+        codexHome,
+        "--source-root",
+        sourceRoot,
+        "--dry-run",
+      ],
+      [
+        "install",
+        "--surface",
+        "harness",
+        "--home",
+        home,
+        "--codex-home",
+        codexHome,
+        "--dry-run",
+      ],
+      [
+        "uninstall",
+        "--surface",
+        "harness",
+        "--home",
+        home,
+        "--transfer",
+        "copy",
+        "--dry-run",
+      ],
+      ["doctor", "--home", home, "--codex-home", codexHome, "--dry-run"],
+      [
+        "configure",
+        "--codex-home",
+        codexHome,
+        "--codex-binary",
+        binary,
+        "--orchestration",
+        "passive",
+        "--transfer",
+        "copy",
+      ],
+      [
+        "unconfigure",
+        "--codex-home",
+        codexHome,
+        "--codex-binary",
+        binary,
+        "--surface",
+        "skills",
+      ],
+      [
+        "prompt-policy",
+        "apply",
+        "--codex-home",
+        codexHome,
+        "--codex-binary",
+        binary,
+        "--source-root",
+        sourceRoot,
+        "--home",
+        home,
+      ],
+      [
+        "prompt-policy",
+        "restore",
+        "--codex-home",
+        codexHome,
+        "--codex-binary",
+        binary,
+        "--source-root",
+        sourceRoot,
+      ],
+      ["doctor", "--home", home, "--home", home, "--codex-home", codexHome],
+    ];
+    for (const invocation of invocations) {
+      const result = runCli(invocation);
+      expect(result.exitCode, invocation.join(" ")).toBe(2);
+      expect(result.stderr.toString()).toStartWith("usage:");
+    }
     expect(existsSync(root)).toBe(false);
   });
 
@@ -360,6 +507,18 @@ describe("installer CLI target gates", () => {
     }
   });
 });
+
+function runCli(invocation: string[]) {
+  return Bun.spawnSync({
+    cmd: [
+      process.execPath,
+      resolve(import.meta.dir, "../src/cli.ts"),
+      ...invocation,
+    ],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+}
 
 function snapshotTree(root: string): [string, string][] {
   const entries: [string, string][] = [];

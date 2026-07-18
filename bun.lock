@@ -7,13 +7,35 @@
       "devDependencies": {
         "@types/bun": "^1.3.14",
         "@types/node": "^26.1.1",
-        "fastmcp": "^4.7.2",
         "typescript": "^7.0.2",
-        "zod": "^4.4.3",
       },
     },
-    "packages/codex-container-lab/cli": {
-      "name": "codex-container-lab",
+    "packages/command-hook": {
+      "name": "@skizzles/command-hook",
+      "version": "0.1.0",
+      "bin": {
+        "skizzles-manage-command-output": "./src/manage-command-output.ts",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/command-supervisor": {
+      "name": "@skizzles/command-supervisor",
+      "version": "0.1.0",
+      "bin": {
+        "codex-command": "./src/codex-command.ts",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/container-lab": {
+      "name": "@skizzles/container-lab",
       "version": "0.1.0",
       "bin": {
         "codex-container-lab": "./src/cli.ts",
@@ -28,22 +50,95 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/core": {
-      "name": "@skizzles/core",
+    "packages/installer": {
+      "name": "@skizzles/installer",
       "version": "0.1.0",
+      "bin": {
+        "skizzles-installer": "./src/cli.ts",
+      },
       "devDependencies": {
         "@types/bun": "^1.3.14",
         "@types/node": "^26.1.1",
         "typescript": "^7.0.2",
       },
     },
-    "packages/installer": {
-      "name": "@skizzles/installer",
+    "packages/model-catalog": {
+      "name": "@skizzles/model-catalog",
       "version": "0.1.0",
+      "bin": {
+        "skizzles-model-catalog": "./src/index.ts",
+      },
       "devDependencies": {
         "@types/bun": "^1.3.14",
         "@types/node": "^26.1.1",
         "typescript": "^7.0.2",
+      },
+    },
+    "packages/plugin-builder": {
+      "name": "@skizzles/plugin-builder",
+      "version": "0.1.0",
+      "bin": {
+        "skizzles-plugin-builder": "./src/plugin-package.ts",
+      },
+      "dependencies": {
+        "@skizzles/prompt-layer": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/prompt-layer": {
+      "name": "@skizzles/prompt-layer",
+      "version": "0.1.0",
+      "bin": {
+        "skizzles-prompt-layer": "./src/prompt-layer.ts",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/usage-analyzer": {
+      "name": "@skizzles/usage-analyzer",
+      "version": "0.1.0",
+      "bin": {
+        "skizzles-analyze": "./src/main.ts",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+      },
+    },
+    "packages/workspace-policy": {
+      "name": "@skizzles/workspace-policy",
+      "version": "0.1.0",
+      "bin": {
+        "skizzles-workspace-policy": "./src/cli.ts",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+      },
+    },
+    "skills/codex-project-tooling/assets/fastmcp-bun-template": {
+      "name": "codex-fastmcp-template",
+      "version": "0.1.0",
+      "bin": {
+        "codex-fastmcp-template": "./src/index.ts",
+      },
+      "dependencies": {
+        "fastmcp": "^4.4.0",
+        "zod": "^3.25.0",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^24.0.0",
+        "typescript": "^5.8.0",
       },
     },
   },
@@ -58,9 +153,23 @@
 
     "@sindresorhus/merge-streams": ["@sindresorhus/merge-streams@4.0.0", "", {}, "sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ=="],
 
-    "@skizzles/core": ["@skizzles/core@workspace:packages/core"],
+    "@skizzles/command-hook": ["@skizzles/command-hook@workspace:packages/command-hook"],
+
+    "@skizzles/command-supervisor": ["@skizzles/command-supervisor@workspace:packages/command-supervisor"],
+
+    "@skizzles/container-lab": ["@skizzles/container-lab@workspace:packages/container-lab"],
 
     "@skizzles/installer": ["@skizzles/installer@workspace:packages/installer"],
+
+    "@skizzles/model-catalog": ["@skizzles/model-catalog@workspace:packages/model-catalog"],
+
+    "@skizzles/plugin-builder": ["@skizzles/plugin-builder@workspace:packages/plugin-builder"],
+
+    "@skizzles/prompt-layer": ["@skizzles/prompt-layer@workspace:packages/prompt-layer"],
+
+    "@skizzles/usage-analyzer": ["@skizzles/usage-analyzer@workspace:packages/usage-analyzer"],
+
+    "@skizzles/workspace-policy": ["@skizzles/workspace-policy@workspace:packages/workspace-policy"],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
@@ -140,7 +249,7 @@
 
     "cliui": ["cliui@9.0.1", "", { "dependencies": { "string-width": "^7.2.0", "strip-ansi": "^7.1.0", "wrap-ansi": "^9.0.0" } }, "sha512-k7ndgKhwoQveBL+/1tqGJYNz097I7WOvwbmmU2AR5+magtbjPWQTS1C5vzGkBC8Ym8UWRzfKUzUUqFLypY4Q+w=="],
 
-    "codex-container-lab": ["codex-container-lab@workspace:packages/codex-container-lab/cli"],
+    "codex-fastmcp-template": ["codex-fastmcp-template@workspace:skills/codex-project-tooling/assets/fastmcp-bun-template"],
 
     "combined-stream": ["combined-stream@1.0.8", "", { "dependencies": { "delayed-stream": "~1.0.0" } }, "sha512-FQN4MRfuJeHf7cBbBMJFXhKSDq+2kAArBlmRBvcvFE5BB1HZKXtSFASDhdlz9zOYwxh8lDdnvmMOe/+5cdoEdg=="],
 
@@ -430,11 +539,19 @@
 
     "yoctocolors": ["yoctocolors@2.1.2", "", {}, "sha512-CzhO+pFNo8ajLM2d2IW/R93ipy99LWjtwblvC1RsoSUMZgyLbYFr221TnSNT7GjGdYui6P459mw9JH/g/zW2ug=="],
 
-    "zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
+    "zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
     "zod-to-json-schema": ["zod-to-json-schema@3.25.2", "", { "peerDependencies": { "zod": "^3.25.28 || ^4" } }, "sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA=="],
 
+    "@modelcontextprotocol/sdk/zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
+
     "body-parser/content-type": ["content-type@2.0.0", "", {}, "sha512-j/O/d7GcZCyNl7/hwZAb606rzqkyvaDctLmckbxLzHvFBzTJHuGEdodATcP3yIRoDrLHkIATJuvzbFlp/ki2cQ=="],
+
+    "codex-fastmcp-template/@types/node": ["@types/node@24.13.3", "", { "dependencies": { "undici-types": "~7.18.0" } }, "sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q=="],
+
+    "codex-fastmcp-template/typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
+
+    "fastmcp/zod": ["zod@4.4.3", "", {}, "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ=="],
 
     "form-data/mime-types": ["mime-types@2.1.35", "", { "dependencies": { "mime-db": "1.52.0" } }, "sha512-ZDY+bPm5zTTF+YpCrAU9nK0UgICYPT0QtT1NZWFv4s++TNkcgVaT0g6+4R2uI4MjQjzysHB1zxuWL50hzaeXiw=="],
 
@@ -449,6 +566,8 @@
     "npm-run-path/path-key": ["path-key@4.0.0", "", {}, "sha512-haREypq7xkM7ErfgIyA0z+Bj4AGKlMSdlQE2jvJo6huWD1EdkKYV+G/T4nq0YEF2vgTT8kqMFKo1uHn950r4SQ=="],
 
     "type-is/content-type": ["content-type@2.0.0", "", {}, "sha512-j/O/d7GcZCyNl7/hwZAb606rzqkyvaDctLmckbxLzHvFBzTJHuGEdodATcP3yIRoDrLHkIATJuvzbFlp/ki2cQ=="],
+
+    "codex-fastmcp-template/@types/node/undici-types": ["undici-types@7.18.2", "", {}, "sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w=="],
 
     "form-data/mime-types/mime-db": ["mime-db@1.52.0", "", {}, "sha512-sPU4uV7dYlvtWJxwwxHD0PuihVNiE7TyAbQ5SWxDCB9mUYvOgroQOwYQQOKPJ8CIbE+1ETVlOoK1UC2nU3gYvg=="],
 

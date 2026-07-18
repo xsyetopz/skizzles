@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import process from "node:process";
 
 const LOCK_SCHEMA = "skizzles.prompt-policy-lock";
 const LOCK_VERSION = 1;
@@ -22,6 +23,8 @@ const OWNER_NAME = "owner.json";
 const DEFAULT_INCOMPLETE_GRACE_MS = 5_000;
 const TOKEN_PATTERN = /^[0-9a-f-]{36}$/;
 const ORPHAN_NAME_PATTERN = /^(?:stale|release|failed)-[0-9a-f-]{36}$/;
+// biome-ignore lint/security/noSecrets: This persisted schema key names Unix timestamp metadata, not credential material.
+const CREATED_AT_UNIX_MS_FIELD = "createdAtUnixMs";
 const LINE_BREAK_PATTERN = /[\r\n]/;
 const WHITESPACE_PATTERN = /\s+/;
 const DARWIN_PS_LSTART =
@@ -127,7 +130,9 @@ function acquireLock(
   const path = promptPolicyLockPath(codexHome, parent);
   cleanupLockOrphans(parent, path, options);
   const created = createLock(parent, path, owner);
-  if (created) return created;
+  if (created) {
+    return created;
+  }
   return reclaimStaleLock(parent, path, owner, options);
 }
 
@@ -140,7 +145,9 @@ function cleanupLockOrphans(
   const prefix = `${basename(lockPath)}.`;
   const grace = options?.incompleteGraceMs ?? DEFAULT_INCOMPLETE_GRACE_MS;
   for (const name of readdirSync(parent).sort()) {
-    if (!name.startsWith(prefix)) continue;
+    if (!name.startsWith(prefix)) {
+      continue;
+    }
     const suffix = name.slice(prefix.length);
     if (!ORPHAN_NAME_PATTERN.test(suffix)) {
       throw new Error(
@@ -164,8 +171,9 @@ function cleanupLockOrphans(
       throw new Error("prompt-policy lock orphan contains unexpected entries");
     }
     const owner = entries.length === 1 ? readOwner(path) : undefined;
-    if (owner) assertStaleOwner(owner, options?.processStartIdentity);
-    else if (Date.now() - metadata.mtimeMs < grace) {
+    if (owner) {
+      assertStaleOwner(owner, options?.processStartIdentity);
+    } else if (Date.now() - metadata.mtimeMs < grace) {
       throw new Error("prompt-policy lock orphan is inside its grace period");
     }
     assertIdentity(path, identity, "prompt-policy lock orphan was replaced");
@@ -184,7 +192,9 @@ function createLock(
   try {
     mkdirSync(path, { mode: 0o700 });
   } catch (error) {
-    if (isNodeError(error) && error.code === "EEXIST") return undefined;
+    if (isNodeError(error) && error.code === "EEXIST") {
+      return undefined;
+    }
     throw error;
   }
   chmodSync(path, 0o700);
@@ -235,8 +245,9 @@ async function reclaimStaleLock(
     throw new Error("prompt-policy lifecycle lock contains unexpected entries");
   }
   const owner = entries.length === 1 ? readOwner(path) : undefined;
-  if (owner) assertStaleOwner(owner, options?.processStartIdentity);
-  else if (Date.now() - metadata.mtimeMs < grace) {
+  if (owner) {
+    assertStaleOwner(owner, options?.processStartIdentity);
+  } else if (Date.now() - metadata.mtimeMs < grace) {
     throw new Error(
       "prompt-policy lifecycle lock initialization is incomplete within its grace period",
     );
@@ -323,7 +334,9 @@ function removeQuarantine(
       "prompt-policy lock quarantine contains unexpected entries",
     );
   }
-  if (ownerExpected) rmSync(join(path, OWNER_NAME));
+  if (ownerExpected) {
+    rmSync(join(path, OWNER_NAME));
+  }
   rmdirSync(path);
 }
 
@@ -369,7 +382,9 @@ function readOwner(lockPath: string): LockOwner {
   } catch {
     throw new Error("prompt-policy lock owner is invalid JSON");
   }
-  if (!isObject(value)) throw new Error("prompt-policy lock owner is invalid");
+  if (!isObject(value)) {
+    throw new Error("prompt-policy lock owner is invalid");
+  }
   const keys = Object.keys(value).sort();
   const expected = [
     "schema",
@@ -378,33 +393,50 @@ function readOwner(lockPath: string): LockOwner {
     "pid",
     "processStartIdentity",
     "token",
-    "createdAtUnixMs",
+    CREATED_AT_UNIX_MS_FIELD,
   ].sort();
   if (keys.join("\0") !== expected.join("\0")) {
     throw new Error("prompt-policy lock owner has unexpected fields");
   }
+  const operation = value["operation"];
+  const pid = value["pid"];
+  const processStartIdentity = value["processStartIdentity"];
+  const token = value["token"];
+  const createdAtUnixMs = value[CREATED_AT_UNIX_MS_FIELD];
   if (
     value["schema"] !== LOCK_SCHEMA ||
     value["version"] !== LOCK_VERSION ||
-    (value["operation"] !== "apply" && value["operation"] !== "restore") ||
-    !Number.isSafeInteger(value["pid"]) ||
-    (value["pid"] as number) < 1 ||
-    !validProcessStartIdentity(value["processStartIdentity"]) ||
-    typeof value["token"] !== "string" ||
-    !TOKEN_PATTERN.test(value["token"]) ||
-    !Number.isSafeInteger(value["createdAtUnixMs"]) ||
-    (value["createdAtUnixMs"] as number) < 1
+    (operation !== "apply" && operation !== "restore") ||
+    typeof pid !== "number" ||
+    !Number.isSafeInteger(pid) ||
+    pid < 1 ||
+    !validProcessStartIdentity(processStartIdentity) ||
+    typeof token !== "string" ||
+    !TOKEN_PATTERN.test(token) ||
+    typeof createdAtUnixMs !== "number" ||
+    !Number.isSafeInteger(createdAtUnixMs) ||
+    createdAtUnixMs < 1
   ) {
     throw new Error("prompt-policy lock owner fields are invalid");
   }
-  return value as unknown as LockOwner;
+  return {
+    schema: LOCK_SCHEMA,
+    version: LOCK_VERSION,
+    operation,
+    pid,
+    processStartIdentity,
+    token,
+    createdAtUnixMs,
+  };
 }
 
 function assertStaleOwner(
   owner: LockOwner,
   provider = defaultProcessStartIdentity,
 ): void {
-  if (!processExists(owner.pid)) return;
+  if (!processExists(owner.pid)) {
+    return;
+  }
   const actual = provider(owner.pid);
   if (!validProcessStartIdentity(actual)) {
     throw new Error(
@@ -423,7 +455,9 @@ function defaultProcessStartIdentity(pid: number): string | undefined {
     try {
       const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
       const commandEnd = stat.lastIndexOf(")");
-      if (commandEnd < 0) return undefined;
+      if (commandEnd < 0) {
+        return undefined;
+      }
       const fields = stat
         .slice(commandEnd + 1)
         .trim()
@@ -443,7 +477,9 @@ function defaultProcessStartIdentity(pid: number): string | undefined {
         stderr: "ignore",
       },
     );
-    if (result.exitCode !== 0) return undefined;
+    if (result.exitCode !== 0) {
+      return undefined;
+    }
     return normalizeDarwinProcessStart(result.stdout.toString());
   }
   return undefined;
@@ -453,7 +489,9 @@ export function normalizeDarwinProcessStart(
   output: string,
 ): string | undefined {
   const match = DARWIN_PS_LSTART.exec(output.trim().replace(/\s+/g, " "));
-  if (!match) return undefined;
+  if (!match) {
+    return undefined;
+  }
   const weekday = DARWIN_WEEKDAYS.indexOf(match[1] ?? "");
   const month = DARWIN_MONTHS.indexOf(match[2] ?? "");
   const day = Number(match[3]);
@@ -461,7 +499,9 @@ export function normalizeDarwinProcessStart(
   const minute = Number(match[5]);
   const second = Number(match[6]);
   const year = Number(match[7]);
-  if (weekday < 0 || month < 0) return undefined;
+  if (weekday < 0 || month < 0) {
+    return undefined;
+  }
   const epochMs = Date.UTC(year, month, day, hour, minute, second);
   const date = new Date(epochMs);
   if (
@@ -484,8 +524,12 @@ function processExists(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    if (isNodeError(error) && error.code === "EPERM") return true;
-    if (isNodeError(error) && error.code === "ESRCH") return false;
+    if (isNodeError(error) && error.code === "EPERM") {
+      return true;
+    }
+    if (isNodeError(error) && error.code === "ESRCH") {
+      return false;
+    }
     throw error;
   }
 }
@@ -536,7 +580,9 @@ function ensureSafeParent(parent: string): void {
       throw new Error("prompt-policy lock parent is not a safe directory");
     }
   } catch (error) {
-    if (!isNodeError(error) || error.code !== "ENOENT") throw error;
+    if (!isNodeError(error) || error.code !== "ENOENT") {
+      throw error;
+    }
     mkdirSync(parent, { mode: 0o700 });
   }
   chmodSync(parent, 0o700);
@@ -544,7 +590,9 @@ function ensureSafeParent(parent: string): void {
 
 function removeParentIfEmpty(parent: string): void {
   try {
-    if (readdirSync(parent).length === 0) rmdirSync(parent);
+    if (readdirSync(parent).length === 0) {
+      rmdirSync(parent);
+    }
   } catch (error) {
     if (
       isNodeError(error) &&

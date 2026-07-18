@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
-
-type JsonRpcResponse = {
-  id?: number;
-  result?: unknown;
-  error?: unknown;
-};
+import process from "node:process";
+import {
+  assertHasHealthTool,
+  assertHealthOk,
+  type JsonRpcResponse,
+  parseJsonRpcResponse,
+} from "./stdio-validation.ts";
 
 const child = spawn("bun", ["run", "src/index.ts"], {
   cwd: process.cwd(),
@@ -27,10 +28,16 @@ child.stdout.on("data", (chunk: Buffer) => {
     if (!line) {
       continue;
     }
-    const message = JSON.parse(line) as JsonRpcResponse;
-    if (typeof message.id === "number") {
-      responses.set(message.id, message);
+    let message: JsonRpcResponse;
+    try {
+      message = parseJsonRpcResponse(line);
+    } catch (error) {
+      console.error(
+        `[validate-stdio] ignoring invalid server response: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      continue;
     }
+    responses.set(message.id, message);
   }
 });
 
@@ -39,6 +46,9 @@ child.stderr.on("data", (chunk: Buffer) => {
 });
 
 function send(message: unknown): void {
+  if (!child.stdin) {
+    throw new Error("stdio validator could not open server stdin");
+  }
   child.stdin.write(`${JSON.stringify(message)}\n`);
 }
 
@@ -47,7 +57,7 @@ async function waitForResponse(id: number): Promise<JsonRpcResponse> {
   while (Date.now() < deadline) {
     const response = responses.get(id);
     if (response) {
-      if (response.error) {
+      if (response.error !== undefined) {
         throw new Error(
           `JSON-RPC ${id} failed: ${JSON.stringify(response.error)}`,
         );
@@ -57,33 +67,6 @@ async function waitForResponse(id: number): Promise<JsonRpcResponse> {
     await Bun.sleep(25);
   }
   throw new Error(`timed out waiting for JSON-RPC response ${id}`);
-}
-
-function assertHasHealthTool(response: JsonRpcResponse): void {
-  const tools = (
-    response.result as { tools?: Array<{ name?: string }> } | undefined
-  )?.tools;
-  if (!tools?.some((tool) => tool.name === "health")) {
-    throw new Error(
-      `tools/list did not include health: ${JSON.stringify(response.result)}`,
-    );
-  }
-}
-
-function assertHealthOk(response: JsonRpcResponse): void {
-  const content = (
-    response.result as { content?: Array<{ text?: string }> } | undefined
-  )?.content;
-  const text = content?.find((item) => typeof item.text === "string")?.text;
-  if (!text) {
-    throw new Error(
-      `health returned no text content: ${JSON.stringify(response.result)}`,
-    );
-  }
-  const health = JSON.parse(text) as { ok?: boolean };
-  if (health.ok !== true) {
-    throw new Error(`health was not ok: ${text}`);
-  }
 }
 
 try {

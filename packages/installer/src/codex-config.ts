@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { pathEntryExists as pathEntryExistsImpl } from "./managed-files.ts";
+import { pathEntryExists } from "./managed-files.ts";
 
 export type JsonValue =
   | null
@@ -138,13 +138,13 @@ type SnapshotStat = {
   size: bigint;
   mtimeNs?: bigint;
   ctimeNs?: bigint;
-  mtimeMs: number;
-  ctimeMs: number;
+  mtimeMs: number | bigint;
+  ctimeMs: number | bigint;
 };
 
 function snapshotStat(stat: SnapshotStat): SnapshotIdentity {
-  const mtimeNs = stat.mtimeNs ?? BigInt(Math.round(stat.mtimeMs * 1_000_000));
-  const ctimeNs = stat.ctimeNs ?? BigInt(Math.round(stat.ctimeMs * 1_000_000));
+  const mtimeNs = statNanoseconds(stat.mtimeNs, stat.mtimeMs);
+  const ctimeNs = statNanoseconds(stat.ctimeNs, stat.ctimeMs);
   return {
     path: "",
     dev: stat.dev,
@@ -155,12 +155,26 @@ function snapshotStat(stat: SnapshotStat): SnapshotIdentity {
   };
 }
 
+function statNanoseconds(
+  nanoseconds: bigint | undefined,
+  milliseconds: number | bigint,
+): bigint {
+  if (nanoseconds !== undefined) {
+    return nanoseconds;
+  }
+  return typeof milliseconds === "bigint"
+    ? milliseconds * 1_000_000n
+    : BigInt(Math.round(milliseconds * 1_000_000));
+}
+
 function createConfigPreviewSnapshot(
   selectedHome: string,
   previewHome: string,
 ): void {
   const configPath = join(selectedHome, "config.toml");
-  if (!pathEntryExists(configPath)) return;
+  if (!pathEntryExists(configPath)) {
+    return;
+  }
   const configBytes = copyPrivateSnapshotFile(
     selectedHome,
     configPath,
@@ -202,7 +216,9 @@ function copyRelativeConfigInputs(
     const source = resolve(dirname(documentPath), reference.value);
     const relativePath = safeSnapshotRelativePath(selectedHome, source);
     const sourceKey = canonicalExistingPath(source);
-    if (budget.copied.has(sourceKey)) continue;
+    if (budget.copied.has(sourceKey)) {
+      continue;
+    }
     if (budget.referencedFiles >= MAX_PREVIEW_REFERENCED_FILES) {
       throw new Error("dry-run snapshot referenced-file limit exceeded");
     }
@@ -239,12 +255,16 @@ function configFileReferences(
   value: unknown,
 ): { key: string; value: string }[] {
   const references: { key: string; value: string }[] = [];
-  if (!isPlainObject(value)) return references;
+  if (!isPlainObject(value)) {
+    return references;
+  }
   addPromptFileReferences(value, references);
   const profiles = value["profiles"];
   if (isPlainObject(profiles)) {
     for (const profile of Object.values(profiles)) {
-      if (isPlainObject(profile)) addPromptFileReferences(profile, references);
+      if (isPlainObject(profile)) {
+        addPromptFileReferences(profile, references);
+      }
     }
   }
   const agents = value["agents"];
@@ -264,7 +284,9 @@ function addPromptFileReferences(
 ): void {
   for (const key of PREVIEW_PROMPT_FILE_KEYS) {
     const value = config[key];
-    if (typeof value === "string") references.push({ key, value });
+    if (typeof value === "string") {
+      references.push({ key, value });
+    }
   }
 }
 
@@ -277,12 +299,12 @@ function snapshotSourceIdentities(
   const identities: SnapshotIdentity[] = [];
   let current = selectedHome;
   for (const segment of ["", ...relativePath.split(sep)]) {
-    if (segment) current = join(current, segment);
+    if (segment) {
+      current = join(current, segment);
+    }
     let metadata: SnapshotStat;
     try {
-      metadata = lstatSync(current, {
-        bigint: true,
-      }) as unknown as SnapshotStat;
+      metadata = lstatSync(current, { bigint: true });
     } catch {
       throw new Error(`${label} is missing from the selected Codex home`);
     }
@@ -292,9 +314,7 @@ function snapshotSourceIdentities(
     const identity = snapshotStat(metadata);
     identities.push({ ...identity, path: current });
   }
-  if (
-    !(lstatSync(source, { bigint: true }) as unknown as SnapshotStat).isFile()
-  ) {
+  if (!lstatSync(source, { bigint: true }).isFile()) {
     throw new Error(`${label} must be a regular file`);
   }
   return identities;
@@ -327,16 +347,16 @@ function copyPrivateSnapshotFile(
 ): number {
   const identities = snapshotSourceIdentities(selectedHome, source, label);
   const expectedFile = identities.at(-1);
-  if (!expectedFile) throw new Error("config snapshot identity is empty");
+  if (!expectedFile) {
+    throw new Error("config snapshot identity is empty");
+  }
   const descriptor = openSync(
     source,
     constants.O_RDONLY | constants.O_NOFOLLOW,
   );
   let bytes: Buffer;
   try {
-    const opened = fstatSync(descriptor, {
-      bigint: true,
-    }) as unknown as SnapshotStat;
+    const opened = fstatSync(descriptor, { bigint: true });
     assertSnapshotStat(opened, expectedFile, label);
     if (opened.size > BigInt(maxBytes)) {
       throw new Error(
@@ -352,13 +372,12 @@ function copyPrivateSnapshotFile(
       constants.O_RDONLY | constants.O_NOFOLLOW,
     );
     try {
-      const rereadStat = fstatSync(rereadDescriptor, {
-        bigint: true,
-      }) as unknown as SnapshotStat;
+      const rereadStat = fstatSync(rereadDescriptor, { bigint: true });
       assertSnapshotStat(rereadStat, expectedFile, label);
       const reread = readFileSync(rereadDescriptor);
-      if (!reread.equals(bytes))
+      if (!reread.equals(bytes)) {
         throw new Error(`${label} changed during dry-run snapshot`);
+      }
     } finally {
       closeSync(rereadDescriptor);
     }
@@ -379,7 +398,7 @@ function metadataNanoseconds(
 ): bigint {
   const ns = field === "mtime" ? stat.mtimeNs : stat.ctimeNs;
   const ms = field === "mtime" ? stat.mtimeMs : stat.ctimeMs;
-  return ns ?? BigInt(Math.round(ms * 1_000_000));
+  return statNanoseconds(ns, ms);
 }
 
 function assertSnapshotStat(
@@ -406,9 +425,7 @@ function assertSnapshotIdentities(
   for (const expected of identities) {
     let actual: SnapshotStat;
     try {
-      actual = lstatSync(expected.path, {
-        bigint: true,
-      }) as unknown as SnapshotStat;
+      actual = lstatSync(expected.path, { bigint: true });
     } catch {
       throw new Error(`${label} changed during dry-run snapshot`);
     }
@@ -442,11 +459,9 @@ class PreviewConfigRpc implements ConfigRpc {
 
   async read(): Promise<ConfigReadResponse> {
     const read = await this.inner.read();
-    return remapPreviewValue(
-      read,
-      this.previewHome,
-      this.selectedHome,
-    ) as ConfigReadResponse;
+    return parseConfigReadResponse(
+      remapPreviewValue(read, this.previewHome, this.selectedHome),
+    );
   }
 
   batchWrite(_params: {
@@ -474,7 +489,9 @@ function remapPreviewValue(
   selectedHome: string,
 ): unknown {
   if (typeof value === "string") {
-    if (value === previewHome) return selectedHome;
+    if (value === previewHome) {
+      return selectedHome;
+    }
     if (value.startsWith(`${previewHome}${sep}`)) {
       return join(selectedHome, relative(previewHome, value));
     }
@@ -485,7 +502,9 @@ function remapPreviewValue(
       remapPreviewValue(item, previewHome, selectedHome),
     );
   }
-  if (!isPlainObject(value)) return value;
+  if (!isPlainObject(value)) {
+    return value;
+  }
   return Object.fromEntries(
     Object.entries(value).map(([key, child]) => [
       key,
@@ -534,7 +553,9 @@ export function safeConfigWriteError(error: unknown): Error {
       "configVersionConflict",
     );
   }
-  if (error instanceof ConfigRpcError) return error;
+  if (error instanceof ConfigRpcError) {
+    return error;
+  }
   return new ConfigRpcError(
     "transport",
     "Codex config write outcome is ambiguous; pending recovery evidence was retained",
@@ -546,10 +567,6 @@ export interface OwnedConfigValue {
   beforePresent: boolean;
   before: JsonValue;
   after: JsonValue;
-}
-
-export function pathEntryExists(path: string): boolean {
-  return pathEntryExistsImpl(path);
 }
 
 export function canonicalExistingPath(path: string): string {
@@ -586,7 +603,11 @@ export function configValueAt(
     ) {
       return { present: false, value: null };
     }
-    current = current[segment] as JsonValue;
+    const next = current[segment];
+    if (next === undefined) {
+      return { present: false, value: null };
+    }
+    current = next;
   }
   return { present: true, value: current };
 }
@@ -730,8 +751,8 @@ export class AppServerRpc implements ConfigRpc {
       stderr: "pipe",
     });
     const rpc = new AppServerRpc(process);
-    rpc.consumeStdout();
-    rpc.consumeStderr();
+    void rpc.consumeStdout();
+    void rpc.consumeStderr();
     try {
       await rpc.request("initialize", {
         clientInfo: {
@@ -749,17 +770,21 @@ export class AppServerRpc implements ConfigRpc {
     }
   }
 
-  read(): Promise<ConfigReadResponse> {
-    return this.request("config/read", { includeLayers: true, cwd: null });
+  async read(): Promise<ConfigReadResponse> {
+    return parseConfigReadResponse(
+      await this.request("config/read", { includeLayers: true, cwd: null }),
+    );
   }
 
-  batchWrite(params: {
+  async batchWrite(params: {
     edits: ConfigEdit[];
     filePath: string;
     expectedVersion: string;
     reloadUserConfig: boolean;
   }): Promise<ConfigWriteResponse> {
-    return this.request("config/batchWrite", params);
+    return parseConfigWriteResponse(
+      await this.request("config/batchWrite", params),
+    );
   }
 
   async close(): Promise<void> {
@@ -768,13 +793,17 @@ export class AppServerRpc implements ConfigRpc {
       this.process.exited.then(() => true),
       Bun.sleep(2_000).then(() => false),
     ]);
-    if (exited) return;
+    if (exited) {
+      return;
+    }
     this.process.kill();
     const terminated = await Promise.race([
       this.process.exited.then(() => true),
       Bun.sleep(1_000).then(() => false),
     ]);
-    if (terminated) return;
+    if (terminated) {
+      return;
+    }
     this.process.kill(9);
     const killed = await Promise.race([
       this.process.exited.then(() => true),
@@ -788,9 +817,9 @@ export class AppServerRpc implements ConfigRpc {
     }
   }
 
-  private request<T>(method: string, params: unknown): Promise<T> {
+  private request(method: string, params: unknown): Promise<unknown> {
     const id = this.nextId++;
-    return new Promise<T>((resolvePromise, reject) => {
+    return new Promise<unknown>((resolvePromise, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
         reject(
@@ -801,7 +830,7 @@ export class AppServerRpc implements ConfigRpc {
         );
       }, 15_000);
       this.pending.set(id, {
-        resolve: (value) => resolvePromise(value as T),
+        resolve: resolvePromise,
         reject,
         timeout,
       });
@@ -820,11 +849,15 @@ export class AppServerRpc implements ConfigRpc {
     let buffered = "";
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        break;
+      }
       buffered += decoder.decode(value, { stream: true });
       const lines = buffered.split("\n");
       buffered = lines.pop() ?? "";
-      for (const line of lines) this.receive(line);
+      for (const line of lines) {
+        this.receive(line);
+      }
     }
     const error = new ConfigRpcError(
       "transport",
@@ -838,26 +871,30 @@ export class AppServerRpc implements ConfigRpc {
   }
 
   private receive(line: string): void {
-    if (!line.trim()) return;
-    let message: {
-      id?: number;
-      result?: unknown;
-      error?: { message?: string; data?: unknown; code?: unknown };
-    };
+    if (!line.trim()) {
+      return;
+    }
+    let value: unknown;
     try {
-      message = JSON.parse(line);
+      value = JSON.parse(line);
     } catch {
       return;
     }
-    if (typeof message.id !== "number") return;
-    const pending = this.pending.get(message.id);
-    if (!pending) return;
-    this.pending.delete(message.id);
+    if (!isPlainObject(value) || typeof value["id"] !== "number") {
+      return;
+    }
+    const id = value["id"];
+    const pending = this.pending.get(id);
+    if (!pending) {
+      return;
+    }
+    this.pending.delete(id);
     clearTimeout(pending.timeout);
-    if (message.error) {
-      pending.reject(classifyProtocolError(message.error));
+    const protocolError = value["error"];
+    if (isPlainObject(protocolError)) {
+      pending.reject(classifyProtocolError(protocolError));
     } else {
-      pending.resolve(message.result);
+      pending.resolve(value["result"]);
     }
   }
 
@@ -866,7 +903,9 @@ export class AppServerRpc implements ConfigRpc {
     const decoder = new TextDecoder();
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      if (done) {
+        break;
+      }
       decoder.decode(value, { stream: true });
     }
   }
@@ -895,7 +934,9 @@ function classifyProtocolError(error: {
 }
 
 function configWriteErrorCode(data: unknown): string | undefined {
-  if (!isPlainObject(data)) return undefined;
+  if (!isPlainObject(data)) {
+    return undefined;
+  }
   const value = data["config_write_error_code"];
   return typeof value === "string" && CONFIG_WRITE_ERROR_CODES.has(value)
     ? value
@@ -904,6 +945,97 @@ function configWriteErrorCode(data: unknown): string | undefined {
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseConfigReadResponse(value: unknown): ConfigReadResponse {
+  if (!isPlainObject(value)) {
+    throw invalidConfigResponse();
+  }
+  const layersValue = value["layers"];
+  if (layersValue !== null && !Array.isArray(layersValue)) {
+    throw invalidConfigResponse();
+  }
+  const layers =
+    layersValue === null ? null : layersValue.map(parseConfigLayerResponse);
+  const configValue = value["config"];
+  if (configValue === undefined) {
+    return { layers };
+  }
+  if (!isJsonValue(configValue)) {
+    throw invalidConfigResponse();
+  }
+  return { config: configValue, layers };
+}
+
+function parseConfigLayerResponse(value: unknown): ConfigLayer {
+  if (!(isPlainObject(value) && isPlainObject(value["name"]))) {
+    throw invalidConfigResponse();
+  }
+  const nameValue = value["name"];
+  const type = nameValue["type"];
+  const file = nameValue["file"];
+  const profile = nameValue["profile"];
+  const version = value["version"];
+  const config = value["config"];
+  if (
+    typeof type !== "string" ||
+    (file !== undefined && typeof file !== "string") ||
+    (profile !== undefined &&
+      profile !== null &&
+      typeof profile !== "string") ||
+    typeof version !== "string" ||
+    !isJsonValue(config)
+  ) {
+    throw invalidConfigResponse();
+  }
+  const name: ConfigLayer["name"] = { type };
+  if (typeof file === "string") {
+    name.file = file;
+  }
+  if (profile === null || typeof profile === "string") {
+    name.profile = profile;
+  }
+  return { name, version, config };
+}
+
+function parseConfigWriteResponse(value: unknown): ConfigWriteResponse {
+  if (
+    !isPlainObject(value) ||
+    typeof value["status"] !== "string" ||
+    typeof value["version"] !== "string" ||
+    typeof value["filePath"] !== "string"
+  ) {
+    throw invalidConfigResponse();
+  }
+  return {
+    status: value["status"],
+    version: value["version"],
+    filePath: value["filePath"],
+  };
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return true;
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+  return isPlainObject(value) && Object.values(value).every(isJsonValue);
+}
+
+function invalidConfigResponse(): ConfigRpcError {
+  return new ConfigRpcError(
+    "protocol",
+    "Codex app-server returned an invalid config response",
+  );
 }
 
 function safeMethodName(method: string): string {

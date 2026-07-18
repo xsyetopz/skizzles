@@ -2,14 +2,5 @@
   "name": "@skizzles/installer",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
-  "scripts": {
-    "test": "bun test test",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
-  },
-  "devDependencies": {
-    "@types/bun": "1.3.14",
-    "@types/node": "^26.1.1",
-    "typescript": "7.0.2"
-  }
+  "type": "module"
 }

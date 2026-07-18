@@ -38,7 +38,9 @@ export function copyDirectoryExclusive(
   try {
     chmodSync(target, lstatSync(source).mode & 0o7777);
     for (const name of readdirSync(source)) {
-      if (name === ".DS_Store") continue;
+      if (name === ".DS_Store") {
+        continue;
+      }
       copyEntry(join(source, name), join(target, name));
     }
   } catch (error) {
@@ -63,12 +65,20 @@ export function assertManagedParentsAreReal(
 }
 
 export function sameTree(left: string, right: string): boolean {
-  if (!(existsSync(left) && existsSync(right))) return false;
+  if (!(existsSync(left) && existsSync(right))) {
+    return false;
+  }
   const leftStat = lstatSync(left);
   const rightStat = lstatSync(right);
-  if (leftStat.isSymbolicLink() || rightStat.isSymbolicLink()) return false;
-  if (leftStat.isDirectory() !== rightStat.isDirectory()) return false;
-  if ((leftStat.mode & 0o7777) !== (rightStat.mode & 0o7777)) return false;
+  if (leftStat.isSymbolicLink() || rightStat.isSymbolicLink()) {
+    return false;
+  }
+  if (leftStat.isDirectory() !== rightStat.isDirectory()) {
+    return false;
+  }
+  if ((leftStat.mode & 0o7777) !== (rightStat.mode & 0o7777)) {
+    return false;
+  }
   if (leftStat.isDirectory()) {
     const leftNames = readdirSync(left)
       .filter((name) => name !== ".DS_Store")
@@ -76,7 +86,9 @@ export function sameTree(left: string, right: string): boolean {
     const rightNames = readdirSync(right)
       .filter((name) => name !== ".DS_Store")
       .sort();
-    if (leftNames.join("\0") !== rightNames.join("\0")) return false;
+    if (leftNames.join("\0") !== rightNames.join("\0")) {
+      return false;
+    }
     return leftNames.every((name) =>
       sameTree(join(left, name), join(right, name)),
     );

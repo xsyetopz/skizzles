@@ -22,7 +22,7 @@ import {
 interface Marketplace {
   name: string;
   interface?: { displayName?: string };
-  plugins: Array<Record<string, unknown>>;
+  plugins: Record<string, unknown>[];
 }
 
 export interface HarnessReceipt {
@@ -69,16 +69,32 @@ function readReceipt(home: string): HarnessReceipt {
   if (!existsSync(path)) {
     throw new Error(`Skizzles harness receipt is missing: ${path}`);
   }
-  const receipt = JSON.parse(
-    readFileSync(path, "utf8"),
-  ) as Partial<HarnessReceipt>;
+  const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
+  const receipt = objectValue(parsed);
   if (
-    receipt.version !== 1 ||
-    (receipt.transfer !== "link" && receipt.transfer !== "copy")
+    receipt?.["version"] !== 1 ||
+    (receipt["transfer"] !== "link" && receipt["transfer"] !== "copy") ||
+    typeof receipt["sourceRoot"] !== "string" ||
+    typeof receipt["pluginTarget"] !== "string" ||
+    typeof receipt["marketplacePath"] !== "string" ||
+    typeof receipt["marketplaceAfter"] !== "string"
   ) {
     throw new Error(`invalid Skizzles harness receipt: ${path}`);
   }
-  return receipt as HarnessReceipt;
+  return {
+    version: 1,
+    sourceRoot: receipt["sourceRoot"],
+    transfer: receipt["transfer"],
+    pluginTarget: receipt["pluginTarget"],
+    marketplacePath: receipt["marketplacePath"],
+    marketplaceAfter: receipt["marketplaceAfter"],
+  };
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value))
+    : undefined;
 }
 
 export function installHarness(options: HarnessOptions): HarnessReceipt {
@@ -117,13 +133,17 @@ export function installHarness(options: HarnessOptions): HarnessReceipt {
     marketplacePath,
     marketplaceAfter,
   };
-  if (options.dryRun) return receipt;
+  if (options.dryRun) {
+    return receipt;
+  }
 
   try {
     mkdirSync(dirname(pluginTarget), { recursive: true });
     if (options.transfer === "link") {
       symlinkSync(pluginSource, pluginTarget, "dir");
-    } else copyDirectoryExclusive(pluginSource, pluginTarget);
+    } else {
+      copyDirectoryExclusive(pluginSource, pluginTarget);
+    }
     mkdirSync(dirname(marketplacePath), { recursive: true });
     writeFileSync(marketplacePath, marketplaceAfter, { flag: "wx" });
     mkdirSync(dirname(receiptPath), { recursive: true });
@@ -188,7 +208,9 @@ export function uninstallHarness(
   ) {
     throw new Error("marketplace changed after Skizzles installation");
   }
-  if (dryRun) return receipt;
+  if (dryRun) {
+    return receipt;
+  }
   const quarantine = join(
     home,
     ".skizzles",

@@ -9,8 +9,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
-import { skillsReceiptPath, uninstallSkills } from "./core";
-import { harnessReceiptPath, uninstallHarness } from "./harness";
+import process from "node:process";
+import { skillsReceiptPath, uninstallSkills } from "./core.ts";
+import { harnessReceiptPath, uninstallHarness } from "./harness.ts";
+
+const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
+const LINE_PATTERN = /\r?\n/;
 
 interface ContainerLabContract {
   configuredRuntime: string;
@@ -31,30 +35,92 @@ interface ContainerLabContract {
 }
 
 function contract(descriptorPath?: string): ContainerLabContract {
-  const path =
-    descriptorPath ??
-    resolve(import.meta.dir, "../../../integrations/container-lab.json");
-  const value = JSON.parse(readFileSync(path, "utf8")) as ContainerLabContract;
+  const path = descriptorPath ?? defaultContainerLabDescriptor();
+  const value: unknown = JSON.parse(readFileSync(path, "utf8"));
+  const root = objectValue(value);
+  const binaries = objectValue(root?.["binaries"]);
+  const execution = objectValue(root?.["execution"]);
+  const ownership = objectValue(root?.["ownership"]);
+  const bundled = objectValue(root?.["bundled"]);
+  const configuredRuntime = nonEmptyString(root?.["configuredRuntime"]);
+  const operational = nonEmptyString(binaries?.["operational"]);
+  const reaper = nonEmptyString(binaries?.["reaper"]);
+  const adminMaxBytes = execution?.["adminMaxBytes"];
+  const canonicalSource = ownership?.["canonicalSource"];
+  const provenanceCommit = ownership?.["provenanceCommit"];
+  const operationalEntrypoint = bundled?.["operationalEntrypoint"];
+  const reaperEntrypoint = bundled?.["reaperEntrypoint"];
+  const launcher = bundled?.["launcher"];
+  const launchAgentTemplate = bundled?.["launchAgentTemplate"];
+  const documentation = bundled?.["documentation"];
   if (
-    !value.configuredRuntime ||
-    !value.binaries?.operational ||
-    !value.binaries?.reaper ||
-    !Number.isSafeInteger(value.execution?.adminMaxBytes) ||
-    value.execution.adminMaxBytes <= 0 ||
-    value.ownership?.runtimeOwner !== "skizzles" ||
-    !relativePath(value.ownership.canonicalSource) ||
-    !/^[0-9a-f]{40}$/.test(value.ownership.provenanceCommit ?? "") ||
-    !relativePath(value.bundled?.operationalEntrypoint) ||
-    !relativePath(value.bundled?.reaperEntrypoint) ||
-    !relativePath(value.bundled?.launcher) ||
-    !relativePath(value.bundled?.launchAgentTemplate) ||
-    !Array.isArray(value.bundled?.documentation) ||
-    value.bundled.documentation.length === 0 ||
-    !value.bundled.documentation.every(relativePath)
+    configuredRuntime === undefined ||
+    operational === undefined ||
+    reaper === undefined ||
+    !Number.isSafeInteger(adminMaxBytes) ||
+    typeof adminMaxBytes !== "number" ||
+    adminMaxBytes <= 0 ||
+    ownership?.["runtimeOwner"] !== "skizzles" ||
+    !relativePath(canonicalSource) ||
+    typeof provenanceCommit !== "string" ||
+    !COMMIT_PATTERN.test(provenanceCommit) ||
+    !relativePath(operationalEntrypoint) ||
+    !relativePath(reaperEntrypoint) ||
+    !relativePath(launcher) ||
+    !relativePath(launchAgentTemplate) ||
+    !Array.isArray(documentation) ||
+    documentation.length === 0 ||
+    !documentation.every(relativePath)
   ) {
     throw new Error("Skizzles Container Lab descriptor is invalid");
   }
-  return value;
+  return {
+    configuredRuntime,
+    binaries: { operational, reaper },
+    execution: { adminMaxBytes },
+    ownership: {
+      runtimeOwner: "skizzles",
+      canonicalSource,
+      provenanceCommit,
+    },
+    bundled: {
+      operationalEntrypoint,
+      reaperEntrypoint,
+      launcher,
+      launchAgentTemplate,
+      documentation,
+    },
+  };
+}
+
+function defaultContainerLabDescriptor(): string {
+  const canonical = resolve(
+    import.meta.dir,
+    "../../container-lab/assets/integrations/container-lab.json",
+  );
+  return existsSync(canonical)
+    ? canonical
+    : resolve(import.meta.dir, "../../../integrations/container-lab.json");
+}
+
+function descriptorForBundle(bundleRoot: string): string {
+  const canonical = join(
+    bundleRoot,
+    "packages/container-lab/assets/integrations/container-lab.json",
+  );
+  return existsSync(canonical)
+    ? canonical
+    : join(bundleRoot, "integrations/container-lab.json");
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? Object.fromEntries(Object.entries(value))
+    : undefined;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function relativePath(value: unknown): value is string {
@@ -86,7 +152,9 @@ export interface DoctorReport {
 
 function executable(name: string, pathValue: string): string | undefined {
   for (const directory of pathValue.split(delimiter)) {
-    if (!directory) continue;
+    if (!directory) {
+      continue;
+    }
     const candidate = resolve(directory, name);
     try {
       accessSync(candidate, constants.X_OK);
@@ -104,7 +172,7 @@ function adminJson(
   maximumBytes: number,
   timeoutMs: number,
 ): Record<string, unknown> {
-  const result = Bun.spawnSync({
+  const spawned = Bun.spawnSync({
     cmd: [...command, ...args],
     env: environment,
     stdout: "pipe",
@@ -112,27 +180,31 @@ function adminJson(
     timeout: timeoutMs,
     maxBuffer: maximumBytes + 1,
   });
-  const output = result.stdout.toString();
-  const errorOutput = result.stderr.toString();
+  const output = spawned.stdout.toString();
+  const errorOutput = spawned.stderr.toString();
   if (
     Buffer.byteLength(output, "utf8") > maximumBytes ||
     Buffer.byteLength(errorOutput, "utf8") > maximumBytes
   ) {
     throw new Error("external command exceeded its public output limit");
   }
-  if (result.signalCode !== undefined && result.signalCode !== null) {
+  if (spawned.signalCode !== undefined && spawned.signalCode !== null) {
     throw new Error("external command exceeded its time or output limit");
   }
-  if (result.exitCode !== 0) throw new Error("external command failed");
-  const lines = output.trim().split(/\r?\n/).filter(Boolean);
-  if (lines.length !== 1) {
+  if (spawned.exitCode !== 0) {
+    throw new Error("external command failed");
+  }
+  const lines = output.trim().split(LINE_PATTERN).filter(Boolean);
+  const line = lines[0];
+  if (lines.length !== 1 || line === undefined) {
     throw new Error("external command did not return one JSON record");
   }
-  const value = JSON.parse(lines[0]!) as unknown;
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+  const value: unknown = JSON.parse(line);
+  const record = objectValue(value);
+  if (record === undefined) {
     throw new Error("external command returned invalid JSON");
   }
-  return value as Record<string, unknown>;
+  return record;
 }
 
 export interface BundledContainerLabPaths {
@@ -145,7 +217,7 @@ export interface BundledContainerLabPaths {
 
 export function bundledContainerLabPaths(
   bundleRoot: string,
-  descriptorPath = join(bundleRoot, "integrations/container-lab.json"),
+  descriptorPath = descriptorForBundle(bundleRoot),
 ): BundledContainerLabPaths {
   const descriptor = contract(descriptorPath);
   return {
@@ -171,7 +243,9 @@ function bundledPathsArePresent(paths: BundledContainerLabPaths): boolean {
       paths.launchAgentTemplate,
       ...paths.documentation,
     ]) {
-      if (!lstatSync(path).isFile()) return false;
+      if (!lstatSync(path).isFile()) {
+        return false;
+      }
     }
     accessSync(paths.operational, constants.X_OK);
     accessSync(paths.reaper, constants.X_OK);
@@ -257,9 +331,9 @@ function inspectContainerLab(
       compatible: true,
       ready: health["dockerAvailable"],
       dockerAvailable: health["dockerAvailable"],
-      ...(!health["dockerAvailable"]
-        ? { reason: "installed but Docker is not ready" }
-        : {}),
+      ...(health["dockerAvailable"]
+        ? {}
+        : { reason: "installed but Docker is not ready" }),
     };
   } catch (error) {
     const reason =
@@ -291,7 +365,7 @@ export function doctorContainerLab(
   const base = {
     version: `configured-${descriptor.configuredRuntime}-unverified`,
   };
-  if (!operational || !reaper) {
+  if (!(operational && reaper)) {
     return {
       ...base,
       installed: false,
@@ -314,13 +388,9 @@ export function doctorBundledContainerLab(
   descriptorPath?: string,
   timeoutMs = 5_000,
 ): ContainerLabDoctor {
-  const descriptor = contract(
-    descriptorPath ?? join(bundleRoot, "integrations/container-lab.json"),
-  );
-  const paths = bundledContainerLabPaths(
-    bundleRoot,
-    descriptorPath ?? join(bundleRoot, "integrations/container-lab.json"),
-  );
+  const selectedDescriptor = descriptorPath ?? descriptorForBundle(bundleRoot);
+  const descriptor = contract(selectedDescriptor);
+  const paths = bundledContainerLabPaths(bundleRoot, selectedDescriptor);
   const base = {
     version: `configured-${descriptor.configuredRuntime}-unverified`,
   };

@@ -1,26 +1,30 @@
 ---
 name: package-skizzles
-description: Stage, inspect, and validate the Skizzles versioned plugin from its canonical source tree. Use when changing plugin inputs, checking generated-plugin drift, preparing a reviewable package checkpoint, or diagnosing packaging validation failures.
+description: Stage, inspect, and validate the Skizzles versioned plugin from its canonical source workspace.
 ---
 
 # Package Skizzles
 
-Package from canonical sources only. Treat `plugins/skizzles/` as generated output and never edit it by hand.
+Package only from canonical workspace packages. `plugins/skizzles/` is generated
+and must never be repaired directly.
 
 ## Prepare
 
-1. Inspect `package.json`, `packages/core/plugin-template/.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`, and `git status`.
-2. Keep the root `.DS_Store` untouched. Remove or relocate Finder metadata and local-state artifacts from package inputs before staging.
-3. Do not mutate a live Codex directory, installed plugin, `PATH`, launchd, or active Container Lab state. The bundled Container Lab runtime is generated from its canonical workspace package.
+1. Inspect `package.json`, `packages/plugin-builder/template/.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`, and `git status`.
+2. Run `bun install --frozen-lockfile` and `bun run workspace:check`.
+3. Keep the tracked root `.DS_Store` untouched and remove Finder metadata or local state from package inputs.
+4. Do not mutate a live Codex directory, installed plugin, `PATH`, launchd, or Container Lab state.
 
 ## Stage and verify
 
-1. Run `bun install --frozen-lockfile` when dependencies are not already available.
-2. Run `bun run plugin:check` before regeneration so existing canonical/generated drift remains visible.
-3. Run `bun run plugin:build` to stage the versioned plugin, then run `bun run plugin:check` again to validate manifest/marketplace/hooks, reject machine paths and Finder metadata, and prove no generated drift.
-4. Run `bun test packages/core/test/plugin-package.test.ts` when package logic or canonical inputs changed; run the launcher smoke when Container Lab bundles or skill resources changed.
-5. Inspect the generated diff. Fix canonical inputs, then rebuild; never patch generated files as the fix.
+1. Run `bun run plugin:check` before regeneration to expose existing drift.
+2. Run `bun run plugin:build`, then `bun run plugin:check`.
+3. Run `bun run test:packaging` for packaging changes and the owning package tests for changed inputs.
+4. Run `bun run verify` for the complete workspace boundary.
+5. Inspect the generated diff. Correct canonical inputs and rebuild; never patch generated files.
 
 ## Hand off
 
-Report the canonical changes, generated paths affected, commands and results, and any release or live-install decision still required. Do not publish, tag, install, or cut over a live environment without explicit approval.
+Report canonical changes, generated artifacts, validation evidence, and any
+separate release or live-install decision. Do not publish, tag, install, or
+activate host wiring without explicit approval.

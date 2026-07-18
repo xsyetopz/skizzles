@@ -1,3 +1,4 @@
+// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
@@ -7,14 +8,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { installSkills } from "../src/core";
+import process from "node:process";
+import { installSkills } from "../src/core.ts";
 import {
   bundledContainerLabPaths,
   doctor,
   doctorBundledContainerLab,
   doctorContainerLab,
-} from "../src/doctor";
-import { installHarness } from "../src/harness";
+} from "../src/doctor.ts";
+import { installHarness } from "../src/harness.ts";
 
 const roots: string[] = [];
 function stubs(
@@ -35,7 +37,8 @@ function stubs(
     mode === "malformed"
       ? "console.log('not-json')"
       : mode === "oversized"
-        ? "console.log(JSON.stringify({help:'x'.repeat(17000)}))"
+        ? // biome-ignore lint/security/noSecrets: The repeated character is a synthetic oversized-output fixture, not credential material.
+          "console.log(JSON.stringify({help:'x'.repeat(17000)}))"
         : mode === "stderr"
           ? "console.error('x'.repeat(17000)); console.log(JSON.stringify({help:'codex-container-lab run --lab ID -- COMMAND'}))"
           : mode === "hang"
@@ -50,11 +53,11 @@ function stubs(
   chmodSync(reaper, 0o755);
   return root;
 }
-afterEach(() =>
-  roots.splice(0).forEach((root) => {
+afterEach(() => {
+  for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
-  }),
-);
+  }
+});
 
 describe("Container Lab doctor", () => {
   test("reports missing binaries without exposing paths", () => {
@@ -69,7 +72,10 @@ describe("Container Lab doctor", () => {
   test("classifies ready and installed-not-ready", () => {
     const descriptor = JSON.parse(
       readFileSync(
-        resolve(import.meta.dir, "../../../integrations/container-lab.json"),
+        resolve(
+          import.meta.dir,
+          "../../container-lab/assets/integrations/container-lab.json",
+        ),
         "utf8",
       ),
     );
@@ -101,7 +107,10 @@ describe("Container Lab doctor", () => {
     const descriptorPath = join(path, "contract.json");
     const descriptor = JSON.parse(
       readFileSync(
-        resolve(import.meta.dir, "../../../integrations/container-lab.json"),
+        resolve(
+          import.meta.dir,
+          "../../container-lab/assets/integrations/container-lab.json",
+        ),
         "utf8",
       ),
     );
@@ -128,21 +137,15 @@ describe("Container Lab doctor", () => {
     const sourceRoot = resolve(import.meta.dir, "../../..");
     const paths = bundledContainerLabPaths(sourceRoot);
     expect(paths).toMatchObject({
-      operational: join(
-        sourceRoot,
-        "packages/codex-container-lab/cli/src/cli.ts",
-      ),
-      reaper: join(
-        sourceRoot,
-        "packages/codex-container-lab/cli/src/reaper-cli.ts",
-      ),
+      operational: join(sourceRoot, "packages/container-lab/src/cli.ts"),
+      reaper: join(sourceRoot, "packages/container-lab/src/reaper-cli.ts"),
       launcher: join(
         sourceRoot,
         "skills/codex-container-lab/scripts/codex-container-lab",
       ),
       launchAgentTemplate: join(
         sourceRoot,
-        "packages/codex-container-lab/cli/install/com.openai.codex-container-lab-reaper.plist",
+        "packages/container-lab/install/com.openai.codex-container-lab-reaper.plist",
       ),
     });
     expect(doctorBundledContainerLab(sourceRoot)).toMatchObject({

@@ -1,3 +1,4 @@
+// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   existsSync,
@@ -10,6 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import process from "node:process";
 import {
   installSkills,
   skillsReceiptPath,
@@ -155,7 +157,9 @@ describe("skills installer", () => {
     expect(() =>
       uninstallSkills(fixtureRoot.codexHome, false, (from, to) => {
         calls += 1;
-        if (calls === 2) throw new Error("injected move failure");
+        if (calls === 2) {
+          throw new Error("injected move failure");
+        }
         renameSync(from, to);
       }),
     ).toThrow("injected move failure");

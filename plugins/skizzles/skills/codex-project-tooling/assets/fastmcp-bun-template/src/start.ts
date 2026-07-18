@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
+import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const projectDir = join(dirname(fileURLToPath(import.meta.url)), "..");

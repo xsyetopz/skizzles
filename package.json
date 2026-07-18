@@ -6,29 +6,32 @@
   "packageManager": "bun@1.3.14",
   "workspaces": [
     "packages/*",
-    "packages/codex-container-lab/cli"
+    "skills/codex-project-tooling/assets/fastmcp-bun-template"
   ],
   "scripts": {
-    "build": "bun run plugin:build",
-    "plugin:build": "bun run packages/core/src/plugin-package.ts build",
-    "plugin:check": "bun run packages/core/src/plugin-package.ts check",
-    "prompt:build": "bun run packages/core/src/prompt-layer.ts build",
-    "prompt:check": "bun run packages/core/src/prompt-layer.ts check",
-    "prompt:patch": "bun run packages/core/src/prompt-layer.ts patch",
-    "prompt:rebase": "bun run packages/core/src/prompt-layer.ts rebase",
-    "format": "bunx @biomejs/biome@2.5.4 format --write biome.jsonc package.json tsconfig.base.json tsconfig.json .agents/plugins/marketplace.json hooks runtime scripts tests packages skills assets integrations",
-    "lint": "bunx @biomejs/biome@2.5.4 lint .",
-    "check": "bunx @biomejs/biome@2.5.4 check . && bun run prompt:check",
-    "typecheck": "bunx tsc -p tsconfig.json --noEmit && bun run --cwd packages/core typecheck && bun run --cwd packages/installer typecheck && bun run --cwd packages/codex-container-lab/cli typecheck && bun run --cwd skills/codex-project-tooling/assets/fastmcp-bun-template typecheck",
-    "test": "bun test",
-    "test:packaging": "bun test packages/core/test/plugin-package.test.ts",
-    "verify": "bun run check && bun run typecheck && bun run plugin:check && bun test"
+    "build": "bun run packages:build && bun run plugin:build",
+    "plugin:build": "bun run packages/plugin-builder/src/plugin-package.ts build",
+    "plugin:check": "bun run packages/plugin-builder/src/plugin-package.ts check",
+    "prompt:build": "bun run packages/prompt-layer/src/prompt-layer.ts build",
+    "prompt:check": "bun run packages/prompt-layer/src/prompt-layer.ts check",
+    "prompt:patch": "bun run packages/prompt-layer/src/prompt-layer.ts patch",
+    "prompt:rebase": "bun run packages/prompt-layer/src/prompt-layer.ts rebase",
+    "format": "bunx @biomejs/biome@2.5.4 format --config-path biome.jsonc --vcs-root . --write .",
+    "format:check": "bunx @biomejs/biome@2.5.4 format --config-path biome.jsonc --vcs-root . .",
+    "lint": "bunx @biomejs/biome@2.5.4 lint --config-path biome.jsonc --vcs-root . .",
+    "biome:check": "bunx @biomejs/biome@2.5.4 check --config-path biome.jsonc --vcs-root . .",
+    "packages:build": "bun run --workspaces --sequential build",
+    "packages:check": "bun run --workspaces --sequential check",
+    "workspace:check": "bun run packages/workspace-policy/src/cli.ts .",
+    "check": "bun run biome:check && bun run packages:check && bun run workspace:check && bun run prompt:check",
+    "typecheck": "bun run --workspaces --sequential typecheck",
+    "test": "bun run --workspaces --sequential test",
+    "test:packaging": "bun test packages/plugin-builder/test/plugin-package.test.ts",
+    "verify": "bun run check && bun run typecheck && bun run test && bun run packages:build && bun run plugin:check"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
     "@types/node": "^26.1.1",
-    "fastmcp": "^4.7.2",
-    "typescript": "^7.0.2",
-    "zod": "^4.4.3"
+    "typescript": "^7.0.2"
   }
 }

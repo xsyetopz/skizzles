@@ -1,9 +1,0 @@
-{
-  "extends": "./tsconfig.base.json",
-  "include": [
-    "hooks/**/*.ts",
-    "runtime/**/*.ts",
-    "scripts/**/*.ts",
-    "tests/**/*.ts"
-  ]
-}

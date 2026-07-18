@@ -1,3 +1,4 @@
+// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
@@ -12,6 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import process from "node:process";
 import {
   type ConfigEdit,
   type ConfigRpc,
@@ -34,8 +36,9 @@ const roots: string[] = [];
 const repoRoot = resolve(import.meta.dir, "../../..");
 
 afterEach(() => {
-  for (const root of roots.splice(0))
+  for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
+  }
 });
 
 function fixture(initial: JsonValue = {}): {
@@ -71,14 +74,20 @@ function setValue(
   let current = root;
   for (const segment of segments.slice(0, -1)) {
     const child = current[segment];
-    if (!child || Array.isArray(child) || typeof child !== "object")
+    if (!child || Array.isArray(child) || typeof child !== "object") {
       current[segment] = {};
+    }
     current = current[segment] as Record<string, JsonValue>;
   }
   const final = segments.at(-1);
-  if (!final) throw new Error("test key path must be non-empty");
-  if (value === null) delete current[final];
-  else current[final] = structuredClone(value);
+  if (!final) {
+    throw new Error("test key path must be non-empty");
+  }
+  if (value === null) {
+    delete current[final];
+  } else {
+    current[final] = structuredClone(value);
+  }
 }
 
 class FakeRpc implements ConfigRpc {
@@ -134,8 +143,9 @@ class FakeRpc implements ConfigRpc {
     // biome-ignore lint/suspicious/noMisplacedAssertion: This RPC double centralizes protocol assertions for tests.
     expect(params.reloadUserConfig).toBe(true);
     this.lastEdits = structuredClone(params.edits);
-    for (const edit of params.edits)
+    for (const edit of params.edits) {
       setValue(this.config, edit.keyPath, edit.value);
+    }
     this.writes += 1;
     this.version = `sha256:${this.writes + 1}`;
     if (this.commitThenThrow) {
@@ -191,12 +201,16 @@ describe("prompt-policy lifecycle", () => {
     expect(f.rpc.config["model_instructions_file"]).toBe(
       promptPolicyManagedPath(f.codexHome),
     );
-    expect(String(f.rpc.config["developer_instructions"])).toStartWith(
-      "# Skizzles Developer Policy\n",
-    );
-    expect(String(f.rpc.config["compact_prompt"])).toContain(
-      "local history compaction only",
-    );
+    const developerInstructions = f.rpc.config["developer_instructions"];
+    if (typeof developerInstructions !== "string") {
+      throw new TypeError("developer instructions must be a string");
+    }
+    expect(developerInstructions).toStartWith("# Skizzles Developer Policy\n");
+    const compactPrompt = f.rpc.config["compact_prompt"];
+    if (typeof compactPrompt !== "string") {
+      throw new TypeError("compact prompt must be a string");
+    }
+    expect(compactPrompt).toContain("local history compaction only");
     expect(
       applied.receipt.values.map(({ beforePresent }) => beforePresent),
     ).toEqual([true, true, false]);
@@ -445,6 +459,97 @@ describe("prompt-policy lifecycle", () => {
     expect(existsSync(promptPolicyManagedPath(f.codexHome))).toBe(true);
   });
 
+  test("rejects malformed receipt scalar and path fields with controlled diagnostics", async () => {
+    const cases: {
+      label: string;
+      mutate: (receipt: Record<string, unknown>) => void;
+      message: string;
+    }[] = [
+      {
+        label: "Codex binary",
+        mutate: (receipt) => {
+          receipt["codexBinary"] = 7;
+        },
+        message: "receipt Codex binary must be a non-empty string",
+      },
+      {
+        label: "config path",
+        mutate: (receipt) => {
+          receipt["configPath"] = false;
+        },
+        message: "receipt config path must be a non-empty string",
+      },
+      {
+        label: "managed target path",
+        mutate: (receipt) => {
+          const target = receipt["managedTarget"] as Record<string, unknown>;
+          target["path"] = null;
+        },
+        message: "receipt managed target path must be a non-empty string",
+      },
+      {
+        label: "descriptor path",
+        mutate: (receipt) => {
+          const policy = receipt["policy"] as Record<string, unknown>;
+          const descriptor = policy["descriptor"] as Record<string, unknown>;
+          descriptor["path"] = 1;
+        },
+        message: "receipt descriptor path must be a non-empty string",
+      },
+      {
+        label: "upstream path",
+        mutate: (receipt) => {
+          const policy = receipt["policy"] as Record<string, unknown>;
+          const upstream = policy["upstream"] as Record<string, unknown>;
+          upstream["path"] = {};
+        },
+        message: "upstream path must be a non-empty string",
+      },
+      {
+        label: "legal source path",
+        mutate: (receipt) => {
+          const policy = receipt["policy"] as Record<string, unknown>;
+          const license = policy["license"] as Record<string, unknown>;
+          license["sourcePath"] = [];
+        },
+        message: "receipt LICENSE sourcePath must be a non-empty string",
+      },
+      {
+        label: "model instructions value",
+        mutate: (receipt) => {
+          const values = receipt["values"] as Record<string, unknown>[];
+          const value = values[0];
+          if (value) {
+            value["after"] = 42;
+          }
+        },
+        message: "receipt model instructions target must be a string",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const f = fixture();
+      await applyPromptPolicy({ ...f, rpcFactory: rpcFactory(f.rpc) });
+      const receiptPath = promptPolicyReceiptPath(f.codexHome);
+      const parsed: unknown = JSON.parse(readFileSync(receiptPath, "utf8"));
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("test receipt must be an object");
+      }
+      testCase.mutate(parsed as Record<string, unknown>);
+      writeFileSync(receiptPath, `${JSON.stringify(parsed, null, 2)}\n`, {
+        mode: 0o600,
+      });
+      const writes = f.rpc.writes;
+      await expect(
+        restorePromptPolicy({ ...f, rpcFactory: rpcFactory(f.rpc) }),
+        testCase.label,
+      ).rejects.toThrow(testCase.message);
+      expect(f.rpc.writes).toBe(writes);
+      expect(existsSync(receiptPath)).toBe(true);
+      expect(existsSync(promptPolicyManagedPath(f.codexHome))).toBe(true);
+    }
+  });
+
   test("refuses duplicate ownership and reports config drift without secret content", async () => {
     const f = fixture();
     await applyPromptPolicy({ ...f, rpcFactory: rpcFactory(f.rpc) });
@@ -517,19 +622,23 @@ describe("prompt-policy lifecycle", () => {
       const f = fixture();
       await applyPromptPolicy({ ...f, rpcFactory: rpcFactory(f.rpc) });
       const receiptPath = promptPolicyReceiptPath(f.codexHome);
-      if (mutation === "mode") chmodSync(receiptPath, 0o644);
-      else {
+      if (mutation === "mode") {
+        chmodSync(receiptPath, 0o644);
+      } else {
         const receipt = JSON.parse(readFileSync(receiptPath, "utf8"));
-        if (mutation === "binary")
+        if (mutation === "binary") {
           receipt.codexBinary = join(f.root, "other-codex");
-        if (mutation === "config")
+        }
+        if (mutation === "config") {
           receipt.configPath = join(f.root, "escaped.toml");
-        if (mutation === "target")
+        }
+        if (mutation === "target") {
           receipt.managedTarget.path = join(
             f.codexHome,
             ".skizzles",
             "other.md",
           );
+        }
         writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, {
           mode: 0o600,
         });
@@ -550,18 +659,21 @@ describe("prompt-policy lifecycle", () => {
       f.sourceRoot = copyPolicySource(f.root);
       if (mutation === "prompt") {
         writeFileSync(
-          join(f.sourceRoot, "instructions/skizzles-base.md"),
+          join(
+            f.sourceRoot,
+            "packages/prompt-layer/assets/instructions/skizzles-base.md",
+          ),
           "tampered\n",
         );
       } else if (mutation === "license") {
         writeFileSync(
-          join(f.sourceRoot, "packages/core/prompt-layer/upstream/LICENSE"),
+          join(f.sourceRoot, "packages/prompt-layer/assets/upstream/LICENSE"),
           "tampered\n",
         );
       } else {
         const path = join(
           f.sourceRoot,
-          "instructions/skizzles-base.provenance.json",
+          "packages/prompt-layer/assets/instructions/skizzles-base.provenance.json",
         );
         const provenance = JSON.parse(readFileSync(path, "utf8"));
         provenance.baselineRole = "swapped provenance role";
@@ -569,7 +681,7 @@ describe("prompt-policy lifecycle", () => {
         writeFileSync(path, bytes);
         const descriptorPath = join(
           f.sourceRoot,
-          "integrations/prompt-policy.json",
+          "packages/prompt-layer/assets/integrations/prompt-policy.json",
         );
         const descriptor = JSON.parse(readFileSync(descriptorPath, "utf8"));
         descriptor.base.provenance.sha256 = new Bun.CryptoHasher("sha256")
@@ -600,12 +712,12 @@ describe("prompt-policy lifecycle", () => {
       f.sourceRoot = copyPolicySource(f.root);
       const descriptorPath = join(
         f.sourceRoot,
-        "integrations/prompt-policy.json",
+        "packages/prompt-layer/assets/integrations/prompt-policy.json",
       );
       const descriptor = JSON.parse(readFileSync(descriptorPath, "utf8"));
       if (mutation === "renamed-source") {
         descriptor.base.legal.license.sourcePath =
-          "packages/core/prompt-layer/upstream/COPYING";
+          "packages/prompt-layer/assets/upstream/COPYING";
       } else if (mutation === "alternate-package") {
         descriptor.base.legal.notice.packagedPath =
           "third_party/openai-codex/NOTICE.txt";
@@ -640,9 +752,18 @@ describe("prompt-policy lifecycle", () => {
       }),
     ).rejects.toThrow("symlinked parents");
 
-    const prompt = join(copied, "instructions/skizzles-base.md");
+    const prompt = join(
+      copied,
+      "packages/prompt-layer/assets/instructions/skizzles-base.md",
+    );
     rmSync(prompt);
-    symlinkSync(join(repoRoot, "instructions/skizzles-base.md"), prompt);
+    symlinkSync(
+      join(
+        repoRoot,
+        "packages/prompt-layer/assets/instructions/skizzles-base.md",
+      ),
+      prompt,
+    );
     await expect(
       applyPromptPolicy({
         ...f,
@@ -833,18 +954,7 @@ describe("prompt-policy lifecycle", () => {
 
   test("accepts the packaged third-party legal layout without maintainer-only sources", async () => {
     const f = fixture();
-    f.sourceRoot = copyPolicySource(f.root);
-    for (const name of ["LICENSE", "NOTICE"]) {
-      const canonical = join(
-        f.sourceRoot,
-        "packages/core/prompt-layer/upstream",
-        name,
-      );
-      const packaged = join(f.sourceRoot, "third_party/openai-codex", name);
-      mkdirSync(dirname(packaged), { recursive: true });
-      cpSync(canonical, packaged);
-      rmSync(canonical);
-    }
+    f.sourceRoot = copyPackagedPolicySource(f.root);
     const outcome = await applyPromptPolicy({
       ...f,
       dryRun: true,
@@ -858,17 +968,57 @@ describe("prompt-policy lifecycle", () => {
 function copyPolicySource(root: string): string {
   const source = join(root, "policy-source");
   for (const path of [
-    "integrations/prompt-policy.json",
-    "instructions/skizzles-base.md",
-    "instructions/skizzles-base.provenance.json",
-    "instructions/developer-instructions.md",
-    "instructions/compact-prompt.md",
-    "packages/core/prompt-layer/upstream/LICENSE",
-    "packages/core/prompt-layer/upstream/NOTICE",
+    "packages/prompt-layer/assets/integrations/prompt-policy.json",
+    "packages/prompt-layer/assets/instructions/skizzles-base.md",
+    "packages/prompt-layer/assets/instructions/skizzles-base.provenance.json",
+    "packages/prompt-layer/assets/instructions/developer-instructions.md",
+    "packages/prompt-layer/assets/instructions/compact-prompt.md",
+    "packages/prompt-layer/assets/upstream/LICENSE",
+    "packages/prompt-layer/assets/upstream/NOTICE",
   ]) {
     const destination = join(source, path);
     mkdirSync(dirname(destination), { recursive: true });
     cpSync(join(repoRoot, path), destination);
+  }
+  return source;
+}
+
+function copyPackagedPolicySource(root: string): string {
+  const source = join(root, "packaged-policy-source");
+  const mappings = [
+    [
+      "packages/prompt-layer/assets/integrations/prompt-policy.json",
+      "integrations/prompt-policy.json",
+    ],
+    [
+      "packages/prompt-layer/assets/instructions/skizzles-base.md",
+      "instructions/skizzles-base.md",
+    ],
+    [
+      "packages/prompt-layer/assets/instructions/skizzles-base.provenance.json",
+      "instructions/skizzles-base.provenance.json",
+    ],
+    [
+      "packages/prompt-layer/assets/instructions/developer-instructions.md",
+      "instructions/developer-instructions.md",
+    ],
+    [
+      "packages/prompt-layer/assets/instructions/compact-prompt.md",
+      "instructions/compact-prompt.md",
+    ],
+    [
+      "packages/prompt-layer/assets/upstream/LICENSE",
+      "third_party/openai-codex/LICENSE",
+    ],
+    [
+      "packages/prompt-layer/assets/upstream/NOTICE",
+      "third_party/openai-codex/NOTICE",
+    ],
+  ] as const;
+  for (const [from, to] of mappings) {
+    const destination = join(source, to);
+    mkdirSync(dirname(destination), { recursive: true });
+    cpSync(join(repoRoot, from), destination);
   }
   return source;
 }

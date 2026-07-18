@@ -77,10 +77,16 @@ Run the narrow checks first:
 bun install
 bun run typecheck
 bun test
+bun run check
+bun run build
 bun run validate:stdio
 ```
 
 Use `bun run validate:stdio` for unattended MCP protocol smoke testing. It starts the server as a background process, sends newline-delimited JSON-RPC over stdin, checks `initialize`, `tools/list`, and the template `health` tool, then terminates the server.
+
+`bun run check` invokes the template's pinned Biome check without adding Biome
+as a project dependency. `bun run build` produces the executable package output
+in `dist/`; it is ignored by Git and can be removed with `bun run clean`.
 
 Use `bun run inspect:browser` as an interactive/manual check when needed. It starts the MCP inspector, opens a browser, and is not a one-shot command. In Codex Desktop, an agent with browser-control tools can pilot that inspector for richer manual validation.
 

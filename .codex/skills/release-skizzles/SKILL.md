@@ -1,25 +1,29 @@
 ---
 name: release-skizzles
-description: Prepare a safe, versioned Skizzles release from canonical source. Use when an approved release version must be aligned across package metadata, rebuilt into the plugin, validated, and handed off for a separate tag, publication, or live cutover decision.
+description: Prepare a safe aligned Skizzles release without publishing or changing a live installation.
 ---
 
 # Release Skizzles
 
-Release only from a clean, validated source state. Keep versioning, generated output, and live deployment as distinct decisions.
+Release only from a clean, validated canonical workspace. Versioning, generated
+output, publication, and live activation are distinct decisions.
 
-## Confirm the release contract
+## Align
 
-1. Obtain the exact target version and release destination from the owner.
-2. Inspect the working tree and preserve unrelated changes, including the root `.DS_Store`.
-3. Confirm that Container Lab is released from its canonical Skizzles workspace and bundled plugin assets, while no live Codex installation, hook configuration, `PATH`, or launchd state is in scope.
+1. Obtain the exact target version and destination.
+2. Update `package.json`, every workspace package manifest, and `packages/plugin-builder/template/.codex-plugin/plugin.json` to the same version.
+3. Run `bun install` once to update the sole root `bun.lock`, then prove `bun install --frozen-lockfile`.
+4. Run `bun run workspace:check` to reject missing packages, version drift, dependency leakage, or invalid exports.
 
-## Align and validate
+## Validate
 
-1. Update the canonical version in `package.json` and `packages/core/plugin-template/.codex-plugin/plugin.json` together.
-2. Run `bun run plugin:check` to record expected pre-regeneration drift, then regenerate with `bun run plugin:build`; do not edit `plugins/skizzles/` directly.
-3. Run `bun install --frozen-lockfile`, `bun run typecheck`, `bun test`, and `bun run plugin:check`.
-4. Inspect the diff for the intended metadata and generated output only. Resolve drift in canonical sources and rerun validation.
+1. Run `bun run plugin:check` and record expected pre-regeneration drift.
+2. Run `bun run plugin:build`, then `bun run plugin:check`.
+3. Run `bun run verify` and reproduce it from a clean checkout.
+4. Inspect source, lockfile, and generated diffs for the intended version only.
 
 ## Release gate
 
-Hand the validated version, evidence, and exact remaining publication/tag/cutover steps to the release owner. Do not create tags, publish artifacts, install the plugin, or change live settings without explicit authorization.
+Hand the validated version, evidence, and remaining tag/publication/cutover steps
+to the release owner. Do not tag, publish, install, or change host state without
+explicit authorization.

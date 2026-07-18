@@ -1,39 +1,68 @@
 # Skizzles maintainer guide
 
-Skizzles is a packaging project, not a live installation. Keep its canonical sources portable, then derive the plugin from them.
+Skizzles is a Bun/TypeScript packaging workspace, not a live installation.
+Canonical packages are portable; `plugins/skizzles/` is their deterministic
+distribution output.
 
-## Ownership and architecture
+## Architecture and ownership
 
-- Treat `skills/`, `hooks/`, `runtime/`, `scripts/`, `assets/`, and `packages/codex-container-lab/` as canonical distributable inputs; `packages/core/plugin-template/` and `.agents/plugins/marketplace.json` define the plugin contract.
-- Treat `plugins/skizzles/` as generated output. Change the canonical source, rebuild, and check drift; never repair generated files in place.
-- Keep repo-local `.codex/skills/` as maintainer guidance, separate from the public skill collection unless packaging intentionally includes it.
-- Treat `packages/codex-container-lab/cli` as the canonical Bun workspace package. Keep `bun.lock` at the Skizzles root as its sole lockfile; do not restore a nested lock.
-- The stable plugin carries bundled Container Lab CLI/reaper entrypoints plus the public skill launcher. Do not hand-edit those generated bundles. PATH and LaunchAgent activation remain separate, explicit host wiring.
-- The former standalone Container Lab checkout is rollback history only, not live authority; never mutate it from Skizzles work.
+- The root owns workspace discovery, `bun.lock`, `tsconfig.base.json`,
+  `biome.jsonc`, aggregate scripts, marketplace metadata, and repository-wide
+  policy only.
+- Every production TypeScript domain owns `package.json`, `src/`, `test/`,
+  `tsconfig.json`, `README.md`, direct dependencies, and intentional exports or
+  binaries under `packages/`.
+- `packages/plugin-builder/` is the sole plugin staging authority.
+  `packages/prompt-layer/` owns prompt inputs and provenance.
+- `skills/` is canonical public skill content. Repo-local `.codex/skills/` is
+  maintainer guidance and is not public unless packaging explicitly includes it.
+- Never hand-edit `plugins/skizzles/`. Rebuild it from canonical packages and
+  prove parity with `plugin:check`.
+- Keep the root `bun.lock` as the only lockfile. Do not add nested locks,
+  build-info files, or undeclared root dependencies.
 
-## Safe working rules
+See [`docs/workspace-architecture.md`](docs/workspace-architecture.md) for the
+complete package-to-artifact map.
 
-- Do not mutate `~/.codex`, an installed plugin, live hooks, `PATH`, launchd, or another host environment while developing this repository. A live-install or cutover requires an explicit owner decision after validation.
-- Preserve the tracked root `.DS_Store`; never stage, normalize, or distribute it. Finder metadata anywhere in package inputs or `plugins/skizzles/` is a defect.
-- Keep distributable content free of machine-specific paths, credentials, symlinks, cache directories, logs, databases, and local runtime state.
-- Make version changes in canonical metadata, then regenerate. Keep plugin manifest and root package versions aligned.
+## TypeScript and tooling
 
-## Validate the boundary you changed
+- Use strict, erasable TypeScript with typed trust-boundary parsers, exhaustive
+  state handling, deterministic errors, `.ts` relative imports, and no
+  accidental `any`, unchecked assertions, non-null assertions, or cross-package
+  relative imports.
+- Public package entrypoints must be explicit; internals remain unexported.
+- Biome 2.5.4 is mandatory through `bunx`. Do not install Biome in any manifest.
+- Tests live with their owning package and prove contracts, negative cases, and
+  relevant runtime entrypoints.
 
-Run the narrowest useful check first, then use the complete package boundary when inputs or packaging change:
+## Safety
+
+- Do not mutate a real Codex home, installed plugin, live hooks, `PATH`, launchd,
+  or another host environment during repository development.
+- Preserve the tracked root `.DS_Store`; do not stage, normalize, or distribute
+  Finder metadata elsewhere.
+- Distributables must contain no machine paths, credentials, symlinks, caches,
+  logs, databases, build output, or live state.
+- Preserve unrelated work. The root integration owner alone creates Git
+  checkpoints after coherent, validated slices.
+
+## Validation
+
+Run the narrowest package check first. For package inputs or workspace changes,
+run:
 
 ```sh
+bun run workspace:check
+bun run check
 bun run typecheck
-bun test
-bun run plugin:check
-bun run plugin:build
+bun run test
+bun run packages:build
 bun run plugin:check
 ```
 
-`plugin:check` restages the plugin, validates its manifest, marketplace metadata and hook commands, rejects Finder metadata and machine paths, and detects generated drift.
+For generated changes, record pre-build drift, run `bun run plugin:build`, then
+rerun `bun run plugin:check` and inspect the generated diff. Final acceptance
+uses `bun run verify` from the aggregate tree and a clean-checkout reproduction.
 
-## Checkpoints
-
-The root integration owner creates Git checkpoints only after a coherent ownership slice has passed focused validation. Do not include unrelated collaborator changes, generated drift, or the root `.DS_Store`. Checkpoint before risky causal changes, a substantial handoff, or independent review; validate the aggregate branch before closeout.
-
-Read [README.md](README.md) for installation choices and [profiles/AGENTS.md](profiles/AGENTS.md) for the optional portable policy.
+Read [README.md](README.md) for installation surfaces and
+[profiles/AGENTS.md](profiles/AGENTS.md) for the optional portable policy.

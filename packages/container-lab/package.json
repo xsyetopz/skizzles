@@ -1,0 +1,30 @@
+{
+  "name": "@skizzles/container-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/service.ts"
+  },
+  "bin": {
+    "codex-container-lab": "./src/cli.ts",
+    "codex-container-lab-reaper": "./src/reaper-cli.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/cli.ts ./src/reaper-cli.ts --target=bun --outdir=dist",
+    "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+    "start": "bun run src/cli.ts --help",
+    "reaper": "bun run src/reaper-cli.ts --help",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test test",
+    "test:safe": "bun test test"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2"
+  }
+}

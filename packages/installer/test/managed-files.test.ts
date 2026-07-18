@@ -1,3 +1,4 @@
+// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
@@ -10,7 +11,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { copyDirectoryExclusive as coreCopyDirectoryExclusive } from "../src/core.ts";
+import process from "node:process";
 import {
   assertManagedParentsAreReal,
   copyDirectoryExclusive,
@@ -35,10 +36,6 @@ afterEach(() => {
 });
 
 describe("managed installer files", () => {
-  test("preserves the legacy core copy helper runtime arity", () => {
-    expect(coreCopyDirectoryExclusive.length).toBe(2);
-  });
-
   test("distinguishes a missing entry from an invalid filesystem path", () => {
     const root = temporaryRoot();
     expect(pathEntryExists(join(root, "missing"))).toBe(false);
@@ -120,7 +117,9 @@ describe("managed installer files", () => {
       { from: first, to: join(quarantine, "first") },
       { from: second, to: join(quarantine, "second") },
     ];
-    for (const item of moved) renameSync(item.from, item.to);
+    for (const item of moved) {
+      renameSync(item.from, item.to);
+    }
 
     rollbackStagedMoves(moved);
     expect(readFileSync(first, "utf8")).toBe("first");

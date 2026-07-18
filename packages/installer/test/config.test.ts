@@ -1,3 +1,4 @@
+// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
@@ -13,6 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import process from "node:process";
 import {
   ConfigRpcError,
   configValueAt,
@@ -65,11 +67,11 @@ function fixture(initial: Value = {}): {
   };
 }
 
-afterEach(() =>
-  roots.splice(0).forEach((root) => {
+afterEach(() => {
+  for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
-  }),
-);
+  }
+});
 
 function setValue(
   root: { [key: string]: Value },
@@ -86,9 +88,14 @@ function setValue(
     current = current[segment] as { [key: string]: Value };
   }
   const final = segments.at(-1);
-  if (!final) throw new Error("config test key path is empty");
-  if (value === null) delete current[final];
-  else current[final] = structuredClone(value);
+  if (!final) {
+    throw new Error("config test key path is empty");
+  }
+  if (value === null) {
+    delete current[final];
+  } else {
+    current[final] = structuredClone(value);
+  }
 }
 
 class FakeRpc implements ConfigRpc {
@@ -130,7 +137,9 @@ class FakeRpc implements ConfigRpc {
     expectedVersion: string;
     reloadUserConfig: boolean;
   }) {
-    if (this.mutateBeforeWrite) this.version = "sha256:external";
+    if (this.mutateBeforeWrite) {
+      this.version = "sha256:external";
+    }
     if (params.expectedVersion !== this.version) {
       throw new ConfigRpcError(
         "conflict",
@@ -138,7 +147,9 @@ class FakeRpc implements ConfigRpc {
         "configVersionConflict",
       );
     }
-    if (this.writeError) throw this.writeError;
+    if (this.writeError) {
+      throw this.writeError;
+    }
     // biome-ignore lint/suspicious/noMisplacedAssertion: This helper is invoked only from test cases and centralizes their assertion.
     expect(params.reloadUserConfig).toBe(true);
     for (const edit of params.edits) {
@@ -146,8 +157,9 @@ class FakeRpc implements ConfigRpc {
     }
     this.writes += 1;
     this.version = `sha256:${this.writes + 1}`;
-    if (this.commitThenThrow)
+    if (this.commitThenThrow) {
       throw new Error("ambiguous private transport data");
+    }
     return { status: "ok", version: this.version, filePath: params.filePath };
   }
 
@@ -240,9 +252,11 @@ describe("Codex configuration lifecycle", () => {
     const files = {
       "base.md": "top base\n",
       "compact.md": "top compact file\n",
+      // biome-ignore lint/security/noSecrets: This is a synthetic model-catalog fixture with no credential material.
       "catalog.json": '{"models":[{"slug":"fixture"}]}\n',
       "profiles/base.md": "profile base\n",
       "profiles/compact.md": "profile compact\n",
+      // biome-ignore lint/security/noSecrets: This is a synthetic model-catalog fixture with no credential material.
       "profiles/catalog.json": '{"models":[{"slug":"profile"}]}\n',
       "agents/reviewer.toml":
         'model_instructions_file = "role-base.md"\ndeveloper_instructions = "Review"\n',

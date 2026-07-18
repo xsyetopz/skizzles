@@ -1,3 +1,4 @@
+// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   existsSync,
@@ -10,11 +11,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import process from "node:process";
 import {
   harnessReceiptPath,
   installHarness,
   uninstallHarness,
-} from "../src/harness";
+} from "../src/harness.ts";
 
 const roots: string[] = [];
 function fixture(): { sourceRoot: string; home: string } {
@@ -33,11 +35,11 @@ function fixture(): { sourceRoot: string; home: string } {
   );
   return { sourceRoot, home };
 }
-afterEach(() =>
-  roots.splice(0).forEach((root) => {
+afterEach(() => {
+  for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
-  }),
-);
+  }
+});
 
 describe("harness installer", () => {
   for (const transfer of ["link", "copy"] as const) {
@@ -116,7 +118,9 @@ describe("harness installer", () => {
     expect(() =>
       uninstallHarness(f.home, false, (from, to) => {
         calls += 1;
-        if (calls === 2) throw new Error("injected move failure");
+        if (calls === 2) {
+          throw new Error("injected move failure");
+        }
         renameSync(from, to);
       }),
     ).toThrow("injected move failure");

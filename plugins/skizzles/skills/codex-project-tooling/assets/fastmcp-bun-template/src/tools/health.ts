@@ -1,6 +1,7 @@
+// biome-ignore lint/correctness/noUnresolvedImports: Biome does not follow FastMCP's package export map.
 import type { FastMCP } from "fastmcp";
 import { z } from "zod";
-import type { ProjectLifecycle } from "../lifecycle";
+import type { ProjectLifecycle } from "../lifecycle.ts";
 
 export function registerHealthTool(
   server: FastMCP,

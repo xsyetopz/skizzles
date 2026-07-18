@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import process from "node:process";
 
 type LifecycleOptions = {
   repoRoot: string;
@@ -119,7 +120,9 @@ export function createLifecycle(options: LifecycleOptions): ProjectLifecycle {
 
   process.once("beforeExit", () => {
     if (!cleaned) {
-      void cleanup();
+      cleanup().catch((error) => {
+        console.error(`[${options.serverName}] cleanup failed: ${error}`);
+      });
     }
   });
 
