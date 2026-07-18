@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import {
   chmod,
   cp,
@@ -12,7 +13,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   buildPlugin,
   checkPlugin,
@@ -20,6 +21,10 @@ import {
   PackagingError,
   stagePlugin,
 } from "../src/plugin-package.ts";
+import {
+  PromptPolicyPackageError,
+  stagePromptPolicyPackage,
+} from "../src/prompt-policy-package.ts";
 
 const temporaryRoots: string[] = [];
 
@@ -142,6 +147,90 @@ describe("deterministic plugin packaging", () => {
     ).toBe(true);
   });
 
+  test("rejects template-injected prompt baselines, patches, tooling, and transaction artifacts", async () => {
+    for (const path of [
+      "packages/core/prompt-layer/upstream/default.md",
+      "packages/core/prompt-layer/skizzles-base.patch",
+      "packages/core/prompt-layer/.transaction/journal.json",
+      "packages/core/src/prompt-layer.ts",
+      "packages/core/test/prompt-layer.test.ts",
+    ] as const) {
+      const root = await fixture();
+      await write(
+        root,
+        `packages/core/plugin-template/${path}`,
+        "template-injected maintainer artifact\n",
+      );
+      const reportedPath = path.startsWith("packages/core/prompt-layer/")
+        ? "packages/core/prompt-layer"
+        : path;
+
+      await expect(stagePlugin(root, join(root, "stage"))).rejects.toEqual(
+        new PackagingError(
+          `Packaged plugin contains maintainer-only prompt-layer artifact ${reportedPath}.`,
+        ),
+      );
+    }
+
+    const emptyDirectoryRoot = await fixture();
+    await mkdir(
+      join(
+        emptyDirectoryRoot,
+        "packages/core/plugin-template/packages/core/prompt-layer",
+      ),
+      { recursive: true },
+    );
+    await expect(
+      stagePlugin(emptyDirectoryRoot, join(emptyDirectoryRoot, "stage")),
+    ).rejects.toEqual(
+      new PackagingError(
+        "Packaged plugin contains maintainer-only prompt-layer artifact packages/core/prompt-layer.",
+      ),
+    );
+  });
+
+  test("rejects extra files in controlled prompt and OpenAI legal roots", async () => {
+    for (const injection of [
+      {
+        path: "instructions/unexpected.md",
+        message:
+          "packaged prompt instructions must contain exactly compact-prompt.md, developer-instructions.md, skizzles-base.md, skizzles-base.provenance.json.",
+      },
+      {
+        path: "third_party/openai-codex/COPYING",
+        message:
+          "packaged OpenAI Codex legal directory must contain exactly LICENSE, NOTICE.",
+      },
+    ] as const) {
+      const root = await fixture();
+      await write(
+        root,
+        `packages/core/plugin-template/${injection.path}`,
+        "unexpected controlled-root file\n",
+      );
+
+      await expect(stagePlugin(root, join(root, "stage"))).rejects.toEqual(
+        new PackagingError(injection.message),
+      );
+    }
+  });
+
+  test("preserves legitimate non-prompt template content", async () => {
+    const root = await fixture();
+    await write(
+      root,
+      "packages/core/plugin-template/docs/template-note.md",
+      "# Legitimate plugin documentation\n",
+    );
+    const destination = join(root, "stage");
+
+    await stagePlugin(root, destination);
+
+    expect(
+      await readFile(join(destination, "docs/template-note.md"), "utf8"),
+    ).toBe("# Legitimate plugin documentation\n");
+  });
+
   test("rejects missing staged installer runtime imports while excluding test-only imports", async () => {
     const root = await fixture();
     await write(
@@ -248,6 +337,330 @@ describe("deterministic plugin packaging", () => {
     }
   });
 
+  test("rejects an invalid prompt-policy descriptor before replacing staged output", async () => {
+    const root = await fixture();
+    const destination = join(root, "existing-stage");
+    await write(root, "existing-stage/preserved.txt", "preserved\n");
+    const descriptorPath = join(root, "integrations/prompt-policy.json");
+    const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+    descriptor.unexpected = true;
+    await writeFile(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`);
+
+    await expect(stagePlugin(root, destination)).rejects.toEqual(
+      new PackagingError(
+        "prompt-policy descriptor has unexpected or missing fields.",
+      ),
+    );
+    expect(await readFile(join(destination, "preserved.txt"), "utf8")).toBe(
+      "preserved\n",
+    );
+  });
+
+  test("binds prompt-policy descriptor facts to the exact staged instruction paths", async () => {
+    const root = await fixture();
+    const destination = join(root, "existing-stage");
+    await write(root, "existing-stage/preserved.txt", "preserved\n");
+    const descriptorPath = join(root, "integrations/prompt-policy.json");
+    const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+    descriptor.developerInstructions = descriptor.compactPrompt;
+    await writeFile(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`);
+
+    await expect(stagePlugin(root, destination)).rejects.toEqual(
+      new PackagingError(
+        "Prompt-policy descriptor does not match the pinned prompt-layer manifest.",
+      ),
+    );
+    expect(await readFile(join(destination, "preserved.txt"), "utf8")).toBe(
+      "preserved\n",
+    );
+  });
+
+  test("rejects malformed descriptor and provenance JSON with fixed redacted diagnostics", async () => {
+    const manifestRoot = await fixture();
+    await write(
+      manifestRoot,
+      "packages/core/prompt-layer/manifest.json",
+      '{"personal":"manifest-secret"\n',
+    );
+    await expect(
+      stagePlugin(manifestRoot, join(manifestRoot, "stage")),
+    ).rejects.toEqual(
+      new PackagingError("Canonical prompt-layer verification failed."),
+    );
+
+    const descriptorRoot = await fixture();
+    await write(
+      descriptorRoot,
+      "integrations/prompt-policy.json",
+      '{"personal":"descriptor-secret"\n',
+    );
+    await expect(
+      stagePlugin(descriptorRoot, join(descriptorRoot, "stage")),
+    ).rejects.toEqual(
+      new PackagingError("prompt-policy descriptor is not valid JSON."),
+    );
+
+    const provenanceRoot = await fixture();
+    const malformed = '{"personal":"provenance-secret"\n';
+    await write(
+      provenanceRoot,
+      "instructions/skizzles-base.provenance.json",
+      malformed,
+    );
+    const descriptorPath = join(
+      provenanceRoot,
+      "integrations/prompt-policy.json",
+    );
+    const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+    descriptor.base.provenance = {
+      path: "instructions/skizzles-base.provenance.json",
+      ...integrity(malformed),
+    };
+    await writeFile(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`);
+
+    await expect(
+      stagePlugin(provenanceRoot, join(provenanceRoot, "stage")),
+    ).rejects.toEqual(
+      new PackagingError("Canonical prompt-layer verification failed."),
+    );
+  });
+
+  test("rejects coherent prompt and legal rewrites against the pinned manifest before copy", async () => {
+    for (const mutation of ["prompt", "legal"] as const) {
+      const root = await fixture();
+      const destination = join(root, "existing-stage");
+      await write(root, "existing-stage/preserved.txt", "preserved\n");
+      const descriptorPath = join(root, "integrations/prompt-policy.json");
+      const provenancePath = join(
+        root,
+        "instructions/skizzles-base.provenance.json",
+      );
+      const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+      const provenance = JSON.parse(await readFile(provenancePath, "utf8"));
+      if (mutation === "prompt") {
+        const rewritten = "coherently rewritten prompt\n";
+        await write(root, "instructions/skizzles-base.md", rewritten);
+        const fact = integrity(rewritten);
+        descriptor.base.applied = {
+          path: "instructions/skizzles-base.md",
+          ...fact,
+        };
+        provenance.output = fact;
+      } else {
+        const rewritten = "coherently rewritten notice\n";
+        await write(
+          root,
+          "packages/core/prompt-layer/upstream/NOTICE",
+          rewritten,
+        );
+        const fact = integrity(rewritten);
+        Object.assign(descriptor.base.legal.notice, fact);
+        provenance.legal.notice = fact;
+      }
+      const provenanceText = `${JSON.stringify(provenance, null, 2)}\n`;
+      await writeFile(provenancePath, provenanceText);
+      descriptor.base.provenance = {
+        path: "instructions/skizzles-base.provenance.json",
+        ...integrity(provenanceText),
+      };
+      await writeFile(
+        descriptorPath,
+        `${JSON.stringify(descriptor, null, 2)}\n`,
+      );
+
+      await expect(stagePlugin(root, destination)).rejects.toEqual(
+        new PackagingError("Canonical prompt-layer verification failed."),
+      );
+      expect(await readFile(join(destination, "preserved.txt"), "utf8")).toBe(
+        "preserved\n",
+      );
+    }
+  });
+
+  test("runs the canonical verifier before staging coherent manifest rewrites with missing or fake patches", async () => {
+    for (const patchMode of ["missing", "fake"] as const) {
+      const root = await fixture();
+      const destination = join(root, "existing-stage");
+      await write(root, "existing-stage/preserved.txt", "preserved\n");
+      await coherentlyRewritePromptContract(root, patchMode);
+
+      await expect(stagePlugin(root, destination)).rejects.toEqual(
+        new PackagingError("Canonical prompt-layer verification failed."),
+      );
+      expect(await readFile(join(destination, "preserved.txt"), "utf8")).toBe(
+        "preserved\n",
+      );
+      expect(
+        await readFile(join(root, "instructions/skizzles-base.md"), "utf8"),
+      ).toBe("coherently rewritten applied prompt\n");
+      expect(
+        await readFile(
+          join(root, "packages/core/prompt-layer/upstream/NOTICE"),
+          "utf8",
+        ),
+      ).toBe("coherently rewritten legal notice\n");
+      const patchPath = join(
+        root,
+        "packages/core/prompt-layer/skizzles-base.patch",
+      );
+      if (patchMode === "missing") {
+        expect(await Bun.file(patchPath).exists()).toBe(false);
+      } else {
+        expect(await readFile(patchPath, "utf8")).toBe(
+          "not a valid Git patch\n",
+        );
+      }
+    }
+  });
+
+  test("rejects tampered canonical baseline and patch bytes before destination replacement", async () => {
+    for (const mutation of ["baseline", "patch"] as const) {
+      const root = await fixture();
+      const destination = join(root, "existing-stage");
+      await write(root, "existing-stage/preserved.txt", "preserved\n");
+      const sourcePath =
+        mutation === "baseline"
+          ? "packages/core/prompt-layer/upstream/default.md"
+          : "packages/core/prompt-layer/skizzles-base.patch";
+      await write(root, sourcePath, `tampered ${mutation}\n`);
+
+      await expect(stagePlugin(root, destination)).rejects.toEqual(
+        new PackagingError("Canonical prompt-layer verification failed."),
+      );
+      expect(await readFile(join(destination, "preserved.txt"), "utf8")).toBe(
+        "preserved\n",
+      );
+      expect(await readFile(join(root, sourcePath), "utf8")).toBe(
+        `tampered ${mutation}\n`,
+      );
+    }
+  });
+
+  test("enforces exact nested prompt manifest and provenance schemas", async () => {
+    const provenanceRoot = await fixture();
+    const provenancePath = join(
+      provenanceRoot,
+      "instructions/skizzles-base.provenance.json",
+    );
+    const provenance = JSON.parse(await readFile(provenancePath, "utf8"));
+    provenance.output.unexpected = true;
+    const provenanceText = `${JSON.stringify(provenance, null, 2)}\n`;
+    await writeFile(provenancePath, provenanceText);
+    const descriptorPath = join(
+      provenanceRoot,
+      "integrations/prompt-policy.json",
+    );
+    const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+    descriptor.base.provenance = {
+      path: "instructions/skizzles-base.provenance.json",
+      ...integrity(provenanceText),
+    };
+    await writeFile(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`);
+    await expect(
+      stagePlugin(provenanceRoot, join(provenanceRoot, "stage")),
+    ).rejects.toEqual(
+      new PackagingError("Canonical prompt-layer verification failed."),
+    );
+
+    const manifestRoot = await fixture();
+    const manifestPath = join(
+      manifestRoot,
+      "packages/core/prompt-layer/manifest.json",
+    );
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest.upstream.baseline.unexpected = true;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    await expect(
+      stagePlugin(manifestRoot, join(manifestRoot, "stage")),
+    ).rejects.toEqual(
+      new PackagingError("Canonical prompt-layer verification failed."),
+    );
+  });
+
+  test("anchors prompt provenance patch facts to the authoritative manifest", async () => {
+    const root = await fixture();
+    const provenancePath = join(
+      root,
+      "instructions/skizzles-base.provenance.json",
+    );
+    const provenance = JSON.parse(await readFile(provenancePath, "utf8"));
+    provenance.patch.sha256 = "0".repeat(64);
+    const provenanceText = `${JSON.stringify(provenance, null, 2)}\n`;
+    await writeFile(provenancePath, provenanceText);
+    const descriptorPath = join(root, "integrations/prompt-policy.json");
+    const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+    descriptor.base.provenance = {
+      path: "instructions/skizzles-base.provenance.json",
+      ...integrity(provenanceText),
+    };
+    await writeFile(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`);
+
+    await expect(stagePlugin(root, join(root, "stage"))).rejects.toEqual(
+      new PackagingError("Canonical prompt-layer verification failed."),
+    );
+  });
+
+  test("closed prompt staging rejects forged source paths and destination symlink escapes", async () => {
+    const forgedRoot = await fixture();
+    const forgedDestination = join(forgedRoot, "direct-stage");
+    const forgedOutside = await mkdtemp(
+      join(tmpdir(), "prompt-policy-forged-source-"),
+    );
+    temporaryRoots.push(forgedOutside);
+    const outsideContent = "outside source must not be trusted\n";
+    await write(forgedOutside, "outside-secret", outsideContent);
+    await mkdir(forgedDestination);
+    await write(forgedRoot, "direct-stage/preserved.txt", "preserved\n");
+    const forgedDescriptorPath = join(
+      forgedRoot,
+      "integrations/prompt-policy.json",
+    );
+    const forgedDescriptor = JSON.parse(
+      await readFile(forgedDescriptorPath, "utf8"),
+    );
+    forgedDescriptor.developerInstructions = {
+      path: `../${basename(forgedOutside)}/outside-secret`,
+      ...integrity(outsideContent),
+    };
+    await writeFile(
+      forgedDescriptorPath,
+      `${JSON.stringify(forgedDescriptor, null, 2)}\n`,
+    );
+    await expect(
+      stagePromptPolicyPackage(forgedRoot, forgedDestination),
+    ).rejects.toEqual(
+      new PromptPolicyPackageError(
+        "developer instructions path must be a portable path.",
+      ),
+    );
+    expect(
+      await readFile(join(forgedDestination, "preserved.txt"), "utf8"),
+    ).toBe("preserved\n");
+    expect(await filesUnder(forgedOutside)).toEqual(["outside-secret"]);
+    expect(await readFile(join(forgedOutside, "outside-secret"), "utf8")).toBe(
+      outsideContent,
+    );
+
+    const symlinkRoot = await fixture();
+    const symlinkDestination = join(symlinkRoot, "direct-stage");
+    const outside = await mkdtemp(join(tmpdir(), "prompt-policy-outside-"));
+    temporaryRoots.push(outside);
+    await write(outside, "preserved.txt", "outside preserved\n");
+    await mkdir(symlinkDestination);
+    await symlink(outside, join(symlinkDestination, "instructions"));
+    await expect(
+      stagePromptPolicyPackage(symlinkRoot, symlinkDestination),
+    ).rejects.toEqual(
+      new PromptPolicyPackageError(
+        "Prompt-policy destination uses an unsafe path.",
+      ),
+    );
+    expect(await filesUnder(outside)).toEqual(["preserved.txt"]);
+    expect(await readFile(join(outside, "preserved.txt"), "utf8")).toBe(
+      "outside preserved\n",
+    );
+  });
+
   test("rejects non-canonical prompt-policy legal mappings before staging", async () => {
     for (const mutation of [
       "license-source",
@@ -298,7 +711,7 @@ describe("deterministic plugin packaging", () => {
       prompt,
     );
     await expect(stagePlugin(root, join(root, "stage"))).rejects.toThrow(
-      "uses a symlinked policy path",
+      "Canonical prompt-layer verification failed.",
     );
 
     const parentRoot = await fixture();
@@ -309,7 +722,7 @@ describe("deterministic plugin packaging", () => {
     );
     await expect(
       stagePlugin(parentRoot, join(parentRoot, "stage")),
-    ).rejects.toThrow("uses a symlinked policy path");
+    ).rejects.toThrow("Canonical prompt-layer verification failed.");
   });
 
   test("check reports generated drift", async () => {
@@ -752,6 +1165,9 @@ async function fixture(): Promise<string> {
     "instructions/skizzles-base.provenance.json",
     "instructions/developer-instructions.md",
     "instructions/compact-prompt.md",
+    "packages/core/prompt-layer/manifest.json",
+    "packages/core/prompt-layer/skizzles-base.patch",
+    "packages/core/prompt-layer/upstream/default.md",
     "packages/core/prompt-layer/upstream/LICENSE",
     "packages/core/prompt-layer/upstream/NOTICE",
   ]) {
@@ -770,6 +1186,78 @@ async function write(
   const path = join(root, relativePath);
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content);
+}
+
+function integrity(content: string): { sha256: string; bytes: number } {
+  const bytes = Buffer.from(content);
+  return {
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+    bytes: bytes.byteLength,
+  };
+}
+
+async function coherentlyRewritePromptContract(
+  root: string,
+  patchMode: "missing" | "fake",
+): Promise<void> {
+  const manifestPath = join(root, "packages/core/prompt-layer/manifest.json");
+  const descriptorPath = join(root, "integrations/prompt-policy.json");
+  const provenancePath = join(
+    root,
+    "instructions/skizzles-base.provenance.json",
+  );
+  const patchPath = join(
+    root,
+    "packages/core/prompt-layer/skizzles-base.patch",
+  );
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  const descriptor = JSON.parse(await readFile(descriptorPath, "utf8"));
+  const provenance = JSON.parse(await readFile(provenancePath, "utf8"));
+
+  const prompt = "coherently rewritten applied prompt\n";
+  const promptFact = integrity(prompt);
+  await write(root, "instructions/skizzles-base.md", prompt);
+  manifest.output = {
+    path: "instructions/skizzles-base.md",
+    ...promptFact,
+  };
+  descriptor.base.applied = {
+    path: "instructions/skizzles-base.md",
+    ...promptFact,
+  };
+  provenance.output = promptFact;
+
+  const notice = "coherently rewritten legal notice\n";
+  const noticeFact = integrity(notice);
+  await write(root, "packages/core/prompt-layer/upstream/NOTICE", notice);
+  manifest.upstream.notice = {
+    path: "packages/core/prompt-layer/upstream/NOTICE",
+    ...noticeFact,
+  };
+  Object.assign(descriptor.base.legal.notice, noticeFact);
+  provenance.legal.notice = noticeFact;
+
+  if (patchMode === "missing") {
+    await rm(patchPath);
+  } else {
+    const patch = "not a valid Git patch\n";
+    const patchFact = integrity(patch);
+    await writeFile(patchPath, patch);
+    manifest.patch = {
+      path: "packages/core/prompt-layer/skizzles-base.patch",
+      ...patchFact,
+    };
+    provenance.patch = patchFact;
+  }
+
+  const provenanceText = `${JSON.stringify(provenance, null, 2)}\n`;
+  await writeFile(provenancePath, provenanceText);
+  descriptor.base.provenance = {
+    path: "instructions/skizzles-base.provenance.json",
+    ...integrity(provenanceText),
+  };
+  await writeFile(descriptorPath, `${JSON.stringify(descriptor, null, 2)}\n`);
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 async function filesUnder(root: string): Promise<string[]> {

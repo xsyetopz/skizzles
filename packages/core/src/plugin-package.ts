@@ -20,6 +20,12 @@ import {
   validateContainerLabDescriptor,
   validateContainerLabRuntime,
 } from "./container-lab-package.ts";
+import {
+  PromptPolicyPackageError,
+  stagePromptPolicyPackage,
+  validatePackagedPromptPolicy,
+  validatePromptPolicySource,
+} from "./prompt-policy-package.ts";
 
 const PLUGIN_NAME = "skizzles";
 const TEMPLATE_PATH = "packages/core/plugin-template";
@@ -37,14 +43,6 @@ const INSTALLER_INPUTS = [
   "src/prompt-policy-lock.ts",
   "src/prompt-policy.ts",
 ] as const;
-const PROMPT_POLICY_DESCRIPTOR = "integrations/prompt-policy.json";
-const PROMPT_POLICY_INSTRUCTION_PATHS = [
-  "instructions/skizzles-base.md",
-  "instructions/skizzles-base.provenance.json",
-  "instructions/developer-instructions.md",
-  "instructions/compact-prompt.md",
-] as const;
-
 const CANONICAL_INPUTS = [
   ["skills", "skills"],
   ["hooks", "hooks"],
@@ -81,8 +79,6 @@ const MACHINE_PATH_PATTERNS = [
   /\/home\/[A-Za-z0-9._-]+(?:\/|\b)/,
   /[A-Za-z]:\\Users\\[A-Za-z0-9._-]+(?:\\|\b)/i,
 ];
-const IMMUTABLE_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
-const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const RELATIVE_MODULE_PATTERN = /^\.\.?\//;
 const INSTALLER_SMOKE_TIMEOUT_MS = 1_000;
 const INSTALLER_SMOKE_TERM_GRACE_MS = 150;
@@ -112,7 +108,7 @@ export async function stagePlugin(
   destination: string,
 ): Promise<void> {
   const paths = packagePaths(repoRoot);
-  const promptPolicy = await validatePromptPolicy(paths.repoRoot, "source");
+  await asPackagingError(() => validatePromptPolicySource(paths.repoRoot));
   await rm(destination, { force: true, recursive: true });
   await mkdir(destination, { recursive: true });
   await copyCanonicalTree(paths.templateRoot, destination, "plugin template");
@@ -136,20 +132,9 @@ export async function stagePlugin(
   }
   await validateInstallerImportClosure(destination);
 
-  for (const path of PROMPT_POLICY_INSTRUCTION_PATHS) {
-    await copyCanonicalFile(
-      join(paths.repoRoot, path),
-      join(destination, path),
-      path,
-    );
-  }
-  for (const legal of [promptPolicy.license, promptPolicy.notice]) {
-    await copyCanonicalFile(
-      join(paths.repoRoot, legal.sourcePath),
-      join(destination, legal.packagedPath),
-      legal.sourcePath,
-    );
-  }
+  await asPackagingError(() =>
+    stagePromptPolicyPackage(paths.repoRoot, destination),
+  );
 
   await asPackagingError(() =>
     stageContainerLabRuntime(paths.repoRoot, destination),
@@ -280,7 +265,9 @@ async function validateGeneratedPlugin(
   await asPackagingError(() =>
     validateContainerLabDescriptor(repoRoot, pluginRoot),
   );
-  await validatePromptPolicy(pluginRoot, "packaged");
+  await asPackagingError(() =>
+    validatePackagedPromptPolicy(repoRoot, pluginRoot),
+  );
   await rejectForbiddenDistributableContent(pluginRoot);
 }
 
@@ -288,7 +275,10 @@ async function asPackagingError<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
   } catch (error) {
-    if (error instanceof ContainerLabPackageError) {
+    if (
+      error instanceof ContainerLabPackageError ||
+      error instanceof PromptPolicyPackageError
+    ) {
       throw new PackagingError(error.message);
     }
     throw error;
@@ -492,354 +482,6 @@ async function assertContainedNonSymlinkFile(
   }
   if (!(await lstat(target)).isFile()) {
     throw new PackagingError("Resolved installer import is not a file.");
-  }
-}
-
-interface PackagedPolicyFileFact {
-  path: string;
-  sha256: string;
-  bytes: number;
-}
-
-interface PackagedPolicyLegalFact {
-  sourcePath: string;
-  packagedPath: string;
-  sha256: string;
-  bytes: number;
-}
-
-async function validatePromptPolicy(
-  root: string,
-  mode: "source" | "packaged",
-): Promise<{
-  license: PackagedPolicyLegalFact;
-  notice: PackagedPolicyLegalFact;
-}> {
-  const descriptorPath = join(root, PROMPT_POLICY_DESCRIPTOR);
-  await assertContainedPolicyFile(
-    root,
-    PROMPT_POLICY_DESCRIPTOR,
-    "prompt-policy descriptor",
-  );
-  const descriptorBytes = await readFile(descriptorPath);
-  validatePolicyText(descriptorBytes, "prompt-policy descriptor");
-  rejectPolicyMachinePath(descriptorBytes, "prompt-policy descriptor");
-  const descriptor = await readJsonObject(
-    descriptorPath,
-    "prompt-policy descriptor",
-  );
-  exactPolicyKeys(
-    descriptor,
-    ["schema", "version", "base", "developerInstructions", "compactPrompt"],
-    "prompt-policy descriptor",
-  );
-  if (
-    descriptor["schema"] !== "skizzles.prompt-policy" ||
-    descriptor["version"] !== 1
-  ) {
-    throw new PackagingError(
-      "Unsupported prompt-policy descriptor schema or version.",
-    );
-  }
-  const base = policyObject(descriptor["base"], "prompt-policy base");
-  exactPolicyKeys(
-    base,
-    ["role", "applied", "provenance", "upstream", "legal"],
-    "prompt-policy base",
-  );
-  const role = policyString(base["role"], "prompt-policy base role");
-  const applied = policyFileFact(base["applied"], "applied prompt");
-  const provenance = policyFileFact(base["provenance"], "prompt provenance");
-  const developer = policyFileFact(
-    descriptor["developerInstructions"],
-    "developer instructions",
-  );
-  const compact = policyFileFact(descriptor["compactPrompt"], "compact prompt");
-  const upstream = policyObject(base["upstream"], "prompt-policy upstream");
-  exactPolicyKeys(
-    upstream,
-    ["repository", "commit", "path", "sha256", "bytes"],
-    "prompt-policy upstream",
-  );
-  if (
-    upstream["repository"] !== "https://github.com/openai/codex" ||
-    typeof upstream["commit"] !== "string" ||
-    !IMMUTABLE_COMMIT_PATTERN.test(upstream["commit"]) ||
-    typeof upstream["path"] !== "string" ||
-    !isPortablePolicyPath(upstream["path"]) ||
-    !isPolicySha(upstream["sha256"]) ||
-    !isPolicyBytes(upstream["bytes"])
-  ) {
-    throw new PackagingError("Prompt-policy upstream provenance is invalid.");
-  }
-  const legal = policyObject(base["legal"], "prompt-policy legal inputs");
-  exactPolicyKeys(legal, ["license", "notice"], "prompt-policy legal inputs");
-  const license = policyLegalFact(legal["license"], "prompt-policy LICENSE");
-  const notice = policyLegalFact(legal["notice"], "prompt-policy NOTICE");
-  assertCanonicalPolicyLegalMappings(license, notice);
-
-  const appliedBytes = await readAndValidatePolicyFact(
-    root,
-    applied,
-    "applied prompt",
-  );
-  const provenanceBytes = await readAndValidatePolicyFact(
-    root,
-    provenance,
-    "prompt provenance",
-  );
-  const developerBytes = await readAndValidatePolicyFact(
-    root,
-    developer,
-    "developer instructions",
-  );
-  const compactBytes = await readAndValidatePolicyFact(
-    root,
-    compact,
-    "compact prompt",
-  );
-  await readAndValidatePolicyLegal(root, license, mode, "OpenAI Codex LICENSE");
-  await readAndValidatePolicyLegal(root, notice, mode, "OpenAI Codex NOTICE");
-
-  validatePolicyText(appliedBytes, "applied prompt");
-  validatePolicyText(provenanceBytes, "prompt provenance");
-  validatePolicyText(developerBytes, "developer instructions");
-  validatePolicyText(compactBytes, "compact prompt");
-  const provenanceValue = policyObject(
-    JSON.parse(provenanceBytes.toString("utf8")),
-    "prompt provenance",
-  );
-  const provenanceUpstream = policyObject(
-    provenanceValue["upstream"],
-    "prompt provenance upstream",
-  );
-  const provenanceOutput = policyObject(
-    provenanceValue["output"],
-    "prompt provenance output",
-  );
-  const provenanceLegal = policyObject(
-    provenanceValue["legal"],
-    "prompt provenance legal",
-  );
-  if (
-    provenanceValue["schema"] !== "skizzles.prompt-layer" ||
-    provenanceValue["version"] !== 1 ||
-    provenanceValue["baselineRole"] !== role ||
-    ["repository", "commit", "path", "sha256", "bytes"].some(
-      (key) => provenanceUpstream[key] !== upstream[key],
-    ) ||
-    provenanceOutput["sha256"] !== applied.sha256 ||
-    provenanceOutput["bytes"] !== applied.bytes ||
-    !samePolicyLegalProvenance(provenanceLegal["license"], license) ||
-    !samePolicyLegalProvenance(provenanceLegal["notice"], notice)
-  ) {
-    throw new PackagingError(
-      "Prompt-policy descriptor does not match applied prompt provenance.",
-    );
-  }
-  return { license, notice };
-}
-
-function assertCanonicalPolicyLegalMappings(
-  license: PackagedPolicyLegalFact,
-  notice: PackagedPolicyLegalFact,
-): void {
-  const expected = {
-    license: {
-      sourcePath: "packages/core/prompt-layer/upstream/LICENSE",
-      packagedPath: "third_party/openai-codex/LICENSE",
-    },
-    notice: {
-      sourcePath: "packages/core/prompt-layer/upstream/NOTICE",
-      packagedPath: "third_party/openai-codex/NOTICE",
-    },
-  } as const;
-  if (
-    license.sourcePath !== expected.license.sourcePath ||
-    license.packagedPath !== expected.license.packagedPath ||
-    notice.sourcePath !== expected.notice.sourcePath ||
-    notice.packagedPath !== expected.notice.packagedPath
-  ) {
-    throw new PackagingError(
-      "Prompt-policy legal mappings must use the canonical OpenAI Codex LICENSE and NOTICE paths.",
-    );
-  }
-}
-
-function policyFileFact(value: unknown, label: string): PackagedPolicyFileFact {
-  const fact = policyObject(value, label);
-  exactPolicyKeys(fact, ["path", "sha256", "bytes"], label);
-  if (
-    typeof fact["path"] !== "string" ||
-    !isPortablePolicyPath(fact["path"]) ||
-    !isPolicySha(fact["sha256"]) ||
-    !isPolicyBytes(fact["bytes"])
-  ) {
-    throw new PackagingError(`${label} has invalid path or integrity facts.`);
-  }
-  return fact as unknown as PackagedPolicyFileFact;
-}
-
-function policyLegalFact(
-  value: unknown,
-  label: string,
-): PackagedPolicyLegalFact {
-  const fact = policyObject(value, label);
-  exactPolicyKeys(
-    fact,
-    ["sourcePath", "packagedPath", "sha256", "bytes"],
-    label,
-  );
-  if (
-    typeof fact["sourcePath"] !== "string" ||
-    !isPortablePolicyPath(fact["sourcePath"]) ||
-    typeof fact["packagedPath"] !== "string" ||
-    !isPortablePolicyPath(fact["packagedPath"]) ||
-    !fact["packagedPath"].startsWith("third_party/openai-codex/") ||
-    !isPolicySha(fact["sha256"]) ||
-    !isPolicyBytes(fact["bytes"])
-  ) {
-    throw new PackagingError(`${label} has invalid paths or integrity facts.`);
-  }
-  return fact as unknown as PackagedPolicyLegalFact;
-}
-
-async function readAndValidatePolicyFact(
-  root: string,
-  fact: PackagedPolicyFileFact,
-  label: string,
-): Promise<Buffer> {
-  const path = join(root, fact.path);
-  await assertContainedPolicyFile(root, fact.path, label);
-  const bytes = await readFile(path);
-  assertPolicyDigest(bytes, fact, label);
-  rejectPolicyMachinePath(bytes, label);
-  return bytes;
-}
-
-async function readAndValidatePolicyLegal(
-  root: string,
-  fact: PackagedPolicyLegalFact,
-  mode: "source" | "packaged",
-  label: string,
-): Promise<void> {
-  const relativePath = mode === "source" ? fact.sourcePath : fact.packagedPath;
-  const path = join(root, relativePath);
-  await assertContainedPolicyFile(root, relativePath, label);
-  const bytes = await readFile(path);
-  assertPolicyDigest(bytes, fact, label);
-  validatePolicyText(bytes, label);
-  rejectPolicyMachinePath(bytes, label);
-}
-
-async function assertContainedPolicyFile(
-  root: string,
-  relativePath: string,
-  label: string,
-): Promise<void> {
-  let current = root;
-  for (const segment of relativePath.split("/")) {
-    current = join(current, segment);
-    let metadata: Awaited<ReturnType<typeof lstat>>;
-    try {
-      metadata = await lstat(current);
-    } catch (error) {
-      throw new PackagingError(
-        `${label} is missing: ${current}: ${String(error)}`,
-      );
-    }
-    if (metadata.isSymbolicLink()) {
-      throw new PackagingError(`${label} uses a symlinked policy path.`);
-    }
-  }
-  const metadata = await lstat(current);
-  if (metadata.isSymbolicLink() || !metadata.isFile()) {
-    throw new PackagingError(`${label} must be a non-symlink regular file.`);
-  }
-}
-
-function assertPolicyDigest(
-  bytes: Buffer,
-  fact: { sha256: string; bytes: number },
-  label: string,
-): void {
-  const sha256 = createHash("sha256").update(bytes).digest("hex");
-  if (sha256 !== fact.sha256 || bytes.byteLength !== fact.bytes) {
-    throw new PackagingError(
-      `${label} does not match the prompt-policy descriptor digest and byte count.`,
-    );
-  }
-}
-
-function validatePolicyText(bytes: Buffer, label: string): void {
-  if (
-    bytes.byteLength === 0 ||
-    bytes.includes(0) ||
-    bytes.at(-1) !== 0x0a ||
-    bytes.includes(Buffer.from("\r"))
-  ) {
-    throw new PackagingError(`${label} must be canonical LF text.`);
-  }
-}
-
-function rejectPolicyMachinePath(bytes: Buffer, label: string): void {
-  const text = bytes.toString("utf8");
-  if (MACHINE_PATH_PATTERNS.some((pattern) => pattern.test(text))) {
-    throw new PackagingError(`${label} contains a machine-specific path.`);
-  }
-}
-
-function samePolicyLegalProvenance(
-  value: unknown,
-  fact: PackagedPolicyLegalFact,
-): boolean {
-  return (
-    isObject(value) &&
-    value["sha256"] === fact.sha256 &&
-    value["bytes"] === fact.bytes
-  );
-}
-
-function isPortablePolicyPath(path: string): boolean {
-  return (
-    path.length > 0 &&
-    !path.startsWith("/") &&
-    !path.includes("\\") &&
-    path
-      .split("/")
-      .every((segment) => segment !== "" && segment !== "." && segment !== "..")
-  );
-}
-
-function isPolicySha(value: unknown): value is string {
-  return typeof value === "string" && SHA256_PATTERN.test(value);
-}
-
-function isPolicyBytes(value: unknown): value is number {
-  return Number.isSafeInteger(value) && (value as number) > 0;
-}
-
-function policyObject(value: unknown, label: string): Record<string, unknown> {
-  if (!isObject(value)) throw new PackagingError(`${label} must be an object.`);
-  return value;
-}
-
-function policyString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0) {
-    throw new PackagingError(`${label} must be a non-empty string.`);
-  }
-  return value;
-}
-
-function exactPolicyKeys(
-  object: Record<string, unknown>,
-  expected: string[],
-  label: string,
-): void {
-  if (
-    Object.keys(object).sort().join("\0") !== [...expected].sort().join("\0")
-  ) {
-    throw new PackagingError(`${label} has unexpected or missing fields.`);
   }
 }
 
@@ -1189,5 +831,3 @@ if (import.meta.main) {
     process.exitCode = 1;
   });
 }
-
-import { createHash } from "node:crypto";

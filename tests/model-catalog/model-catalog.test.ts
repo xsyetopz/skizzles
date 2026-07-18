@@ -1,11 +1,23 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import {
   applyLunaV2Overlay,
   refreshCatalog,
   renderLaunchAgent,
-} from "../../runtime/model-catalog";
+} from "../../runtime/model-catalog.ts";
+
+const UNRESOLVED_PLACEHOLDER = /__[A-Z0-9_]+__/;
 
 const roots: string[] = [];
 afterEach(() =>
@@ -55,7 +67,7 @@ function model(
 }
 
 function source(version: "v1" | "v2" = "v1"): {
-  models: Array<Record<string, unknown>>;
+  models: Record<string, unknown>[];
 } {
   return {
     models: [
@@ -68,26 +80,70 @@ function source(version: "v1" | "v2" = "v1"): {
 
 function root(): string {
   const path = join(
-    process.env["TMPDIR"] ?? "/tmp",
+    realpathSync(process.env["TMPDIR"] ?? "/tmp"),
     `skizzles-model-catalog-${crypto.randomUUID()}`,
   );
   roots.push(path);
-  mkdirSync(path, { recursive: true });
+  mkdirSync(path, { recursive: true, mode: 0o700 });
+  chmodSync(path, 0o700);
   return path;
 }
 
 async function fakeCodex(
   path: string,
   bundled = source(),
-  behavior: "normal" | "hang" | "noisy" = "normal",
+  behavior:
+    | "descendant"
+    | "descendant-hang"
+    | "hang"
+    | "noisy"
+    | "normal"
+    | "probe" = "normal",
+  version = "0.145.0-alpha.18",
 ): Promise<string> {
   const codex = join(path, "codex");
   const script = `#!/usr/bin/env bun
 const args = Bun.argv.slice(2);
-if (args.includes("--version")) { console.log("codex-cli 0.145.0-alpha.18"); process.exit(0); }
-if (${JSON.stringify(
-    behavior,
-  )} === "hang") { await Bun.sleep(10_000); process.exit(0); }
+if (${JSON.stringify(behavior)}.startsWith("descendant")) {
+  const marker = ${JSON.stringify(join(path, "descendant-pids"))};
+  const markerFile = Bun.file(marker);
+  const previous = await markerFile.exists() ? await markerFile.text() : "";
+  const descendant = Bun.spawn([
+    "/bin/sh",
+    "-c",
+    "trap '' TERM; while :; do sleep 1; done",
+  ], { stdin: "ignore", stdout: "inherit", stderr: "inherit" });
+  await Bun.write(marker, previous + descendant.pid + "\\n");
+}
+if (${JSON.stringify(behavior)} === "probe") {
+  const home = process.env.HOME;
+  const observationPath = ${JSON.stringify(join(path, "child-observations.ndjson"))};
+  const observationFile = Bun.file(observationPath);
+  const previous = await observationFile.exists() ? await observationFile.text() : "";
+  const observation = {
+    home,
+    codexHome: process.env.CODEX_HOME,
+    tmpdir: process.env.TMPDIR,
+    sentinel: process.env.SKIZZLES_CHILD_SENTINEL ?? null,
+    ambientHome: home === ${JSON.stringify(path)},
+    realHome: home === ${JSON.stringify(process.env["HOME"] ?? null)},
+    authPresent: await Bun.file(home + "/auth.json").exists(),
+    environmentKeys: Object.keys(process.env).sort(),
+  };
+  await Bun.write(observationPath, previous + JSON.stringify(observation) + "\\n");
+  if (observation.sentinel || observation.ambientHome || observation.authPresent || home !== process.env.CODEX_HOME) {
+    console.error("raw-child-secret");
+    process.exit(97);
+  }
+}
+if (args.includes("--version")) { console.log(${JSON.stringify(
+    `codex-cli ${version}`,
+  )}); process.exit(0); }
+if (${JSON.stringify(behavior)}.endsWith("hang")) {
+  await Bun.write(${JSON.stringify(join(path, "failed-child-home"))}, process.env.HOME);
+  await Bun.sleep(10_000);
+  process.exit(0);
+}
 if (${JSON.stringify(
     behavior,
   )} === "noisy") { await Bun.stdout.write("x".repeat(16_384)); process.exit(0); }
@@ -96,11 +152,16 @@ if (args.includes("--bundled")) { console.log(JSON.stringify(bundled)); process.
 const config = args[args.indexOf("-c") + 1];
 const candidatePath = JSON.parse(config.slice("model_catalog_json=".length));
 const candidate = JSON.parse(await Bun.file(candidatePath).text());
+if (process.env.HOME !== process.env.CODEX_HOME) {
+  console.error("preflight HOME was not isolated");
+  process.exit(1);
+}
 if (!candidate.models.every((entry) => typeof entry.display_name === "string")) {
   console.error("missing field display_name");
   process.exit(1);
 }
 console.log(JSON.stringify(candidate));
+process.exit(0);
 `;
   await Bun.write(codex, script);
   chmodSync(codex, 0o700);
@@ -110,7 +171,7 @@ console.log(JSON.stringify(candidate));
 function cache(
   models: unknown,
   fetchedAt = new Date(),
-  version = "0.145.0",
+  version = "0.145.0-alpha.18",
 ): string {
   return JSON.stringify({
     fetched_at: fetchedAt.toISOString(),
@@ -138,7 +199,9 @@ describe("Luna V2 model catalog overlay", () => {
       }),
     ).toThrow("found 2");
     const invalid = source();
-    invalid.models[2]!["multi_agent_version"] = null;
+    const invalidLuna = invalid.models[2];
+    if (invalidLuna === undefined) throw new Error("missing Luna fixture");
+    invalidLuna["multi_agent_version"] = null;
     expect(() => applyLunaV2Overlay(invalid)).toThrow("unexpected");
   });
 
@@ -167,6 +230,11 @@ describe("Luna V2 model catalog overlay", () => {
     });
     expect(second.generation).toBe(first.generation);
     expect(statSync(outputPath).mode & 0o777).toBe(0o600);
+    expect(statSync(join(path, "models_cache.json")).mode & 0o777).toBe(0o600);
+    expect(statSync(join(path, "skizzles")).mode & 0o777).toBe(0o700);
+    expect(
+      statSync(join(path, "skizzles/model-catalog-status.json")).mode & 0o777,
+    ).toBe(0o600);
     expect(JSON.parse(readFileSync(outputPath, "utf8"))).toEqual(source("v2"));
     expect(
       JSON.parse(
@@ -180,6 +248,7 @@ describe("Luna V2 model catalog overlay", () => {
       ["stale", cache(source().models, new Date(Date.now() - 301_000))],
       ["mismatch", cache(source().models, new Date(), "0.144.0")],
       ["partial", cache([model("gpt-5.6-luna", "v1")])],
+      ["future", cache(source().models, new Date(Date.now() + 1_000))],
     ] as const) {
       const path = root();
       const codex = await fakeCodex(path);
@@ -191,12 +260,89 @@ describe("Luna V2 model catalog overlay", () => {
     }
   });
 
+  test("uses the complete SemVer including prerelease and build metadata for cache identity", async () => {
+    for (const [binaryVersion, cacheVersion, expectedSource] of [
+      ["0.145.0-alpha.18+build.7", "0.145.0-alpha.18+build.7", "cache"],
+      ["0.145.0-alpha.18+build.7", "0.145.0-alpha.18", "bundled"],
+      ["0.145.0-alpha.18", "0.145.0-alpha.19", "bundled"],
+    ] as const) {
+      const path = root();
+      const codex = await fakeCodex(path, source(), "normal", binaryVersion);
+      await Bun.write(
+        join(path, "models_cache.json"),
+        cache(source().models, new Date(), cacheVersion),
+      );
+      expect(
+        await refreshCatalog({ codexHome: path, codexBinary: codex }),
+      ).toMatchObject({ source: expectedSource });
+    }
+
+    const path = root();
+    const invalid = await fakeCodex(path, source(), "normal", "01.145.0");
+    await expect(
+      refreshCatalog({ codexHome: path, codexBinary: invalid }),
+    ).rejects.toThrow("valid full semantic version");
+  });
+
+  test("isolates and removes every Codex child home without ambient credentials", async () => {
+    const path = root();
+    writeFileSync(join(path, "auth.json"), "ambient-credential", {
+      mode: 0o600,
+    });
+    const codex = await fakeCodex(path, source(), "probe");
+    const previous = process.env["SKIZZLES_CHILD_SENTINEL"];
+    process.env["SKIZZLES_CHILD_SENTINEL"] = "raw-child-secret";
+    try {
+      await refreshCatalog({ codexHome: path, codexBinary: codex });
+    } finally {
+      if (previous === undefined) {
+        delete process.env["SKIZZLES_CHILD_SENTINEL"];
+      } else {
+        process.env["SKIZZLES_CHILD_SENTINEL"] = previous;
+      }
+    }
+    const observations = readFileSync(
+      join(path, "child-observations.ndjson"),
+      "utf8",
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(observations).toHaveLength(3);
+    expect(new Set(observations.map((entry) => entry.home)).size).toBe(3);
+    for (const observation of observations) {
+      expect(observation).toMatchObject({
+        sentinel: null,
+        ambientHome: false,
+        realHome: false,
+        authPresent: false,
+      });
+      expect(observation.home).toBe(observation.codexHome);
+      expect(observation.tmpdir).toStartWith(`${observation.home}/`);
+      expect(observation.environmentKeys).toEqual([
+        "CODEX_HOME",
+        "HOME",
+        "LANG",
+        "LC_ALL",
+        "NO_COLOR",
+        "PATH",
+        "TMPDIR",
+        "XDG_CACHE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+      ]);
+      expect(() => statSync(observation.home)).toThrow();
+    }
+  });
+
   test("falls back without replacing last-good output when cache schema preflight fails", async () => {
     const path = root();
     const bundled = source();
     const codex = await fakeCodex(path, bundled);
     const malformed = source();
-    delete malformed.models[0]!["display_name"];
+    const malformedModel = malformed.models[0];
+    if (malformedModel === undefined) throw new Error("missing model fixture");
+    delete malformedModel["display_name"];
     await Bun.write(join(path, "models_cache.json"), cache(malformed.models));
     const result = await refreshCatalog({
       codexHome: path,
@@ -206,6 +352,100 @@ describe("Luna V2 model catalog overlay", () => {
     expect(JSON.parse(readFileSync(result.output, "utf8"))).toEqual(
       source("v2"),
     );
+  });
+
+  test("preserves last-good output when bundled catalog validation fails", async () => {
+    const path = root();
+    const output = join(path, "skizzles/model-catalog.json");
+    mkdirSync(join(path, "skizzles"), { recursive: true, mode: 0o700 });
+    chmodSync(join(path, "skizzles"), 0o700);
+    writeFileSync(output, "last-good\n", { mode: 0o600 });
+    const codex = await fakeCodex(path, {
+      models: [model("gpt-5.6-luna", "v1")],
+    });
+    await expect(
+      refreshCatalog({ codexHome: path, codexBinary: codex }),
+    ).rejects.toThrow("incomplete");
+    expect(readFileSync(output, "utf8")).toBe("last-good\n");
+  });
+
+  test("rejects path aliasing and symlink output without changing its target", async () => {
+    const path = root();
+    const codex = await fakeCodex(path);
+    const shared = join(path, "shared.json");
+    await expect(
+      refreshCatalog({
+        codexHome: path,
+        codexBinary: codex,
+        output: shared,
+        status: shared,
+      }),
+    ).rejects.toThrow("must be distinct");
+
+    const victim = join(path, "victim.json");
+    const output = join(path, "catalog-link.json");
+    writeFileSync(victim, "victim\n");
+    symlinkSync(victim, output);
+    await expect(
+      refreshCatalog({ codexHome: path, codexBinary: codex, output }),
+    ).rejects.toThrow("symlink");
+    expect(readFileSync(victim, "utf8")).toBe("victim\n");
+  });
+
+  test("rejects physical aliases and symlink ancestors without writing outside", async () => {
+    const path = root();
+    const outside = root();
+    const codex = await fakeCodex(path);
+    const output = join(path, "catalog.json");
+    const status = join(path, "status.json");
+    writeFileSync(output, "last-good\n", { mode: 0o600 });
+    linkSync(output, status);
+    await expect(
+      refreshCatalog({
+        codexHome: path,
+        codexBinary: codex,
+        output,
+        status,
+      }),
+    ).rejects.toThrow("exactly one hard link");
+    expect(readFileSync(output, "utf8")).toBe("last-good\n");
+
+    const alias = join(path, "outside-alias");
+    symlinkSync(outside, alias);
+    const escapedOutput = join(alias, "escaped.json");
+    await expect(
+      refreshCatalog({
+        codexHome: path,
+        codexBinary: codex,
+        output: escapedOutput,
+      }),
+    ).rejects.toThrow("symlink path components");
+    expect(() => readFileSync(join(outside, "escaped.json"))).toThrow();
+  });
+
+  test("rejects external hard links for every managed catalog path without mutating the victim", async () => {
+    for (const role of ["output", "status", "cache"] as const) {
+      const path = root();
+      const codex = await fakeCodex(path);
+      const victim = join(path, `${role}-victim.json`);
+      const managed = {
+        output: join(path, "catalog.json"),
+        status: join(path, "status.json"),
+        cache: join(path, "cache.json"),
+      };
+      writeFileSync(victim, "external-victim\n", { mode: 0o640 });
+      linkSync(victim, managed[role]);
+      await expect(
+        refreshCatalog({
+          codexHome: path,
+          codexBinary: codex,
+          ...managed,
+        }),
+      ).rejects.toThrow("exactly one hard link");
+      expect(readFileSync(victim, "utf8")).toBe("external-victim\n");
+      expect(statSync(victim).mode & 0o777).toBe(0o640);
+      expect(statSync(victim).nlink).toBe(2);
+    }
   });
 
   test("terminates noisy and hanging Codex subprocesses", async () => {
@@ -225,6 +465,40 @@ describe("Luna V2 model catalog overlay", () => {
     }
   });
 
+  test("bounds and reaps descendant-held pipes on success and timeout", async () => {
+    for (const behavior of ["descendant", "descendant-hang"] as const) {
+      const path = root();
+      const codex = await fakeCodex(path, source(), behavior);
+      const started = Date.now();
+      const operation = refreshCatalog({
+        codexHome: path,
+        codexBinary: codex,
+        commandTimeoutMs: behavior === "descendant" ? 1_000 : 300,
+      });
+      if (behavior === "descendant") {
+        await operation;
+      } else {
+        await expect(operation).rejects.toThrow("timed out");
+      }
+      expect(Date.now() - started).toBeLessThan(1_500);
+      const pids = readFileSync(join(path, "descendant-pids"), "utf8")
+        .trim()
+        .split("\n")
+        .map(Number);
+      expect(pids.length).toBe(behavior === "descendant" ? 3 : 2);
+      for (const pid of pids) {
+        expect(() => process.kill(pid, 0)).toThrow();
+      }
+      if (behavior === "descendant-hang") {
+        const failedHome = readFileSync(
+          join(path, "failed-child-home"),
+          "utf8",
+        );
+        expect(() => statSync(failedHome)).toThrow();
+      }
+    }
+  });
+
   test("renders a launch agent with absolute escaped paths", () => {
     const template =
       "<array><string>__BUN_ABSOLUTE_PATH__</string><string>__SCRIPT_ABSOLUTE_PATH__</string><string>__CODEX_HOME_ABSOLUTE_PATH__</string><string>__CODEX_BINARY_ABSOLUTE_PATH__</string><string>__MODELS_CACHE_ABSOLUTE_PATH__</string></array>";
@@ -236,7 +510,7 @@ describe("Luna V2 model catalog overlay", () => {
     });
     expect(rendered).toContain("/opt/bun&amp;friends/bun");
     expect(rendered).toContain("/tmp/codex-home/models_cache.json");
-    expect(rendered).not.toMatch(/__[A-Z0-9_]+__/);
+    expect(rendered).not.toMatch(UNRESOLVED_PLACEHOLDER);
     expect(() =>
       renderLaunchAgent(template, {
         bun: "relative/bun",
