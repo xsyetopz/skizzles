@@ -5,7 +5,6 @@ import { PROMPT_POLICY_DESCRIPTOR_PATHS } from "@skizzles/prompt-layer";
 import { type JsonValue, readJsonFile } from "../codex-config.ts";
 import { pathEntryExists } from "../managed-files.ts";
 
-const PACKAGED_DESCRIPTOR_PATH = "integrations/prompt-policy.json";
 const MACHINE_PATH_PATTERNS = [
   /\/Users\/[A-Za-z0-9._-]+(?:\/|\b)/,
   /\/home\/[A-Za-z0-9._-]+(?:\/|\b)/,
@@ -80,16 +79,17 @@ export function readPolicySource(
     descriptorPathInput,
     "prompt-policy descriptor path",
   );
-  const descriptorSuffix = `/${PACKAGED_DESCRIPTOR_PATH}`;
+  const packagedDescriptorPath = PROMPT_POLICY_DESCRIPTOR_PATHS.packagedPath;
+  const descriptorSuffix = `/${packagedDescriptorPath}`;
   const sourcePrefix =
-    descriptorPath === PACKAGED_DESCRIPTOR_PATH
+    descriptorPath === packagedDescriptorPath
       ? ""
       : descriptorPath.endsWith(descriptorSuffix)
         ? descriptorPath.slice(0, -descriptorSuffix.length)
         : undefined;
   if (sourcePrefix === undefined) {
     throw new Error(
-      "prompt-policy descriptor path must end in integrations/prompt-policy.json",
+      `prompt-policy descriptor path must end in ${packagedDescriptorPath}`,
     );
   }
   const descriptorAbsolute = resolveContainedFile(

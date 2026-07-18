@@ -12,6 +12,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
+import { PROMPT_POLICY_DESCRIPTOR_PATHS } from "@skizzles/prompt-layer";
 import {
   type ConfigEdit,
   type ConfigRpc,
@@ -465,6 +466,21 @@ describe("prompt-policy source and lock boundaries", () => {
       rpcFactory: rpcFactory(f.rpc),
     });
     expect(outcome.action).toBe("apply");
+    expect(f.rpc.writes).toBe(0);
+  });
+
+  test("rejects descriptor locations outside the provider-owned contract", async () => {
+    const f = fixture();
+    await expect(
+      applyPromptPolicy({
+        ...f,
+        sourceDescriptor: { descriptorPath: "alternate/policy.json" },
+        dryRun: true,
+        rpcFactory: rpcFactory(f.rpc),
+      }),
+    ).rejects.toThrow(
+      `prompt-policy descriptor path must end in ${PROMPT_POLICY_DESCRIPTOR_PATHS.packagedPath}`,
+    );
     expect(f.rpc.writes).toBe(0);
   });
 });
