@@ -77,6 +77,7 @@ describe("pinned Codex prompt layer", () => {
 
   test("builds the known prompt deterministically and check is non-writing", async () => {
     const root = await fixture();
+    expect(await pathExistsForTest(join(root, "instructions"))).toBe(false);
     await buildPrompt(root);
     const firstPrompt = await readFile(
       join(root, "packages/prompt-layer/assets/instructions/skizzles-base.md"),
@@ -1315,9 +1316,6 @@ async function fixture(): Promise<string> {
       recursive: true,
     },
   );
-  await cp(join(source, "instructions"), join(root, "instructions"), {
-    recursive: true,
-  });
   return root;
 }
 
