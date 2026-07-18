@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, realpath } from "node:fs/promises";
+import { realpath, rename } from "node:fs/promises";
 import {
   basename,
   dirname,
@@ -12,14 +12,18 @@ import {
 import { PackagingError } from "./contract.ts";
 import {
   assertLexicalAncestors,
+  isNodeError,
+  lstatBigInt,
+  serialized,
+  type TransactionJournal,
   unsafeDestinationAncestorError,
 } from "./destination-parent.ts";
 
 const DESTINATION_KEY_LENGTH = 16;
 
 interface FileIdentity {
-  dev: number | bigint;
-  ino: number | bigint;
+  dev: bigint;
+  ino: bigint;
 }
 
 interface PathSnapshot {
@@ -86,10 +90,10 @@ async function snapshotAncestors(parent: string): Promise<PathSnapshot[]> {
     if (component !== "") {
       current = join(current, component);
     }
-    let metadata: Awaited<ReturnType<typeof lstat>>;
+    let metadata: Awaited<ReturnType<typeof lstatBigInt>>;
     try {
       // biome-ignore lint/performance/noAwaitInLoops: ordered ancestor inspection is the destination containment boundary.
-      metadata = await lstat(current);
+      metadata = await lstatBigInt(current);
     } catch (error) {
       throw unsafeDestinationAncestorError(error);
     }
@@ -105,10 +109,10 @@ async function revalidateAncestors(
   ancestors: readonly PathSnapshot[],
 ): Promise<void> {
   for (const snapshot of ancestors) {
-    let metadata: Awaited<ReturnType<typeof lstat>>;
+    let metadata: Awaited<ReturnType<typeof lstatBigInt>>;
     try {
       // biome-ignore lint/performance/noAwaitInLoops: ordered identity checks fail closed before pathname mutation.
-      metadata = await lstat(snapshot.path);
+      metadata = await lstatBigInt(snapshot.path);
     } catch (error) {
       throw changedAncestorError(error);
     }
@@ -123,9 +127,9 @@ async function revalidateAncestors(
 }
 
 async function inspectDestination(path: string): Promise<DestinationSnapshot> {
-  let metadata: Awaited<ReturnType<typeof lstat>>;
+  let metadata: Awaited<ReturnType<typeof lstatBigInt>>;
   try {
-    metadata = await lstat(path);
+    metadata = await lstatBigInt(path);
   } catch (error) {
     if (isNodeError(error) && error.code === "ENOENT") {
       return { present: false };
@@ -163,7 +167,38 @@ async function assertDestinationUnchanged(
   }
 }
 
-function identity(metadata: Awaited<ReturnType<typeof lstat>>): FileIdentity {
+async function assertPathIdentity(
+  path: string,
+  expected: FileIdentity | undefined,
+): Promise<void> {
+  if (expected === undefined) {
+    throw new PackagingError("Plugin staging path identity is unavailable.");
+  }
+  const metadata = await lstatBigInt(path);
+  if (
+    metadata.isSymbolicLink() ||
+    !metadata.isDirectory() ||
+    !sameIdentity(expected, identity(metadata))
+  ) {
+    throw new PackagingError("Plugin staging path identity changed.");
+  }
+}
+
+async function assertPathAbsent(path: string): Promise<void> {
+  try {
+    await lstatBigInt(path);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") return;
+    throw error;
+  }
+  throw new PackagingError(
+    "Plugin staging destination changed during rollback.",
+  );
+}
+
+function identity(
+  metadata: Awaited<ReturnType<typeof lstatBigInt>>,
+): FileIdentity {
   return { dev: metadata.dev, ino: metadata.ino };
 }
 
@@ -189,8 +224,52 @@ function changedDestinationError(): PackagingError {
   );
 }
 
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
+function initialJournal(
+  original: DestinationSnapshot,
+  version: number,
+): TransactionJournal {
+  const journal: TransactionJournal = {
+    version,
+    state: "active",
+    original: { present: original.present },
+  };
+  if (original.identity !== undefined) {
+    journal.original.identity = serialized(original.identity);
+  }
+  return journal;
+}
+
+function transactionLockPath(target: TransactionTarget): string {
+  return join(target.parent, `.skizzles-package-${target.key}.lock`);
+}
+
+function privateSiblingPath(
+  target: TransactionTarget,
+  kind: "backup" | "stage",
+  token: string,
+): string {
+  return join(
+    target.parent,
+    `.skizzles-package-${target.key}-${kind}-${token}`,
+  );
+}
+
+function changedRecoveryDestinationError(): PackagingError {
+  return new PackagingError(
+    "Plugin staging recovery found a changed destination.",
+  );
+}
+
+async function restoreQuarantinedPath(
+  quarantine: string,
+  original: string,
+): Promise<void> {
+  try {
+    await assertPathAbsent(original);
+    await rename(quarantine, original);
+  } catch {
+    // Both paths are retained when restoration cannot be proven safe.
+  }
 }
 
 export type {
@@ -201,9 +280,17 @@ export type {
 };
 export {
   assertDestinationUnchanged,
+  assertPathAbsent,
+  assertPathIdentity,
+  changedDestinationError,
+  changedRecoveryDestinationError,
   identity,
+  initialJournal,
   inspectDestination,
   inspectTarget,
+  privateSiblingPath,
+  restoreQuarantinedPath,
   revalidateAncestors,
   sameIdentity,
+  transactionLockPath,
 };

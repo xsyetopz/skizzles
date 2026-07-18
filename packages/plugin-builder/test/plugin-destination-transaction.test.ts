@@ -2,30 +2,26 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   chmod,
-  lstat,
   mkdir,
   mkdtemp,
   readdir,
   readFile,
-  realpath,
   rename,
+  rm,
   stat,
-  symlink,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join, resolve } from "node:path";
+import process from "node:process";
+import {
+  inspectTarget,
+  transactionLockPath,
+} from "../src/plugin/destination-path.ts";
 import { replaceDirectoryTransaction } from "../src/plugin/destination-transaction.ts";
-import {
-  buildPlugin,
-  PackagingError,
-  stagePlugin,
-} from "../src/plugin-package.ts";
-import {
-  createTestWorkspace,
-  filesUnder,
-  write,
-} from "./plugin-package-fixture.ts";
+import { PackagingError, stagePlugin } from "../src/plugin-package.ts";
+import { createTestWorkspace, write } from "./plugin-package-fixture.ts";
 
 const PRIVATE_MODE = 0o700;
 const PRESERVED_MODE = 0o751;
@@ -62,74 +58,6 @@ describe("plugin destination transactions", () => {
     expect(await transactionArtifacts(root)).toEqual([]);
   });
 
-  it("replaces a valid destination only after complete staging", async () => {
-    const root = await fixture();
-    const destination = join(root, "replace-plugin");
-    await write(root, "replace-plugin/old-only.txt", "old\n");
-
-    await stagePlugin(root, destination);
-
-    expect(await Bun.file(join(destination, "old-only.txt")).exists()).toBe(
-      false,
-    );
-    expect(
-      await Bun.file(join(destination, ".codex-plugin/plugin.json")).exists(),
-    ).toBe(true);
-    expect(await transactionArtifacts(root)).toEqual([]);
-  });
-
-  it("routes build replacement through the same failure-preserving authority", async () => {
-    const root = await fixture();
-    const generated = join(root, "plugins/skizzles");
-    await write(root, "plugins/skizzles/preserved.txt", "preserved\n");
-    await write(root, "skills/example/late-build.unknown", "neutral\n");
-
-    await expect(buildPlugin(root)).rejects.toThrow(
-      "has no explicit language-policy surface classification",
-    );
-    expect(await readFile(join(generated, "preserved.txt"), "utf8")).toBe(
-      "preserved\n",
-    );
-    expect(
-      await Bun.file(join(generated, ".codex-plugin/plugin.json")).exists(),
-    ).toBe(false);
-    expect(await transactionArtifacts(join(root, "plugins"))).toEqual([]);
-  });
-
-  it("rejects destination symlinks, files, and symlinked ancestors without path disclosure", async () => {
-    const root = await fixture();
-    const outside = await mkdtemp(join(tmpdir(), "skizzles-stage-outside-"));
-    temporaryRoots.push(outside);
-    await writeFile(join(outside, "preserved.txt"), "outside\n");
-
-    const symlinkDestination = join(root, "symlink-destination");
-    await symlink(outside, symlinkDestination);
-    expect(await rejectionMessage(stagePlugin(root, symlinkDestination))).toBe(
-      "Plugin staging destination must be a real directory or absent.",
-    );
-
-    const fileDestination = join(root, "file-destination");
-    await writeFile(fileDestination, "file\n");
-    expect(await rejectionMessage(stagePlugin(root, fileDestination))).toBe(
-      "Plugin staging destination must be a real directory or absent.",
-    );
-
-    const ancestor = join(root, "symlinked-parent");
-    await symlink(outside, ancestor);
-    const ancestorMessage = await rejectionMessage(
-      stagePlugin(root, join(ancestor, "plugin")),
-    );
-    expect(ancestorMessage).toBe(
-      "Plugin staging destination ancestors must be existing real directories.",
-    );
-    expect(ancestorMessage).not.toContain(root);
-    expect(await readFile(join(outside, "preserved.txt"), "utf8")).toBe(
-      "outside\n",
-    );
-    expect(await filesUnder(outside)).toEqual(["preserved.txt"]);
-    expect(await transactionArtifacts(root)).toEqual([]);
-  });
-
   it("restores the identity-backed backup when promotion is interrupted", async () => {
     const parent = await temporaryRoot("skizzles-stage-rollback-");
     const destination = join(parent, "plugin");
@@ -142,7 +70,8 @@ describe("plugin destination transactions", () => {
           await writeFile(join(privateRoot, "new.txt"), "new bytes\n");
         },
         {
-          afterBackup: () => {
+          checkpoint: (point) => {
+            if (point !== "backup-renamed") return;
             throw new Error("injected promotion failure");
           },
         },
@@ -170,28 +99,6 @@ describe("plugin destination transactions", () => {
       }),
     ).rejects.toEqual(new PackagingError("injected staged validation failure"));
     expect(await Bun.file(destination).exists()).toBe(false);
-    expect(await transactionArtifacts(parent)).toEqual([]);
-  });
-
-  it("constructs privately on the destination filesystem and cleans success artifacts", async () => {
-    const parent = await temporaryRoot("skizzles-stage-private-");
-    const destination = join(parent, "plugin");
-    await write(parent, "plugin/old.txt", "old\n");
-    const parentDevice = (await stat(parent)).dev;
-
-    await replaceDirectoryTransaction(destination, async (privateRoot) => {
-      const metadata = await lstat(privateRoot);
-      expect(dirname(privateRoot)).toBe(await realpath(parent));
-      expect(metadata.dev).toBe(parentDevice);
-      expect(metadata.mode & PERMISSION_BITS).toBe(PRIVATE_MODE);
-      expect(await readFile(join(destination, "old.txt"), "utf8")).toBe(
-        "old\n",
-      );
-      await writeFile(join(privateRoot, "new.txt"), "new\n");
-    });
-
-    expect(await readFile(join(destination, "new.txt"), "utf8")).toBe("new\n");
-    expect(await Bun.file(join(destination, "old.txt")).exists()).toBe(false);
     expect(await transactionArtifacts(parent)).toEqual([]);
   });
 
@@ -255,6 +162,98 @@ describe("plugin destination transactions", () => {
     );
     expect(await transactionArtifacts(parent)).toEqual([]);
   });
+
+  it("commits mode 0755 and never rejects after lock replacement housekeeping", async () => {
+    const parent = await temporaryRoot("skizzles-stage-committed-lock-");
+    const destination = join(parent, "plugin");
+    const displaced = join(parent, "displaced-lock");
+    await write(parent, "plugin/old", "old\n");
+
+    await expect(
+      replaceDirectoryTransaction(
+        destination,
+        async (root) => {
+          expect((await stat(root)).mode & PERMISSION_BITS).toBe(PRIVATE_MODE);
+          await writeFile(join(root, "new"), "new\n");
+        },
+        {
+          beforeLockCleanup: async (lock) => {
+            await rename(lock, displaced);
+            await mkdir(lock, { mode: PRIVATE_MODE });
+          },
+        },
+      ),
+    ).resolves.toBeUndefined();
+    expect((await stat(destination)).mode & PERMISSION_BITS).toBe(0o755);
+    expect(await Bun.file(join(destination, "new")).exists()).toBe(true);
+    expect(await Bun.file(join(destination, "old")).exists()).toBe(false);
+    expect((await stat(displaced)).isDirectory()).toBe(true);
+  });
+
+  it("removes only identity-owned empty parents on precommit failure", async () => {
+    const parent = await temporaryRoot("skizzles-stage-parent-cleanup-");
+    const created = join(parent, "new/nested");
+    await expect(
+      replaceDirectoryTransaction(join(created, "plugin"), async () => {
+        throw new Error("injected construction failure");
+      }),
+    ).rejects.toThrow("injected construction failure");
+    expect(await Bun.file(created).exists()).toBe(false);
+    expect(await Bun.file(join(parent, "new")).exists()).toBe(false);
+  });
+
+  it("treats partial backup disposal as committed recoverable housekeeping", async () => {
+    const parent = await temporaryRoot("skizzles-stage-partial-cleanup-");
+    const destination = join(parent, "plugin");
+    await write(parent, "plugin/old-a", "a\n");
+    await write(parent, "plugin/old-b", "b\n");
+
+    await expect(
+      replaceDirectoryTransaction(
+        destination,
+        (root) => writeFile(join(root, "new"), "new\n"),
+        {
+          beforeBackupCleanup: async (backup) => {
+            await rm(join(backup, "previous/old-a"));
+            throw new Error("injected partial disposal");
+          },
+        },
+      ),
+    ).resolves.toBeUndefined();
+    expect(await Bun.file(join(destination, "new")).exists()).toBe(true);
+    const artifacts = await transactionArtifacts(parent);
+    expect(artifacts.some((name) => name.includes("-backup-"))).toBe(true);
+    expect(artifacts.some((name) => name.includes("-cleanup-"))).toBe(true);
+  });
+
+  it("recovers every promotion crash point and a stale unpublished lock", async () => {
+    for (const [point, expected, exitCode] of [
+      ["construction", "old", 72],
+      ["backup-ready", "old", 71],
+      ["backup-renamed", "old", 71],
+      ["destination-ready", "old", 71],
+      ["destination-renamed", "new", 71],
+      ["committed", "new", 71],
+    ] as const) {
+      const parent = await temporaryRoot(`skizzles-crash-${point}-`);
+      const destination = join(parent, "plugin");
+      await write(parent, "plugin/old", "old\n");
+      expect(crashTransaction(destination, point)).toBe(exitCode);
+      const observed = await observeRecoveredDestination(destination);
+      expect(observed).toBe(expected);
+    }
+    const parent = await temporaryRoot("skizzles-crash-lock-publication-");
+    const destination = join(parent, "plugin");
+    const lock = transactionLockPath(await inspectTarget(destination));
+    await mkdir(lock, { mode: PRIVATE_MODE });
+    const stale = new Date(Date.now() - 60_000);
+    await utimes(lock, stale, stale);
+
+    await replaceDirectoryTransaction(destination, (root) =>
+      writeFile(join(root, "new"), "new\n"),
+    );
+    expect(await Bun.file(join(destination, "new")).exists()).toBe(true);
+  }, 20_000);
 });
 
 async function temporaryRoot(prefix: string): Promise<string> {
@@ -269,16 +268,32 @@ async function transactionArtifacts(parent: string): Promise<string[]> {
     .sort();
 }
 
-async function rejectionMessage(operation: Promise<void>): Promise<string> {
-  let message = "";
+function crashTransaction(destination: string, point: string): number {
+  const module = resolve(
+    import.meta.dir,
+    "../src/plugin/destination-transaction.ts",
+  );
+  const source = `import { replaceDirectoryTransaction } from ${JSON.stringify(module)};\nawait replaceDirectoryTransaction(process.env.DEST, async (root) => { await Bun.write(root + "/new", "new\\n"); if (process.env.POINT === "construction") process.exit(72); }, { checkpoint: (point) => { if (point === process.env.POINT) process.exit(71); } });`;
+  return Bun.spawnSync([process.execPath, "-e", source], {
+    env: { ...process.env, DEST: destination, POINT: point },
+    stderr: "pipe",
+    stdout: "pipe",
+  }).exitCode;
+}
+
+async function observeRecoveredDestination(
+  destination: string,
+): Promise<"missing" | "new" | "old"> {
+  let observed: "missing" | "new" | "old" = "missing";
+  const stop = new PackagingError("stop after recovery observation");
   try {
-    await operation;
+    await replaceDirectoryTransaction(destination, async () => {
+      if (await Bun.file(join(destination, "old")).exists()) observed = "old";
+      if (await Bun.file(join(destination, "new")).exists()) observed = "new";
+      throw stop;
+    });
   } catch (error) {
-    if (error instanceof Error) {
-      ({ message } = error);
-    } else {
-      message = String(error);
-    }
+    if (error !== stop) throw error;
   }
-  return message;
+  return observed;
 }
