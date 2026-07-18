@@ -88,7 +88,7 @@ artifacts, or FFI to the workspace.
 
 ## Evidence updates
 
-- [2026-07-18 Rust measurement gate](../research/rust-measurement-gate-2026-07-18.md):
+- [2026-07-18 Rust measurement gate](../research/rust/measurement-gate.md):
   concurrent-tree triage found lifecycle, process, filesystem, and deliberate-wait
   costs rather than a qualifying CPU-bound boundary. It records the reproducible
   revisit threshold and native-pilot evidence contract.

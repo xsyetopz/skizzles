@@ -272,8 +272,5 @@ async function temporaryRoot(): Promise<string> {
 }
 
 async function manifestSource(): Promise<string> {
-  return readFile(
-    join(WORKSPACE_ROOT, "config/repository-security-tools.json"),
-    "utf8",
-  );
+  return readFile(join(WORKSPACE_ROOT, "config/security-tools.json"), "utf8");
 }

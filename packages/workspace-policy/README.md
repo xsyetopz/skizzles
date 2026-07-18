@@ -51,7 +51,7 @@ dependency alone does not grant filesystem reach-through authority.
 
 This package also owns the networked repository security gate invoked by
 `bun run security:check`. The root
-`config/repository-security-tools.json` pins the exact actionlint, ShellCheck,
+`config/security-tools.json` pins the exact actionlint, ShellCheck,
 and Gitleaks release provenance and Linux x64/macOS arm64 archive contracts. A
 code-owned immutable authority independently binds every version, license, command,
 pattern, release URL, archive digest, executable member, and GitHub API identity

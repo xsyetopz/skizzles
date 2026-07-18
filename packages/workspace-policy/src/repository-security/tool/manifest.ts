@@ -19,7 +19,7 @@ const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;
 async function loadRepositorySecurityToolManifest(
   workspaceRoot: string,
 ): Promise<RepositorySecurityToolManifest> {
-  const path = `${workspaceRoot}/config/repository-security-tools.json`;
+  const path = `${workspaceRoot}/config/security-tools.json`;
   let input: unknown;
   try {
     input = JSON.parse(await readFile(path, "utf8"));

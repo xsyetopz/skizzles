@@ -3,7 +3,7 @@
 Consequential architecture choices and their executable confirmation contracts are
 recorded in the [architecture decision log](decisions/README.md). Source provenance and
 Adopt/Adapt/Defer/Reject assessments for the cohesion campaign are maintained separately
-in the [research decision ledger](research/architectural-cohesion-ledger.md).
+in the [research decision ledger](research/architecture-ledger.md).
 
 ## Design
 

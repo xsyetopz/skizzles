@@ -21,7 +21,7 @@ Those findings are migration inputs, not evidence that a different deployment mo
 is required.
 
 Evidence and applicability decisions are recorded in the
-[research ledger](../research/architectural-cohesion-ledger.md). Fowler's evolutionary
+[research ledger](../research/architecture-ledger.md). Fowler's evolutionary
 architecture guidance supports feedback-driven change; the pattern catalogs are
 discovery aids rather than prescriptions.
 

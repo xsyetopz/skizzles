@@ -1,0 +1,214 @@
+{
+  "naming_exceptions": [
+    {
+      "rule": "semantic-token-limit",
+      "path": "docs/decisions/0001-modular-packaging-monolith.md",
+      "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
+      "owner": "Repository architecture policy",
+      "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
+      "review": "Rename only through an explicit ADR history migration that updates every reference atomically."
+    },
+    {
+      "rule": "temporal-file",
+      "path": "docs/decisions/0001-modular-packaging-monolith.md",
+      "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
+      "owner": "Repository architecture policy",
+      "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
+      "review": "Remove only if the repository adopts a different versioned ADR identity convention."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "docs/decisions/0002-executable-architecture-fitness.md",
+      "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
+      "owner": "Repository architecture policy",
+      "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
+      "review": "Rename only through an explicit ADR history migration that updates every reference atomically."
+    },
+    {
+      "rule": "temporal-file",
+      "path": "docs/decisions/0002-executable-architecture-fitness.md",
+      "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
+      "owner": "Repository architecture policy",
+      "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
+      "review": "Remove only if the repository adopts a different versioned ADR identity convention."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "docs/decisions/0003-agent-trust-and-evaluation.md",
+      "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
+      "owner": "Repository architecture policy",
+      "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
+      "review": "Rename only through an explicit ADR history migration that updates every reference atomically."
+    },
+    {
+      "rule": "temporal-file",
+      "path": "docs/decisions/0003-agent-trust-and-evaluation.md",
+      "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
+      "owner": "Repository architecture policy",
+      "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
+      "review": "Remove only if the repository adopts a different versioned ADR identity convention."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "docs/decisions/0004-measurement-gated-rust.md",
+      "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
+      "owner": "Repository architecture policy",
+      "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
+      "review": "Rename only through an explicit ADR history migration that updates every reference atomically."
+    },
+    {
+      "rule": "temporal-file",
+      "path": "docs/decisions/0004-measurement-gated-rust.md",
+      "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
+      "owner": "Repository architecture policy",
+      "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
+      "review": "Remove only if the repository adopts a different versioned ADR identity convention."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "docs/decisions/0005-ephemeral-repository-security-tools.md",
+      "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
+      "owner": "Repository architecture policy",
+      "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
+      "review": "Rename only through an explicit ADR history migration that updates every reference atomically."
+    },
+    {
+      "rule": "temporal-file",
+      "path": "docs/decisions/0005-ephemeral-repository-security-tools.md",
+      "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
+      "owner": "Repository architecture policy",
+      "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
+      "review": "Remove only if the repository adopts a different versioned ADR identity convention."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "packages/command-hook/src/manage-command-output.ts",
+      "reason": "The published plugin generator contract stages this exact canonical source path into the hook runtime.",
+      "owner": "Command Hook and plugin builder",
+      "control": "Plugin staging tests and generated parity checks verify the exact source and destination paths.",
+      "review": "Remove only in a versioned plugin layout migration."
+    },
+    {
+      "rule": "redundant-owner-prefix",
+      "path": "packages/container-lab/assets/integrations/container-lab.json",
+      "reason": "The package export and published integration descriptor bind this exact canonical and distributed filename.",
+      "owner": "Container Lab integration contract",
+      "control": "Descriptor tests, package exports, plugin staging, installer diagnostics, and parity checks verify the exact path and descriptor bytes.",
+      "review": "Remove only in a versioned integration-descriptor and plugin-layout migration."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "packages/container-lab/examples/compose/.codex-container-lab.yaml",
+      "reason": "The published manifest schema requires the external .codex-container-lab.yaml filename.",
+      "owner": "Container Lab manifest parser",
+      "control": "Config parser tests and example validation check the exact manifest filename.",
+      "review": "Remove only in a versioned public schema migration."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "packages/container-lab/examples/dockerfile/.codex-container-lab.yaml",
+      "reason": "The published manifest schema requires the external .codex-container-lab.yaml filename.",
+      "owner": "Container Lab manifest parser",
+      "control": "Config parser tests and example validation check the exact manifest filename.",
+      "review": "Remove only in a versioned public schema migration."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "packages/container-lab/examples/image/.codex-container-lab.yaml",
+      "reason": "The published manifest schema requires the external .codex-container-lab.yaml filename.",
+      "owner": "Container Lab manifest parser",
+      "control": "Config parser tests and example validation check the exact manifest filename.",
+      "review": "Remove only in a versioned public schema migration."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "packages/prompt-layer/assets/evaluations/shipped-language-policy.v2.json",
+      "reason": "The versioned shipped-language schema and distributed plugin descriptor publish this exact evaluation path.",
+      "owner": "Prompt Layer shipped-language contract",
+      "control": "Prompt Layer and plugin-builder parity tests bind the exact canonical path, packaged path, schema version, and bytes.",
+      "review": "Remove only in a versioned evaluation-schema and plugin-layout migration."
+    },
+    {
+      "rule": "temporal-file",
+      "path": "packages/prompt-layer/assets/evaluations/shipped-language-policy.v2.json",
+      "reason": "The v2 suffix is the externally observed evaluation schema version, not a temporary implementation marker.",
+      "owner": "Prompt Layer shipped-language contract",
+      "control": "Prompt Layer parser tests reject schema/path version drift and plugin parity tests verify the distributed name.",
+      "review": "Supersede only when a new schema version has an explicit migration and compatibility decision."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "packages/prompt-layer/assets/instructions/skizzles-base.provenance.json",
+      "reason": "The published prompt manifest and public policy descriptor require this exact generated provenance filename.",
+      "owner": "Prompt Layer lifecycle and plugin packaging",
+      "control": "Prompt checks bind its digest and byte count; plugin parity and installer validation bind the packaged path.",
+      "review": "Remove only in a versioned prompt-policy descriptor and plugin-layout migration."
+    },
+    {
+      "rule": "redundant-owner-prefix",
+      "path": "packages/prompt-layer/assets/integrations/prompt-policy.json",
+      "reason": "The published prompt-policy descriptor is a stable cross-package and distributed integration contract.",
+      "owner": "Prompt Layer descriptor contract",
+      "control": "Prompt Layer, installer, and plugin-builder tests bind the exact canonical and packaged descriptor paths.",
+      "review": "Remove only in a versioned descriptor and plugin-layout migration."
+    },
+    {
+      "rule": "redundant-owner-prefix",
+      "path": "skills/codex-container-lab/scripts/codex-container-lab",
+      "reason": "The skill launcher is a published executable path and command name referenced by installed guidance and integration descriptors.",
+      "owner": "Container Lab public skill surface",
+      "control": "Launcher, installer, command-hook, shipped-language, plugin staging, and parity tests bind the exact path and executable mode.",
+      "review": "Remove only in a versioned public launcher and plugin-layout migration."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "skills/codex-container-lab/scripts/codex-container-lab",
+      "reason": "The skill launcher is a published executable path and command name referenced by installed guidance and integration descriptors.",
+      "owner": "Container Lab public skill surface",
+      "control": "Launcher, installer, command-hook, shipped-language, plugin staging, and parity tests bind the exact path and executable mode.",
+      "review": "Remove only in a versioned public launcher and plugin-layout migration."
+    },
+    {
+      "rule": "redundant-owner-prefix",
+      "path": "skills/designer-runtime/scripts/designer-sim",
+      "reason": "The designer simulator is a published executable skill path staged into the plugin and referenced by shipped policy.",
+      "owner": "Designer Runtime public skill surface",
+      "control": "Prompt Layer and plugin-builder shipped-language tests bind the exact canonical and distributed path and executable mode.",
+      "review": "Remove only in a versioned public simulator and plugin-layout migration."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "skills/fourth-wall/contracts/context-envelope.schema.json",
+      "reason": "The published context-envelope schema path is a distributed agent-contract identifier.",
+      "owner": "Fourth Wall agent-contract schemas",
+      "control": "Schema validation, instance tests, plugin staging, and parity checks bind the exact canonical and distributed path and bytes.",
+      "review": "Remove only in a versioned agent-contract schema and plugin-layout migration."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "skills/fourth-wall/contracts/handoff-review.schema.json",
+      "reason": "The published handoff/review schema path is a distributed agent-contract identifier.",
+      "owner": "Fourth Wall agent-contract schemas",
+      "control": "Schema validation, instance tests, plugin staging, and parity checks bind the exact canonical and distributed path and bytes.",
+      "review": "Remove only in a versioned agent-contract schema and plugin-layout migration."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "skills/fourth-wall/fixtures/trust-boundary-incidents.json",
+      "reason": "The published incident-regression corpus path is a distributed Fourth Wall evaluation contract.",
+      "owner": "Fourth Wall trust-boundary fixtures",
+      "control": "Instance evaluation, plugin staging, and parity checks bind the exact canonical and distributed path and bytes.",
+      "review": "Remove only in a versioned evaluation-corpus and plugin-layout migration."
+    }
+  ],
+  "artifact_exemptions": [
+    {
+      "class": "generated",
+      "path": "plugins/skizzles",
+      "reason": "This directory is generated by the deterministic plugin-builder distribution runner from canonical packages and skills.",
+      "owner": "Plugin Builder",
+      "control": "The plugin build and parity check compare the generated tree against canonical staging inputs; contributors never hand-edit it.",
+      "review": "Remove when this path ceases to be generated distribution output or the canonical staging authority changes."
+    }
+  ]
+}

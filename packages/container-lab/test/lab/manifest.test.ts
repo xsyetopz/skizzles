@@ -1,6 +1,6 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, test } from "bun:test";
-import { parseLabManifest } from "../src/lab/manifest.ts";
+import { parseLabManifest } from "../../src/lab/manifest.ts";
 
 describe("parseLabManifest", () => {
   test("preserves schema diagnostic ordering across manifest domains", () => {

@@ -104,8 +104,8 @@ If the MCP is registered in Codex config, start a fresh trusted Codex thread and
 ## Trust-boundary contract
 
 Hook and MCP composition may produce or consume the versioned Fourth Wall
-[context envelope](../../fourth-wall/contracts/context-envelope.schema.json)
-and [handoff/review](../../fourth-wall/contracts/handoff-review.schema.json),
+[context envelope](../../../fourth-wall/contracts/context-envelope.schema.json)
+and [handoff/review](../../../fourth-wall/contracts/handoff-review.schema.json),
 but the published schemas only define portable document shape. Repository
 packaging pins those schema bytes and executes incident fixtures through a
 strict evaluator; that evaluator still depends on trusted caller-supplied

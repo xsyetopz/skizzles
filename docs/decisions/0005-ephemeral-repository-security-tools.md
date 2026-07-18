@@ -47,7 +47,7 @@ block-scalar action values, quoted escapes or continuations, explicit tags, alia
 merge-derived values, duplicate keys, and ambiguous annotations fail closed. Ordinary
 block scalars remain valid for unrelated fields such as `run`.
 
-The root `config/repository-security-tools.json` is the strict versioned manifest.
+The root `config/security-tools.json` is the strict versioned manifest.
 It supports only CI Linux x64 and maintainer macOS arm64 because those exact upstream
 archives were inspected. Every asset records the official GitHub release API URL,
 release and asset IDs, byte size, update timestamp, and API-provided SHA-256 digest;
@@ -143,13 +143,13 @@ availability failures fail closed. Release acceptance runs the same root command
 ## Fitness checks
 
 ```sh
-bun test packages/workspace-policy/test/repository-security.test.ts
+bun test packages/workspace-policy/test/repository-security/tools.test.ts
 bun run --cwd packages/workspace-policy typecheck
 bunx @biomejs/biome@2.5.4 check --config-path biome.jsonc --vcs-root . \
-  config/repository-security-tools.json .gitleaks.toml \
+  config/security-tools.json .gitleaks.toml \
   packages/workspace-policy/src/repository-security \
   packages/workspace-policy/src/security-cli.ts \
-  packages/workspace-policy/test/repository-security.test.ts
+  packages/workspace-policy/test/repository-security/tools.test.ts
 bun run packages/workspace-policy/src/cli.ts --architecture-fitness .
 bun run security:check
 ```
