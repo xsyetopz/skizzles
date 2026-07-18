@@ -7,7 +7,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "./bounded-process.ts";
+import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "../process.ts";
 
 const FINDINGS_EXIT_CODE = 10;
 const GITLEAKS_TIMEOUT_MS = 120_000;

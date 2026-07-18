@@ -4,13 +4,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { runBoundedCommand } from "../src/repository-security/bounded-process.ts";
-import { runGitleaksGate } from "../src/repository-security/gitleaks-gate.ts";
+import { runGitleaksGate } from "../../src/repository-security/gitleaks/gate.ts";
 import {
   classifyGitleaksResult,
   type GitleaksRawResult,
   type GitleaksScanner,
-} from "../src/repository-security/gitleaks-report.ts";
+} from "../../src/repository-security/gitleaks/report.ts";
+import { runBoundedCommand } from "../../src/repository-security/process.ts";
 
 const temporaryRoots: string[] = [];
 // Captured from pinned Gitleaks 8.30.1 using deterministic non-credential probes.

@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto";
 import { chmod, lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "./bounded-process.ts";
+import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "../process.ts";
 import {
   type RepositorySecurityToolManifest,
   type SecurityToolAsset,
   type SecurityToolSpec,
   type SecurityToolTarget,
   validateArchiveMemberPath,
-} from "./security-tool-contract.ts";
+} from "./contract.ts";
 
 const MAXIMUM_ARCHIVE_BYTES = 67_108_864;
 const MAXIMUM_REDIRECTS = 5;

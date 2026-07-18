@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/workspace-policy.ts"
+    ".": "./src/workspace/policy.ts"
   },
   "bin": {
     "skizzles-workspace-policy": "./src/cli.ts"
   },
   "scripts": {
-    "build": "bun build ./src/cli.ts ./src/security-cli.ts ./src/workspace-policy.ts --target=bun --format=esm --outdir=./dist",
+    "build": "bun build ./src/cli.ts ./src/security-cli.ts ./src/workspace/policy.ts --target=bun --format=esm --outdir=./dist",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test ./test",
     "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test package.json tsconfig.json"

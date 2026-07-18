@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { validateWorkspace } from "../src/workspace-policy.ts";
+import { validateWorkspace } from "../../src/workspace/policy.ts";
 
 const roots: string[] = [];
 const descendantPidMarkers: string[] = [];

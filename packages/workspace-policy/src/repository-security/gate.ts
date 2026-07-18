@@ -2,13 +2,13 @@ import { chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
-import { runActionlintGate } from "./actionlint-gate.ts";
-import { runGitleaksGate } from "./gitleaks-gate.ts";
+import { runActionlintGate } from "./actionlint/gate.ts";
+import { runGitleaksGate } from "./gitleaks/gate.ts";
 import {
   loadRepositorySecurityToolManifest,
   resolveSecurityToolTarget,
-} from "./security-tool-manifest.ts";
-import { installRepositorySecurityTools } from "./security-tool-runtime.ts";
+} from "./tool/manifest.ts";
+import { installRepositorySecurityTools } from "./tool/runtime.ts";
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 

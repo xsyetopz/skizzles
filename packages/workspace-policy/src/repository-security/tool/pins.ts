@@ -1,8 +1,5 @@
 // biome-ignore-all lint/security/noSecrets: Immutable public upstream commits and release digests are the contract.
-import type {
-  SecurityToolName,
-  SecurityToolTarget,
-} from "./security-tool-contract.ts";
+import type { SecurityToolName, SecurityToolTarget } from "./contract.ts";
 
 interface RequiredAssetFacts {
   url: string;

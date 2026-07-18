@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { validateWorkspaceArchitecture } from "../src/workspace-policy.ts";
+import { validateWorkspaceArchitecture } from "../../src/workspace/policy.ts";
 
 const roots: string[] = [];
 const REVIEWED_BODY_LINES = 650;

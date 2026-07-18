@@ -4,8 +4,8 @@ import {
   addFinding,
   type WorkspaceFinding,
   type WorkspacePackage,
-} from "./workspace-contract.ts";
-import { listFiles } from "./workspace-files.ts";
+} from "./contract.ts";
+import { listFiles } from "./filesystem.ts";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const IMPORT_EXTENSIONS = new Set([...SOURCE_EXTENSIONS, ".json"]);

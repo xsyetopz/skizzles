@@ -10,11 +10,8 @@ import {
   SUPPORTED_TARGETS,
   TOOL_NAMES,
   validateArchiveMemberPath,
-} from "./security-tool-contract.ts";
-import {
-  REQUIRED_TOOL_FACTS,
-  type RequiredAssetFacts,
-} from "./security-tool-pins.ts";
+} from "./contract.ts";
+import { REQUIRED_TOOL_FACTS, type RequiredAssetFacts } from "./pins.ts";
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/u;

@@ -6,8 +6,8 @@ import { join } from "node:path";
 import {
   parseActionlintFindings,
   runActionlintGate,
-} from "../src/repository-security/actionlint-gate.ts";
-import { validateWorkflowActionPins } from "../src/repository-security/workflow-action-pins.ts";
+} from "../../src/repository-security/actionlint/gate.ts";
+import { validateWorkflowActionPins } from "../../src/repository-security/workflow/pins.ts";
 
 const FULL_COMMIT_PATTERN = /@[a-f0-9]{40}/u;
 // biome-ignore lint/security/noSecrets: Public upstream action commit pin.

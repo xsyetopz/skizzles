@@ -1,7 +1,7 @@
 import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "./bounded-process.ts";
-import { validateWorkflowActionPins } from "./workflow-action-pins.ts";
+import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "../process.ts";
+import { validateWorkflowActionPins } from "../workflow/pins.ts";
 
 const ACTIONLINT_JSON_FORMAT = "{{json .}}";
 const ACTIONLINT_TIMEOUT_MS = 30_000;

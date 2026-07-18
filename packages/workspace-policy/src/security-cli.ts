@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import process from "node:process";
-import { runRepositorySecurityGate } from "./repository-security/repository-security-gate.ts";
+import { runRepositorySecurityGate } from "./repository-security/gate.ts";
 
 async function main(args: readonly string[]): Promise<0 | 1> {
   const root = resolve(args[0] ?? process.cwd());

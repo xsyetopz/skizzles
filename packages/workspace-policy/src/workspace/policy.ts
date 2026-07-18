@@ -1,23 +1,20 @@
 import { relative, resolve } from "node:path";
-import { validateWorkspaceImports } from "./import-policy.ts";
-import {
-  readPackageManifest,
-  readWorkspaceManifest,
-  validatePackage,
-  validateRootManifest,
-} from "./package-policy.ts";
-import type * as Contract from "./workspace-contract.ts";
-import {
-  compareFindings,
-  type WorkspacePackage,
-} from "./workspace-contract.ts";
+import type * as Contract from "./contract.ts";
+import { compareFindings, type WorkspacePackage } from "./contract.ts";
 import {
   discoverPackageRoots,
   validateExpectedPackageNames,
   validateLockfiles,
   validateRootSourceIsolation,
-} from "./workspace-files.ts";
-import { validateWorkspaceFitness } from "./workspace-fitness.ts";
+} from "./filesystem.ts";
+import { validateWorkspaceFitness } from "./fitness.ts";
+import { validateWorkspaceImports } from "./imports.ts";
+import {
+  readPackageManifest,
+  readWorkspaceManifest,
+  validatePackage,
+  validateRootManifest,
+} from "./packages.ts";
 
 const PATH_SEPARATOR_PATTERN = /[\\/]/u;
 
@@ -110,7 +107,7 @@ function toPortablePath(path: string): string {
 export type {
   WorkspaceFinding,
   WorkspacePolicyOptions,
-} from "./workspace-contract.ts";
+} from "./contract.ts";
 export {
   SKIZZLES_PACKAGE_NAMES,
   validateWorkspace,

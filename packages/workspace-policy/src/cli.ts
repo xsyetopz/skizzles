@@ -4,7 +4,7 @@ import {
   SKIZZLES_PACKAGE_NAMES,
   validateWorkspace,
   validateWorkspaceArchitecture,
-} from "./workspace-policy.ts";
+} from "./workspace/policy.ts";
 
 export async function main(args: readonly string[]): Promise<0 | 1> {
   const architectureFitness = args[0] === "--architecture-fitness";

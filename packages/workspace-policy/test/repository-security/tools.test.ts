@@ -6,20 +6,20 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { validateArchiveMemberPath } from "../src/repository-security/security-tool-contract.ts";
+import { validateArchiveMemberPath } from "../../src/repository-security/tool/contract.ts";
 import {
   loadRepositorySecurityToolManifest,
   parseRepositorySecurityToolManifest,
   resolveSecurityToolTarget,
-} from "../src/repository-security/security-tool-manifest.ts";
+} from "../../src/repository-security/tool/manifest.ts";
 import {
   downloadVerifiedArchive,
   validateArchiveEntries,
-} from "../src/repository-security/security-tool-runtime.ts";
+} from "../../src/repository-security/tool/runtime.ts";
 
 const WORKSPACE_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
-  "../../..",
+  "../../../..",
 );
 const ACTIONLINT_COMMIT = "914e7df21a07ef503a81201c76d2b11c789d3fca";
 const ACTIONLINT_LINUX_SHA256 =

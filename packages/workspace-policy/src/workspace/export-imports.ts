@@ -8,7 +8,7 @@ import {
   addFinding,
   type PackageManifest,
   type WorkspaceFinding,
-} from "./workspace-contract.ts";
+} from "./contract.ts";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const EXPORT_IMPORT_TIMEOUT_MS = 1000;

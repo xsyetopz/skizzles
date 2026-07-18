@@ -1,12 +1,12 @@
 import { chmod, mkdir, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "./bounded-process.ts";
+import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "../process.ts";
 import {
   classifyGitleaksResult,
   type GitleaksRawResult,
   type GitleaksScanner,
   invokeGitleaks,
-} from "./gitleaks-report.ts";
+} from "./report.ts";
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;

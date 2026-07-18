@@ -1,12 +1,12 @@
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { validateExportImports } from "./export-import-policy.ts";
 import {
   addFinding,
   type PackageManifest,
   type WorkspaceFinding,
   type WorkspaceManifest,
-} from "./workspace-contract.ts";
+} from "./contract.ts";
+import { validateExportImports } from "./export-imports.ts";
 
 const TOOL_DEPENDENCIES = ["@types/bun", "@types/node", "typescript"] as const;
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);

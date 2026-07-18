@@ -1,6 +1,6 @@
 import { readdir, stat } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { addFinding, type WorkspaceFinding } from "./workspace-contract.ts";
+import { addFinding, type WorkspaceFinding } from "./contract.ts";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
