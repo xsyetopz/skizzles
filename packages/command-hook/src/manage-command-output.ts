@@ -7,6 +7,9 @@
  * rewrite never grants permission; Codex's normal approval and sandbox policy
  * still governs the transformed command.
  */
+import { lstatSync, realpathSync, statSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+import process from "node:process";
 import { isManagedScript } from "./manage-command-output/policy.ts";
 
 type HookEvent = {
@@ -15,8 +18,36 @@ type HookEvent = {
 };
 
 const maximumScriptLength = 64 * 1024;
-const pluginRootPlaceholder = ["$", "{PLUGIN_ROOT}"].join("");
-const runner = `bun "${pluginRootPlaceholder}/runtime/codex-command.ts"`;
+
+function pluginRootFrom(arguments_: string[]): string | undefined {
+  if (
+    arguments_.length !== 2 ||
+    arguments_[0] !== "--plugin-root" ||
+    !arguments_[1] ||
+    !isAbsolute(arguments_[1]) ||
+    arguments_[1].includes("\0")
+  ) {
+    return;
+  }
+
+  try {
+    const pluginRoot = realpathSync(arguments_[1]);
+    const supervisor = join(pluginRoot, "runtime", "codex-command.ts");
+    if (
+      !(statSync(pluginRoot).isDirectory() && lstatSync(supervisor).isFile())
+    ) {
+      return;
+    }
+    return pluginRoot;
+  } catch {
+    // Missing or inaccessible launch context fails closed.
+    return undefined;
+  }
+}
+
+function shellWord(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -52,7 +83,10 @@ function commandFrom(
   return undefined;
 }
 
-function rewrittenCommand(event: HookEvent): string | undefined {
+function rewrittenCommand(
+  event: HookEvent,
+  pluginRoot: string,
+): string | undefined {
   if (event.hook_event_name !== "PreToolUse") {
     return undefined;
   }
@@ -68,6 +102,8 @@ function rewrittenCommand(event: HookEvent): string | undefined {
   }
 
   const encoded = Buffer.from(command.value, "utf8").toString("base64url");
+  const supervisor = join(pluginRoot, "runtime", "codex-command.ts");
+  const runner = `bun ${shellWord(supervisor)}`;
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
@@ -83,7 +119,11 @@ const raw = await Bun.stdin.text();
 try {
   const parsed: unknown = JSON.parse(raw);
   const event = hookEvent(parsed);
-  const output = event ? rewrittenCommand(event) : undefined;
+  const pluginRoot = pluginRootFrom(process.argv.slice(2));
+  let output: string | undefined;
+  if (event && pluginRoot) {
+    output = rewrittenCommand(event, pluginRoot);
+  }
   if (output) {
     console.log(output);
   }

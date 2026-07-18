@@ -1,6 +1,11 @@
 #!/usr/bin/env bun
 // @bun
 
+// packages/command-hook/src/manage-command-output.ts
+import { lstatSync, realpathSync, statSync } from "fs";
+import { isAbsolute, join } from "path";
+import process from "process";
+
 // packages/command-hook/src/manage-command-output/lexer.ts
 var shellControlWords = new Set([
   "case",
@@ -347,8 +352,24 @@ function isManagedScript(script) {
 
 // packages/command-hook/src/manage-command-output.ts
 var maximumScriptLength = 64 * 1024;
-var pluginRootPlaceholder = ["$", "{PLUGIN_ROOT}"].join("");
-var runner = `bun "${pluginRootPlaceholder}/runtime/codex-command.ts"`;
+function pluginRootFrom(arguments_) {
+  if (arguments_.length !== 2 || arguments_[0] !== "--plugin-root" || !arguments_[1] || !isAbsolute(arguments_[1]) || arguments_[1].includes("\x00")) {
+    return;
+  }
+  try {
+    const pluginRoot = realpathSync(arguments_[1]);
+    const supervisor = join(pluginRoot, "runtime", "codex-command.ts");
+    if (!(statSync(pluginRoot).isDirectory() && lstatSync(supervisor).isFile())) {
+      return;
+    }
+    return pluginRoot;
+  } catch {
+    return;
+  }
+}
+function shellWord(value) {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
+}
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -377,7 +398,7 @@ function commandFrom(input) {
   }
   return;
 }
-function rewrittenCommand(event) {
+function rewrittenCommand(event, pluginRoot) {
   if (event.hook_event_name !== "PreToolUse") {
     return;
   }
@@ -386,6 +407,8 @@ function rewrittenCommand(event) {
     return;
   }
   const encoded = Buffer.from(command.value, "utf8").toString("base64url");
+  const supervisor = join(pluginRoot, "runtime", "codex-command.ts");
+  const runner = `bun ${shellWord(supervisor)}`;
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
@@ -400,7 +423,11 @@ var raw = await Bun.stdin.text();
 try {
   const parsed = JSON.parse(raw);
   const event = hookEvent(parsed);
-  const output = event ? rewrittenCommand(event) : undefined;
+  const pluginRoot = pluginRootFrom(process.argv.slice(2));
+  let output;
+  if (event && pluginRoot) {
+    output = rewrittenCommand(event, pluginRoot);
+  }
   if (output) {
     console.log(output);
   }

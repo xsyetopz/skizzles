@@ -1,16 +1,43 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
 
 const packageRoot = resolve(import.meta.dir, "..");
 const hook = join(packageRoot, "src/manage-command-output.ts");
 const hookAsset = join(packageRoot, "assets/hooks.json");
-const pluginRootPlaceholder = ["$", "{PLUGIN_ROOT}"].join("");
-const runnerCommand = `bun "${pluginRootPlaceholder}/runtime/codex-command.ts"`;
+let temporaryRoot: string;
+let pluginRoot: string;
 
-function invoke(command: string) {
-  return Bun.spawnSync(["bun", hook], {
+beforeAll(() => {
+  temporaryRoot = mkdtempSync(join(tmpdir(), "skizzles-command-hook-"));
+  pluginRoot = join(temporaryRoot, "plugin root '$(touch injected); &");
+  mkdirSync(join(pluginRoot, "runtime"), { recursive: true });
+  writeFileSync(
+    join(pluginRoot, "runtime/codex-command.ts"),
+    'import { writeFileSync } from "node:fs";\nimport process from "node:process";\nwriteFileSync(process.env["ARGV_MARKER"] ?? "", JSON.stringify(process.argv.slice(2)));\nprocess.exit(Number(process.env["FIXTURE_EXIT"] ?? "0"));\n',
+  );
+});
+
+afterAll(() => {
+  rmSync(temporaryRoot, { force: true, recursive: true });
+});
+
+function invoke(
+  command: string,
+  arguments_: string[] = ["--plugin-root", pluginRoot],
+) {
+  return Bun.spawnSync(["bun", hook, ...arguments_], {
     stdin: new TextEncoder().encode(command),
     stdout: "pipe",
     stderr: "pipe",
@@ -94,7 +121,8 @@ describe("managed command output hook", () => {
             hooks: [
               {
                 type: "command",
-                command: `bun "${pluginRootPlaceholder}/hooks/manage-command-output.ts"`,
+                command:
+                  'bun "${PLUGIN_ROOT}/hooks/manage-command-output.ts" --plugin-root "${PLUGIN_ROOT}"',
                 timeout: 3,
                 statusMessage: "checking command output management",
               },
@@ -122,7 +150,7 @@ describe("managed command output hook", () => {
     }
   });
 
-  test("rewrites through a portable PLUGIN_ROOT runner with a round-trippable encoding", () => {
+  test("rewrites through a concrete safely quoted runner with a round-trippable encoding", () => {
     const cmd = "flutter test --reporter expanded && cargo check --workspace";
     const result = invoke(
       JSON.stringify({
@@ -133,12 +161,75 @@ describe("managed command output hook", () => {
     const payload = JSON.parse(text(result.stdout));
     expect(rewriteContract(payload)).toEqual(neutralRewriteContract);
     const rewritten = requiredString(hookUpdatedInput(payload), "cmd");
-    expect(rewritten).toStartWith(`${runnerCommand} run --base64url `);
+    expect(rewritten).toStartWith("bun '");
+    expect(rewritten).toContain(`runtime/codex-command.ts' run --base64url `);
     expect(Buffer.from(encodedCommand(rewritten), "base64url").toString()).toBe(
       cmd,
     );
     expect(hookUpdatedInput(payload)["workdir"]).toBe("/tmp");
-    expect(rewritten).not.toContain("/Users/");
+  });
+
+  test("passes through when launch context is missing, relative, or incomplete", () => {
+    const input = JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_input: { cmd: "bun test" },
+    });
+    const incompleteRoot = join(temporaryRoot, "incomplete");
+    mkdirSync(incompleteRoot);
+    const symlinkedRoot = join(temporaryRoot, "symlinked");
+    mkdirSync(join(symlinkedRoot, "runtime"), { recursive: true });
+    symlinkSync(
+      join(pluginRoot, "runtime/codex-command.ts"),
+      join(symlinkedRoot, "runtime/codex-command.ts"),
+    );
+
+    for (const arguments_ of [
+      [],
+      ["--plugin-root", "relative/plugin"],
+      ["--plugin-root", incompleteRoot],
+      ["--plugin-root", symlinkedRoot],
+      ["--unknown", pluginRoot],
+      ["--plugin-root", pluginRoot, "extra"],
+    ]) {
+      const result = invoke(input, arguments_);
+      expect(result.exitCode).toBe(0);
+      expect(text(result.stdout)).toBe("");
+    }
+  });
+
+  test("quotes shell metacharacters in the concrete runner path without injection", () => {
+    const cmd = "bun test";
+    const result = invoke(
+      JSON.stringify({
+        hook_event_name: "PreToolUse",
+        tool_input: { cmd },
+      }),
+    );
+    const rewritten = requiredString(
+      hookUpdatedInput(JSON.parse(text(result.stdout))),
+      "cmd",
+    );
+    const argumentMarker = join(temporaryRoot, "arguments.json");
+    const injectionMarker = join(process.cwd(), "injected");
+    rmSync(injectionMarker, { force: true });
+    const executionEnvironment = { ...process.env };
+    delete executionEnvironment["PLUGIN_ROOT"];
+    executionEnvironment["ARGV_MARKER"] = argumentMarker;
+    executionEnvironment["FIXTURE_EXIT"] = "23";
+
+    const execution = Bun.spawnSync(["bash", "-c", rewritten], {
+      stdout: "pipe",
+      stderr: "pipe",
+      env: executionEnvironment,
+    });
+
+    expect(execution.exitCode).toBe(23);
+    expect(JSON.parse(readFileSync(argumentMarker, "utf8"))).toEqual([
+      "run",
+      "--base64url",
+      Buffer.from(cmd, "utf8").toString("base64url"),
+    ]);
+    expect(existsSync(injectionMarker)).toBe(false);
   });
 
   test("preserves an entire script when every simple command is recognized", () => {

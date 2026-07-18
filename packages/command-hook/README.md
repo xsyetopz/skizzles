@@ -12,9 +12,14 @@ potentially noisy commands to the generated plugin supervisor path.
 - `@skizzles/command-hook/hooks.json` exports the canonical descriptor stored
   at `assets/hooks.json`.
 
-The emitted `${PLUGIN_ROOT}/runtime/codex-command.ts` path is the generated
-plugin contract. The plugin builder stages the separate command-supervisor
-package at that destination.
+The hook descriptor passes the launch-time `${PLUGIN_ROOT}` as an explicit
+`--plugin-root` argument. The hook validates that this is an absolute plugin
+root containing the staged supervisor, then emits its concrete path with
+POSIX-safe shell quoting. The replacement command therefore does not depend on
+`PLUGIN_ROOT` remaining present in the command shell. Missing, relative, or
+incomplete launch context fails closed without rewriting the original command.
+The plugin builder stages the separate command-supervisor package at
+`runtime/codex-command.ts`.
 
 ## Development
 

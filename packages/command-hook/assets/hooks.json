@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun \"${PLUGIN_ROOT}/hooks/manage-command-output.ts\"",
+            "command": "bun \"${PLUGIN_ROOT}/hooks/manage-command-output.ts\" --plugin-root \"${PLUGIN_ROOT}\"",
             "timeout": 3,
             "statusMessage": "checking command output management"
           }

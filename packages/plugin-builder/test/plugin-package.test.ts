@@ -76,7 +76,7 @@ describe("deterministic plugin packaging", () => {
             hooks: [
               {
                 type: "command",
-                command: `bun "${PLUGIN_ROOT_TOKEN}/hooks/manage-command-output.ts"`,
+                command: `bun "${PLUGIN_ROOT_TOKEN}/hooks/manage-command-output.ts" --plugin-root "${PLUGIN_ROOT_TOKEN}"`,
                 timeout: 3,
                 statusMessage: "checking command output management",
               },
@@ -86,6 +86,128 @@ describe("deterministic plugin packaging", () => {
       },
     });
   });
+
+  test("staged hook emits a concrete supervisor command independent of PLUGIN_ROOT", async () => {
+    const repoRoot = resolve(import.meta.dir, "../../..");
+    const parent = await mkdtemp(join(tmpdir(), "skizzles-hook-stage-"));
+    temporaryRoots.push(parent);
+    const stagedRoot = join(parent, "plugin root '$(touch INJECTED); & staged");
+    await stagePlugin(repoRoot, stagedRoot);
+
+    const projectRoot = join(parent, "project");
+    const directArguments = join(parent, "direct-arguments.json");
+    const supervisedArguments = join(parent, "supervised-arguments.json");
+    await mkdir(projectRoot, { recursive: true });
+    await writeFile(
+      join(projectRoot, "argv.test.ts"),
+      [
+        'import { expect, test } from "bun:test";',
+        'import { writeFileSync } from "node:fs";',
+        'import process from "node:process";',
+        'writeFileSync(process.env["ARGV_MARKER"] ?? "", JSON.stringify(Bun.argv));',
+        'test("fixture", () => expect(process.env["SHOULD_FAIL"]).not.toBe("1"));',
+        "",
+      ].join("\n"),
+    );
+
+    const stagedHooks: unknown = await Bun.file(
+      join(stagedRoot, "hooks/hooks.json"),
+    ).json();
+    const hooks = requiredTestRecord(stagedHooks, "staged hooks");
+    const hookGroups = requiredTestRecord(hooks["hooks"], "hook groups");
+    const preToolUse = requiredTestArray(
+      hookGroups["PreToolUse"],
+      "PreToolUse hooks",
+    );
+    const hookGroup = requiredTestRecord(preToolUse[0], "hook group");
+    const commands = requiredTestArray(hookGroup["hooks"], "hook commands");
+    const hook = requiredTestRecord(commands[0], "hook command");
+    const hookCommand = requiredTestString(hook["command"], "hook command");
+    const originalCommand = "bun test argv.test.ts --bail";
+    const hookEnvironment = { ...process.env, PLUGIN_ROOT: stagedRoot };
+    const hookResult = Bun.spawnSync(["/bin/bash", "-c", hookCommand], {
+      cwd: parent,
+      env: hookEnvironment,
+      stdin: new TextEncoder().encode(
+        JSON.stringify({
+          hook_event_name: "PreToolUse",
+          tool_input: { cmd: originalCommand, workdir: projectRoot },
+        }),
+      ),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(hookResult.exitCode).toBe(0);
+
+    const hookOutput: unknown = JSON.parse(textOutput(hookResult.stdout));
+    const output = requiredTestRecord(hookOutput, "hook output");
+    const specific = requiredTestRecord(
+      output["hookSpecificOutput"],
+      "hook-specific output",
+    );
+    const updatedInput = requiredTestRecord(
+      specific["updatedInput"],
+      "updated input",
+    );
+    const rewritten = requiredTestString(updatedInput["cmd"], "updated cmd");
+    expect(rewritten).not.toContain(PLUGIN_ROOT_TOKEN);
+    expect(rewritten).toContain("runtime/codex-command.ts");
+
+    const commonEnvironment = { ...process.env };
+    delete commonEnvironment["PLUGIN_ROOT"];
+    commonEnvironment["CODEX_COMMAND_OUTPUT_DIR"] = join(parent, "runs");
+    const directEnvironment = {
+      ...commonEnvironment,
+      ARGV_MARKER: directArguments,
+    };
+    const direct = Bun.spawnSync(["/bin/bash", "-c", originalCommand], {
+      cwd: projectRoot,
+      env: directEnvironment,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const supervisedEnvironment = {
+      ...commonEnvironment,
+      ARGV_MARKER: supervisedArguments,
+    };
+    const supervised = Bun.spawnSync(["/bin/bash", "-c", rewritten], {
+      cwd: projectRoot,
+      env: supervisedEnvironment,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+
+    expect(supervised.exitCode).toBe(direct.exitCode);
+    expect(await readFile(supervisedArguments, "utf8")).toBe(
+      await readFile(directArguments, "utf8"),
+    );
+    expect(textOutput(supervised.stdout)).toContain("[codex-command] exit 0");
+    expect(await Bun.file(join(parent, "INJECTED")).exists()).toBe(false);
+    expect(await Bun.file(join(projectRoot, "INJECTED")).exists()).toBe(false);
+
+    const failingDirect = Bun.spawnSync(["/bin/bash", "-c", originalCommand], {
+      cwd: projectRoot,
+      env: {
+        ...directEnvironment,
+        ARGV_MARKER: join(parent, "failing-direct-arguments.json"),
+        SHOULD_FAIL: "1",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const failingSupervised = Bun.spawnSync(["/bin/bash", "-c", rewritten], {
+      cwd: projectRoot,
+      env: {
+        ...supervisedEnvironment,
+        ARGV_MARKER: join(parent, "failing-supervised-arguments.json"),
+        SHOULD_FAIL: "1",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(failingDirect.exitCode).not.toBe(0);
+    expect(failingSupervised.exitCode).toBe(failingDirect.exitCode);
+  }, 20_000);
 
   test("plugin manifest uses the authoritative repository origin", async () => {
     const repoRoot = resolve(import.meta.dir, "../../..");
@@ -1273,7 +1395,7 @@ async function fixture(): Promise<string> {
     JSON.stringify({
       hooks: [
         {
-          command: `bun "${PLUGIN_ROOT_TOKEN}/hooks/manage-command-output.ts"`,
+          command: `bun "${PLUGIN_ROOT_TOKEN}/hooks/manage-command-output.ts" --plugin-root "${PLUGIN_ROOT_TOKEN}"`,
         },
       ],
     }),
@@ -1531,4 +1653,36 @@ function compareCodeUnits(left: string, right: string): number {
     return 1;
   }
   return 0;
+}
+
+function requiredTestRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> {
+  if (!isTestRecord(value)) {
+    throw new Error(`${label} is not an object`);
+  }
+  return value;
+}
+
+function isTestRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requiredTestArray(value: unknown, label: string): unknown[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`${label} is not an array`);
+  }
+  return value;
+}
+
+function requiredTestString(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new Error(`${label} is not a string`);
+  }
+  return value;
+}
+
+function textOutput(output: Uint8Array | undefined): string {
+  return new TextDecoder().decode(output);
 }
