@@ -13,7 +13,7 @@ import {
   snapshot,
   timestamp,
   writeJsonl,
-} from "./analyze-fixtures.ts";
+} from "./harness.ts";
 
 it("returns an empty report when sessions and state files are absent", async () => {
   const home = await fixtureHome();

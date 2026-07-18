@@ -1,13 +1,11 @@
 import { basename } from "node:path";
-import { rolloutId } from "./rollout-discovery.ts";
-import { readEvents } from "./rollout-reader.ts";
 import type {
   Actor,
   Options,
   ParsedRollout,
   RateSnapshot,
   SessionSummary,
-} from "./types.ts";
+} from "../contracts.ts";
 import {
   addUsage,
   aggregateInto,
@@ -20,7 +18,9 @@ import {
   property,
   usageDelta,
   usageFrom,
-} from "./usage.ts";
+} from "../usage.ts";
+import { rolloutId } from "./discovery.ts";
+import { readEvents } from "./reader.ts";
 
 function classify(source: unknown): Actor {
   const subagent = property(source, "subagent");

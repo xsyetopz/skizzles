@@ -9,7 +9,7 @@ import {
   snapshot,
   timestamp,
   writeJsonl,
-} from "./analyze-fixtures.ts";
+} from "./harness.ts";
 
 it("prints portable help without touching a Codex home", async () => {
   const home = await fixtureHome();

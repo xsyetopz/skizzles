@@ -1,7 +1,7 @@
 import { isAbsolute, resolve } from "node:path";
 import process from "node:process";
 import type { OrchestrationMode } from "./config.ts";
-import type { Transfer } from "./core.ts";
+import type { Transfer } from "./skills.ts";
 
 interface DryRunCommand {
   dryRun: boolean;

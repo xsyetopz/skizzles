@@ -12,12 +12,12 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
+import { copyDirectoryExclusive } from "../src/managed-files.ts";
 import {
   installSkills,
   skillsReceiptPath,
   uninstallSkills,
-} from "../src/core.ts";
-import { copyDirectoryExclusive } from "../src/managed-files.ts";
+} from "../src/skills.ts";
 
 const roots: string[] = [];
 

@@ -1,5 +1,5 @@
 import process from "node:process";
-import type { Bucket, Options } from "./types.ts";
+import type { Bucket, Options } from "./contracts.ts";
 
 const dateOnlyPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
 const localDateTimePattern =

@@ -1,4 +1,4 @@
-import type { SerializableAggregate, UsageReport } from "./types.ts";
+import type { SerializableAggregate, UsageReport } from "./contracts.ts";
 
 const localDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   year: "numeric",

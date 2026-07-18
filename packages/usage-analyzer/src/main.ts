@@ -5,7 +5,7 @@ import process from "node:process";
 import { buildReport } from "./aggregation.ts";
 import { parseArgs } from "./cli.ts";
 import { printHuman, printJson } from "./report.ts";
-import { listRollouts } from "./rollout-discovery.ts";
+import { listRollouts } from "./rollout/discovery.ts";
 
 export async function run(
   argv: readonly string[],

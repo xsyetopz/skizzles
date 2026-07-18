@@ -13,8 +13,8 @@ import process from "node:process";
 import containerLabIntegrationDescriptor from "@skizzles/container-lab/integration-descriptor" with {
   type: "json",
 };
-import { skillsReceiptPath, uninstallSkills } from "./core.ts";
 import { harnessReceiptPath, uninstallHarness } from "./harness.ts";
+import { skillsReceiptPath, uninstallSkills } from "./skills.ts";
 
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const LINE_PATTERN = /\r?\n/;

@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import process from "node:process";
 
-const analyzer = join(import.meta.dir, "../src/main.ts");
+const analyzer = join(import.meta.dir, "../../src/main.ts");
 const fixtureRoots: string[] = [];
 
 type AnalyzerEnvironment = Record<string, string | undefined> & {

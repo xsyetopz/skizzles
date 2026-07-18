@@ -10,7 +10,7 @@ import {
   runAnalyzer,
   timestamp,
   writeJsonl,
-} from "./analyze-fixtures.ts";
+} from "../analysis/harness.ts";
 
 it("preserves role and legacy tier attribution for historical task names", async () => {
   const home = await fixtureHome();

@@ -2,7 +2,6 @@
 import process from "node:process";
 import { parseInstallerCommand } from "./cli-arguments.ts";
 import { configureCodex, unconfigureCodex } from "./config.ts";
-import { installSkills, receiptSummary, uninstallSkills } from "./core.ts";
 import { doctor } from "./doctor.ts";
 import { installHarness, uninstallHarness } from "./harness.ts";
 import {
@@ -10,6 +9,7 @@ import {
   promptPolicySummary,
   restorePromptPolicy,
 } from "./prompt-policy.ts";
+import { installSkills, receiptSummary, uninstallSkills } from "./skills.ts";
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const parsed = parseInstallerCommand(argv);

@@ -1,4 +1,4 @@
-import { asObject, type JsonObject } from "./usage.ts";
+import { asObject, type JsonObject } from "../usage.ts";
 
 async function* lines(path: string): AsyncGenerator<string> {
   const reader = Bun.file(path).stream().getReader();

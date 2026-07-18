@@ -1,5 +1,3 @@
-import { loadTitles } from "./rollout-discovery.ts";
-import { parseRollout } from "./rollout-parser.ts";
 import type {
   Actor,
   Aggregate,
@@ -9,7 +7,9 @@ import type {
   SessionSummary,
   TimelineReport,
   UsageReport,
-} from "./types.ts";
+} from "./contracts.ts";
+import { loadTitles } from "./rollout/discovery.ts";
+import { parseRollout } from "./rollout/parser.ts";
 import {
   addUsage,
   aggregateRecord,

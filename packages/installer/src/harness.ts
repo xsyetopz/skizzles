@@ -10,7 +10,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { Transfer } from "./core.ts";
 import {
   assertManagedParentsAreReal,
   copyDirectoryExclusive,
@@ -18,6 +17,7 @@ import {
   rollbackStagedMoves,
   sameTree,
 } from "./managed-files.ts";
+import type { Transfer } from "./skills.ts";
 
 interface Marketplace {
   name: string;

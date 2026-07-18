@@ -18,17 +18,17 @@ import {
   type ConfigRpc,
   ConfigRpcError,
   type JsonValue,
-} from "../src/codex-config.ts";
-import { promptPolicyLockPath } from "../src/prompt-policy/lock.ts";
+} from "../../src/codex-config.ts";
+import { promptPolicyLockPath } from "../../src/prompt-policy/lock.ts";
 import {
   applyPromptPolicy,
   promptPolicyManagedPath,
   promptPolicyReceiptPath,
   restorePromptPolicy,
-} from "../src/prompt-policy.ts";
+} from "../../src/prompt-policy.ts";
 
 const roots: string[] = [];
-const repoRoot = resolve(import.meta.dir, "../../..");
+const repoRoot = resolve(import.meta.dir, "../../../..");
 
 afterEach(() => {
   for (const root of roots.splice(0)) {

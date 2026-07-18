@@ -6,7 +6,6 @@ import process from "node:process";
 import containerLabIntegrationDescriptor from "@skizzles/container-lab/integration-descriptor" with {
   type: "json",
 };
-import { installSkills } from "../src/core.ts";
 import {
   bundledContainerLabPaths,
   doctor,
@@ -14,6 +13,7 @@ import {
   doctorContainerLab,
 } from "../src/doctor.ts";
 import { installHarness } from "../src/harness.ts";
+import { installSkills } from "../src/skills.ts";
 
 const roots: string[] = [];
 function stubs(

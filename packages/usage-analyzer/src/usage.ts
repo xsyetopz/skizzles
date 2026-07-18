@@ -4,7 +4,7 @@ import type {
   SerializableAggregate,
   SerializableUsage,
   Usage,
-} from "./types.ts";
+} from "./contracts.ts";
 
 export type JsonObject = Record<string, unknown>;
 

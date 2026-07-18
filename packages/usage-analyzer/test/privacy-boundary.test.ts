@@ -11,7 +11,7 @@ import {
   runAnalyzer,
   timestamp,
   writeJsonl,
-} from "./analyze-fixtures.ts";
+} from "./analysis/harness.ts";
 
 const canaries = {
   user: "PRIVACY_USER_CANARY_7f2c9a",
