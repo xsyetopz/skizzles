@@ -237,6 +237,10 @@ function privateSiblingPath(
   );
 }
 
+function disposalPath(path: string): string {
+  return path.endsWith(".dispose") ? path : `${path}.dispose`;
+}
+
 function initialJournal(original: DestinationSnapshot): TransactionJournal {
   return {
     version: PROTOCOL_VERSION,
@@ -276,6 +280,7 @@ export {
   assertPathIdentity,
   changedDestinationError,
   changedRecoveryDestinationError,
+  disposalPath,
   identity,
   initialJournal,
   inspectDestination,

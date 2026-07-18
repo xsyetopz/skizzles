@@ -122,6 +122,9 @@ describe("plugin destination transaction adversarial recovery", () => {
       ["stage-journal-ready", "old"],
       ["backup-journal-ready", "old"],
       ["committed-journal-ready", "new"],
+      ..."backup-disposal-ready backup-disposal-renamed backup-disposal-remove backup-disposal-partial lock-disposal-ready lock-disposal-renamed lock-disposal-remove lock-disposal-journal lock-disposal-owner"
+        .split(" ")
+        .map((point) => [point, "new"] as const),
     ] as const) {
       const parent = await temporaryRoot(`skizzles-publication-${point}-`);
       const destination = join(parent, "plugin");
@@ -129,6 +132,8 @@ describe("plugin destination transaction adversarial recovery", () => {
       expect(crashAt(destination, point)).toBe(73);
       // biome-ignore lint/performance/noAwaitInLoops: each publication crash is recovered before the next isolated case.
       expect(await observeRecovered(destination)).toBe(expected);
+      // biome-ignore lint/performance/noAwaitInLoops: artifact cleanup is part of each isolated recovery case.
+      expect(await transactionArtifacts(parent)).toEqual([]);
     }
   }, 20_000);
 
@@ -269,7 +274,7 @@ function crashAt(destination: string, checkpoint: string): number {
     import.meta.dir,
     "../src/plugin/destination-transaction.ts",
   );
-  const source = `import { replaceDirectoryTransaction } from ${JSON.stringify(module)}; await replaceDirectoryTransaction(process.env.DEST, async (stage) => Bun.write(stage + "/new", "new\\n"), { checkpoint: (point) => { if (point === process.env.POINT) process.exit(73); } });`;
+  const source = `import { rm } from "node:fs/promises"; import { replaceDirectoryTransaction } from ${JSON.stringify(module)}; await replaceDirectoryTransaction(process.env.DEST, async (stage) => Bun.write(stage + "/new", "new\\n"), { checkpoint: async (point, path) => { if (process.env.POINT === "backup-disposal-partial" && point === "backup-disposal-remove") { await rm(path + "/previous/old"); process.exit(73); } if (point === process.env.POINT) process.exit(73); } });`;
   return Bun.spawnSync([process.execPath, "-e", source], {
     env: { ...process.env, DEST: destination, POINT: checkpoint },
     stderr: "pipe",

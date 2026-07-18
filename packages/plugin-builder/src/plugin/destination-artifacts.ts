@@ -1,18 +1,12 @@
-import { randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { PackagingError } from "./contract.ts";
-import type { SerializedIdentity } from "./destination-journal.ts";
-import {
-  matches,
-  parsePrivateJson,
-  temporaryName,
-} from "./destination-journal.ts";
+import { parsePrivateJson, temporaryName } from "./destination-journal.ts";
 import { isNodeError, lstatBigInt } from "./destination-parent.ts";
 import type { PathSnapshot, TransactionTarget } from "./destination-path.ts";
 import {
+  disposalPath,
   identity,
-  privateSiblingPath,
   restoreQuarantinedPath,
   revalidateAncestors,
   sameIdentity,
@@ -23,6 +17,12 @@ const PRIVATE_DIRECTORY_MODE = 0o700;
 
 interface OwnedDirectory extends PathSnapshot {
   present: boolean;
+}
+
+interface RemovalHooks {
+  afterRename?: (path: string) => Promise<void> | void;
+  beforeRemove?: (path: string) => Promise<void> | void;
+  beforeRename?: () => Promise<void> | void;
 }
 
 async function acquireLock(target: TransactionTarget): Promise<OwnedDirectory> {
@@ -200,16 +200,20 @@ async function assertOwnedDirectory(
 
 async function removeOwnedDirectory(
   owned: OwnedDirectory,
-  beforeRename?: () => Promise<void> | void,
+  hooks: RemovalHooks = {},
 ): Promise<void> {
   if (!owned.present) {
     return;
   }
-  await quarantineOwnedDirectory(
-    owned,
-    `${owned.path}.dispose-${randomUUID()}`,
-    beforeRename,
-  );
+  if (!owned.path.endsWith(".dispose")) {
+    await quarantineOwnedDirectory(
+      owned,
+      disposalPath(owned.path),
+      hooks.beforeRename,
+    );
+    await hooks.afterRename?.(owned.path);
+  }
+  await hooks.beforeRemove?.(owned.path);
   await rm(owned.path, { recursive: true });
   owned.present = false;
 }
@@ -227,13 +231,13 @@ async function assertPathMissing(path: string): Promise<void> {
 async function cleanupOwned(
   owned: OwnedDirectory | undefined,
   failure: unknown,
-  beforeRename?: () => Promise<void> | void,
+  hooks?: RemovalHooks,
 ): Promise<unknown> {
   if (owned === undefined || !owned.present) {
     return failure;
   }
   try {
-    await removeOwnedDirectory(owned, beforeRename);
+    await removeOwnedDirectory(owned, hooks);
     return failure;
   } catch {
     return (
@@ -245,21 +249,17 @@ async function cleanupOwned(
   }
 }
 
-async function recoverableArtifact(
-  target: TransactionTarget,
-  kind: "backup" | "stage",
-  token: string,
-  expected: SerializedIdentity | undefined,
+async function inspectOwnedVariant(
+  path: string,
 ): Promise<OwnedDirectory | undefined> {
-  const artifact = await inspectOwnedDirectory(
-    privateSiblingPath(target, kind, token),
-  );
-  if (artifact !== undefined && !matches(artifact.identity, expected)) {
+  const canonical = await inspectOwnedDirectory(path);
+  const disposal = await inspectOwnedDirectory(disposalPath(path));
+  if (canonical !== undefined && disposal !== undefined) {
     throw new PackagingError(
-      "Plugin staging recovery artifact identity changed.",
+      "Plugin staging found conflicting private artifacts.",
     );
   }
-  return artifact;
+  return canonical ?? disposal;
 }
 
 async function quarantineTransactionLock(
@@ -278,16 +278,17 @@ async function quarantineTransactionLock(
   }
 }
 
-export type { OwnedDirectory };
+export type { OwnedDirectory, RemovalHooks };
 export {
   acquireLock,
   assertOwnedDirectory,
   cleanupOwned,
   createPrivateSibling,
   inspectOwnedDirectory,
+  inspectOwnedVariant,
+  quarantineOwnedDirectory,
   quarantineTransactionLock,
   readOwnedJson,
-  recoverableArtifact,
   removeOwnedDirectory,
   temporaryName,
   writeOwnedJson,

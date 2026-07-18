@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import process from "node:process";
+import { PackagingError } from "./contract.ts";
+
 const OWNER_FILE = "owner.json";
 const JOURNAL_FILE = "journal.json";
 const PROTOCOL_VERSION = 1;
@@ -150,16 +154,46 @@ function matches(
   );
 }
 
+function processIdentity(pid: number): string | undefined {
+  const result = Bun.spawnSync(["ps", "-o", "lstart=", "-p", String(pid)], {
+    env: { PATH: process.env["PATH"] ?? "", LC_ALL: "C" },
+    stderr: "ignore",
+    stdout: "pipe",
+  });
+  if (result.exitCode !== 0) return;
+  const value = result.stdout.toString().trim();
+  return value === "" ? undefined : value;
+}
+
+function ownerIsActive(owner: LockOwner): boolean {
+  return processIdentity(owner.pid) === owner.processStartIdentity;
+}
+
+function currentOwner(): LockOwner {
+  const processStartIdentity = processIdentity(process.pid);
+  if (processStartIdentity === undefined) {
+    throw new PackagingError("Plugin staging could not identify lock owner.");
+  }
+  return {
+    version: PROTOCOL_VERSION,
+    pid: process.pid,
+    processStartIdentity,
+    token: randomUUID(),
+  };
+}
+
 function temporaryName(name: string, token: string): string {
   return `.${name}.${token}.tmp`;
 }
 
 export type { LockOwner, SerializedIdentity, TransactionJournal };
 export {
+  currentOwner,
   deserialize,
   JOURNAL_FILE,
   matches,
   OWNER_FILE,
+  ownerIsActive,
   PROTOCOL_VERSION,
   parseJournal,
   parseOwner,

@@ -1,7 +1,5 @@
-import { randomUUID } from "node:crypto";
 import { chmod, rename } from "node:fs/promises";
 import { join } from "node:path";
-import process from "node:process";
 import { PackagingError } from "./contract.ts";
 import type { OwnedDirectory } from "./destination-artifacts.ts";
 import {
@@ -9,17 +7,20 @@ import {
   assertOwnedDirectory,
   cleanupOwned,
   createPrivateSibling,
-  quarantineTransactionLock,
   removeOwnedDirectory,
   writeOwnedJson,
 } from "./destination-artifacts.ts";
 import type { LockOwner, TransactionJournal } from "./destination-journal.ts";
 import {
+  currentOwner,
   JOURNAL_FILE,
   OWNER_FILE,
-  PROTOCOL_VERSION,
   serialized,
 } from "./destination-journal.ts";
+import {
+  cleanupOwnedLock,
+  deferLockCleanup,
+} from "./destination-lock-disposal.ts";
 import {
   cleanupOwnedParents,
   ensureDestinationParent,
@@ -42,19 +43,15 @@ import {
   IncompleteRollbackError,
   PROMOTED_DIRECTORY_MODE,
   preserveIncompleteRollback,
-  processIdentity,
-  readJournal,
   recoverStaleTransaction,
 } from "./destination-recovery.ts";
-
-const PRIVATE_DIRECTORY_MODE = 0o700;
 
 interface DestinationTransactionHooks {
   afterParentCreated?: (path: string) => Promise<void> | void;
   beforeBackupCleanup?: (path: string) => Promise<void> | void;
   beforeLockCleanup?: (path: string) => Promise<void> | void;
   beforeLockRemovalRename?: () => Promise<void> | void;
-  checkpoint?: (checkpoint: Checkpoint) => Promise<void> | void;
+  checkpoint?: (checkpoint: Checkpoint, path?: string) => Promise<void> | void;
 }
 
 interface PromotionRollback {
@@ -66,19 +63,6 @@ interface PromotionRollback {
   target: TransactionTarget;
 }
 
-function currentOwner(): LockOwner {
-  const processStartIdentity = processIdentity(process.pid);
-  if (processStartIdentity === undefined) {
-    throw new PackagingError("Plugin staging could not identify lock owner.");
-  }
-  return {
-    version: PROTOCOL_VERSION,
-    pid: process.pid,
-    processStartIdentity,
-    token: randomUUID(),
-  };
-}
-
 type Checkpoint =
   | "owner-ready"
   | "initial-journal-ready"
@@ -88,10 +72,18 @@ type Checkpoint =
   | "backup-ready"
   | "backup-validated"
   | "backup-renamed"
+  | "backup-disposal-ready"
+  | "backup-disposal-renamed"
+  | "backup-disposal-remove"
   | "destination-ready"
   | "destination-renamed"
   | "committed-journal-ready"
-  | "committed";
+  | "committed"
+  | "lock-disposal-ready"
+  | "lock-disposal-renamed"
+  | "lock-disposal-remove"
+  | "lock-disposal-journal"
+  | "lock-disposal-owner";
 
 async function replaceDirectoryTransaction(
   destinationInput: string,
@@ -145,7 +137,7 @@ async function replaceDirectoryTransaction(
     } catch (error) {
       if (error instanceof IncompleteRollbackError) throw error;
       let failure = await cleanupOwned(stage, error);
-      failure = await cleanupOwned(lock, failure);
+      failure = await cleanupOwnedLock(lock, failure);
       throw failure;
     }
   } finally {
@@ -161,11 +153,10 @@ async function promote(
   stage: OwnedDirectory,
   lock: OwnedDirectory,
   owner: LockOwner,
-  inputJournal: TransactionJournal,
+  journal: TransactionJournal,
   hooks: DestinationTransactionHooks,
 ): Promise<OwnedDirectory | undefined> {
   let backup: OwnedDirectory | undefined;
-  const journal = inputJournal;
   let previousMoved = false;
   let stageMoved = false;
   let commitReached = false;
@@ -197,9 +188,8 @@ async function promote(
       await hooks.checkpoint?.("backup-renamed");
     }
 
-    // Node/Bun exposes no portable directory-exchange primitive. Existing
-    // destinations are briefly absent between these two same-filesystem
-    // renames; the journal makes every crash point deterministically recoverable.
+    // Node/Bun has no portable directory exchange: existing destinations are
+    // briefly absent, but the journal makes each crash point recoverable.
     // For an initially absent destination, Node/Bun also lacks a portable
     // rename-no-replace primitive, so a hostile empty-directory insertion in
     // the final syscall race cannot be distinguished after promotion.
@@ -261,20 +251,30 @@ async function finishCommitted(
   if (backup !== undefined) {
     try {
       await hooks.beforeBackupCleanup?.(backup.path);
-      await removeOwnedDirectory(backup);
+      await removeOwnedDirectory(backup, {
+        beforeRename: () =>
+          hooks.checkpoint?.("backup-disposal-ready", backup.path),
+        afterRename: (path) =>
+          hooks.checkpoint?.("backup-disposal-renamed", path),
+        beforeRemove: (path) =>
+          hooks.checkpoint?.("backup-disposal-remove", path),
+      });
     } catch {
-      await writeOwnedJson(
-        lock,
-        JOURNAL_FILE,
-        { ...(await readJournal(lock, owner.token)), state: "cleanup-pending" },
-        owner.token,
-      ).catch(() => undefined);
-      await quarantineTransactionLock(target, lock, owner.token);
+      await deferLockCleanup(target, lock, owner.token);
       return;
     }
   }
   await hooks.beforeLockCleanup?.(lock.path);
-  await cleanupOwned(lock, undefined, hooks.beforeLockRemovalRename);
+  await cleanupOwnedLock(lock, undefined, {
+    beforeRename: async () => {
+      await hooks.checkpoint?.("lock-disposal-ready", lock.path);
+      await hooks.beforeLockRemovalRename?.();
+    },
+    afterRename: (path) => hooks.checkpoint?.("lock-disposal-renamed", path),
+    beforeRemove: (path) => hooks.checkpoint?.("lock-disposal-remove", path),
+    afterJournalRemoval: () => hooks.checkpoint?.("lock-disposal-journal"),
+    afterOwnerRemoval: () => hooks.checkpoint?.("lock-disposal-owner"),
+  });
 }
 
 async function rollbackOwnedPromotion(rollback: PromotionRollback) {
@@ -285,7 +285,7 @@ async function rollbackOwnedPromotion(rollback: PromotionRollback) {
     await rename(target.destination, stage.path);
     stage.present = true;
     await assertOwnedDirectory(stage, "private construction directory");
-    await chmod(stage.path, PRIVATE_DIRECTORY_MODE);
+    await chmod(stage.path, 0o700);
     await assertOwnedDirectory(stage, "private construction directory");
   }
   if (previousMoved && backup !== undefined) {
