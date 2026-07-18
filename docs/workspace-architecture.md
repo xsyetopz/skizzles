@@ -1,5 +1,10 @@
 # Workspace architecture
 
+Consequential architecture choices and their executable confirmation contracts are
+recorded in the [architecture decision log](decisions/README.md). Source provenance and
+Adopt/Adapt/Defer/Reject assessments for the cohesion campaign are maintained separately
+in the [research decision ledger](research/architectural-cohesion-ledger.md).
+
 ## Design
 
 Skizzles uses a private Bun workspace with one package per executable or
@@ -7,14 +12,17 @@ independently testable TypeScript domain. The repository root is orchestration,
 not an ambient source package. Package imports either remain internal or use an
 explicit `workspace:*` dependency and exported entrypoint.
 
-The only current workspace dependency edge is:
+The current workspace dependency edges are:
 
 ```text
 @skizzles/plugin-builder -> @skizzles/prompt-layer
+@skizzles/installer -> @skizzles/container-lab
 ```
 
 Other runtime relationships cross process or packaging boundaries rather than
-TypeScript imports.
+TypeScript imports. The installer consumes the Container Lab integration descriptor
+through the package's explicit `./integration-descriptor` export; it does not traverse
+into Container Lab's private filesystem paths.
 
 ## Canonical and generated paths
 
