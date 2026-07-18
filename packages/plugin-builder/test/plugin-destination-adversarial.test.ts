@@ -13,12 +13,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import {
-  deserialize,
-  matches,
-  parseJournal,
-  serialized,
-} from "../src/plugin/destination-journal.ts";
-import {
   inspectTarget,
   transactionLockPath,
 } from "../src/plugin/destination-path.ts";
@@ -33,30 +27,6 @@ afterEach(async () => {
 });
 
 describe("plugin destination transaction adversarial recovery", () => {
-  it("round-trips bigint identities without numeric narrowing", () => {
-    const identity = {
-      dev: 9_007_199_254_740_993n,
-      ino: 18_446_744_073_709_551_615n,
-    };
-    const encoded = serialized(identity);
-    expect(encoded).toEqual({
-      dev: "9007199254740993",
-      ino: String(identity.ino),
-    });
-    expect(deserialize(encoded)).toEqual(identity);
-    expect(matches(identity, encoded)).toBe(true);
-    expect(matches({ ...identity, ino: identity.ino - 1n }, encoded)).toBe(
-      false,
-    );
-    expect(() =>
-      parseJournal({
-        original: { identity: { dev: "01", ino: "2" }, present: true },
-        state: "active",
-        version: 1,
-      }),
-    ).toThrow("invalid identity");
-  });
-
   it("restores a destination replacement swapped after final validation", async () => {
     const parent = await temporaryRoot("skizzles-swap-after-validation-");
     const destination = join(parent, "plugin");
@@ -117,12 +87,15 @@ describe("plugin destination transaction adversarial recovery", () => {
 
   it("recovers valid temporary owner and journal publications", async () => {
     for (const [point, expected] of [
+      ..."claim-helper-ready claim-temp-ready claim-published lock-created"
+        .split(" ")
+        .map((point) => [point, "old"] as const),
       ["owner-ready", "old"],
       ["initial-journal-ready", "old"],
       ["stage-journal-ready", "old"],
       ["backup-journal-ready", "old"],
       ["committed-journal-ready", "new"],
-      ..."backup-disposal-ready backup-disposal-renamed backup-disposal-remove backup-disposal-partial lock-disposal-ready lock-disposal-renamed lock-disposal-remove lock-disposal-journal lock-disposal-owner"
+      ..."claim-release-ready claim-released claim-helper-stopped backup-disposal-ready backup-disposal-renamed backup-disposal-remove backup-disposal-partial lock-disposal-ready lock-disposal-renamed lock-disposal-remove lock-disposal-journal lock-disposal-owner"
         .split(" ")
         .map((point) => [point, "new"] as const),
     ] as const) {

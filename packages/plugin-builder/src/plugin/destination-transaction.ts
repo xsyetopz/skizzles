@@ -10,14 +10,13 @@ import {
   removeOwnedDirectory,
   writeOwnedJson,
 } from "./destination-artifacts.ts";
-import type { LockOwner, TransactionJournal } from "./destination-journal.ts";
 import {
-  currentOwner,
-  JOURNAL_FILE,
-  OWNER_FILE,
-  releaseOwner,
-  serialized,
-} from "./destination-journal.ts";
+  acquireClaim,
+  retireClaim,
+  transactionArtifactsRemain,
+} from "./destination-claim.ts";
+import type { LockOwner, TransactionJournal } from "./destination-journal.ts";
+import { JOURNAL_FILE, OWNER_FILE, serialized } from "./destination-journal.ts";
 import {
   cleanupOwnedLock,
   deferLockCleanup,
@@ -46,38 +45,8 @@ import { rollbackOwnedPromotion } from "./destination-promotion-rollback.ts";
 import {
   PROMOTED_DIRECTORY_MODE,
   recoverStaleTransaction,
-  transactionArtifactsRemain,
 } from "./destination-recovery.ts";
-
-interface DestinationTransactionHooks {
-  afterParentCreated?: (path: string) => Promise<void> | void;
-  beforeBackupCleanup?: (path: string) => Promise<void> | void;
-  beforeLockCleanup?: (path: string) => Promise<void> | void;
-  beforeLockRemovalRename?: () => Promise<void> | void;
-  checkpoint?: (checkpoint: Checkpoint, path?: string) => Promise<void> | void;
-}
-
-type Checkpoint =
-  | "owner-ready"
-  | "initial-journal-ready"
-  | "stage-created"
-  | "stage-journal-ready"
-  | "backup-journal-ready"
-  | "backup-ready"
-  | "backup-validated"
-  | "backup-renamed"
-  | "backup-disposal-ready"
-  | "backup-disposal-renamed"
-  | "backup-disposal-remove"
-  | "destination-ready"
-  | "destination-renamed"
-  | "committed-journal-ready"
-  | "committed"
-  | "lock-disposal-ready"
-  | "lock-disposal-renamed"
-  | "lock-disposal-remove"
-  | "lock-disposal-journal"
-  | "lock-disposal-owner";
+import type { DestinationTransactionHooks } from "./destination-transaction-hooks.ts";
 
 async function replaceDirectoryTransaction(
   destinationInput: string,
@@ -91,12 +60,17 @@ async function replaceDirectoryTransaction(
   let committed = false;
   try {
     const target = await inspectTarget(destinationInput);
-    await recoverStaleTransaction(target);
-    const lock = await acquireLock(target);
-    const owner = currentOwner();
+    await recoverStaleTransaction(target, hooks.checkpoint);
+    const claim = await acquireClaim(target, hooks.checkpoint);
+    let removeClaim = true;
+    let lock: OwnedDirectory | undefined;
     let stage: OwnedDirectory | undefined;
     let journal: TransactionJournal | undefined;
     try {
+      lock = await acquireLock(target);
+      removeClaim = false;
+      const owner = claim.owner;
+      await hooks.checkpoint?.("lock-created", lock.path);
       await writeOwnedJson(lock, OWNER_FILE, owner, owner.token, () =>
         hooks.checkpoint?.("owner-ready"),
       );
@@ -126,17 +100,26 @@ async function replaceDirectoryTransaction(
         hooks,
       );
       committed = true;
-      await finishCommitted(target, lock, owner, backup, hooks).catch(
-        () => undefined,
-      );
+      removeClaim = await finishCommitted(
+        target,
+        lock,
+        owner,
+        backup,
+        hooks,
+      ).catch(() => false);
     } catch (error) {
       if (error instanceof IncompleteRollbackError) throw error;
+      const owner = claim.owner;
       const stageCleanup = await cleanupOwned(stage, error);
       const artifactsRemain = await transactionArtifactsRemain(
         target,
         owner.token,
       ).catch(() => true);
-      if ((!stageCleanup.removed || artifactsRemain) && journal !== undefined) {
+      if (
+        (!stageCleanup.removed || artifactsRemain) &&
+        journal !== undefined &&
+        lock !== undefined
+      ) {
         await deferLockCleanup(target, lock, owner.token);
         throw stageCleanup.failure;
       }
@@ -145,9 +128,12 @@ async function replaceDirectoryTransaction(
         owner.token,
         stageCleanup.failure,
       );
+      removeClaim = lockCleanup.removed;
       throw lockCleanup.failure;
     } finally {
-      releaseOwner(owner);
+      await retireClaim(claim, removeClaim, hooks.checkpoint).catch(
+        () => undefined,
+      );
     }
   } finally {
     if (!committed) {
@@ -256,7 +242,7 @@ async function finishCommitted(
   owner: LockOwner,
   backup: OwnedDirectory | undefined,
   hooks: DestinationTransactionHooks,
-): Promise<void> {
+): Promise<boolean> {
   if (backup !== undefined) {
     try {
       await hooks.beforeBackupCleanup?.(backup.path);
@@ -270,11 +256,11 @@ async function finishCommitted(
       });
     } catch {
       await deferLockCleanup(target, lock, owner.token);
-      return;
+      return false;
     }
   }
   await hooks.beforeLockCleanup?.(lock.path);
-  await cleanupOwnedLock(lock, owner.token, undefined, {
+  const cleanup = await cleanupOwnedLock(lock, owner.token, undefined, {
     beforeRename: async () => {
       await hooks.checkpoint?.("lock-disposal-ready", lock.path);
       await hooks.beforeLockRemovalRename?.();
@@ -284,6 +270,7 @@ async function finishCommitted(
     afterJournalRemoval: () => hooks.checkpoint?.("lock-disposal-journal"),
     afterOwnerRemoval: () => hooks.checkpoint?.("lock-disposal-owner"),
   });
+  return cleanup.removed;
 }
 
 export { replaceDirectoryTransaction };

@@ -128,7 +128,7 @@ describe("plugin destination transactions", () => {
     );
     expect(competingConstructionRan).toBe(false);
     expect(await readFile(join(destination, "old.txt"), "utf8")).toBe("old\n");
-    expect((await transactionArtifacts(parent)).length).toBe(2);
+    expect((await transactionArtifacts(parent)).length).toBe(3);
 
     release.resolve();
     await first;
@@ -226,7 +226,7 @@ describe("plugin destination transactions", () => {
     expect(await transactionArtifacts(parent)).toEqual([]);
   });
 
-  it("recovers every promotion crash point and a stale unpublished lock", async () => {
+  it("recovers every promotion crash point and rejects an unclaimed lock", async () => {
     for (const [point, expected, exitCode] of [
       ["construction", "old", 72],
       ["stage-created", "old", 71],
@@ -249,11 +249,9 @@ describe("plugin destination transactions", () => {
     await mkdir(lock, { mode: PRIVATE_MODE });
     const stale = new Date(Date.now() - 60_000);
     await utimes(lock, stale, stale);
-
-    await replaceDirectoryTransaction(destination, (root) =>
-      writeFile(join(root, "new"), "new\n"),
-    );
-    expect(await Bun.file(join(destination, "new")).exists()).toBe(true);
+    await expect(
+      replaceDirectoryTransaction(destination, () => Promise.resolve()),
+    ).rejects.toThrow("locked by another operation");
   }, 20_000);
 });
 

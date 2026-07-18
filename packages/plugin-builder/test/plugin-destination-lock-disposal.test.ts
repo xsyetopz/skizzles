@@ -114,13 +114,6 @@ describe("plugin destination lock disposal", () => {
       const disposal = `${join(parent, String(cleanup))}.dispose`;
       await rename(join(parent, String(cleanup)), disposal);
       const ownerPath = join(disposal, "owner.json");
-      const owner = parseOwner(
-        parsePrivateJson(await readFile(ownerPath, "utf8")),
-      );
-      await writeFile(
-        ownerPath,
-        `${JSON.stringify({ ...owner, pid: 999_999_999, processStartIdentity: "dead" })}\n`,
-      );
       await rm(join(disposal, JOURNAL_FILE));
       if (removeOwner) await rm(ownerPath);
       await expect(
@@ -148,8 +141,12 @@ describe("plugin destination lock disposal", () => {
       replaceDirectoryTransaction(destination, () => Promise.resolve()),
     ).rejects.toThrow("could not clean up its private lock");
     const artifacts = await transactionArtifacts(parent);
-    expect(artifacts).toHaveLength(1);
-    expect(artifacts[0]?.endsWith(".lock.dispose")).toBe(true);
+    expect(artifacts).toHaveLength(3);
+    expect(artifacts.some((name) => name.endsWith(".claim"))).toBe(true);
+    expect(artifacts.some((name) => name.endsWith(".lock.dispose"))).toBe(true);
+    expect(artifacts.some((name) => name.includes(".claim.recovery-"))).toBe(
+      true,
+    );
   });
 
   it("retains foreign-token temporary lock metadata", async () => {

@@ -1,21 +1,29 @@
-import { chmod, readdir, rename, rmdir } from "node:fs/promises";
+import { chmod, readdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { PackagingError } from "./contract.ts";
 import type { OwnedDirectory } from "./destination-artifacts.ts";
 import {
-  assertOwnedDirectory,
   cleanupOwned,
   inspectOwnedVariant,
   quarantineTransactionLock,
   readOwnedJson,
 } from "./destination-artifacts.ts";
+import type { ClaimCheckpoint } from "./destination-claim.ts";
+import {
+  hasUnclaimedLockNamespace,
+  inspectClaim,
+  recoverClaimTemps,
+  recoverUnknownClaimLock,
+  sameOwner,
+  transactionArtifactsRemain,
+} from "./destination-claim.ts";
 import type { LockOwner, TransactionJournal } from "./destination-journal.ts";
 import {
   deserialize,
   JOURNAL_FILE,
   matches,
   OWNER_FILE,
-  ownerIsActive,
+  ownerRemainsActive,
   parseJournal,
   parseOwner,
   temporaryName,
@@ -34,27 +42,54 @@ import {
   privateSiblingPath,
   transactionLockPath,
 } from "./destination-path.ts";
+import {
+  cleanupOrphanedRecoveryLeases,
+  withRecoveryLease,
+} from "./destination-recovery-lease.ts";
 
 export const PROMOTED_DIRECTORY_MODE = 0o755;
 
-export async function recoverStaleTransaction(target: TransactionTarget) {
-  await recoverDeferredCleanup(target);
+export async function recoverStaleTransaction(
+  target: TransactionTarget,
+  checkpoint?: ClaimCheckpoint,
+) {
+  await recoverClaimTemps(target);
+  const claim = await inspectClaim(target);
+  if (claim === undefined) {
+    await cleanupOrphanedRecoveryLeases(target);
+    if (await hasUnclaimedLockNamespace(target)) throw lockedDestinationError();
+    return;
+  }
+  if (await ownerRemainsActive(claim.owner)) throw lockedDestinationError();
+  await withRecoveryLease(target, claim, checkpoint, async () => {
+    await recoverDeferredCleanup(target, claim.owner);
+    await recoverClaimLock(target, claim.owner);
+    if (await transactionArtifactsRemain(target, claim.owner.token)) {
+      throw lockedDestinationError();
+    }
+  });
+}
+
+async function recoverClaimLock(
+  target: TransactionTarget,
+  expectedOwner: LockOwner,
+): Promise<void> {
   const lock = await inspectOwnedVariant(transactionLockPath(target));
   if (lock === undefined) return;
   let owner: LockOwner;
   try {
     owner = await readOwner(lock);
   } catch {
-    await recoverUnknownLock(lock);
+    await recoverUnknownClaimLock(lock);
     return;
   }
+  if (!sameOwner(owner, expectedOwner)) throw lockedDestinationError();
   let journal: TransactionJournal;
   try {
     journal = await readJournal(lock, owner.token);
   } catch {
     const entries = await readdir(lock.path);
     if (
-      ownerIsActive(owner) ||
       entries.includes(JOURNAL_FILE) ||
       entries.includes(temporaryName(JOURNAL_FILE, owner.token))
     ) {
@@ -63,11 +98,13 @@ export async function recoverStaleTransaction(target: TransactionTarget) {
     await recoverMissingJournal(target, lock, owner);
     return;
   }
-  if (ownerIsActive(owner)) throw lockedDestinationError();
   await recoverJournal(target, lock, owner, journal);
 }
 
-async function recoverDeferredCleanup(target: TransactionTarget) {
+async function recoverDeferredCleanup(
+  target: TransactionTarget,
+  expectedOwner: LockOwner,
+) {
   const prefix = `.skizzles-package-${target.key}-cleanup-`;
   const candidates = (await readdir(target.parent))
     .filter((name) => name.startsWith(prefix))
@@ -98,7 +135,7 @@ async function recoverDeferredCleanup(target: TransactionTarget) {
     }
     throw lockedDestinationError();
   }
-  if (owner.token !== token || ownerIsActive(owner)) {
+  if (owner.token !== token || !sameOwner(owner, expectedOwner)) {
     throw lockedDestinationError();
   }
   let journal: TransactionJournal;
@@ -115,20 +152,6 @@ async function recoverDeferredCleanup(target: TransactionTarget) {
   await recoverJournal(target, lock, owner, journal);
 }
 
-async function recoverUnknownLock(lock: OwnedDirectory): Promise<void> {
-  await assertOwnedDirectory(lock, "private destination lock");
-  if ((await readdir(lock.path)).length === 0) {
-    try {
-      await rmdir(lock.path);
-      lock.present = false;
-      return;
-    } catch {
-      throw lockedDestinationError();
-    }
-  }
-  throw lockedDestinationError();
-}
-
 async function recoverMissingJournal(
   target: TransactionTarget,
   lock: OwnedDirectory,
@@ -140,17 +163,6 @@ async function recoverMissingJournal(
     throw lockedDestinationError();
   }
   await requireLockCleanup(lock, owner.token);
-}
-
-export async function transactionArtifactsRemain(
-  target: TransactionTarget,
-  token: string,
-) {
-  const stage = inspectOwnedVariant(privateSiblingPath(target, "stage", token));
-  const backup = inspectOwnedVariant(
-    privateSiblingPath(target, "backup", token),
-  );
-  return (await stage) !== undefined || (await backup) !== undefined;
 }
 
 async function recoverJournal(

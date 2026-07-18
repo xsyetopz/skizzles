@@ -226,6 +226,10 @@ function transactionLockPath(target: TransactionTarget): string {
   return join(target.parent, `.skizzles-package-${target.key}.lock`);
 }
 
+function transactionClaimPath(target: TransactionTarget): string {
+  return join(target.parent, `.skizzles-package-${target.key}.claim`);
+}
+
 function privateSiblingPath(
   target: TransactionTarget,
   kind: "backup" | "stage",
@@ -289,5 +293,6 @@ export {
   restoreQuarantinedPath,
   revalidateAncestors,
   sameIdentity,
+  transactionClaimPath,
   transactionLockPath,
 };

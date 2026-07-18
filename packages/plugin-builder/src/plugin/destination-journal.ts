@@ -10,7 +10,6 @@ const PRIVATE_JSON_DEPTH_LIMIT = 32;
 const DECIMAL_IDENTITY_PATTERN = /^(?:0|[1-9][0-9]*)$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const activeOwnerTokens = new Set<string>();
 
 interface LockOwner {
   pid: number;
@@ -155,39 +154,67 @@ function matches(
   );
 }
 
-function processIdentity(pid: number): string | undefined {
-  const result = Bun.spawnSync(["ps", "-o", "lstart=", "-p", String(pid)], {
-    env: { PATH: process.env["PATH"] ?? "", LC_ALL: "C" },
-    stderr: "ignore",
-    stdout: "pipe",
-  });
-  if (result.exitCode !== 0) return;
+type ProcessIdentity =
+  | { state: "alive"; value: string }
+  | { state: "dead" }
+  | { state: "unknown" };
+
+function processIdentity(pid: number): ProcessIdentity {
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") {
+      return { state: "dead" };
+    }
+    return { state: "unknown" };
+  }
+  const result = Bun.spawnSync(
+    ["/bin/ps", "-o", "state=", "-o", "lstart=", "-p", String(pid)],
+    {
+      env: { PATH: process.env["PATH"] ?? "", LC_ALL: "C" },
+      stderr: "ignore",
+      stdout: "pipe",
+    },
+  );
+  if (result.exitCode !== 0) return { state: "unknown" };
   const value = result.stdout.toString().trim();
-  return value === "" ? undefined : value;
+  const separator = value.indexOf(" ");
+  if (separator < 0) return { state: "unknown" };
+  if (value.slice(0, separator).includes("Z")) return { state: "dead" };
+  const identity = value.slice(separator + 1).trim();
+  return identity === ""
+    ? { state: "unknown" }
+    : { state: "alive", value: identity };
 }
 
 function ownerIsActive(owner: LockOwner): boolean {
-  if (processIdentity(owner.pid) !== owner.processStartIdentity) return false;
-  return owner.pid !== process.pid || activeOwnerTokens.has(owner.token);
+  const identity = processIdentity(owner.pid);
+  return (
+    identity.state === "unknown" ||
+    (identity.state === "alive" &&
+      identity.value === owner.processStartIdentity)
+  );
 }
 
-function currentOwner(): LockOwner {
-  const processStartIdentity = processIdentity(process.pid);
-  if (processStartIdentity === undefined) {
+async function ownerRemainsActive(owner: LockOwner): Promise<boolean> {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    if (!ownerIsActive(owner)) return false;
+    await Bun.sleep(10);
+  }
+  return ownerIsActive(owner);
+}
+
+function ownerForProcess(pid: number): LockOwner {
+  const identity = processIdentity(pid);
+  if (identity.state !== "alive") {
     throw new PackagingError("Plugin staging could not identify lock owner.");
   }
-  const owner = {
+  return {
     version: PROTOCOL_VERSION,
-    pid: process.pid,
-    processStartIdentity,
+    pid,
+    processStartIdentity: identity.value,
     token: randomUUID(),
   };
-  activeOwnerTokens.add(owner.token);
-  return owner;
-}
-
-function releaseOwner(owner: LockOwner): void {
-  activeOwnerTokens.delete(owner.token);
 }
 
 function temporaryName(name: string, token: string): string {
@@ -196,17 +223,17 @@ function temporaryName(name: string, token: string): string {
 
 export type { LockOwner, SerializedIdentity, TransactionJournal };
 export {
-  currentOwner,
   deserialize,
   JOURNAL_FILE,
   matches,
   OWNER_FILE,
+  ownerForProcess,
   ownerIsActive,
+  ownerRemainsActive,
   PROTOCOL_VERSION,
   parseJournal,
   parseOwner,
   parsePrivateJson,
-  releaseOwner,
   serialized,
   temporaryName,
   UUID_PATTERN,
