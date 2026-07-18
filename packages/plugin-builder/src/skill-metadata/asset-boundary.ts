@@ -1,6 +1,11 @@
+import { createHash } from "node:crypto";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { ICON_ASSET_MAX_BYTES, SkillMetadataError } from "./contract.ts";
-import { inspectStableRegularFile } from "./regular-file-boundary.ts";
+import {
+  ICON_ASSET_MAX_BYTES,
+  type SkillAssetBinding,
+  SkillMetadataError,
+} from "./contract.ts";
+import { readStableRegularFile } from "./regular-file-boundary.ts";
 
 async function validateContainedAsset(
   root: string,
@@ -8,7 +13,7 @@ async function validateContainedAsset(
   value: string,
   metadataPath: string,
   key: string,
-): Promise<void> {
+): Promise<SkillAssetBinding> {
   if (
     !value.startsWith("./") ||
     isAbsolute(value) ||
@@ -23,9 +28,11 @@ async function validateContainedAsset(
   if (!isContained(skillRoot, assetPath)) {
     throw containmentError(metadataPath, key);
   }
-  await inspectStableRegularFile(
-    skillRoot,
-    relative(skillRoot, assetPath).split(sep).join("/"),
+  const assetRelativePath = relative(skillRoot, assetPath).split(sep).join("/");
+  const distributedRelativePath = `skills/${directoryName}/${assetRelativePath}`;
+  const bytes = await readStableRegularFile(
+    root,
+    distributedRelativePath,
     ICON_ASSET_MAX_BYTES,
   ).catch((error: unknown) => {
     if (error instanceof SkillMetadataError) {
@@ -33,6 +40,11 @@ async function validateContainedAsset(
     }
     throw error;
   });
+  return {
+    bytes,
+    relativePath: distributedRelativePath,
+    sha256: createHash("sha256").update(bytes).digest("hex"),
+  };
 }
 
 function containmentError(

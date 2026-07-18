@@ -25,7 +25,7 @@ const FRONTMATTER_KEYS = [
 const FRONTMATTER_OPEN = "---\n";
 const FRONTMATTER_CLOSE = "\n---\n";
 const NON_VISIBLE_HTML_COMMENT = /<!--[\s\S]*?(?:-->|$)/gu;
-const VISIBLE_INSTRUCTION_CHARACTER = /[\p{L}\p{N}\p{S}]/u;
+const VISIBLE_INSTRUCTION_CHARACTER = /[\p{L}\p{N}]/u;
 
 function validateSkillFile(record: SkillMetadataRecord): string {
   const text = decodeMetadataText(record.skill);

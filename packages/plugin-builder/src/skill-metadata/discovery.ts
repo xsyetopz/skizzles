@@ -3,6 +3,8 @@ import { join } from "node:path";
 import {
   OPENAI_METADATA_MAX_BYTES,
   SKILL_FILE_MAX_BYTES,
+  SKILL_NAME_MAX_LENGTH,
+  SKILL_NAME_PATTERN,
   SkillMetadataError,
   type SkillMetadataFile,
   type SkillMetadataRecord,
@@ -27,12 +29,8 @@ async function readSkillMetadata(
   entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
   const records: SkillMetadataRecord[] = [];
   for (const entry of entries) {
+    validateDirectoryName(entry.name);
     const entryPath = `skills/${entry.name}`;
-    if (entry.name === ".DS_Store") {
-      throw new SkillMetadataError(
-        `${entryPath} looks like local or live state and cannot be packaged.`,
-      );
-    }
     if (entry.isSymbolicLink()) {
       throw new SkillMetadataError(`${entryPath}: is a symlink.`);
     }
@@ -62,6 +60,22 @@ async function readSkillMetadata(
     throw new SkillMetadataError(`${label} skills directory is empty.`);
   }
   return records;
+}
+
+function validateDirectoryName(name: string): void {
+  if (name === ".DS_Store") {
+    throw new SkillMetadataError(
+      "skills/.DS_Store looks like local or live state and cannot be packaged.",
+    );
+  }
+  if (
+    [...name].length > SKILL_NAME_MAX_LENGTH ||
+    !SKILL_NAME_PATTERN.test(name)
+  ) {
+    throw new SkillMetadataError(
+      "Distributed skill directory name is invalid.",
+    );
+  }
 }
 
 async function readBoundedFile(

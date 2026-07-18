@@ -47,7 +47,7 @@ function parseStrictYamlObject(
     ) {
       hasUnquotedStringValue = true;
     }
-    return undefined;
+    return;
   });
   if (prohibitedConstruct !== undefined) {
     throw new SkillMetadataError(
@@ -92,7 +92,7 @@ function prohibitedYamlConstruct(
   if (Yaml.isPair(node) && Yaml.isScalar(node.key) && node.key.value === "<<") {
     return "merge key";
   }
-  return undefined;
+  return;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

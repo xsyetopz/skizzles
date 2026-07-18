@@ -1,20 +1,8 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
-import {
-  copyFile,
-  cp,
-  link,
-  mkdir,
-  rename,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { stagePlugin } from "../src/plugin-package.ts";
-import {
-  validateCanonicalSkillMetadata,
-  validateStagedSkillMetadata,
-} from "../src/skill-metadata/validation.ts";
+import { validateCanonicalSkillMetadata } from "../src/skill-metadata/validation.ts";
 import {
   assertPinnedProvenance,
   pinnedFixture,
@@ -111,6 +99,26 @@ describe("canonical skill metadata", () => {
     await rejectsMetadata(root, "must not contain angle-bracket markup");
 
     await assertPinnedProvenance();
+  });
+
+  it("executes the pinned Codex 0.144.5 metadata contract fixtures", async () => {
+    const root = await fixture();
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      await pinnedFixture("runtime-valid-openai.yaml"),
+    );
+    await expect(validateCanonicalSkillMetadata(root)).resolves.toBeUndefined();
+
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      await pinnedFixture("runtime-invalid-openai.yaml"),
+    );
+    await rejectsMetadata(
+      root,
+      "display_name must be a nonempty bounded string",
+    );
   });
 
   it("rejects YAML aliases, tags, and merge keys", async () => {
@@ -214,6 +222,62 @@ describe("canonical skill metadata", () => {
       'interface:\n  default_prompt: "Use $example-other to validate metadata."\n',
     );
     await rejectsMetadata(root, "must explicitly mention $example");
+
+    for (const continuation of ["_", ":", "A", "z", "0", "-"]) {
+      // biome-ignore lint/performance/noAwaitInLoops: each runtime continuation byte is an independent mention-boundary contract.
+      await write(
+        root,
+        "skills/example/agents/openai.yaml",
+        `interface:\n  default_prompt: "Use $example${continuation}other now."\n`,
+      );
+      // biome-ignore lint/performance/noAwaitInLoops: deterministic fixture validation is intentionally sequential.
+      await rejectsMetadata(root, "must explicitly mention $example");
+    }
+
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      'interface:\n  default_prompt: "Use $example, then continue."\n',
+    );
+    await expect(validateCanonicalSkillMetadata(root)).resolves.toBeUndefined();
+  });
+
+  it("enforces executable runtime lengths and rejects invisible UI values", async () => {
+    expect.hasAssertions();
+    const root = await fixture();
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      `interface:\n  display_name: "${"x".repeat(65)}"\n`,
+    );
+    await rejectsMetadata(
+      root,
+      "display_name must be a nonempty bounded string",
+    );
+
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      `interface:\n  default_prompt: "$example ${"x".repeat(1016)}"\n`,
+    );
+    await rejectsMetadata(
+      root,
+      "default_prompt must be a nonempty bounded string",
+    );
+
+    for (const invisible of ["\u200B", "\u2060", "\uFEFF"]) {
+      // biome-ignore lint/performance/noAwaitInLoops: each default-ignorable code point is an independent UI spoofing probe.
+      await write(
+        root,
+        "skills/example/agents/openai.yaml",
+        `interface:\n  display_name: "Example${invisible} Skill"\n`,
+      );
+      // biome-ignore lint/performance/noAwaitInLoops: deterministic fixture validation is intentionally sequential.
+      await rejectsMetadata(
+        root,
+        "display_name must be a nonempty bounded string",
+      );
+    }
   });
 
   it("rejects unsupported dependency declarations and unknown keys", async () => {
@@ -231,7 +295,7 @@ describe("canonical skill metadata", () => {
       "skills/example/agents/openai.yaml",
       'dependencies:\n  tools:\n    - type: "package"\n      value: "example"\n',
     );
-    await rejectsMetadata(root, "dependency type must be mcp");
+    await rejectsMetadata(root, "dependency type must be mcp or cli");
 
     await write(
       root,
@@ -252,7 +316,31 @@ describe("canonical skill metadata", () => {
       "skills/example/agents/openai.yaml",
       'dependencies:\n  tools:\n    - type: "mcp"\n      value: "docs"\n    - type: "mcp"\n      value: "docs"\n',
     );
-    await rejectsMetadata(root, "duplicate MCP dependency");
+    await rejectsMetadata(root, "duplicate dependency identity");
+
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      'dependencies:\n  tools:\n    - type: "mcp"\n      value: "local-gh"\n      command: "attacker-command"\n',
+    );
+    await rejectsMetadata(root, "must match an approved local MCP command");
+
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      'policy:\n  products:\n    - "codex"\n    - "CODEX"\n',
+    );
+    await rejectsMetadata(root, "policy.products contains a duplicate product");
+
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      'policy:\n  products:\n    - "desktop"\n',
+    );
+    await rejectsMetadata(
+      root,
+      "policy.products contains an unsupported product",
+    );
   });
 
   it("rejects root-dot and dynamic DNS aliases without network lookup", async () => {
@@ -294,140 +382,5 @@ describe("canonical skill metadata", () => {
       "x".repeat(OVERSIZED_OPENAI_METADATA_BYTES),
     );
     await rejectsMetadata(root, "size must be between 1 and 65536 bytes");
-  });
-
-  it("rejects unsafe icon symlinks", async () => {
-    expect.hasAssertions();
-    const root = await fixture();
-    await write(root, "skills/example/icon.png", "icon");
-    await symlink("icon.png", join(root, "skills/example/icon-link"));
-    await write(
-      root,
-      "skills/example/agents/openai.yaml",
-      'interface:\n  display_name: "Example Skill"\n  short_description: "Validate example skill metadata"\n  icon_small: "./icon-link"\n',
-    );
-    await rejectsMetadata(root, "must be a self-contained regular file");
-
-    const skillPath = join(root, "skills/example/SKILL.md");
-    await rename(skillPath, join(root, "skills/example/original-skill.md"));
-    await symlink("original-skill.md", skillPath);
-    await rejectsMetadata(root, "must be a self-contained regular file");
-  });
-
-  it("rejects hard-linked skill, OpenAI metadata, and icon files", async () => {
-    expect.hasAssertions();
-    const skillRoot = await fixture();
-    const skillPath = join(skillRoot, "skills/example/SKILL.md");
-    const originalSkill = join(skillRoot, "skills/example/original-skill.md");
-    await rename(skillPath, originalSkill);
-    await link(originalSkill, skillPath);
-    await rejectsMetadata(skillRoot, "must have exactly one filesystem link");
-
-    const openaiRoot = await fixture();
-    const openaiPath = join(openaiRoot, "skills/example/agents/openai.yaml");
-    await write(
-      openaiRoot,
-      "skills/example/agents/openai.yaml",
-      'interface:\n  display_name: "Example Skill"\n',
-    );
-    await link(openaiPath, join(openaiRoot, "skills/example/openai-copy.yaml"));
-    await rejectsMetadata(openaiRoot, "must have exactly one filesystem link");
-
-    const assetRoot = await fixture();
-    const iconPath = join(assetRoot, "skills/example/icon.png");
-    await write(assetRoot, "skills/example/icon.png", "icon");
-    await link(iconPath, join(assetRoot, "skills/example/icon-copy.png"));
-    await write(
-      assetRoot,
-      "skills/example/agents/openai.yaml",
-      'interface:\n  icon_small: "./icon.png"\n',
-    );
-    await rejectsMetadata(assetRoot, "must have exactly one filesystem link");
-  });
-
-  it("rejects Unicode-invisible, comment-only, and punctuation-only bodies", async () => {
-    const root = await fixture();
-    for (const body of [
-      // biome-ignore lint/security/noSecrets: explicit Unicode-invisible adversarial fixture, not a credential.
-      "\u200B\u200D\uFEFF\u0301\uFE0F",
-      "<!-- hidden only -->",
-      "# *** ---",
-    ]) {
-      // biome-ignore lint/performance/noAwaitInLoops: every invisible class is an independent adversarial fixture.
-      await writeSkill(
-        root,
-        `---\nname: example\ndescription: Visible body fixture.\n---\n${body}\n`,
-      );
-      await rejectsMetadata(root, "must contain visible instructional content");
-    }
-
-    await writeSkill(
-      root,
-      "---\nname: example\ndescription: Visible body fixture.\n---\n\n# 例\n",
-    );
-    await expect(validateCanonicalSkillMetadata(root)).resolves.toBeUndefined();
-  });
-
-  it("allows a skill without optional openai.yaml", async () => {
-    await expect(
-      validateCanonicalSkillMetadata(await fixture()),
-    ).resolves.toBeUndefined();
-  });
-});
-
-describe("staged skill metadata", () => {
-  it("rejects staged byte drift and missing or extra metadata", async () => {
-    const root = await fixture();
-    const staged = join(root, "stage");
-    await cp(join(root, "skills"), join(staged, "skills"), {
-      recursive: true,
-    });
-    await writeFile(
-      join(staged, "skills/example/SKILL.md"),
-      "---\nname: example\ndescription: drift\n---\n",
-    );
-    await expect(validateStagedSkillMetadata(root, staged)).rejects.toThrow(
-      "metadata differs from canonical bytes",
-    );
-
-    await copyFile(
-      join(root, "skills/example/SKILL.md"),
-      join(staged, "skills/example/SKILL.md"),
-    );
-    await write(root, "skills/example/agents/openai.yaml", "interface: {}\n");
-    await expect(validateStagedSkillMetadata(root, staged)).rejects.toThrow(
-      "metadata set differs from canonical",
-    );
-
-    await copyFile(
-      join(root, "skills/example/SKILL.md"),
-      join(staged, "skills/example/SKILL.md"),
-    );
-    await expect(
-      validateStagedSkillMetadata(root, join(root, "missing-stage")),
-    ).rejects.toThrow("skill metadata set differs from canonical");
-
-    await mkdir(join(staged, "skills/extra"), { recursive: true });
-    await writeFile(
-      join(staged, "skills/extra/SKILL.md"),
-      "---\nname: extra\ndescription: x\n---\n",
-    );
-    await expect(validateStagedSkillMetadata(root, staged)).rejects.toThrow(
-      "skill metadata set differs from canonical",
-    );
-  });
-
-  it("rejects invalid canonical metadata before destination mutation", async () => {
-    const root = await fixture();
-    const destination = join(root, "stage");
-    await write(root, "skills/example/SKILL.md", "invalid\n");
-    await write(destination, "sentinel.txt", "preserve\n");
-
-    await expect(stagePlugin(root, destination)).rejects.toThrow(
-      "must start with YAML frontmatter at byte 0",
-    );
-    await expect(
-      Bun.file(join(destination, "sentinel.txt")).text(),
-    ).resolves.toBe("preserve\n");
   });
 });

@@ -1,0 +1,2 @@
+interface:
+  display_name: "This display name is deliberately longer than the sixty-four character runtime limit"

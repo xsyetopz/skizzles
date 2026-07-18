@@ -3,10 +3,11 @@ import {
   BRAND_COLOR_LENGTH,
   BRAND_COLOR_PATTERN,
   DEFAULT_PROMPT_MAX_LENGTH,
+  DISPLAY_NAME_MAX_LENGTH,
   ICON_PATH_MAX_LENGTH,
-  INTERFACE_TEXT_MAX_LENGTH,
   SHORT_DESCRIPTION_MAX_LENGTH,
   SHORT_DESCRIPTION_MIN_LENGTH,
+  type SkillAssetBinding,
   SkillMetadataError,
   type SkillMetadataFile,
   TOOL_IDENTIFIER_MAX_LENGTH,
@@ -16,7 +17,10 @@ import {
   URL_MAX_LENGTH,
 } from "./contract.ts";
 import { isApprovedMcpEndpoint } from "./mcp-endpoint-v1.ts";
-import { SKILL_METADATA_CONTRACT_VERSION } from "./official-contract-v1.ts";
+import {
+  APPROVED_LOCAL_MCP_COMMANDS,
+  SKILL_METADATA_CONTRACT_VERSION,
+} from "./official-contract-v1.ts";
 import {
   assertExactKeys,
   boundedString,
@@ -34,24 +38,43 @@ const INTERFACE_KEYS = [
   "icon_small",
   "short_description",
 ] as const;
-const POLICY_KEYS = ["allow_implicit_invocation"] as const;
+const POLICY_KEYS = ["allow_implicit_invocation", "products"] as const;
 const DEPENDENCIES_KEYS = ["tools"] as const;
-const TOOL_KEYS = ["description", "transport", "type", "url", "value"] as const;
-const SKILL_NAME_CONTINUATION = /[a-z0-9-]/u;
+const TOOL_KEYS = [
+  "command",
+  "description",
+  "transport",
+  "type",
+  "url",
+  "value",
+] as const;
+const SKILL_NAME_CONTINUATION = /[A-Za-z0-9_:-]/u;
+const PRODUCTS = new Set([
+  "atlas",
+  "ATLAS",
+  "chatgpt",
+  "CHATGPT",
+  "codex",
+  "CODEX",
+]);
+const APPROVED_LOCAL_COMMAND_BY_VALUE = new Map<string, string>(
+  APPROVED_LOCAL_MCP_COMMANDS.map(({ command, value }) => [value, command]),
+);
 
 async function validateOpenAiMetadata(
   root: string,
   directoryName: string,
   file: SkillMetadataFile,
-): Promise<void> {
+): Promise<readonly SkillAssetBinding[]> {
   const value = parseStrictYamlObject(
     decodeMetadataText(file),
     file.relativePath,
     { requireQuotedStringValues: true },
   );
   assertExactKeys(value, OPENAI_KEYS, file.relativePath, "metadata", true);
+  let assets: readonly SkillAssetBinding[] = [];
   if ("interface" in value) {
-    await validateInterface(
+    assets = await validateInterface(
       root,
       directoryName,
       objectValue(value["interface"], file.relativePath, "interface"),
@@ -67,6 +90,7 @@ async function validateOpenAiMetadata(
   if ("dependencies" in value) {
     validateDependencies(value["dependencies"], file.relativePath);
   }
+  return assets;
 }
 
 async function validateInterface(
@@ -74,12 +98,15 @@ async function validateInterface(
   directoryName: string,
   value: Record<string, unknown>,
   path: string,
-): Promise<void> {
+): Promise<readonly SkillAssetBinding[]> {
   assertExactKeys(value, INTERFACE_KEYS, path, "interface", true);
-  for (const key of ["display_name", "short_description"] as const) {
-    if (key in value) {
-      boundedString(value[key], path, key, INTERFACE_TEXT_MAX_LENGTH);
-    }
+  if ("display_name" in value) {
+    boundedString(
+      value["display_name"],
+      path,
+      "display_name",
+      DISPLAY_NAME_MAX_LENGTH,
+    );
   }
   if ("short_description" in value) {
     const shortDescription = boundedString(
@@ -120,6 +147,7 @@ async function validateInterface(
       );
     }
   }
+  const assets = new Map<string, SkillAssetBinding>();
   for (const key of ["icon_small", "icon_large"] as const) {
     if (key in value) {
       const iconPath = boundedString(
@@ -129,9 +157,17 @@ async function validateInterface(
         ICON_PATH_MAX_LENGTH,
       );
       // biome-ignore lint/performance/noAwaitInLoops: documented icon fields retain deterministic field-order diagnostics.
-      await validateContainedAsset(root, directoryName, iconPath, path, key);
+      const asset = await validateContainedAsset(
+        root,
+        directoryName,
+        iconPath,
+        path,
+        key,
+      );
+      assets.set(asset.relativePath, asset);
     }
   }
+  return [...assets.values()];
 }
 
 function mentionsSkillInvocation(prompt: string, skillName: string): boolean {
@@ -159,6 +195,28 @@ function validatePolicy(value: Record<string, unknown>, path: string): void {
     throw new SkillMetadataError(
       `${path}: allow_implicit_invocation must be a boolean.`,
     );
+  }
+  if ("products" in value) {
+    if (!Array.isArray(value["products"])) {
+      throw new SkillMetadataError(
+        `${path}: policy.products must be an array.`,
+      );
+    }
+    const products = new Set<string>();
+    for (const product of value["products"]) {
+      if (typeof product !== "string" || !PRODUCTS.has(product)) {
+        throw new SkillMetadataError(
+          `${path}: policy.products contains an unsupported product.`,
+        );
+      }
+      const normalized = product.toLowerCase();
+      if (products.has(normalized)) {
+        throw new SkillMetadataError(
+          `${path}: policy.products contains a duplicate product.`,
+        );
+      }
+      products.add(normalized);
+    }
   }
 }
 
@@ -197,18 +255,28 @@ function validateToolDependency(
     `${itemPath}.value`,
     TOOL_IDENTIFIER_MAX_LENGTH,
   );
-  if (type !== "mcp") {
-    throw new SkillMetadataError(`${path}: dependency type must be mcp.`);
+  if (type !== "mcp" && type !== "cli") {
+    throw new SkillMetadataError(
+      `${path}: dependency type must be mcp or cli.`,
+    );
   }
   if (!TOOL_IDENTIFIER_PATTERN.test(identifier)) {
     throw new SkillMetadataError(`${path}: ${itemPath}.value is invalid.`);
   }
   if (identities.has(identifier)) {
-    throw new SkillMetadataError(`${path}: duplicate MCP dependency value.`);
+    throw new SkillMetadataError(`${path}: duplicate dependency identity.`);
   }
   identities.add(identifier);
   validateToolDescription(tool, itemPath, path);
-  validateToolEndpoint(tool, itemPath, path, identifier);
+  if (type === "cli") {
+    if ("transport" in tool || "command" in tool || "url" in tool) {
+      throw new SkillMetadataError(
+        `${path}: ${itemPath} CLI dependency contains MCP-only fields.`,
+      );
+    }
+    return;
+  }
+  validateMcpEndpoint(tool, itemPath, path, identifier);
 }
 
 function validateToolDescription(
@@ -226,7 +294,7 @@ function validateToolDescription(
   }
 }
 
-function validateToolEndpoint(
+function validateMcpEndpoint(
   tool: Record<string, unknown>,
   itemPath: string,
   path: string,
@@ -234,6 +302,34 @@ function validateToolEndpoint(
 ): void {
   const hasTransport = "transport" in tool;
   const hasUrl = "url" in tool;
+  const hasCommand = "command" in tool;
+  if (hasCommand) {
+    const transport = hasTransport
+      ? boundedString(
+          tool["transport"],
+          path,
+          `${itemPath}.transport`,
+          TRANSPORT_MAX_LENGTH,
+        )
+      : undefined;
+    if (hasUrl || (transport !== undefined && transport !== "stdio")) {
+      throw new SkillMetadataError(
+        `${path}: ${itemPath} command must use the stdio MCP form.`,
+      );
+    }
+    const command = boundedString(
+      tool["command"],
+      path,
+      `${itemPath}.command`,
+      TOOL_TEXT_MAX_LENGTH,
+    );
+    if (APPROVED_LOCAL_COMMAND_BY_VALUE.get(identifier) !== command) {
+      throw new SkillMetadataError(
+        `${path}: ${itemPath} must match an approved local MCP command.`,
+      );
+    }
+    return;
+  }
   if (hasTransport !== hasUrl) {
     throw new SkillMetadataError(
       `${path}: ${itemPath}.transport and url must be declared together.`,

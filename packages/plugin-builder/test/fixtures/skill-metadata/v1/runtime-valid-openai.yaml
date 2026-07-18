@@ -1,0 +1,20 @@
+interface:
+  display_name: "Runtime Compatible Skill"
+  short_description: "Validate executable metadata behavior"
+  brand_color: "#a1B2c3"
+  default_prompt: "Use $example to validate executable metadata behavior."
+dependencies:
+  tools:
+    - type: "cli"
+      value: "gh"
+      description: "GitHub CLI"
+    - type: "mcp"
+      value: "local-gh"
+      description: "Local GitHub MCP server"
+      command: "gh-mcp"
+policy:
+  allow_implicit_invocation: false
+  products:
+    - "codex"
+    - "CHATGPT"
+    - "atlas"

@@ -1,5 +1,7 @@
 import { SkillMetadataError, type SkillMetadataFile } from "./contract.ts";
 
+const DEFAULT_IGNORABLE_CHARACTER = /\p{Default_Ignorable_Code_Point}/u;
+
 function decodeMetadataText(file: SkillMetadataFile): string {
   let text: string;
   try {
@@ -31,7 +33,8 @@ function boundedString(
     value.trim() !== value ||
     value.length === 0 ||
     [...value].length > maximumLength ||
-    containsControlCharacter(value)
+    containsControlCharacter(value) ||
+    DEFAULT_IGNORABLE_CHARACTER.test(value)
   ) {
     throw new SkillMetadataError(
       `${path}: ${field} must be a nonempty bounded string.`,

@@ -1,6 +1,11 @@
 {
   "version": "skizzles.skill-metadata/v1",
   "observedCodexCliVersion": "0.144.5",
+  "executableSource": {
+    "repository": "https://github.com/openai/codex",
+    "tag": "rust-v0.144.5",
+    "commit": "87db9bc18ba5bc82c1cb4e4381b44f693ee35623"
+  },
   "approvedMcpEndpoints": [
     {
       "url": "https://developers.openai.com/mcp",
@@ -11,7 +16,7 @@
       "value": "github"
     }
   ],
-  "filesystemLimitation": "Final files are read through identity-checked no-follow descriptors. Node does not expose openat path walking here, and staging copies occur after validation; the transaction owner must guard ancestor replacement and bind copied bytes to validated bytes.",
+  "filesystemLimitation": "Files are read through no-follow descriptors when the host exposes O_NOFOLLOW, with root/ancestor/leaf identity and realpath containment revalidated after each read. The fallback uses the same identity and containment checks. Without openat-style directory descriptors, a privileged or kernel-level hostile writer remains outside the validator threat model.",
   "sources": [
     {
       "locator": "$CODEX_HOME/skills/.system/skill-creator/SKILL.md",
@@ -28,7 +33,46 @@
     {
       "locator": "official Codex manual lines 8514-8539",
       "sha256": "523c876b69ad9670759e81ad7b5589e192296076e4ea48b9bc145bb76e2015c3"
+    },
+    {
+      "locator": "openai/codex@rust-v0.144.5:codex-rs/core-skills/src/loader.rs",
+      "sha256": "acc354079afe6adddf60a96f848f9e923af889822b8958456b58f7ba9c8a69e2"
+    },
+    {
+      "locator": "openai/codex@rust-v0.144.5:codex-rs/core-skills/src/injection.rs",
+      "sha256": "5ddef9da885d91e8882b9a6e059bd5914f6f9fe42b4ecf4efc1699f912d1fabe"
+    },
+    {
+      "locator": "openai/codex@rust-v0.144.5:codex-rs/core-skills/src/model.rs",
+      "sha256": "23360b3d490b614ba932336ff7bcc1548e9ac42e90220d85657051464eaa1150"
+    },
+    {
+      "locator": "openai/codex@rust-v0.144.5:codex-rs/protocol/src/protocol.rs",
+      "sha256": "375808be883656cf1d1e2fe591696ac547b20f90362ac8f17ce61eb9031e4bc3"
     }
   ],
-  "networkLimitation": "Static validation approves exact declared endpoint identities only. It does not resolve DNS or attest connection-time addresses; the MCP client retains DNS, rebinding, redirect, and egress enforcement."
+  "networkLimitation": "Static validation approves exact declared endpoint identities only. It does not resolve DNS or attest connection-time addresses; the MCP client retains DNS, rebinding, redirect, and egress enforcement.",
+  "repositoryNarrowing": "Codex 0.144.5 runtime accepts short_description through 1024 characters and generally ignores unknown metadata fields. This repository deliberately requires quoted strings, exact known fields, 25-64 character short descriptions, unique products, and closed approved MCP network or local-command identities for deterministic authoring and supply-chain safety.",
+  "fixtures": [
+    {
+      "file": "official-valid-SKILL.md",
+      "sha256": "5e113d5e58f0eb36d43ac39dd4f50daf840eaddcff9c3b1cc1a016f30f1e5579"
+    },
+    {
+      "file": "official-invalid-description-SKILL.md",
+      "sha256": "9f4d44352df38433e7fc1d022d8dc76a2228778159189605c932b1978f48720b"
+    },
+    {
+      "file": "official-valid-openai.yaml",
+      "sha256": "9f06af1a8469f02f6595de2aac361cd8a0770e31f6bcf2808b096ce0db5cdcbc"
+    },
+    {
+      "file": "runtime-valid-openai.yaml",
+      "sha256": "40da3c9b67f198816805b94fd8d45cd1275bd73d67501999ba208a6ce117a142"
+    },
+    {
+      "file": "runtime-invalid-openai.yaml",
+      "sha256": "9ecec3c4f4a041522c433add3c209288bbd63bea5bdc697d1406991f09dd2d42"
+    }
+  ]
 }

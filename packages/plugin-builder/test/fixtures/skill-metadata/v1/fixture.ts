@@ -1,10 +1,14 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { expect } from "bun:test";
+import { createHash } from "node:crypto";
+import { mkdir, rename, symlink, unlink, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   APPROVED_MCP_ENDPOINTS,
   SKILL_METADATA_CONTRACT_PROVENANCE,
   SKILL_METADATA_CONTRACT_VERSION,
 } from "../../../../src/skill-metadata/official-contract-v1.ts";
+import { readStableRegularFile } from "../../../../src/skill-metadata/regular-file-boundary.ts";
 import { validateCanonicalSkillMetadata } from "../../../../src/skill-metadata/validation.ts";
 import { write } from "../../../plugin-package-fixture.ts";
 
@@ -32,6 +36,10 @@ async function assertPinnedProvenance(): Promise<void> {
     SKILL_METADATA_CONTRACT_PROVENANCE.observedCodexCliVersion,
   );
   // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+  expect(provenance.executableSource).toEqual(
+    SKILL_METADATA_CONTRACT_PROVENANCE.executableSource,
+  );
+  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
   expect(provenance.sources).toEqual(
     SKILL_METADATA_CONTRACT_PROVENANCE.artifacts,
   );
@@ -45,6 +53,109 @@ async function assertPinnedProvenance(): Promise<void> {
   expect(provenance.filesystemLimitation).toBe(
     SKILL_METADATA_CONTRACT_PROVENANCE.filesystemLimitation,
   );
+  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+  expect(provenance.repositoryNarrowing).toBe(
+    SKILL_METADATA_CONTRACT_PROVENANCE.repositoryNarrowing,
+  );
+  for (const fixture of provenance.fixtures) {
+    // biome-ignore lint/performance/noAwaitInLoops: each declared fixture is independently bound to its recorded digest.
+    const bytes = await Bun.file(`${import.meta.dir}/${fixture.file}`).bytes();
+    // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+    expect(createHash("sha256").update(bytes).digest("hex")).toBe(
+      fixture.sha256,
+    );
+  }
 }
 
-export { assertPinnedProvenance, pinnedFixture, rejectsMetadata, writeSkill };
+interface AncestorSwapProbeResult {
+  accepted: ReadonlyArray<{ expected: Uint8Array; value: Uint8Array }>;
+  canonicalAfterAttack: Uint8Array;
+  canonicalSkill: Uint8Array;
+}
+
+async function runAncestorSwapProbe(
+  root: string,
+): Promise<AncestorSwapProbeResult> {
+  const skillDirectory = join(root, "skills/example");
+  const parkedDirectory = join(root, "skills/example-canonical");
+  const outsideDirectory = join(root, "outside-example");
+  const canonical = {
+    icon: new TextEncoder().encode("canonical-icon"),
+    openai: new TextEncoder().encode(
+      'interface:\n  display_name: "Canonical"\n',
+    ),
+    skill: new TextEncoder().encode(
+      "---\nname: example\ndescription: Canonical fixture.\n---\ncanonical\n",
+    ),
+  };
+  await mkdir(join(skillDirectory, "agents"), { recursive: true });
+  await writeFile(join(skillDirectory, "SKILL.md"), canonical.skill);
+  await writeFile(
+    join(root, "skills/example/agents/openai.yaml"),
+    canonical.openai,
+  );
+  await writeFile(join(skillDirectory, "icon.png"), canonical.icon);
+  await mkdir(join(outsideDirectory, "agents"), { recursive: true });
+  await writeFile(join(outsideDirectory, "SKILL.md"), "outside-skill");
+  await writeFile(
+    join(outsideDirectory, "agents/openai.yaml"),
+    "outside-openai",
+  );
+  await writeFile(join(outsideDirectory, "icon.png"), "outside-icon");
+
+  const swapOnce = async (): Promise<void> => {
+    await rename(skillDirectory, parkedDirectory);
+    await symlink("../outside-example", skillDirectory);
+    await Bun.sleep(0);
+    await unlink(skillDirectory);
+    await rename(parkedDirectory, skillDirectory);
+  };
+  let attacking = true;
+  const attacker = (async () => {
+    try {
+      for (let index = 0; index < 150; index += 1) {
+        // biome-ignore lint/performance/noAwaitInLoops: the race probe requires serialized complete swap cycles.
+        await swapOnce();
+      }
+    } finally {
+      attacking = false;
+    }
+  })();
+  const accepted: Array<{ expected: Uint8Array; value: Uint8Array }> = [];
+  while (attacking) {
+    for (const probe of [
+      { expected: canonical.skill, path: "skills/example/SKILL.md" },
+      {
+        expected: canonical.openai,
+        path: "skills/example/agents/openai.yaml",
+      },
+      { expected: canonical.icon, path: "skills/example/icon.png" },
+    ]) {
+      try {
+        // biome-ignore lint/performance/noAwaitInLoops: each read races the same adversarial filesystem transition.
+        const value = await readStableRegularFile(root, probe.path, 65_536);
+        accepted.push({ expected: probe.expected, value });
+      } catch {
+        // Fail-closed rejection is expected while the hostile writer owns the path.
+      }
+    }
+  }
+  await attacker;
+  return {
+    accepted,
+    canonicalAfterAttack: await readStableRegularFile(
+      root,
+      "skills/example/SKILL.md",
+      65_536,
+    ),
+    canonicalSkill: canonical.skill,
+  };
+}
+
+export {
+  assertPinnedProvenance,
+  pinnedFixture,
+  rejectsMetadata,
+  runAncestorSwapProbe,
+  writeSkill,
+};
