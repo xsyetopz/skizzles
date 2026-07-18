@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +35,7 @@ import {
   PLUGIN_NAME,
   TEMPLATE_PATH,
 } from "./contract.ts";
+import { replaceDirectoryTransaction } from "./destination-transaction.ts";
 import {
   copyCanonicalFile,
   copyCanonicalTree,
@@ -70,27 +71,36 @@ export async function stagePlugin(
   destination: string,
 ): Promise<void> {
   const paths = packagePaths(repoRoot);
+  await replaceDirectoryTransaction(destination, (privateRoot) =>
+    constructPlugin(paths, privateRoot),
+  );
+}
+
+async function constructPlugin(
+  paths: PackagePaths,
+  destination: string,
+): Promise<void> {
   await validateCanonicalShippedLanguage(paths.repoRoot);
   await asPackagingError(() => validateCanonicalAgentContracts(paths.repoRoot));
   await asPackagingError(() => validateCanonicalSkillMetadata(paths.repoRoot));
   await asPackagingError(() => validatePromptPolicySource(paths.repoRoot));
-  await rm(destination, { force: true, recursive: true });
-  await mkdir(destination, { recursive: true });
   await copyCanonicalTree(paths.templateRoot, destination, "plugin template");
 
   for (const [sourcePath, destinationPath] of CANONICAL_TREE_INPUTS) {
     const source = join(paths.repoRoot, sourcePath);
-    if (!(await exists(source))) {
-      continue;
+    // biome-ignore lint/performance/noAwaitInLoops: canonical inputs are copied in declared order for deterministic failures.
+    const sourceExists = await exists(source);
+    if (sourceExists) {
+      await copyCanonicalTree(
+        source,
+        join(destination, destinationPath),
+        sourcePath,
+      );
     }
-    await copyCanonicalTree(
-      source,
-      join(destination, destinationPath),
-      sourcePath,
-    );
   }
 
   for (const [sourcePath, destinationPath] of CANONICAL_FILE_INPUTS) {
+    // biome-ignore lint/performance/noAwaitInLoops: canonical inputs are copied in declared order for deterministic failures.
     await copyCanonicalFile(
       join(paths.repoRoot, sourcePath),
       join(destination, destinationPath),
@@ -126,26 +136,15 @@ export async function stagePlugin(
 
 export async function buildPlugin(repoRoot = defaultRepoRoot()): Promise<void> {
   const paths = packagePaths(repoRoot);
-  const stageParent = dirname(paths.generatedRoot);
-  await mkdir(stageParent, { recursive: true });
-  const stagingRoot = await mkdtemp(
-    join(stageParent, `.${PLUGIN_NAME}-stage-`),
-  );
-
-  try {
-    await stagePlugin(paths.repoRoot, stagingRoot);
-    await rm(paths.generatedRoot, { force: true, recursive: true });
-    await rename(stagingRoot, paths.generatedRoot);
-  } finally {
-    await rm(stagingRoot, { force: true, recursive: true });
-  }
+  await stagePlugin(paths.repoRoot, paths.generatedRoot);
 }
 
 export async function checkPlugin(repoRoot = defaultRepoRoot()): Promise<void> {
   const paths = packagePaths(repoRoot);
-  const comparisonRoot = await mkdtemp(
+  const comparisonParent = await mkdtemp(
     join(tmpdir(), `${PLUGIN_NAME}-package-check-`),
   );
+  const comparisonRoot = join(comparisonParent, PLUGIN_NAME);
 
   try {
     await stagePlugin(paths.repoRoot, comparisonRoot);
@@ -159,22 +158,20 @@ export async function checkPlugin(repoRoot = defaultRepoRoot()): Promise<void> {
       );
     }
   } finally {
-    await rm(comparisonRoot, { force: true, recursive: true });
+    await rm(comparisonParent, { force: true, recursive: true });
   }
 }
 
 function defaultRepoRoot(): string {
   let candidate = dirname(fileURLToPath(import.meta.url));
-  while (true) {
-    if (isSkizzlesWorkspace(candidate)) {
-      return candidate;
-    }
+  while (!isSkizzlesWorkspace(candidate)) {
     const parent = dirname(candidate);
     if (parent === candidate) {
       throw new PackagingError("Unable to locate the Skizzles workspace root.");
     }
     candidate = parent;
   }
+  return candidate;
 }
 
 function isSkizzlesWorkspace(candidate: string): boolean {
