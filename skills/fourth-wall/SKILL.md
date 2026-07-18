@@ -156,3 +156,24 @@ When observed behavior reveals a reusable routing or lifecycle caveat, follow [r
 - Do not turn size, difficulty, or uncertainty into a blocker. A blocker identifies an external dependency, contradiction, safety issue, or owner decision.
 - Do not accept completion prose as proof.
 - Do not attempt to promote a child into the root. Root renewal requires a new top-level task and an explicit handoff.
+
+## Versioned trust contracts
+
+Context crossing boundaries uses the versioned
+[context-envelope schema](contracts/context-envelope.schema.json). Each
+property carries origin/time, trust, SHA-256 integrity,
+scope/objective/policy version, retention/expiry, sensitivity/redaction,
+transformations and producer, and deterministic validation status/evidence.
+LLM-transformed values remain untrusted until property-specific deterministic
+validation. Handoffs and reviews use
+[handoff-review](contracts/handoff-review.schema.json) to integrity-bind the
+objective, inputs, artifacts, acceptance contract, policy, model, actors, and
+evidence references without storing raw secrets. A conforming deterministic
+consumer additionally rejects expired handoffs, current-version or digest
+mismatches, and equal author/reviewer identities; JSON Schema alone cannot
+compare identities or wall-clock/current-version state. The canonical public
+[trust-boundary incident-regression corpus](fixtures/trust-boundary-incidents.json)
+is implementation-visible regression input, not independent or private
+acceptance material.
+
+These schemas guide tool/plugin composition and validation; they cannot intercept native Codex handoffs or enforce the host lifecycle.

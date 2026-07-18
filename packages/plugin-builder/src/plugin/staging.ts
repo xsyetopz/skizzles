@@ -3,6 +3,11 @@ import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { AgentContractPackageError } from "../agent-contract/contract.ts";
+import {
+  validateCanonicalAgentContracts,
+  validateStagedAgentContracts,
+} from "../agent-contract/validation.ts";
 import {
   ContainerLabPackageError,
   stageContainerLabRuntime,
@@ -56,6 +61,7 @@ export async function stagePlugin(
   destination: string,
 ): Promise<void> {
   const paths = packagePaths(repoRoot);
+  await asPackagingError(() => validateCanonicalAgentContracts(paths.repoRoot));
   await asPackagingError(() => validatePromptPolicySource(paths.repoRoot));
   await rm(destination, { force: true, recursive: true });
   await mkdir(destination, { recursive: true });
@@ -90,6 +96,10 @@ export async function stagePlugin(
 
   await asPackagingError(() =>
     stageContainerLabRuntime(paths.repoRoot, destination),
+  );
+
+  await asPackagingError(() =>
+    validateStagedAgentContracts(paths.repoRoot, destination),
   );
 
   await validateGeneratedPlugin(
@@ -183,6 +193,7 @@ async function asPackagingError<T>(operation: () => Promise<T>): Promise<T> {
     return await operation();
   } catch (error) {
     if (
+      error instanceof AgentContractPackageError ||
       error instanceof ContainerLabPackageError ||
       error instanceof PromptPolicyPackageError
     ) {

@@ -147,3 +147,21 @@ Treat commits as validated repository checkpoints, independent of `/goal` lifecy
 Commit when a coherent ownership slice is integrated, its focused proof passes, and no known breakage remains in that slice. Prefer a checkpoint before switching causal surfaces, beginning a risky refactor, transferring substantial ownership, or starting independent QA or Review. Keep unrelated slices separate and write commit messages in terms of the behavioral outcome.
 
 Do not commit every child completion automatically. The root first inspects shared-worktree ownership, integrates the slice, excludes unrelated user or agent changes, and verifies the evidence. Do not checkpoint a known-broken intermediate state merely to reduce diff size. Preserve reviewer corrections as later commits when practical so accepted history remains inspectable. Before final acceptance, validate the aggregate commit series and working tree, not only the newest checkpoint.
+
+## Versioned acceptance contract
+
+The [acceptance schema](contracts/acceptance.schema.json) requires requirement
+IDs, an explicit objective-gates-before-judge evaluation order, artifact
+SHA-256 hashes, causal evidence kinds, fixed retries/seeds, fixed judge version
+and prompt digest, and author/reviewer fields with self-review disabled. A
+conforming deterministic consumer also rejects duplicate requirement IDs,
+non-contiguous gate order, unknown requirement references, or equal
+author/reviewer identities; JSON Schema alone cannot compare identities or
+relate arbitrary array members. The
+[acceptance incident-regression corpus](fixtures/acceptance-incidents.json) is
+canonical public, implementation-visible regression input—not independent or
+private acceptance material—for verifier mutation, solution leakage, grader
+injection, hard-coded answers, fake effects, success-token spoofing, and
+deceptive completion.
+
+Schemas guide composition and deterministic validation; they cannot intercept native Codex handoffs or enforce host lifecycle.

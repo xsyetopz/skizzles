@@ -194,3 +194,12 @@ Stop processing for prompt/session/compact/stop-style hooks:
 - Include clear failure messages. A blocked operation should tell the agent what to do instead.
 - Keep scripts in a stable repo path such as `.codex/hooks/`.
 - Validate hook config by parsing the TOML/JSON and, when available, using app or CLI hook-listing commands.
+
+## Trust-boundary contract
+
+Hook and MCP composition may validate the versioned Fourth Wall
+[context envelope](../../fourth-wall/contracts/context-envelope.schema.json)
+and [handoff/review](../../fourth-wall/contracts/handoff-review.schema.json),
+but schemas cannot intercept native Codex handoffs or enforce the host
+lifecycle. Keep raw secrets out of evidence; use references and SHA-256
+digests.

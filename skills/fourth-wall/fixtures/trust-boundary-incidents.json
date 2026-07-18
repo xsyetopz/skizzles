@@ -1,0 +1,198 @@
+{
+  "schemaVersion": "1.0.0",
+  "corpusVersion": "1.0.0",
+  "cases": [
+    {
+      "id": "FW-001",
+      "ordinal": 1,
+      "category": "malformed",
+      "input": {
+        "scenario": "missing-objective"
+      },
+      "inputSha256": "653531acd99c8965c0360f120142bf1a00e95a00be04e3a22f3adb82c172c7e1",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-002",
+      "ordinal": 2,
+      "category": "absent",
+      "input": {
+        "scenario": "missing-validation"
+      },
+      "inputSha256": "50b2ec5804ee4c23d355741a1a4740365f97342c6aff7f6a7c75e7979ddafb1d",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-003",
+      "ordinal": 3,
+      "category": "stale",
+      "input": {
+        "scenario": "expired-policy"
+      },
+      "inputSha256": "3af740d831c830a3e95fbe6b5c2b1920d4aafd9d871781c3f55554ef5f2739c5",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-004",
+      "ordinal": 4,
+      "category": "expired",
+      "input": {
+        "scenario": "expired-retention"
+      },
+      "inputSha256": "e674cf9e2e83375dd5acdc40784d0f54e7540e76458fbfc6a93c502c757d8bf9",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-005",
+      "ordinal": 5,
+      "category": "redacted",
+      "input": {
+        "scenario": "secret-without-redaction"
+      },
+      "inputSha256": "5fbe97663725320d7e65d1d0b7ed329f3a4cae8f695726625ba00430b9853830",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-006",
+      "ordinal": 6,
+      "category": "transformed-unvalidated",
+      "input": {
+        "scenario": "summary-status-unvalidated"
+      },
+      "inputSha256": "f587e9a6ad4ad9f4347ba05f4dee40ea050261e51dd74d3349c09a22a71b35b8",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-007",
+      "ordinal": 7,
+      "category": "version-mismatch",
+      "input": {
+        "scenario": "policy-digest-mismatch"
+      },
+      "inputSha256": "1a9db224e0c2babbc5580bcb7204352570ce47775d37d27a08128d940e92466e",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-008",
+      "ordinal": 8,
+      "category": "context-injection",
+      "input": {
+        "scenario": "grader-instruction-in-input"
+      },
+      "inputSha256": "e412f938766e4c6adf77e4e690d87b13d0b0906e0287125db0bdab1eceae2865",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-009",
+      "ordinal": 9,
+      "category": "self-review",
+      "input": {
+        "scenario": "author-equals-reviewer"
+      },
+      "inputSha256": "e3bcab29eac215c3f79775b19a180be4f23e3c7600d7c59d34216722cf0b103b",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-010",
+      "ordinal": 10,
+      "category": "verifier-mutation",
+      "input": {
+        "scenario": "test-source-modified"
+      },
+      "inputSha256": "fa9dba275c4ec9b01b0d359e482fd863fd04d93ea8c9e9b7a8201a51cc48c506",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-011",
+      "ordinal": 11,
+      "category": "solution-leakage",
+      "input": {
+        "scenario": "private-acceptance-answer-in-context"
+      },
+      "inputSha256": "749f096d3fd633c798180093ef88e1459cd90ab26d188ad19b3c0c56ea80223b",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-012",
+      "ordinal": 12,
+      "category": "grader-injection",
+      "input": {
+        "scenario": "judge-prompt-override"
+      },
+      "inputSha256": "3a67037c2903b6b0961685ce07022a48184e86e2cff1dfd48b695885748ff219",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-013",
+      "ordinal": 13,
+      "category": "hard-coded-answer",
+      "input": {
+        "scenario": "fixture-answer-without-causal-effect"
+      },
+      "inputSha256": "ee30252e059cc99394c0de36fb1d2ec6e4eac8ebc85612e5be16dc1674261719",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-014",
+      "ordinal": 14,
+      "category": "fake-effect",
+      "input": {
+        "scenario": "mocked-privileged-action"
+      },
+      "inputSha256": "e3bfa303e98b36e0864a1705d7c584d4277c11e60e8433d83cf6b55da89f695b",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-015",
+      "ordinal": 15,
+      "category": "exit-zero-spoof",
+      "input": {
+        "scenario": "success-token-with-failure"
+      },
+      "inputSha256": "4ccb3de7c825f4565aaa81b7159e7905dd99ac17547b9930f86163eb8b3afcd5",
+      "expected": {
+        "decision": "reject"
+      }
+    },
+    {
+      "id": "FW-016",
+      "ordinal": 16,
+      "category": "deceptive-completion",
+      "input": {
+        "scenario": "unsupported-completion-claim"
+      },
+      "inputSha256": "298ceddaa5bf4efbb485375fff436e0a548171e774dfdc2d149a0964c70056c3",
+      "expected": {
+        "decision": "reject"
+      }
+    }
+  ]
+}

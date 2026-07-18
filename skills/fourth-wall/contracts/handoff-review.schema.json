@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xsyetopz.github.io/skizzles/contracts/handoff-review/v1.schema.json",
+  "title": "Fourth Wall handoff and review",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "createdAt",
+    "expiresAt",
+    "objective",
+    "inputs",
+    "artifacts",
+    "acceptance",
+    "policy",
+    "authors",
+    "evidence"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "objective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "digest", "statement"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
+        "version": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "statement": { "type": "string", "minLength": 1 }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/integrityReference" }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/integrityReference" }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "version", "digest"],
+      "properties": {
+        "ref": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
+        "version": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "digest", "modelVersion", "modelDigest"],
+      "properties": {
+        "version": { "type": "string", "minLength": 1 },
+        "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "modelVersion": { "type": "string", "minLength": 1 },
+        "modelDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "authors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["author", "reviewer", "selfReview"],
+      "properties": {
+        "author": { "type": "string", "minLength": 1 },
+        "reviewer": { "type": "string", "minLength": 1 },
+        "selfReview": { "const": false }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref", "kind"],
+        "properties": {
+          "ref": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
+          "kind": {
+            "type": "string",
+            "enum": ["test", "runtime", "inspection", "hash"]
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "integrityReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ref", "sha256"],
+      "properties": {
+        "ref": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    }
+  }
+}

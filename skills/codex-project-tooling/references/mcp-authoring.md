@@ -100,3 +100,12 @@ If the MCP is registered in Codex config, start a fresh trusted Codex thread and
 - A harmless health tool works.
 - Outputs are compact in the agent transcript.
 - Stack cleanup runs when the MCP process exits, if the server owns a stack.
+
+## Trust-boundary contract
+
+Hook and MCP composition may validate the versioned Fourth Wall
+[context envelope](../../fourth-wall/contracts/context-envelope.schema.json)
+and [handoff/review](../../fourth-wall/contracts/handoff-review.schema.json),
+but schemas cannot intercept native Codex handoffs or enforce the host
+lifecycle. Keep raw secrets out of evidence; use references and SHA-256
+digests.

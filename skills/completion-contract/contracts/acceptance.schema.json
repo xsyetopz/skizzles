@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xsyetopz.github.io/skizzles/contracts/acceptance/v1.schema.json",
+  "title": "Completion Contract acceptance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "requirements",
+    "objectiveGates",
+    "evaluationOrder",
+    "artifacts",
+    "evidence",
+    "execution",
+    "judge",
+    "authors"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "requirements": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "obligation"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,31}$" },
+          "obligation": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "objectiveGates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["order", "requirementId", "check"],
+        "properties": {
+          "order": { "type": "integer", "minimum": 1 },
+          "requirementId": { "type": "string", "minLength": 1 },
+          "check": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "evaluationOrder": {
+      "type": "array",
+      "prefixItems": [{ "const": "objectiveGates" }, { "const": "judge" }],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ref", "sha256"],
+        "properties": {
+          "ref": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "ref"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["test", "runtime", "inspection", "hash"]
+          },
+          "ref": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" }
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retries", "seed"],
+      "properties": {
+        "retries": { "type": "integer", "minimum": 0 },
+        "seed": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "judge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "version", "promptSha256"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "version": { "type": "string", "minLength": 1 },
+        "promptSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "authors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["author", "reviewer", "selfReview"],
+      "properties": {
+        "author": { "type": "string", "minLength": 1 },
+        "reviewer": { "type": "string", "minLength": 1 },
+        "selfReview": { "const": false }
+      }
+    }
+  }
+}

@@ -271,6 +271,11 @@ async function fixture(temporaryRoots: string[]): Promise<string> {
   );
   const canonicalRoot = resolve(import.meta.dir, "../../..");
   for (const path of [
+    "skills/fourth-wall/contracts/context-envelope.schema.json",
+    "skills/fourth-wall/contracts/handoff-review.schema.json",
+    "skills/fourth-wall/fixtures/trust-boundary-incidents.json",
+    "skills/completion-contract/contracts/acceptance.schema.json",
+    "skills/completion-contract/fixtures/acceptance-incidents.json",
     "packages/prompt-layer/assets/integrations/prompt-policy.json",
     "packages/prompt-layer/assets/instructions/skizzles-base.md",
     "packages/prompt-layer/assets/instructions/skizzles-base.provenance.json",

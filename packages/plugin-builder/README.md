@@ -20,6 +20,9 @@ provides the repository CLI.
   facade; `src/prompt-policy/` owns its contract parsing, containment, layout,
   and packaged-surface validation.
 - `src/container-lab-package.ts` owns the Container Lab distribution contract.
+- `src/agent-contract/` strictly parses the versioned Fourth Wall and Completion
+  Contract schemas and public incident corpora, then proves staged copies are
+  byte-identical to their canonical skill owners.
 - `test/` follows those capabilities; `plugin-package-fixture.ts` is the single
   canonical isolated-workspace fixture builder.
 
