@@ -80,6 +80,24 @@ function encodedCommand(rewritten: string): string {
   return encoded;
 }
 
+function rewriteContract(payload: Record<string, unknown>) {
+  const output = payload["hookSpecificOutput"] as Record<string, unknown>;
+  return {
+    keys: Object.keys(output).sort(),
+    hasPermissionDecision: Object.hasOwn(output, "permissionDecision"),
+    hasPermissionDecisionReason: Object.hasOwn(
+      output,
+      "permissionDecisionReason",
+    ),
+  };
+}
+
+const neutralRewriteContract = {
+  keys: ["hookEventName", "updatedInput"],
+  hasPermissionDecision: false,
+  hasPermissionDecisionReason: false,
+};
+
 async function waitForFile(path: string, timeoutMilliseconds = 2_000) {
   const deadline = performance.now() + timeoutMilliseconds;
   while (performance.now() < deadline) {
@@ -258,6 +276,7 @@ describe("managed command output hook", () => {
       }),
     });
     const payload = JSON.parse(text(result.stdout));
+    expect(rewriteContract(payload)).toEqual(neutralRewriteContract);
     const rewritten = payload.hookSpecificOutput.updatedInput.cmd as string;
     expect(rewritten).toStartWith(`${runnerCommand} run --base64url `);
     expect(Buffer.from(encodedCommand(rewritten), "base64url").toString()).toBe(
@@ -294,6 +313,7 @@ describe("managed command output hook", () => {
       }),
     });
     const payload = JSON.parse(text(result.stdout));
+    expect(rewriteContract(payload)).toEqual(neutralRewriteContract);
     const rewritten = payload.hookSpecificOutput.updatedInput.command as string;
     expect(Buffer.from(encodedCommand(rewritten), "base64url").toString()).toBe(
       command,
@@ -342,6 +362,9 @@ describe("managed command output hook", () => {
         }),
       });
       expect(text(result.stdout), command).not.toBe("");
+      expect(rewriteContract(JSON.parse(text(result.stdout)))).toEqual(
+        neutralRewriteContract,
+      );
     }
   });
 
@@ -356,10 +379,38 @@ describe("managed command output hook", () => {
         }),
       });
       expect(text(result.stdout), command).not.toBe("");
+      expect(rewriteContract(JSON.parse(text(result.stdout)))).toEqual(
+        neutralRewriteContract,
+      );
     }
   });
 
-  test("does not auto-allow path, environment, config, or compound-command injection", () => {
+  test("rewrites effectful recognized commands without elevating permission", () => {
+    for (const command of [
+      "cargo install arbitrary-package",
+      "xcodebuild -scheme App archive",
+      "codex-container-lab run --lab experiment -- rm data",
+    ]) {
+      const result = invoke(hook, [], {
+        stdin: JSON.stringify({
+          hook_event_name: "PreToolUse",
+          tool_input: { command, workdir: "/tmp/project" },
+        }),
+      });
+      const payload = JSON.parse(text(result.stdout));
+      expect(rewriteContract(payload)).toEqual(neutralRewriteContract);
+      const updatedInput = payload.hookSpecificOutput.updatedInput;
+      expect(updatedInput.workdir).toBe("/tmp/project");
+      expect(
+        Buffer.from(
+          encodedCommand(updatedInput.command),
+          "base64url",
+        ).toString(),
+      ).toBe(command);
+    }
+  });
+
+  test("does not rewrite path, environment, config, or compound-command injection", () => {
     for (const command of [
       "/usr/bin/xcodebuild -scheme App build",
       "./gradlew test",
@@ -572,6 +623,48 @@ describe("managed command output runner", () => {
     const path = artifactPath(text(result.stdout));
     const status = JSON.parse(readFileSync(join(path, "status.json"), "utf8"));
     expect(status.drainIncomplete).toBe(true);
+  });
+
+  test("settles background descendants after a normal shell exit", async () => {
+    if (process.platform === "win32") return;
+    const root = temporaryDirectory();
+    const descendantPidPath = join(root, "normal-exit-descendant.pid");
+    const child = spawnRunner(
+      `printf shell-output; /bin/sh -c 'trap "" TERM; printf %s $$ > "${descendantPidPath}"; while :; do sleep 1; done' &`,
+      join(root, "artifacts"),
+      {
+        CODEX_COMMAND_DRAIN_MS: "50",
+        CODEX_COMMAND_SIGNAL_GRACE_MS: "50",
+      },
+    );
+    await waitForFile(descendantPidPath);
+    const descendantPid = Number.parseInt(
+      readFileSync(descendantPidPath, "utf8"),
+      10,
+    );
+    const exitCode = await exitWithin(child, 1_500);
+    const descendantExited = await waitForProcessExit(descendantPid, 500);
+    if (!descendantExited) stopProcess(descendantPid);
+    if (exitCode === undefined) stopProcess(child.pid);
+
+    expect(exitCode).toBe(0);
+    expect(descendantExited).toBe(true);
+    const output = await new Response(child.stdout).text();
+    const directory = artifactPath(output);
+    const status = JSON.parse(
+      readFileSync(join(directory, "status.json"), "utf8"),
+    );
+    expect(status.exitCode).toBe(0);
+    expect(status.completedAt).toBeString();
+    expect(status.drainIncomplete).toBe(true);
+    expect(readFileSync(join(directory, "stdout.log"), "utf8")).toBe(
+      "shell-output",
+    );
+    expect(readdirSync(directory).sort()).toEqual([
+      "status.json",
+      "stderr.log",
+      "stdout.log",
+    ]);
   });
 
   test("runs even when artifact setup fails", () => {

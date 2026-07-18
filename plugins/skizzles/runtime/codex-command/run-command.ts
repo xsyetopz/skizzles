@@ -53,18 +53,27 @@ function progressReporter(
   };
 }
 
-async function drainCaptures(
+function waitForCaptureDrain(
   captures: readonly StreamCapture[],
   drainMilliseconds: number,
 ): Promise<boolean> {
   const allDone = Promise.all(captures.map((capture) => capture.done));
-  const drained = await Promise.race([
+  return Promise.race([
     allDone.then(() => true),
     Bun.sleep(drainMilliseconds).then(() => false),
   ]);
-  for (const capture of captures) capture.cancel();
-  await Promise.race([allDone, Bun.sleep(25)]);
-  return !drained;
+}
+
+async function finishCaptures(captures: readonly StreamCapture[]) {
+  const allDone = Promise.all(captures.map((capture) => capture.done));
+  const finished = await Promise.race([
+    allDone.then(() => true),
+    Bun.sleep(25).then(() => false),
+  ]);
+  if (!finished) {
+    for (const capture of captures) capture.cancel();
+    await Promise.race([allDone, Bun.sleep(25)]);
+  }
 }
 
 function renderRetainedOutput(
@@ -195,14 +204,19 @@ export async function runCommand(script: string): Promise<number> {
 
   await supervisedShell.waitForShell();
   let result: Awaited<ReturnType<typeof supervisedShell.finish>>;
+  let drainedNaturally = false;
   try {
-    status.drainIncomplete = await drainCaptures(
+    drainedNaturally = await waitForCaptureDrain(
       captures,
       settings.drainMilliseconds,
     );
   } finally {
     try {
       result = await supervisedShell.finish();
+      // A forced process-group cleanup means the post-shell drain did not
+      // complete naturally, even if the pipe readers happened to finish.
+      status.drainIncomplete = !drainedNaturally || result.forcedCleanup;
+      await finishCaptures(captures);
       status.completedAt = new Date().toISOString();
       status.exitCode = result.exitCode;
       if (result.signal !== undefined) status.signal = result.signal;

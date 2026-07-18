@@ -8,6 +8,7 @@ export type SupervisedShell = {
   finish: () => Promise<{
     exitCode: number;
     signal: SupervisedSignal | undefined;
+    forcedCleanup: boolean;
   }>;
   close: () => void;
 };
@@ -142,6 +143,18 @@ export function spawnSupervisedShell(
     await waitForProcessTreeExit(child, 500);
   };
 
+  const settleNormalCompletion = async (): Promise<boolean> => {
+    if (!processTreeExists(child)) return false;
+    signalProcessTree(child, "SIGTERM");
+    const exitedGracefully = await waitForProcessTreeExit(
+      child,
+      signalGraceMilliseconds,
+    );
+    if (!exitedGracefully) signalProcessTree(child, "SIGKILL");
+    await waitForProcessTreeExit(child, 500);
+    return true;
+  };
+
   return {
     child,
     waitForShell: async () => {
@@ -151,13 +164,18 @@ export function spawnSupervisedShell(
     },
     finish: async () => {
       await Bun.sleep(0);
-      await settleReceivedSignal();
+      let forcedCleanup = false;
+      if (receivedSignal === undefined) {
+        forcedCleanup = await settleNormalCompletion();
+      } else {
+        await settleReceivedSignal();
+      }
       const signal = receivedSignal;
       const exitCode =
         signal !== undefined && signalAfterShellExit
           ? signalExitCodes[signal]
           : (shellExitCode ?? (await child.exited));
-      return { exitCode, signal };
+      return { exitCode, signal, forcedCleanup };
     },
     close: () => {
       finishEscalation();

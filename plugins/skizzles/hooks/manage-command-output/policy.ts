@@ -113,7 +113,7 @@ export function isRecognized(command: SimpleCommand | undefined): boolean {
   );
 }
 
-/** A rewritten script is allowed only when every top-level command is trusted. */
+/** A script is rewritten only when every top-level command is recognized. */
 export function isManagedScript(script: string): boolean {
   const commands = simpleCommands(script);
   return commands?.every(isRecognized) ?? false;

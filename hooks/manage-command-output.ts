@@ -3,7 +3,9 @@
 /**
  * Routes only confidently-recognized, potentially noisy commands through the
  * command-output supervisor. The classifier is deliberately a conservative
- * shell subset: unsupported syntax is always passed through unchanged.
+ * shell subset: unsupported syntax is always passed through unchanged. A
+ * rewrite never grants permission; Codex's normal approval and sandbox policy
+ * still governs the transformed command.
  */
 import { isManagedScript } from "./manage-command-output/policy.ts";
 
@@ -45,7 +47,6 @@ function rewrittenCommand(event: HookEvent): string | undefined {
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
-      permissionDecision: "allow",
       updatedInput: {
         ...event.tool_input,
         [command.key]: `${runner} run --base64url ${encoded}`,
