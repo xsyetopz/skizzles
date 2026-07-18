@@ -23,6 +23,10 @@ interface ContainerLabContract {
   configuredRuntime: string;
   binaries: { operational: string; reaper: string };
   execution: { adminMaxBytes: number };
+  locations: {
+    canonicalWorkspace: string;
+    packagedPlugin: string;
+  };
   ownership: {
     runtimeOwner: "skizzles";
     canonicalSource: string;
@@ -45,12 +49,15 @@ function contract(descriptorPath?: string): ContainerLabContract {
   const root = objectValue(value);
   const binaries = objectValue(root?.["binaries"]);
   const execution = objectValue(root?.["execution"]);
+  const locations = objectValue(root?.["locations"]);
   const ownership = objectValue(root?.["ownership"]);
   const bundled = objectValue(root?.["bundled"]);
   const configuredRuntime = nonEmptyString(root?.["configuredRuntime"]);
   const operational = nonEmptyString(binaries?.["operational"]);
   const reaper = nonEmptyString(binaries?.["reaper"]);
   const adminMaxBytes = execution?.["adminMaxBytes"];
+  const canonicalWorkspace = locations?.["canonicalWorkspace"];
+  const packagedPlugin = locations?.["packagedPlugin"];
   const canonicalSource = ownership?.["canonicalSource"];
   const provenanceCommit = ownership?.["provenanceCommit"];
   const operationalEntrypoint = bundled?.["operationalEntrypoint"];
@@ -65,6 +72,8 @@ function contract(descriptorPath?: string): ContainerLabContract {
     !Number.isSafeInteger(adminMaxBytes) ||
     typeof adminMaxBytes !== "number" ||
     adminMaxBytes <= 0 ||
+    !relativePath(canonicalWorkspace) ||
+    !relativePath(packagedPlugin) ||
     ownership?.["runtimeOwner"] !== "skizzles" ||
     !relativePath(canonicalSource) ||
     typeof provenanceCommit !== "string" ||
@@ -83,6 +92,7 @@ function contract(descriptorPath?: string): ContainerLabContract {
     configuredRuntime,
     binaries: { operational, reaper },
     execution: { adminMaxBytes },
+    locations: { canonicalWorkspace, packagedPlugin },
     ownership: {
       runtimeOwner: "skizzles",
       canonicalSource,
@@ -99,13 +109,11 @@ function contract(descriptorPath?: string): ContainerLabContract {
 }
 
 function descriptorForBundle(bundleRoot: string): string {
-  const canonical = join(
-    bundleRoot,
-    "packages/container-lab/assets/integrations/container-lab.json",
-  );
+  const locations = contract().locations;
+  const canonical = join(bundleRoot, locations.canonicalWorkspace);
   return existsSync(canonical)
     ? canonical
-    : join(bundleRoot, "integrations/container-lab.json");
+    : join(bundleRoot, locations.packagedPlugin);
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
