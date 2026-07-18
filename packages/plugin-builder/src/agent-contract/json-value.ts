@@ -1,4 +1,8 @@
 import { AgentContractPackageError } from "./contract.ts";
+import {
+  assertNoDuplicateJsonKeys,
+  DuplicateJsonKeyError,
+} from "./duplicate-json.ts";
 
 export type JsonPrimitive = boolean | null | number | string;
 export type JsonValue =
@@ -7,9 +11,16 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 export function parseJsonAsset(bytes: Buffer, label: string): JsonValue {
+  const text = bytes.toString("utf8");
   try {
-    return JSON.parse(bytes.toString("utf8")) as JsonValue;
-  } catch {
+    assertNoDuplicateJsonKeys(text);
+    return JSON.parse(text) as JsonValue;
+  } catch (error) {
+    if (error instanceof DuplicateJsonKeyError) {
+      throw new AgentContractPackageError(
+        `${label} contains a duplicate JSON object key.`,
+      );
+    }
     throw new AgentContractPackageError(`${label} is not valid JSON.`);
   }
 }

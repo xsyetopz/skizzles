@@ -191,6 +191,10 @@ contains valid controls plus executable mutations and stable rejection codes.
 It is implementation-visible regression input, not independent or private
 acceptance material.
 
+Published contract assets are bounded to 1 MiB. Composition rejects duplicate
+JSON object keys by decoded identity before `JSON.parse`, including collisions
+between literal and Unicode-escaped key spellings.
+
 Neither the published schemas nor the repository evaluator intercept native
 Codex handoffs, attest that a host supplied truthful facts, or enforce the host
 lifecycle. Native integration must collect trusted facts and invoke a

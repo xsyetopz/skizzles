@@ -1,6 +1,7 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
+  appendFile,
   link,
   mkdir,
   readFile,
@@ -120,6 +121,49 @@ describe("pinned agent contract publications", () => {
     expect(message).toBe("canonical Fourth Wall schema is not valid JSON.");
     expect(message).not.toContain(root);
     expect(message).not.toContain("SyntaxError");
+  });
+
+  it("rejects conflicting duplicate acceptance refs in evaluator options", async () => {
+    const root = await fixture();
+    await replaceRaw(
+      root,
+      TRUST_CORPUS,
+      '      "ref": "contracts/acceptance.json"\n    },',
+      '      "ref": "contracts/acceptance.json",\n      "\\u0072ef": "contracts/unrelated.json"\n    },',
+    );
+
+    await expect(validateCanonicalAgentContracts(root)).rejects.toThrow(
+      "canonical Fourth Wall corpus contains a duplicate JSON object key",
+    );
+  });
+
+  it("rejects conflicting duplicate acceptance refs in a handoff", async () => {
+    const root = await fixture();
+    await replaceRaw(
+      root,
+      TRUST_CORPUS,
+      '          "ref": "contracts/acceptance.json",',
+      '          "ref": "contracts/acceptance.json",\n          "ref": "contracts/unrelated.json",',
+    );
+
+    await expect(validateCanonicalAgentContracts(root)).rejects.toThrow(
+      "canonical Fourth Wall corpus contains a duplicate JSON object key",
+    );
+  });
+
+  it("rejects nested duplicate keys by decoded Unicode identity", async () => {
+    const root = await fixture();
+    const escapedVersionKey = ["\\u0076", "ersion"].join("");
+    await replaceRaw(
+      root,
+      TRUST_CORPUS,
+      '    "policy": {\n      "version": "policy-2",',
+      `    "policy": {\n      "version": "policy-2",\n      "${escapedVersionKey}": "conflict",`,
+    );
+
+    await expect(validateCanonicalAgentContracts(root)).rejects.toThrow(
+      "canonical Fourth Wall corpus contains a duplicate JSON object key",
+    );
   });
 });
 
@@ -363,7 +407,9 @@ describe("agent contract filesystem boundary", () => {
         },
       ).then(() => undefined),
     );
-    expect(message).toBe("transient asset changed during identity-bound read.");
+    expect(message).toBe(
+      "transient asset changed identity or uses a hardlinked file.",
+    );
     expect(message).not.toContain(root);
   });
 
@@ -381,7 +427,59 @@ describe("agent contract filesystem boundary", () => {
         },
       ).then(() => undefined),
     );
-    expect(message).toBe("rewritten asset changed during identity-bound read.");
+    expect(message).toBe(
+      "rewritten asset changed identity or uses a hardlinked file.",
+    );
+    expect(message).not.toContain(root);
+  });
+
+  it("rejects same-inode rewrite between target snapshot and open", async () => {
+    const root = await fixture();
+    const target = join(root, CONTEXT_SCHEMA);
+    const message = await rejectionMessage(
+      readContainedJsonAsset(
+        root,
+        CONTEXT_SCHEMA,
+        "pre-open rewritten asset",
+        undefined,
+        undefined,
+        async () => {
+          await writeFile(target, '{"changed":true}\n');
+        },
+      ).then(() => undefined),
+    );
+    expect(message).toBe(
+      "pre-open rewritten asset changed identity or uses a hardlinked file.",
+    );
+    expect(message).not.toContain(root);
+  });
+
+  it("rejects oversized contract assets before allocation", async () => {
+    const root = await fixture();
+    await writeFile(
+      join(root, ACCEPTANCE_CORPUS),
+      Buffer.alloc(32 * 1024 * 1024, 0x20),
+    );
+    const message = await rejectionMessage(
+      validateCanonicalAgentContracts(root),
+    );
+    expect(message).toBe(
+      "canonical Completion Contract corpus exceeds the bounded contract asset size.",
+    );
+    expect(message).not.toContain(root);
+  });
+
+  it("rejects contract asset size growth after open", async () => {
+    const root = await fixture();
+    const target = join(root, HANDOFF_SCHEMA);
+    const message = await rejectionMessage(
+      readContainedJsonAsset(root, HANDOFF_SCHEMA, "grown asset", async () => {
+        await appendFile(target, " ");
+      }).then(() => undefined),
+    );
+    expect(message).toBe(
+      "grown asset changed identity or uses a hardlinked file.",
+    );
     expect(message).not.toContain(root);
   });
 });
@@ -398,6 +496,20 @@ async function mutateJson(
   );
   mutation(document);
   await writeFile(path, `${JSON.stringify(document, null, 2)}\n`);
+}
+
+async function replaceRaw(
+  root: string,
+  relativePath: string,
+  expected: string,
+  replacement: string,
+): Promise<void> {
+  const path = join(root, relativePath);
+  const source = await readFile(path, "utf8");
+  if (!source.includes(expected)) {
+    throw new Error(`Missing raw fixture fragment in ${relativePath}.`);
+  }
+  await writeFile(path, source.replace(expected, replacement));
 }
 
 function corpusCase(

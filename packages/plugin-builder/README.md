@@ -51,6 +51,9 @@ and after an identity-bound no-follow read. Descriptor identity, link count,
 size, modification/change time, and two bounded positioned byte reads must
 remain stable; transient links, in-place rewrites, multi-link files, and
 detected ancestor replacement races fail closed.
+Agent contract assets are capped at 1 MiB before allocation. Their JSON is
+lexically validated before parsing, including decoded duplicate-key rejection,
+so escaped and literal spellings cannot collapse into one trusted member.
 
 Executable package sources are bundled to the four stable plugin entrypoints
 plus the installer CLI. The generated bundles are dependency-self-contained
