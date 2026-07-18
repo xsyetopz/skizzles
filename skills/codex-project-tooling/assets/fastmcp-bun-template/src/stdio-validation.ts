@@ -1,3 +1,4 @@
+// biome-ignore lint/correctness/noUnresolvedImports: The generated portable template is checked before its declared dependencies are installed.
 import { z } from "zod";
 
 const jsonRpcResponseSchema = z
