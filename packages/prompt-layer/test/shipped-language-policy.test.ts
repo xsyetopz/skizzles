@@ -148,6 +148,8 @@ describe("versioned shipped-language policy", () => {
       "I am your friend's coding assistant.",
       "I am your friend’s coding assistant.",
       "I am your friend-shaped coding assistant.",
+      "I am your friend‐shaped coding assistant.",
+      "I am your friend‑shaped coding assistant.",
       "𐐀i am sentient",
       "I am sentient𐐀",
     ]) {

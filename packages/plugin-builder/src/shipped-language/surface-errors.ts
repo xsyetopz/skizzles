@@ -20,3 +20,9 @@ export function boundsError(path: string): PackagingError {
     `Shipped language surface ${safeLanguageDiagnosticPath(path)} exceeds semantic scan bounds.`,
   );
 }
+
+export function policyError(path: string, policy: string): PackagingError {
+  return new PackagingError(
+    `Shipped language surface ${safeLanguageDiagnosticPath(path)} violates bounded ${policy}.`,
+  );
+}

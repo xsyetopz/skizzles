@@ -161,11 +161,12 @@ collapsed horizontal whitespace, then matched on one physical line with
 Unicode letter, mark, number, and underscore boundaries. The dependency phrase
 also excludes only a complete neutral repository/workspace-boundary sentence;
 additional trailing language removes that exemption. Apostrophe, curly
-apostrophe, and hyphen continuations into another letter remain part of the
-surrounding word. These lexical and narrow context boundaries prevent pattern
-prefixes from matching words, possessives, or compounds such as `memory`,
-`friend's`, and `friend-shaped` without exempting punctuation-separated
-prohibited fixtures.
+apostrophe, and every Unicode `Dash_Punctuation` continuation into another
+letter remain part of the surrounding word. These lexical and narrow context
+boundaries prevent pattern prefixes from matching words, possessives, or
+compounds such as `memory`, `friend's`, and ASCII/U+2010/U+2011
+`friend-shaped` variants without exempting punctuation-separated prohibited
+fixtures.
 Quoted text and fenced code are scanned. Negation has no semantic exemption: a
 negated sentence is accepted only when its normalized text does not match a
 prohibited literal. Ordinary first-person service language remains permitted.
@@ -223,10 +224,13 @@ diagnostic contract:
   fail closed before unbounded amplification.
 - Markdown is additively scanned through Bun's fixed renderer so HTML character
   references are decoded as rendered text. A bounded non-executing HTML pass
-  then removes comments and tags while joining adjacent visible text nodes;
-  malformed markup and script-capable elements fail closed. It never constructs
-  a DOM or executes tags, attributes, scripts, or entities. Raw Markdown remains
-  scanned as well. `.gitignore` uses raw text. The only staged extensionless text paths are
+  then removes comments and a narrow allowlist of inert Markdown elements while
+  joining adjacent visible text nodes. It strictly parses bounded attributes,
+  rejects duplicates, event/style/namespace or unknown attributes, active URL
+  schemes, and executable/unknown elements, and adds decoded `alt`, `title`, and
+  `aria-label` values to the scanned text. Malformed markup fails closed. The
+  pass never constructs a DOM or executes tags, attributes, URLs, scripts, or
+  entities. Raw Markdown remains scanned as well. `.gitignore` uses raw text. The only staged extensionless text paths are
   `skills/codex-container-lab/scripts/codex-container-lab` and
   `skills/designer-runtime/scripts/designer-sim`.
 

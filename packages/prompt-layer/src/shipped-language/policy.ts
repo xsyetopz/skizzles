@@ -20,7 +20,8 @@ const LINE_BREAK_PATTERN = /\r\n?|\n/u;
 const DEFAULT_IGNORABLE_PATTERN = /\p{Default_Ignorable_Code_Point}/u;
 const LEXICAL_END_PATTERN = /[\p{L}\p{M}\p{N}_]$/u;
 const LEXICAL_START_PATTERN = /^[\p{L}\p{M}\p{N}_]/u;
-const LEXICAL_SUFFIX_CONTINUATION_PATTERN = /^(?:['’\-]\p{L})/u;
+const LEXICAL_SUFFIX_CONTINUATION_PATTERN =
+  /^(?:['’\p{Dash_Punctuation}]\p{L})/u;
 const NEUTRAL_REPOSITORY_BOUNDARY_PATTERN =
   /^ within (?:the )?(?:repository|workspace) boundary[.!]?$/u;
 const EXPECTED_TAXONOMY_IDS = [
