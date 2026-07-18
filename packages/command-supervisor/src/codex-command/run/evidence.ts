@@ -2,7 +2,7 @@ import {
   type EvidenceReference,
   type RunStatus,
   sha256Digest,
-} from "./run-status.ts";
+} from "./status.ts";
 
 function verifyEvidence(
   status: RunStatus,

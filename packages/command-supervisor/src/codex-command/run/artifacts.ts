@@ -13,7 +13,7 @@ import {
   writeSync,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { cleanOldRuns } from "./run-retention.ts";
+import { cleanOldRuns } from "./retention.ts";
 import {
   type FileIdentity,
   identity,
@@ -23,9 +23,9 @@ import {
   sameDirectoryNode,
   sameIdentity,
   validatedRootIdentity,
-} from "./run-root.ts";
-import type { RunStatus } from "./run-status.ts";
-import { serializeRunStatus } from "./run-status-codec.ts";
+} from "./root.ts";
+import type { RunStatus } from "./status.ts";
+import { serializeRunStatus } from "./status-codec.ts";
 
 export const retainedOutputTailBytes = 1_200;
 

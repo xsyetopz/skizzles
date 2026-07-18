@@ -1,4 +1,4 @@
-import type { RunStatus } from "./run-status.ts";
+import type { RunStatus } from "./status.ts";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

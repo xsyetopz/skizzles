@@ -12,7 +12,7 @@ import {
 } from "../docker.ts";
 import { withFileLock } from "../locks.ts";
 import { runCommand } from "../process.ts";
-import { listLabs, readLab, writeLab } from "../state/lab-store.ts";
+import { listLabs, readLab, writeLab } from "../state/lab/store.ts";
 import {
   labLockPath,
   ownerLockPath,

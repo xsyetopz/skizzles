@@ -1,7 +1,7 @@
 import process from "node:process";
-import type { StreamName } from "./command-contract.ts";
-import { runCommand } from "./run-command.ts";
-import { RunStoreQueries } from "./run-queries.ts";
+import type { StreamName } from "./contract.ts";
+import { runCommand } from "./run/command.ts";
+import { RunStoreQueries } from "./run/queries.ts";
 import { runRoot } from "./settings.ts";
 
 const usage =

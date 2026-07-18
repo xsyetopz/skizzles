@@ -1,6 +1,14 @@
 import { join } from "node:path";
 import process from "node:process";
-import type { StreamCaptureState } from "./command-contract.ts";
+import type { StreamCaptureState } from "../contract.ts";
+import { commandShell, loadRunSettings } from "../settings.ts";
+import { spawnSupervisedShell } from "../shell-process.ts";
+import {
+  captureStream,
+  emptyCaptureState,
+  printCaptured,
+  type StreamCapture,
+} from "../stream-capture.ts";
 import {
   artifactContents,
   artifactTail,
@@ -8,22 +16,14 @@ import {
   createRunId,
   prepareRunArtifacts,
   writeStatus,
-} from "./run-artifacts.ts";
+} from "./artifacts.ts";
 import {
   completeRun,
   createRunStatus,
   failRunStart,
   type RunStatus,
   syncRunEvidence,
-} from "./run-status.ts";
-import { commandShell, loadRunSettings } from "./settings.ts";
-import { spawnSupervisedShell } from "./shell-process.ts";
-import {
-  captureStream,
-  emptyCaptureState,
-  printCaptured,
-  type StreamCapture,
-} from "./stream-capture.ts";
+} from "./status.ts";
 
 function progressReporter(
   startedAt: number,

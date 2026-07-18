@@ -2,7 +2,7 @@ import { accessSync, constants } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import process from "node:process";
-import type { RunSettings } from "./command-contract.ts";
+import type { RunSettings } from "./contract.ts";
 
 const defaultMaximumBytes = 16 * 1024 * 1024;
 const defaultMaximumDiskBytes = 256 * 1024 * 1024;

@@ -22,7 +22,7 @@ import {
 import { createProvisionedLab } from "./lab/provisioning.ts";
 import { withFileLock } from "./locks.ts";
 import { redactPublicText } from "./public-output.ts";
-import { listLabs, readLab } from "./state/lab-store.ts";
+import { listLabs, readLab } from "./state/lab/store.ts";
 import {
   activityLockPath,
   labLockPath,

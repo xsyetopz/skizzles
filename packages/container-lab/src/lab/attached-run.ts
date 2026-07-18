@@ -7,7 +7,7 @@ import {
   terminateDockerRun,
 } from "../docker.ts";
 import { withFileLock } from "../locks.ts";
-import { readLab, writeLab } from "../state/lab-store.ts";
+import { readLab, writeLab } from "../state/lab/store.ts";
 import {
   activityLockPath,
   labLockPath,

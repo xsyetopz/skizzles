@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { writeSync } from "node:fs";
 import process from "node:process";
-import type { StreamCaptureState, StreamName } from "./command-contract.ts";
+import type { StreamCaptureState, StreamName } from "./contract.ts";
 
 export type StreamCapture = {
   done: Promise<void>;

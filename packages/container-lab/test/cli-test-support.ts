@@ -20,7 +20,7 @@ import process from "node:process";
 import { withFileLock } from "../src/locks.ts";
 import { runCommand } from "../src/process.ts";
 import { serializePublicJson } from "../src/public-json.ts";
-import { writeLab } from "../src/state/lab-store.ts";
+import { writeLab } from "../src/state/lab/store.ts";
 import { labManifestPath, ownerKey } from "../src/state/layout.ts";
 import { ensureOwner } from "../src/state/owner-store.ts";
 import { initializeSyncBaseline } from "../src/sync/service.ts";

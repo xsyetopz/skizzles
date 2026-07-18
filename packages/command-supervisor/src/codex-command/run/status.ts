@@ -3,7 +3,7 @@ import type {
   RunSettings,
   StreamCaptureState,
   SupervisedSignal,
-} from "./command-contract.ts";
+} from "../contract.ts";
 
 const runStatusSchema = "skizzles.command-supervisor/run-status";
 const runStatusVersion = 1;

@@ -11,16 +11,16 @@ import {
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
-import type { RunSettings } from "../../src/codex-command/command-contract.ts";
+import type { RunSettings } from "../../src/codex-command/contract.ts";
 import {
   completeRun,
   createRunStatus,
   syncRunEvidence,
-} from "../../src/codex-command/run-status.ts";
+} from "../../src/codex-command/run/status.ts";
 import {
   parseRunStatus,
   serializeRunStatus,
-} from "../../src/codex-command/run-status-codec.ts";
+} from "../../src/codex-command/run/status-codec.ts";
 import { emptyCaptureState } from "../../src/codex-command/stream-capture.ts";
 
 export const packageRoot = resolve(import.meta.dir, "../..");

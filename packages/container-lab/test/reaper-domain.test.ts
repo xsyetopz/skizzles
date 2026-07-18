@@ -22,7 +22,7 @@ import {
   reapArchivedOwners,
   validateThreadsSchema,
 } from "../src/reaper-domain.ts";
-import { writeLab } from "../src/state/lab-store.ts";
+import { writeLab } from "../src/state/lab/store.ts";
 import {
   labManifestPath,
   ownerDirectory,

@@ -21,7 +21,7 @@ import { withFileLock } from "../src/locks.ts";
 import type { CommandResult, RunOptions } from "../src/process.ts";
 import { runCommand } from "../src/process.ts";
 import { ContainerLabService } from "../src/service.ts";
-import { readLab, writeLab } from "../src/state/lab-store.ts";
+import { readLab, writeLab } from "../src/state/lab/store.ts";
 import {
   labLockPath,
   labManifestPath,

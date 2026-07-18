@@ -6,7 +6,7 @@ import {
   rmSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { verifyRunEvidence } from "./run-evidence.ts";
+import { verifyRunEvidence } from "./evidence.ts";
 import {
   type FileIdentity,
   identity,
@@ -15,8 +15,8 @@ import {
   sameDirectoryNode,
   sameIdentity,
   validatedRootIdentity,
-} from "./run-root.ts";
-import { maximumStatusBytes, parseRunStatus } from "./run-status-codec.ts";
+} from "./root.ts";
+import { maximumStatusBytes, parseRunStatus } from "./status-codec.ts";
 
 const generatedRunIdPattern = /^[a-f0-9]{12}$/;
 const artifactNames = ["status.json", "stderr.log", "stdout.log"] as const;

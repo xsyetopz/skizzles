@@ -1,5 +1,5 @@
 import process from "node:process";
-import type { SupervisedSignal } from "./command-contract.ts";
+import type { SupervisedSignal } from "./contract.ts";
 
 type ShellSubprocess = Bun.Subprocess<"inherit", "pipe", "pipe">;
 

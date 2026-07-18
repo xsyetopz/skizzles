@@ -1,12 +1,12 @@
 import { rm } from "node:fs/promises";
-import { safeStateName, writeJsonAtomic } from "../files.ts";
+import { safeStateName, writeJsonAtomic } from "../../files.ts";
 import {
   readTrustedDirectory,
   readTrustedUnknownJson,
-} from "../trusted-filesystem.ts";
-import type { LabMetadata } from "../types.ts";
-import { assertLabMetadata } from "./lab-validation.ts";
-import { labManifestPath, ownerKey, type StateRoots } from "./layout.ts";
+} from "../../trusted-filesystem.ts";
+import type { LabMetadata } from "../../types.ts";
+import { labManifestPath, ownerKey, type StateRoots } from "../layout.ts";
+import { assertLabMetadata } from "./validation.ts";
 
 export async function writeLab(
   roots: StateRoots,

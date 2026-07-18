@@ -4,7 +4,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LabMode } from "../src/config.ts";
-import { listLabs, readLab, writeLab } from "../src/state/lab-store.ts";
+import { listLabs, readLab, writeLab } from "../src/state/lab/store.ts";
 import {
   activityLockPath,
   labLockPath,

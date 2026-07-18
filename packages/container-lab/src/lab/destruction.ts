@@ -16,7 +16,7 @@ import {
   readLab,
   removeLabState,
   writeLab,
-} from "../state/lab-store.ts";
+} from "../state/lab/store.ts";
 import {
   activityLockPath,
   expectedLabRuntimeRoot,

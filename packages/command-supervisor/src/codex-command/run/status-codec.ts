@@ -1,11 +1,11 @@
-import { parseRunLifecycle } from "./run-lifecycle-codec.ts";
+import { parseRunLifecycle } from "./lifecycle-codec.ts";
 import {
   type EvidenceReference,
   operatorActionLabel,
   type RunStatus,
   runStatusSchema,
   runStatusVersion,
-} from "./run-status.ts";
+} from "./status.ts";
 
 export const maximumStatusBytes = 64 * 1024;
 const sha256Pattern = /^[a-f0-9]{64}$/u;

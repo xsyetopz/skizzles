@@ -7,16 +7,23 @@ import {
   resolve,
   sep,
 } from "node:path";
-import { composeCommandArgs, internalImageTag } from "../compose/generation.ts";
-import { type DeclaredPort, type LabConfig, manifestName } from "../config.ts";
-import { safeStateName } from "../files.ts";
-import type { LabMetadata, PersistedLabRuntime } from "../types.ts";
+import {
+  composeCommandArgs,
+  internalImageTag,
+} from "../../compose/generation.ts";
+import {
+  type DeclaredPort,
+  type LabConfig,
+  manifestName,
+} from "../../config.ts";
+import { safeStateName } from "../../files.ts";
+import type { LabMetadata, PersistedLabRuntime } from "../../types.ts";
 import {
   expectedLabRuntimeRoot,
   ownerKey,
   resolveOwner,
   type StateRoots,
-} from "./layout.ts";
+} from "../layout.ts";
 
 const LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
 const LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -38,7 +45,6 @@ const FINDING_SURFACES = new Set([
   "non-loopback-port",
 ]);
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 export function assertLabMetadata(
   value: unknown,
   roots: StateRoots,
@@ -155,7 +161,7 @@ export function assertLabMetadata(
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Validates persisted runtime invariants as one fail-closed trust-boundary pass.
 function validatePersistedRuntime(
   lab: Record<string, unknown>,
   runtime: unknown,
