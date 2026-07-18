@@ -106,6 +106,12 @@ function parseTool(name: SecurityToolName, input: unknown): SecurityToolSpec {
     value["versionOutputPattern"],
     `${label} versionOutputPattern`,
   );
+  if (
+    !sameStrings(command, facts.versionCommand) ||
+    pattern !== facts.versionOutputPattern
+  ) {
+    throw new Error(`${label} command contract does not match immutable pins`);
+  }
   try {
     new RegExp(pattern, "u").test("");
   } catch (error) {
@@ -183,6 +189,14 @@ function parseAsset(
     value["executablePath"],
     `${label} executablePath`,
   );
+  const assetFacts = REQUIRED_TOOL_FACTS[name].assets[target];
+  if (
+    url !== assetFacts.url ||
+    sha256 !== assetFacts.sha256 ||
+    executablePath !== assetFacts.executablePath
+  ) {
+    throw new Error(`${label} does not match immutable asset pins`);
+  }
   const parsedUrl = new URL(url);
   const releasePrefix = `/releases/download/${provenance.tag}/`;
   if (
@@ -209,7 +223,6 @@ function parseAsset(
     githubReleaseAsset: parseGitHubReleaseAsset(
       name,
       target,
-      provenance,
       sha256,
       value["githubReleaseAsset"],
     ),
@@ -219,7 +232,6 @@ function parseAsset(
 function parseGitHubReleaseAsset(
   name: SecurityToolName,
   target: SecurityToolTarget,
-  provenance: SecurityToolProvenance,
   sha256: string,
   input: unknown,
 ): GitHubReleaseAssetEvidence {
@@ -239,15 +251,15 @@ function parseGitHubReleaseAsset(
   const bytes = positiveInteger(value["bytes"], `${label} bytes`);
   const updatedAt = exactString(value["updatedAt"], `${label} updatedAt`);
   const digest = exactString(value["digest"], `${label} digest`);
-  const facts = REQUIRED_TOOL_FACTS[name];
-  const assetFacts: RequiredAssetFacts = facts.assets[target];
+  const assetFacts: RequiredAssetFacts =
+    REQUIRED_TOOL_FACTS[name].assets[target];
   if (
-    releaseApiUrl !==
-      `https://api.github.com/repos/${provenance.repository}/releases/${facts.releaseId}` ||
-    releaseId !== facts.releaseId ||
+    releaseApiUrl !== assetFacts.releaseApiUrl ||
+    releaseId !== assetFacts.releaseId ||
     assetId !== assetFacts.assetId ||
     bytes !== assetFacts.bytes ||
     updatedAt !== assetFacts.updatedAt ||
+    digest !== assetFacts.digest ||
     digest !== `sha256:${sha256}`
   ) {
     throw new Error(`${label} does not match pinned primary API evidence`);
@@ -316,6 +328,16 @@ function stringArray(value: unknown, label: string): readonly string[] {
     throw new Error(`${label} must be a non-empty array of exact strings`);
   }
   return value;
+}
+
+function sameStrings(
+  actual: readonly string[],
+  expected: readonly string[],
+): boolean {
+  return (
+    actual.length === expected.length &&
+    actual.every((value, index) => value === expected[index])
+  );
 }
 
 export {

@@ -39,13 +39,20 @@ at `34e114876b0b11c390a56381ad16ebd13914f8d5`, and
 at `0c5077e51419868618aeaa5fe8019c62421857d6`. Readable version comments remain beside
 the commits. The workspace-policy gate rejects mutable, unknown, mismatched, missing,
 or multiply declared remote actions; a pin change therefore requires code, workflow,
-and primary-provenance review together.
+and primary-provenance review together. Pin comments are read from the exact YAML
+scalar node that supplies each direct job or step `uses` value, not from a global
+text match. Flow maps, block-scalar action values, aliases, merge-derived values,
+duplicate keys, and ambiguous annotations fail closed.
 
 The root `config/repository-security-tools.json` is the strict versioned manifest.
 It supports only CI Linux x64 and maintainer macOS arm64 because those exact upstream
 archives were inspected. Every asset records the official GitHub release API URL,
 release and asset IDs, byte size, update timestamp, and API-provided SHA-256 digest;
-downloaded bytes matched that primary metadata. actionlint and Gitleaks additionally
+an immutable code-owned authority independently binds those fields together with the
+tool version, license, version command and output pattern, release URL and basename,
+archive SHA-256, and executable member path. Internally consistent manifest drift is
+therefore rejected rather than becoming a new authority. Downloaded bytes matched
+the primary metadata. actionlint and Gitleaks additionally
 publish separate release checksum files. ShellCheck has no separate checksum or
 signature asset, but its release API provides the matching digest. ShellCheck source
 notices at the pinned commit grant GPL version 3 or later; its legacy Cabal/Hackage
@@ -95,8 +102,10 @@ availability failures fail closed. Release acceptance runs the same root command
   by a distinct causal gap in this packaging workspace.
 - **markdownlint-cli2:** deferred. Markdown consistency remains a typed/documentation
   debt, not evidence for adding a networked release gate now.
-- **Generic YAML parsing:** retained for formats that own schemas, but rejected as an
-  Actions verifier because it cannot prove Actions semantics or embedded shell.
+- **Generic YAML parsing alone:** rejected as an Actions verifier because it cannot
+  prove Actions semantics or embedded shell. A direct `yaml` AST dependency is used
+  only to bind each action pin annotation to its exact source scalar; actionlint owns
+  Actions-specific semantic and embedded-shell validation.
 - **Homebrew/global installation or vendored binaries:** rejected. Both introduce
   mutable host state or repository artifacts outside the package owner and pin
   contract.

@@ -52,7 +52,10 @@ dependency alone does not grant filesystem reach-through authority.
 This package also owns the networked repository security gate invoked by
 `bun run security:check`. The root
 `config/repository-security-tools.json` pins the exact actionlint, ShellCheck,
-and Gitleaks release provenance and Linux x64/macOS arm64 archive digests.
+and Gitleaks release provenance and Linux x64/macOS arm64 archive contracts. A
+code-owned immutable authority independently binds every version, license, command,
+pattern, release URL, archive digest, executable member, and GitHub API identity
+field; mutually consistent manifest drift still fails.
 Unsupported platforms fail deterministically. Archives are downloaded with byte
 and time bounds into an owner-only temporary directory. Every redirect hop is
 manually host/protocol checked; GitHub release API asset identity, byte count, and
@@ -63,7 +66,10 @@ failure. No package manifest carries these tools and no persistent tool cache is
 The gate passes every real `.github/workflows/*.{yml,yaml}` file to actionlint
 with an explicit pinned ShellCheck executable, parses actionlint JSON output, and
 runs invalid-event, invalid-expression, invalid-`needs`, unquoted-shell, and
-corrected-workflow causal probes. Gitleaks scans the current tree and complete Git
+corrected-workflow causal probes. A typed YAML AST binds each readable action version
+comment to the exact direct job/step `uses` scalar. Flow, block-scalar, alias,
+merge-derived, duplicate, and ambiguous action values are rejected rather than
+matched by reference text elsewhere in the file. Gitleaks scans the current tree and complete Git
 history with 100% redaction and ephemeral owner-only JSON reports. Only exit zero
 plus an exact empty report and clean diagnostics is clean; only exit 10 plus a
 nonempty fully redacted report is findings. Other statuses, warning/error/skip

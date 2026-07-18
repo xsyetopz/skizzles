@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { parseActionlintFindings } from "../src/repository-security/actionlint-gate.ts";
 import { runBoundedCommand } from "../src/repository-security/bounded-process.ts";
 import { runGitleaksGate } from "../src/repository-security/gitleaks-gate.ts";
 import {
@@ -12,10 +11,7 @@ import {
   type GitleaksRawResult,
   type GitleaksScanner,
 } from "../src/repository-security/gitleaks-report.ts";
-import { validateWorkflowActionPins } from "../src/repository-security/workflow-action-pins.ts";
 
-// biome-ignore lint/security/noSecrets: Public upstream action commit pin.
-const CHECKOUT_COMMIT = "34e114876b0b11c390a56381ad16ebd13914f8d5";
 const temporaryRoots: string[] = [];
 
 afterEach(async () => {
@@ -47,68 +43,6 @@ describe("repository security process and output contracts", () => {
         },
       ),
     ).rejects.toThrow("25ms timeout");
-  });
-
-  it("parses actionlint JSON arrays and JSON Lines findings", () => {
-    expect(
-      parseActionlintFindings(
-        '[{"filepath":"ci.yml","line":2,"column":3,"message":"bad","kind":"syntax-check"}]\n',
-      ),
-    ).toEqual([
-      {
-        filepath: "ci.yml",
-        line: 2,
-        column: 3,
-        message: "bad",
-        kind: "syntax-check",
-      },
-    ]);
-    expect(
-      parseActionlintFindings(
-        '{"filepath":"ci.yml","line":4,"column":5,"message":"bad line","kind":"expression"}\n',
-      ),
-    ).toHaveLength(1);
-    expect(() => parseActionlintFindings("not-json\n")).toThrow("JSON Lines");
-    expect(() =>
-      parseActionlintFindings('{"message":"missing fields"}\n'),
-    ).toThrow("output contract");
-  });
-
-  it("requires reviewed full-commit action pins with version comments", async () => {
-    const root = await temporaryRoot();
-    const workflow = join(root, "ci.yml");
-    const valid =
-      "jobs:\n" +
-      "  check:\n" +
-      "    runs-on: ubuntu-latest\n" +
-      "    steps:\n" +
-      `      - uses: actions/checkout@${CHECKOUT_COMMIT} # v4.3.1\n` +
-      "      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0\n";
-    await writeFile(workflow, valid, { mode: 0o600 });
-    await expect(
-      validateWorkflowActionPins([workflow]),
-    ).resolves.toBeUndefined();
-
-    await writeFile(workflow, valid.replace(/@[a-f0-9]{40}/u, "@v4"), {
-      mode: 0o600,
-    });
-    await expect(validateWorkflowActionPins([workflow])).rejects.toThrow(
-      `must use ${CHECKOUT_COMMIT} # v4.3.1`,
-    );
-
-    const decoy = valid
-      .replace(
-        `actions/checkout@${CHECKOUT_COMMIT} # v4.3.1`,
-        `actions/checkout@${CHECKOUT_COMMIT}`,
-      )
-      .replace(
-        "    steps:\n",
-        `    env:\n      DECOY: 'actions/checkout@${CHECKOUT_COMMIT} # v4.3.1'\n    steps:\n`,
-      );
-    await writeFile(workflow, decoy, { mode: 0o600 });
-    await expect(validateWorkflowActionPins([workflow])).rejects.toThrow(
-      `must use ${CHECKOUT_COMMIT} # v4.3.1`,
-    );
   });
 
   it("distinguishes clean, findings, warnings, and operational failures", () => {

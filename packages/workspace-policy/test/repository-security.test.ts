@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Public upstream commits and release digests are test fixtures.
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
@@ -20,8 +21,9 @@ const WORKSPACE_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../..",
 );
-// biome-ignore lint/security/noSecrets: Public upstream source commit pin.
 const ACTIONLINT_COMMIT = "914e7df21a07ef503a81201c76d2b11c789d3fca";
+const ACTIONLINT_LINUX_SHA256 =
+  "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8";
 const temporaryRoots: string[] = [];
 
 afterEach(async () => {
@@ -97,6 +99,40 @@ describe("repository security tool manifest", () => {
     expect(() => parseRepositorySecurityToolManifest(assetIdentity)).toThrow(
       "does not match pinned primary API evidence",
     );
+  });
+
+  it("rejects internally consistent drift in every immutable tool field", async () => {
+    const source = await manifestSource();
+    const replacementDigest = "0".repeat(64);
+    const mutations = [
+      source.replaceAll(ACTIONLINT_LINUX_SHA256, replacementDigest),
+      source.replace(
+        "actionlint_1.7.12_linux_amd64.tar.gz",
+        "actionlint_1.7.12_linux_x64.tar.gz",
+      ),
+      source.replace(
+        '"executablePath": "actionlint"',
+        '"executablePath": "bin/actionlint"',
+      ),
+      source.replace('"bytes": 2353908', '"bytes": 2353909'),
+      source.replace(
+        '"updatedAt": "2026-03-30T17:49:19Z"',
+        '"updatedAt": "2026-03-30T17:49:20Z"',
+      ),
+      source.replace(
+        '"versionCommand": ["-version"]',
+        '"versionCommand": ["--version"]',
+      ),
+      source.replace(
+        '"versionOutputPattern": "^1\\\\.7\\\\.12(?:\\\\r?\\\\n|$)"',
+        '"versionOutputPattern": "^1\\\\.7\\\\.12$"',
+      ),
+    ];
+    for (const mutation of mutations) {
+      expect(mutation).not.toBe(source);
+      const input: unknown = JSON.parse(mutation);
+      expect(() => parseRepositorySecurityToolManifest(input)).toThrow();
+    }
   });
 
   it("rejects archive escape paths and duplicate executables", () => {
