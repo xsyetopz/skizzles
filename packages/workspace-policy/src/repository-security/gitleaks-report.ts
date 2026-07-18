@@ -15,9 +15,29 @@ const MAXIMUM_REPORT_BYTES = 1_048_576;
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_FILE_CREATION_MASK = 0o077;
-const FINDINGS_WARNING_PATTERN = /\bWRN leaks found: (\d+)\s*$/u;
-const OPERATIONAL_DIAGNOSTIC_PATTERN =
-  /\b(?:ERR|FTL|PNC)\b|skipp(?:ed|ing)|permission denied|failed|unable|could not/iu;
+const MAXIMUM_REDACTED_MATCH_LENGTH = 512;
+const GITLEAKS_LOG_PREFIX = String.raw`\d{1,2}:\d{2}(?:AM|PM)`;
+const HUMAN_NUMBER = String.raw`\d+(?:\.\d+)?`;
+const HUMAN_BYTES = String.raw`${HUMAN_NUMBER} (?:bytes|KB|MB|GB)`;
+const SCANNED_LINE_PATTERN = new RegExp(
+  String.raw`^${GITLEAKS_LOG_PREFIX} INF scanned ~${HUMAN_BYTES} \(${HUMAN_BYTES}\) in ${HUMAN_NUMBER}(?:ms|s)$`,
+  "u",
+);
+const COMMITS_LINE_PATTERN = new RegExp(
+  String.raw`^${GITLEAKS_LOG_PREFIX} INF \d+ commits scanned\.$`,
+  "u",
+);
+const CLEAN_LINE_PATTERN = new RegExp(
+  String.raw`^${GITLEAKS_LOG_PREFIX} INF no leaks found$`,
+  "u",
+);
+const FINDINGS_LINE_PATTERN = new RegExp(
+  String.raw`^${GITLEAKS_LOG_PREFIX} WRN leaks found: (?<findings>\d+)$`,
+  "u",
+);
+const PRINTABLE_REDACTED_MATCH_PATTERN = /^[\x20-\x7e]+$/u;
+const REDACTION_MARKER_PATTERN = /REDACTED/gu;
+const TOKEN_LIKE_CONTEXT_PATTERN = /[A-Za-z0-9_-]{32,}/u;
 
 const FINDING_KEYS = [
   "Author",
@@ -143,19 +163,9 @@ function classifyGitleaksResult(
 }
 
 function validateCleanDiagnostics(stderr: string, label: string): void {
-  const lines = diagnosticLines(stderr);
-  if (
-    lines.some(
-      (line) =>
-        /\b(?:WRN|ERR|FTL|PNC)\b/u.test(line) ||
-        OPERATIONAL_DIAGNOSTIC_PATTERN.test(line),
-    ) ||
-    !lines.some((line) => line.includes(" INF no leaks found"))
-  ) {
-    throw operational(
-      label,
-      "clean status contained warning, skipped, or error diagnostics",
-    );
+  const diagnostics = parseDiagnostics(stderr, label);
+  if (diagnostics.findings !== undefined) {
+    throw operational(label, "clean status emitted findings diagnostics");
   }
 }
 
@@ -164,27 +174,49 @@ function validateFindingsDiagnostics(
   findings: number,
   label: string,
 ): void {
-  const lines = diagnosticLines(stderr);
-  if (lines.some((line) => OPERATIONAL_DIAGNOSTIC_PATTERN.test(line))) {
-    throw operational(
-      label,
-      "findings status contained operational diagnostics",
-    );
-  }
-  const warnings = lines.filter((line) => /\bWRN\b/u.test(line));
-  if (warnings.length !== 1) {
-    throw operational(
-      label,
-      "findings status did not contain one findings warning",
-    );
-  }
-  const match = FINDINGS_WARNING_PATTERN.exec(warnings[0] ?? "");
-  if (match === null || Number(match[1]) !== findings) {
+  const diagnostics = parseDiagnostics(stderr, label);
+  if (diagnostics.findings !== findings) {
     throw operational(
       label,
       "findings warning did not match the redacted report",
     );
   }
+}
+
+function parseDiagnostics(
+  stderr: string,
+  label: string,
+): { findings: number | undefined } {
+  if (!stderr.endsWith("\n")) {
+    throw operational(label, "diagnostics did not end with a newline");
+  }
+  const lines = diagnosticLines(stderr);
+  if (lines.length < 2 || lines.length > 3) {
+    throw operational(label, "diagnostic line count changed");
+  }
+  const terminal = lines.at(-1) ?? "";
+  const body = lines.slice(0, -1);
+  if (body.filter((line) => SCANNED_LINE_PATTERN.test(line)).length !== 1) {
+    throw operational(label, "diagnostics omitted the exact scanned line");
+  }
+  if (
+    body.some(
+      (line) =>
+        !SCANNED_LINE_PATTERN.test(line) && !COMMITS_LINE_PATTERN.test(line),
+    ) ||
+    body.filter((line) => COMMITS_LINE_PATTERN.test(line)).length > 1
+  ) {
+    throw operational(label, "diagnostics contained an unknown line");
+  }
+  if (CLEAN_LINE_PATTERN.test(terminal)) {
+    return { findings: undefined };
+  }
+  const match = FINDINGS_LINE_PATTERN.exec(terminal);
+  const count = match?.groups?.["findings"];
+  if (count === undefined) {
+    throw operational(label, "diagnostics had an unknown terminal line");
+  }
+  return { findings: Number(count) };
 }
 
 function parseRedactedFindings(report: string, label: string): number {
@@ -245,8 +277,8 @@ function validateRedactedFinding(input: unknown, label: string): void {
     }
   }
   if (
-    input["Match"] !== "REDACTED" ||
     input["Secret"] !== "REDACTED" ||
+    !isSafelyRedactedMatch(input["Match"]) ||
     input["RuleID"] === "" ||
     input["File"] === "" ||
     input["Fingerprint"] === "" ||
@@ -257,8 +289,23 @@ function validateRedactedFinding(input: unknown, label: string): void {
   }
 }
 
+function isSafelyRedactedMatch(input: unknown): input is string {
+  if (
+    typeof input !== "string" ||
+    input.length === 0 ||
+    input.length > MAXIMUM_REDACTED_MATCH_LENGTH ||
+    !PRINTABLE_REDACTED_MATCH_PATTERN.test(input)
+  ) {
+    return false;
+  }
+  return (
+    [...input.matchAll(REDACTION_MARKER_PATTERN)].length === 1 &&
+    !TOKEN_LIKE_CONTEXT_PATTERN.test(input.replace("REDACTED", ""))
+  );
+}
+
 function diagnosticLines(stderr: string): string[] {
-  return stderr.split(/\r?\n/u).filter((line) => line !== "");
+  return stderr.split(/\r?\n/u).slice(0, -1);
 }
 
 function operational(label: string, reason: string): Error {

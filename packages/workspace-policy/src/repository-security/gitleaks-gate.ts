@@ -95,6 +95,22 @@ async function runGitleaksCausalProbes(
     "provider-like token",
   );
 
+  const genericToken = `${generatedTokenPart(7)}${generatedTokenPart(19)}`;
+  await writeFile(probeFile, `api_key = '${genericToken}'\n`, {
+    mode: PRIVATE_FILE_MODE,
+  });
+  expectLeak(
+    await scanner({
+      executable: gitleaks,
+      mode: "dir",
+      config,
+      root: directoryProbe,
+      reportRoot,
+    }),
+    genericToken,
+    "generic assignment token",
+  );
+
   const allowedCanary = ["sk-privacy-canary-", "4f9e2d7c"].join("");
   await writeFile(probeFile, `${allowedCanary}\n`, { mode: PRIVATE_FILE_MODE });
   expectClean(

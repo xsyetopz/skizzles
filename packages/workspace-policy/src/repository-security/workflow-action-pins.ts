@@ -1,13 +1,16 @@
 // biome-ignore-all lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
 import { readFile } from "node:fs/promises";
 import {
+  isAlias,
   isMap,
+  isPair,
   isScalar,
   isSeq,
   type Pair,
   type ParsedNode,
   parseDocument,
   Scalar,
+  visit,
   type YAMLMap,
   type YAMLSeq,
 } from "yaml";
@@ -107,6 +110,7 @@ function parseWorkflowActionReferences(
       `${workflow} could not be parsed for action pins: ${issue}`,
     );
   }
+  rejectUnsupportedYamlGraph(document, workflow);
   const root = blockMap(document.contents, workflow);
   const jobs = blockMap(
     requiredPair(root, "jobs", workflow).value,
@@ -150,17 +154,60 @@ function appendActionReference(
   const key = stringScalar(pair.key, `${location} action key`);
   const value = stringScalar(pair.value, `${location} action use`);
   if (
+    key.type !== Scalar.PLAIN ||
+    key.source !== "uses" ||
     value.anchor !== undefined ||
-    (value.type !== Scalar.PLAIN &&
-      value.type !== Scalar.QUOTE_DOUBLE &&
-      value.type !== Scalar.QUOTE_SINGLE)
+    value.type !== Scalar.PLAIN
   ) {
-    throw new Error(
-      `${location} action use must be a direct single-line scalar`,
-    );
+    throw new Error(`${location} action use must be a direct plain scalar`);
   }
+  requireExactScalarSource(source, value, location);
   const version = exactVersionComment(source, key, value, location);
   references.push({ location, reference: value.value, version });
+}
+
+function requireExactScalarSource(
+  source: string,
+  value: Scalar<string>,
+  location: string,
+): void {
+  if (value.range === undefined || value.range === null) {
+    throw new Error(`${location} action use has no exact source range`);
+  }
+  const literal = source.slice(value.range[0], value.range[1]);
+  if (
+    literal.includes("\n") ||
+    literal.includes("\r") ||
+    literal !== value.value ||
+    value.source !== value.value
+  ) {
+    throw new Error(
+      `${location} action use must preserve exact single-line literal bytes`,
+    );
+  }
+}
+
+function rejectUnsupportedYamlGraph(
+  document: ReturnType<typeof parseDocument>,
+  workflow: string,
+): void {
+  visit(document, {
+    Alias: (_key, node) => {
+      if (isAlias(node)) {
+        throw new Error(`${workflow} must not use YAML aliases`);
+      }
+    },
+    Node: (_key, node) => {
+      if (node.tag !== undefined) {
+        throw new Error(`${workflow} must not use explicit YAML tags`);
+      }
+    },
+    Pair: (_key, pair) => {
+      if (isPair(pair) && isScalar(pair.key) && pair.key.value === "<<") {
+        throw new Error(`${workflow} must not use YAML merge keys`);
+      }
+    },
+  });
 }
 
 function exactVersionComment(

@@ -68,13 +68,17 @@ with an explicit pinned ShellCheck executable, parses actionlint JSON output, an
 runs invalid-event, invalid-expression, invalid-`needs`, unquoted-shell, and
 corrected-workflow causal probes. A typed YAML AST binds each readable action version
 comment to the exact direct job/step `uses` scalar. Flow, block-scalar, alias,
-merge-derived, duplicate, and ambiguous action values are rejected rather than
-matched by reference text elsewhere in the file. Gitleaks scans the current tree and complete Git
+merge-derived, tagged, quoted/escaped, continued, duplicate, and ambiguous action
+values are rejected rather than matched by reference text elsewhere in the file.
+External actions require exact untagged plain source bytes; unrelated `run` block
+scalars remain supported. Gitleaks scans the current tree and complete Git
 history with 100% redaction and ephemeral owner-only JSON reports. Only exit zero
 plus an exact empty report and clean diagnostics is clean; only exit 10 plus a
 nonempty fully redacted report is findings. Other statuses, warning/error/skip
-diagnostics, or mismatched reports fail operationally. Provider-token, exact-canary,
-adjacent-token, removed-history, and real unreadable-file probes prove the classifier.
+diagnostics outside the pinned stderr grammar, or mismatched reports fail
+operationally. Redacted matches may retain bounded printable assignment context but
+must contain exactly one marker and no probe token. Provider-token, generic-assignment,
+exact-canary, adjacent-token, removed-history, and real unreadable-file probes prove the classifier.
 The `.gitleaks.toml` allowance is restricted to the one documented fake privacy
 canary; it does not allow the test path or disable a default rule.
 

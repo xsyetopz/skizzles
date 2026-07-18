@@ -1,9 +1,12 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseActionlintFindings } from "../src/repository-security/actionlint-gate.ts";
+import {
+  parseActionlintFindings,
+  runActionlintGate,
+} from "../src/repository-security/actionlint-gate.ts";
 import { validateWorkflowActionPins } from "../src/repository-security/workflow-action-pins.ts";
 
 const FULL_COMMIT_PATTERN = /@[a-f0-9]{40}/u;
@@ -77,16 +80,31 @@ describe("repository action validation contracts", () => {
 
   it("binds action annotations to exact direct scalar nodes", async () => {
     const workflow = join(await temporaryRoot(), "ci.yml");
-    const invalidSources = [
-      flowActionWithBlockDecoy(),
-      blockActionWithNestedDecoy(),
-      duplicateActionNode(),
-      aliasActionWithNestedDecoy(),
-      mergeDerivedActions(),
-    ];
-    for (const source of invalidSources) {
+    for (const source of unsupportedActionSources()) {
       await writeFile(workflow, source, { mode: 0o600 });
       await expect(validateWorkflowActionPins([workflow])).rejects.toThrow();
+    }
+  });
+
+  it("rejects hidden action syntax at the aggregate action gate", async () => {
+    const root = await temporaryRoot();
+    const workflows = join(root, ".github", "workflows");
+    const probes = join(root, "probes");
+    await Promise.all([
+      mkdir(workflows, { recursive: true, mode: 0o700 }),
+      mkdir(probes, { mode: 0o700 }),
+    ]);
+    const workflow = join(workflows, "ci.yml");
+    for (const source of unsupportedActionSources()) {
+      await writeFile(workflow, source, { mode: 0o600 });
+      await expect(
+        runActionlintGate(
+          root,
+          probes,
+          "/unused/actionlint",
+          "/unused/shellcheck",
+        ),
+      ).rejects.toThrow();
     }
   });
 });
@@ -98,8 +116,25 @@ function validWorkflow(): string {
     "    runs-on: ubuntu-latest\n" +
     "    steps:\n" +
     `      - uses: actions/checkout@${CHECKOUT_COMMIT} # v4.3.1\n` +
-    "      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0\n"
+    "      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0\n" +
+    "      - run: |\n          printf '%s\\n' 'ordinary block scalar'\n"
   );
+}
+
+function unsupportedActionSources(): readonly string[] {
+  return [
+    flowActionWithBlockDecoy(),
+    blockActionWithNestedDecoy(),
+    duplicateActionNode(),
+    aliasActionWithNestedDecoy(),
+    mergeDerivedActions(),
+    escapedQuotedAction(),
+    taggedActionScalar(),
+    continuedQuotedAction(),
+    taggedJobsMap(),
+    taggedStepMap(),
+    rootMergeAction(),
+  ];
 }
 
 function flowActionWithBlockDecoy(): string {
@@ -148,6 +183,51 @@ function mergeDerivedActions(): string {
     "  uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0\n" +
     "jobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n" +
     "      - <<: *checkout\n      - <<: *setup\n"
+  );
+}
+
+function escapedQuotedAction(): string {
+  return validWorkflow().replace(
+    `actions/checkout@${CHECKOUT_COMMIT}`,
+    `"actions/checkout@\\x33\\x34${CHECKOUT_COMMIT.slice(2)}"`,
+  );
+}
+
+function taggedActionScalar(): string {
+  return validWorkflow().replace(
+    `actions/checkout@${CHECKOUT_COMMIT}`,
+    `!!str actions/checkout@${CHECKOUT_COMMIT}`,
+  );
+}
+
+function continuedQuotedAction(): string {
+  const split = 20;
+  const reference = `actions/checkout@${CHECKOUT_COMMIT}`;
+  return validWorkflow().replace(
+    reference,
+    `"${reference.slice(0, split)}\\\n          ${reference.slice(split)}"`,
+  );
+}
+
+function taggedJobsMap(): string {
+  return validWorkflow().replace("jobs:\n", "jobs: !!map\n");
+}
+
+function taggedStepMap(): string {
+  return validWorkflow().replace(
+    "      - uses: actions/checkout@",
+    "      - !!map\n        uses: actions/checkout@",
+  );
+}
+
+function rootMergeAction(): string {
+  return (
+    "hidden: &hidden\n" +
+    "  jobs:\n" +
+    "    hidden:\n" +
+    `      uses: actions/checkout@${CHECKOUT_COMMIT} # v4.3.1\n` +
+    "<<: *hidden\n" +
+    validWorkflow()
   );
 }
 

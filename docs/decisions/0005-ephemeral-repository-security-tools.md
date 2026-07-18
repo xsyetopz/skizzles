@@ -41,8 +41,11 @@ the commits. The workspace-policy gate rejects mutable, unknown, mismatched, mis
 or multiply declared remote actions; a pin change therefore requires code, workflow,
 and primary-provenance review together. Pin comments are read from the exact YAML
 scalar node that supplies each direct job or step `uses` value, not from a global
-text match. Flow maps, block-scalar action values, aliases, merge-derived values,
-duplicate keys, and ambiguous annotations fail closed.
+text match. External action values must be untagged, unquoted, single-line plain
+scalars whose decoded value, parser source, and exact source bytes agree. Flow maps,
+block-scalar action values, quoted escapes or continuations, explicit tags, aliases,
+merge-derived values, duplicate keys, and ambiguous annotations fail closed. Ordinary
+block scalars remain valid for unrelated fields such as `run`.
 
 The root `config/repository-security-tools.json` is the strict versioned manifest.
 It supports only CI Linux x64 and maintainer macOS arm64 because those exact upstream
@@ -52,7 +55,9 @@ an immutable code-owned authority independently binds those fields together with
 tool version, license, version command and output pattern, release URL and basename,
 archive SHA-256, and executable member path. Internally consistent manifest drift is
 therefore rejected rather than becoming a new authority. Downloaded bytes matched
-the primary metadata. actionlint and Gitleaks additionally
+the primary metadata. Tests independently pin the complete versioned manifest byte
+digest, so coordinated production-authority and manifest drift still requires an
+explicit acceptance-evidence review. actionlint and Gitleaks additionally
 publish separate release checksum files. ShellCheck has no separate checksum or
 signature asset, but its release API provides the matching digest. ShellCheck source
 notices at the pinned commit grant GPL version 3 or later; its legacy Cabal/Hackage
@@ -80,7 +85,11 @@ ShellCheck path, with JSON findings. Causal probes require invalid event, expres
 findings exit code of 10. Exit zero is clean only with an exact empty JSON report and
 no warning, skip, or error diagnostics. Exit 10 is findings only with a nonempty,
 strictly typed, fully redacted JSON report whose count matches the sole findings
-warning. Every other exit/status/report/diagnostic combination is an operational
+warning. `Secret` must be exactly `REDACTED`; bounded printable `Match` values may
+retain safe assignment context such as `api_key = 'REDACTED'`, but must contain one
+redaction marker. A version-pinned whitelist accepts only the observed scanned,
+optional commit-count, clean-terminal, and findings-terminal diagnostic lines. Every
+other exit/status/report/diagnostic combination is an operational
 failure. Reports are bounded, mode `0600`, nested under the owner-only temporary root,
 parsed only after the process exits, and deleted in `finally`; captured findings are
 withheld at the aggregate boundary. Configuration extends defaults and narrowly

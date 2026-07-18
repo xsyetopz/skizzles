@@ -24,6 +24,9 @@ const WORKSPACE_ROOT = resolve(
 const ACTIONLINT_COMMIT = "914e7df21a07ef503a81201c76d2b11c789d3fca";
 const ACTIONLINT_LINUX_SHA256 =
   "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8";
+// Independent v1 acceptance evidence reviewed against ADR 0005 and the pinned GitHub release API records.
+const REPOSITORY_SECURITY_MANIFEST_V1_SHA256 =
+  "7bf3c403b36cc9cd83bc1340a8ec6ce438888c30abc162eec0232aa6484dc1fe";
 const temporaryRoots: string[] = [];
 
 afterEach(async () => {
@@ -47,6 +50,13 @@ describe("repository security tool manifest", () => {
       "darwin-arm64",
       "linux-x64",
     ]);
+  });
+
+  it("matches the independently reviewed complete v1 manifest", async () => {
+    const source = await manifestSource();
+    const digest = createHash("sha256").update(source).digest("hex");
+
+    expect(digest).toBe(REPOSITORY_SECURITY_MANIFEST_V1_SHA256);
   });
 
   it("rejects unsupported targets, drifted pins, and unknown fields", async () => {

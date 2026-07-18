@@ -13,6 +13,11 @@ import {
 } from "../src/repository-security/gitleaks-report.ts";
 
 const temporaryRoots: string[] = [];
+// Captured from pinned Gitleaks 8.30.1 using deterministic non-credential probes.
+const GITLEAKS_8_30_1_CLEAN_STDERR =
+  "7:00PM INF scanned ~1 bytes (1 bytes) in 1ms\n7:00PM INF no leaks found\n";
+const GITLEAKS_8_30_1_FINDINGS_STDERR =
+  "7:00PM INF scanned ~1 bytes (1 bytes) in 1ms\n7:00PM WRN leaks found: 1\n";
 
 afterEach(async () => {
   await Promise.all(
@@ -65,11 +70,21 @@ describe("repository security process and output contracts", () => {
         {
           ...cleanGitleaksResult(),
           stderr:
-            "7:00PM WRN skipping file: permission denied path=/private/probe\n7:00PM INF no leaks found\n",
+            "7:00PM INF scanned ~1 bytes (1 bytes) in 1ms\n7:00PM WRN skipping file: permission denied path=/private/probe\n7:00PM INF no leaks found\n",
         },
         "skip",
       ),
-    ).toThrow("warning, skipped, or error diagnostics");
+    ).toThrow("unknown line");
+    expect(() =>
+      classifyGitleaksResult(
+        {
+          ...cleanGitleaksResult(),
+          stderr:
+            "7:00PM INF scanned ~1 bytes (1 bytes) in 1ms\n7:00PM WARN arbitrary warning\n7:00PM INF no leaks found\n",
+        },
+        "unknown warning",
+      ),
+    ).toThrow("unknown line");
     expect(() =>
       classifyGitleaksResult(
         { ...cleanGitleaksResult(), report: redactedFindingReport() },
@@ -82,6 +97,17 @@ describe("repository security process and output contracts", () => {
         "ambiguous findings",
       ),
     ).toThrow("empty report");
+    expect(() =>
+      classifyGitleaksResult(
+        {
+          ...findingsGitleaksResult(),
+          report: redactedFindingReport(
+            `api_key = 'REDACTED' ${"A".repeat(32)}`,
+          ),
+        },
+        "retained token-like context",
+      ),
+    ).toThrow("not fully redacted");
   });
 
   it("rejects the former stateful operational-error sequence", async () => {
@@ -122,8 +148,7 @@ function cleanGitleaksResult(): GitleaksRawResult {
   return {
     exitCode: 0,
     stdout: "",
-    stderr:
-      "7:00PM INF scanned ~1 bytes (1 bytes) in 1ms\n7:00PM INF no leaks found\n",
+    stderr: GITLEAKS_8_30_1_CLEAN_STDERR,
     report: "[]\n",
   };
 }
@@ -132,13 +157,12 @@ function findingsGitleaksResult(): GitleaksRawResult {
   return {
     exitCode: 10,
     stdout: "",
-    stderr:
-      "7:00PM INF scanned ~1 bytes (1 bytes) in 1ms\n7:00PM WRN leaks found: 1\n",
+    stderr: GITLEAKS_8_30_1_FINDINGS_STDERR,
     report: redactedFindingReport(),
   };
 }
 
-function redactedFindingReport(): string {
+function redactedFindingReport(match = "api_key = 'REDACTED'"): string {
   return `${JSON.stringify([
     {
       RuleID: "probe-rule",
@@ -147,7 +171,7 @@ function redactedFindingReport(): string {
       EndLine: 1,
       StartColumn: 1,
       EndColumn: 2,
-      Match: "REDACTED",
+      Match: match,
       Secret: "REDACTED",
       File: "/private/probe",
       SymlinkFile: "",
