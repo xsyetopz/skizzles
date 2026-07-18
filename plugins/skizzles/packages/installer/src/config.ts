@@ -1,65 +1,26 @@
+import { existsSync, rmSync } from "node:fs";
+import { join, resolve } from "node:path";
 import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
-import { assertManagedParentsAreReal, pathEntryExists } from "./core";
+  type ConfigEdit,
+  type ConfigRpc,
+  canonicalExistingPath,
+  isConfigVersionConflict,
+  type OwnedConfigValue,
+  openConfigRpcSession,
+  readJsonFile,
+  restoreConfigEdits,
+  safeConfigWriteError,
+  selectedUserLayer,
+  snapshotConfigValues,
+  validateCodexBinary,
+  valuesMatchAfter,
+  valuesMatchBefore,
+  writePrivateJson,
+} from "./codex-config.ts";
+import { assertManagedParentsAreReal, pathEntryExists } from "./core.ts";
 
+export type { ConfigEdit, ConfigRpc } from "./codex-config.ts";
 export type OrchestrationMode = "aggressive" | "passive";
-type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | {
-      [key: string]: JsonValue;
-    };
-
-export interface ConfigEdit {
-  keyPath: string;
-  value: JsonValue;
-  mergeStrategy: "replace";
-}
-
-interface ConfigLayer {
-  name: { type: string; file?: string; profile?: string | null };
-  version: string;
-  config: JsonValue;
-}
-
-interface ConfigReadResponse {
-  layers: ConfigLayer[] | null;
-}
-
-interface ConfigWriteResponse {
-  status: string;
-  version: string;
-  filePath: string;
-}
-
-export interface ConfigRpc {
-  read(): Promise<ConfigReadResponse>;
-  batchWrite(params: {
-    edits: ConfigEdit[];
-    filePath: string;
-    expectedVersion: string;
-    reloadUserConfig: boolean;
-  }): Promise<ConfigWriteResponse>;
-  close(): Promise<void>;
-}
-
-interface OwnedValue {
-  keyPath: string;
-  beforePresent: boolean;
-  before: JsonValue;
-  after: JsonValue;
-}
 
 export interface ConfigReceipt {
   version: 1;
@@ -67,7 +28,7 @@ export interface ConfigReceipt {
   orchestration: OrchestrationMode;
   codexBinary: string;
   configPath: string;
-  values: OwnedValue[];
+  values: OwnedConfigValue[];
 }
 
 export interface ConfigureOptions {
@@ -91,11 +52,6 @@ export function configReceiptPath(codexHome: string): string {
     ".skizzles",
     "config-receipt.json",
   );
-}
-
-function canonicalExistingPath(path: string): string {
-  const absolute = resolve(path);
-  return existsSync(absolute) ? realpathSync(absolute) : absolute;
 }
 
 export function desiredConfigEdits(
@@ -136,79 +92,21 @@ export function desiredConfigEdits(
   return edits;
 }
 
-function valueAt(
-  root: JsonValue,
-  keyPath: string,
-): { present: boolean; value: JsonValue } {
-  let current = root;
-  for (const segment of keyPath.split(".")) {
-    if (
-      current === null ||
-      Array.isArray(current) ||
-      typeof current !== "object" ||
-      !(segment in current)
-    ) {
-      return { present: false, value: null };
-    }
-    current = current[segment]!;
-  }
-  return { present: true, value: current };
-}
-
-function sameValue(left: JsonValue, right: JsonValue): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function userLayer(read: ConfigReadResponse, configPath: string): ConfigLayer {
-  const expected = canonicalExistingPath(configPath);
-  const layer = read.layers?.find(
-    ({ name }) =>
-      name.type === "user" &&
-      name.profile === null &&
-      name.file &&
-      canonicalExistingPath(name.file) === expected,
-  );
-  if (!layer) {
-    throw new Error(
-      `Codex did not report the selected user config layer: ${expected}`,
-    );
-  }
-  return layer;
-}
-
-function writeReceipt(
-  path: string,
-  receipt: ConfigReceipt,
-  exclusive = false,
-): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const contents = `${JSON.stringify(receipt, null, 2)}\n`;
-  if (exclusive) {
-    writeFileSync(path, contents, { flag: "wx" });
-    return;
-  }
-  const temporary = `${path}.${crypto.randomUUID()}.tmp`;
-  writeFileSync(temporary, contents, { flag: "wx" });
-  try {
-    renameSync(temporary, path);
-  } catch (error) {
-    rmSync(temporary, { force: true });
-    throw error;
-  }
-}
-
 function readReceipt(codexHome: string): ConfigReceipt {
   const path = configReceiptPath(codexHome);
   if (!existsSync(path)) {
     throw new Error(`Skizzles config receipt is missing: ${path}`);
   }
-  const receipt = JSON.parse(
-    readFileSync(path, "utf8"),
+  const receipt = readJsonFile(
+    path,
+    "Skizzles config receipt",
   ) as Partial<ConfigReceipt>;
   if (
     receipt.version !== 1 ||
     !["pending", "active", "restoring"].includes(receipt.state ?? "") ||
     !["aggressive", "passive"].includes(receipt.orchestration ?? "") ||
+    typeof receipt.codexBinary !== "string" ||
+    typeof receipt.configPath !== "string" ||
     !Array.isArray(receipt.values)
   ) {
     throw new Error(`invalid Skizzles config receipt: ${path}`);
@@ -216,72 +114,162 @@ function readReceipt(codexHome: string): ConfigReceipt {
   return receipt as ConfigReceipt;
 }
 
-function validateBinary(codexBinary: string): string {
-  if (!isAbsolute(codexBinary)) {
-    throw new Error("--codex-binary must be an absolute path");
+function validateReceiptTarget(
+  receipt: ConfigReceipt,
+  codexHome: string,
+  codexBinary: string,
+): void {
+  if (resolve(receipt.codexBinary) !== codexBinary) {
+    throw new Error(
+      `use the Codex binary recorded by the config receipt: ${receipt.codexBinary}`,
+    );
   }
-  const binary = resolve(codexBinary);
-  if (!existsSync(binary)) {
-    throw new Error(`Codex binary is missing: ${binary}`);
+  if (resolve(receipt.configPath) !== join(codexHome, "config.toml")) {
+    throw new Error("config receipt points outside the selected CODEX_HOME");
   }
-  return binary;
+}
+
+function receiptConfigEdits(receipt: ConfigReceipt): ConfigEdit[] {
+  return receipt.values.map(({ keyPath, after }) => ({
+    keyPath,
+    value: after,
+    mergeStrategy: "replace",
+  }));
+}
+
+function pendingConfigureReceipt(
+  receiptPath: string,
+  codexHome: string,
+  codexBinary: string,
+  orchestration: OrchestrationMode,
+): ConfigReceipt | undefined {
+  if (!pathEntryExists(receiptPath)) return undefined;
+  const receipt = readReceipt(codexHome);
+  validateReceiptTarget(receipt, codexHome, codexBinary);
+  if (receipt.state === "active") {
+    throw new Error(`Skizzles config receipt already exists: ${receiptPath}`);
+  }
+  if (receipt.state === "restoring") {
+    throw new Error(
+      "Skizzles config restoration is pending; run unconfigure before configuring again",
+    );
+  }
+  if (receipt.orchestration !== orchestration) {
+    throw new Error(
+      "pending config recovery uses a different orchestration mode; use the recorded mode or run unconfigure",
+    );
+  }
+  return receipt;
+}
+
+async function writeConfigBatch(
+  rpc: ConfigRpc,
+  edits: ConfigEdit[],
+  filePath: string,
+  expectedVersion: string,
+  conflictReceiptPath?: string,
+): Promise<void> {
+  try {
+    await rpc.batchWrite({
+      edits,
+      filePath,
+      expectedVersion,
+      reloadUserConfig: true,
+    });
+  } catch (error) {
+    if (conflictReceiptPath && isConfigVersionConflict(error)) {
+      rmSync(conflictReceiptPath, { force: true });
+    }
+    throw safeConfigWriteError(error);
+  }
+}
+
+async function recoverPendingConfigure(
+  receipt: ConfigReceipt,
+  receiptPath: string,
+  config: Parameters<typeof valuesMatchAfter>[0],
+  expectedVersion: string,
+  rpc: ConfigRpc,
+  dryRun?: boolean,
+): Promise<ConfigReceipt> {
+  const atAfter = valuesMatchAfter(config, receipt.values);
+  const atBefore = valuesMatchBefore(config, receipt.values);
+  if (!(atAfter || atBefore)) {
+    throw new Error(
+      "refusing to recover pending configuration after owned keys drifted",
+    );
+  }
+  if (dryRun) return receipt;
+  if (!atAfter) {
+    await writeConfigBatch(
+      rpc,
+      receiptConfigEdits(receipt),
+      receipt.configPath,
+      expectedVersion,
+    );
+  }
+  receipt.state = "active";
+  writePrivateJson(receiptPath, receipt);
+  return receipt;
 }
 
 export async function configureCodex(
   options: ConfigureOptions,
 ): Promise<ConfigReceipt> {
   const codexHome = canonicalExistingPath(options.codexHome);
-  const codexBinary = validateBinary(options.codexBinary);
+  const codexBinary = validateCodexBinary(options.codexBinary);
   assertManagedParentsAreReal(codexHome, [".skizzles"]);
   const receiptPath = configReceiptPath(codexHome);
-  if (pathEntryExists(receiptPath)) {
-    throw new Error(`Skizzles config receipt already exists: ${receiptPath}`);
-  }
-
-  const configPath = join(codexHome, "config.toml");
-  const rpc = await (options.rpcFactory ?? AppServerRpc.create)(
+  const existingReceipt = pendingConfigureReceipt(
+    receiptPath,
     codexHome,
     codexBinary,
+    options.orchestration,
   );
+
+  const configPath = join(codexHome, "config.toml");
+  const rpcSession = await openConfigRpcSession({
+    codexHome,
+    codexBinary,
+    dryRun: options.dryRun,
+    rpcFactory: options.rpcFactory,
+  });
+  const { rpc } = rpcSession;
   try {
-    const layer = userLayer(await rpc.read(), configPath);
+    const layer = selectedUserLayer(await rpc.read(), rpcSession.configPath);
+    if (existingReceipt) {
+      return recoverPendingConfigure(
+        existingReceipt,
+        receiptPath,
+        layer.config,
+        layer.version,
+        rpc,
+        options.dryRun,
+      );
+    }
+
     const edits = desiredConfigEdits(options.orchestration);
-    const values = edits.map(({ keyPath, value }) => {
-      const before = valueAt(layer.config, keyPath);
-      return {
-        keyPath,
-        beforePresent: before.present,
-        before: before.value,
-        after: value,
-      };
-    });
     const receipt: ConfigReceipt = {
       version: 1,
       state: "pending",
       orchestration: options.orchestration,
       codexBinary,
       configPath,
-      values,
+      values: snapshotConfigValues(layer.config, edits),
     };
     if (options.dryRun) return receipt;
 
-    writeReceipt(receiptPath, receipt, true);
-    try {
-      await rpc.batchWrite({
-        edits,
-        filePath: configPath,
-        expectedVersion: layer.version,
-        reloadUserConfig: true,
-      });
-    } catch (error) {
-      rmSync(receiptPath, { force: true });
-      throw error;
-    }
+    writePrivateJson(receiptPath, receipt, true);
+    await writeConfigBatch(rpc, edits, configPath, layer.version, receiptPath);
     receipt.state = "active";
-    writeReceipt(receiptPath, receipt);
+    writePrivateJson(receiptPath, receipt);
     return receipt;
   } finally {
-    await rpc.close();
+    try {
+      await rpc.close();
+    } finally {
+      rpcSession.cleanup();
+    }
   }
 }
 
@@ -292,216 +280,51 @@ export async function unconfigureCodex(
   assertManagedParentsAreReal(codexHome, [".skizzles"]);
   const receiptPath = configReceiptPath(codexHome);
   const receipt = readReceipt(codexHome);
-  const codexBinary = validateBinary(options.codexBinary);
-  if (resolve(receipt.codexBinary) !== codexBinary) {
-    throw new Error(
-      `use the Codex binary recorded by the config receipt: ${receipt.codexBinary}`,
-    );
-  }
-  if (resolve(receipt.configPath) !== join(codexHome, "config.toml")) {
-    throw new Error("config receipt points outside the selected CODEX_HOME");
-  }
+  const codexBinary = validateCodexBinary(options.codexBinary);
+  validateReceiptTarget(receipt, codexHome, codexBinary);
 
-  const rpc = await (options.rpcFactory ?? AppServerRpc.create)(
+  const rpcSession = await openConfigRpcSession({
     codexHome,
     codexBinary,
-  );
+    dryRun: options.dryRun,
+    rpcFactory: options.rpcFactory,
+  });
+  const { rpc } = rpcSession;
   try {
-    const layer = userLayer(await rpc.read(), receipt.configPath);
-    const atBefore = receipt.values.every(
-      ({ keyPath, beforePresent, before }) => {
-        const current = valueAt(layer.config, keyPath);
-        return (
-          current.present === beforePresent &&
-          (!beforePresent || sameValue(current.value, before))
-        );
-      },
-    );
-    if (receipt.state === "restoring" && atBefore) {
+    const layer = selectedUserLayer(await rpc.read(), rpcSession.configPath);
+    const atBefore = valuesMatchBefore(layer.config, receipt.values);
+    const atAfter = valuesMatchAfter(layer.config, receipt.values);
+    if (
+      atBefore &&
+      (receipt.state === "pending" || receipt.state === "restoring")
+    ) {
       if (!options.dryRun) rmSync(receiptPath);
       return receipt;
     }
-    for (const value of receipt.values) {
-      const current = valueAt(layer.config, value.keyPath);
-      if (!current.present || !sameValue(current.value, value.after)) {
-        throw new Error(
-          `refusing to restore drifted config key: ${value.keyPath}`,
-        );
-      }
+    if (!atAfter) {
+      throw new Error("refusing to restore drifted config keys");
     }
     if (options.dryRun) return receipt;
 
     receipt.state = "restoring";
-    writeReceipt(receiptPath, receipt);
-    await rpc.batchWrite({
-      edits: receipt.values.map(({ keyPath, beforePresent, before }) => ({
-        keyPath,
-        value: beforePresent ? before : null,
-        mergeStrategy: "replace",
-      })),
-      filePath: receipt.configPath,
-      expectedVersion: layer.version,
-      reloadUserConfig: true,
-    });
+    writePrivateJson(receiptPath, receipt);
+    try {
+      await rpc.batchWrite({
+        edits: restoreConfigEdits(receipt.values),
+        filePath: receipt.configPath,
+        expectedVersion: layer.version,
+        reloadUserConfig: true,
+      });
+    } catch (error) {
+      throw safeConfigWriteError(error);
+    }
     rmSync(receiptPath);
     return receipt;
   } finally {
-    await rpc.close();
-  }
-}
-
-class AppServerRpc implements ConfigRpc {
-  private readonly process: Bun.Subprocess<"pipe", "pipe", "pipe">;
-  private nextId = 1;
-  private readonly pending = new Map<
-    number,
-    {
-      resolve: (value: unknown) => void;
-      reject: (error: Error) => void;
-      timeout: ReturnType<typeof setTimeout>;
-    }
-  >();
-  private readonly stderrChunks: string[] = [];
-  private constructor(process: Bun.Subprocess<"pipe", "pipe", "pipe">) {
-    this.process = process;
-  }
-
-  static async create(
-    codexHome: string,
-    codexBinary: string,
-  ): Promise<AppServerRpc> {
-    const process = Bun.spawn([codexBinary, "app-server"], {
-      env: { ...Bun.env, CODEX_HOME: codexHome },
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const rpc = new AppServerRpc(process);
-    rpc.consumeStdout();
-    rpc.consumeStderr();
     try {
-      await rpc.request("initialize", {
-        clientInfo: {
-          name: "skizzles_installer",
-          title: "Skizzles Installer",
-          version: "0.1.0",
-        },
-        capabilities: { experimentalApi: true },
-      });
-      rpc.send({ method: "initialized" });
-      return rpc;
-    } catch (error) {
       await rpc.close();
-      throw error;
-    }
-  }
-
-  read(): Promise<ConfigReadResponse> {
-    return this.request("config/read", { includeLayers: true, cwd: null });
-  }
-
-  batchWrite(params: {
-    edits: ConfigEdit[];
-    filePath: string;
-    expectedVersion: string;
-    reloadUserConfig: boolean;
-  }): Promise<ConfigWriteResponse> {
-    return this.request("config/batchWrite", params);
-  }
-
-  async close(): Promise<void> {
-    this.process.stdin.end();
-    const exited = await Promise.race([
-      this.process.exited.then(() => true),
-      Bun.sleep(2_000).then(() => false),
-    ]);
-    if (!exited) this.process.kill();
-  }
-
-  private request<T>(method: string, params: unknown): Promise<T> {
-    const id = this.nextId++;
-    return new Promise<T>((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`Codex app-server request timed out: ${method}`));
-      }, 15_000);
-      this.pending.set(id, {
-        resolve: (value) => resolve(value as T),
-        reject,
-        timeout,
-      });
-      this.send({ method, id, params });
-    });
-  }
-
-  private send(message: object): void {
-    this.process.stdin.write(`${JSON.stringify(message)}\n`);
-    this.process.stdin.flush();
-  }
-
-  private async consumeStdout(): Promise<void> {
-    const reader = this.process.stdout.getReader();
-    const decoder = new TextDecoder();
-    let buffered = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffered += decoder.decode(value, { stream: true });
-      const lines = buffered.split("\n");
-      buffered = lines.pop() ?? "";
-      for (const line of lines) this.receive(line);
-    }
-    const detail = this.stderrChunks.join("").slice(-8_000).trim();
-    const error = new Error(
-      `Codex app-server closed unexpectedly${detail ? `: ${detail}` : ""}`,
-    );
-    for (const pending of this.pending.values()) {
-      clearTimeout(pending.timeout);
-      pending.reject(error);
-    }
-    this.pending.clear();
-  }
-
-  private receive(line: string): void {
-    if (!line.trim()) return;
-    let message: {
-      id?: number;
-      result?: unknown;
-      error?: { message?: string; data?: unknown };
-    };
-    try {
-      message = JSON.parse(line);
-    } catch {
-      return;
-    }
-    if (typeof message.id !== "number") return;
-    const pending = this.pending.get(message.id);
-    if (!pending) return;
-    this.pending.delete(message.id);
-    clearTimeout(pending.timeout);
-    if (message.error) {
-      pending.reject(
-        new Error(
-          `${message.error.message ?? "Codex app-server request failed"}: ${JSON.stringify(
-            message.error.data ?? {},
-          )}`,
-        ),
-      );
-    } else {
-      pending.resolve(message.result);
-    }
-  }
-
-  private async consumeStderr(): Promise<void> {
-    const reader = this.process.stderr.getReader();
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      this.stderrChunks.push(decoder.decode(value, { stream: true }));
-      if (this.stderrChunks.join("").length > 16_000) {
-        this.stderrChunks.splice(0, this.stderrChunks.length - 1);
-      }
+    } finally {
+      rpcSession.cleanup();
     }
   }
 }

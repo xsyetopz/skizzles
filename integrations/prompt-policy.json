@@ -1,0 +1,48 @@
+{
+  "schema": "skizzles.prompt-policy",
+  "version": 1,
+  "base": {
+    "role": "pinned generic upstream compatibility baseline; not a claim about any selected model's active baseline",
+    "applied": {
+      "path": "instructions/skizzles-base.md",
+      "sha256": "3412f9c3bf51311e7ffbf8874955e1f60b823dec71be2a53e7acb7cd7475b1c0",
+      "bytes": 21888
+    },
+    "provenance": {
+      "path": "instructions/skizzles-base.provenance.json",
+      "sha256": "7cf93dbcfe674cd316b07997787c1d1555b226636fb5d86998fca21874113e9a",
+      "bytes": 997
+    },
+    "upstream": {
+      "repository": "https://github.com/openai/codex",
+      "commit": "bc5c9161b46feddc13282652fd2cfdf1e5bab4a9",
+      "path": "codex-rs/protocol/src/prompts/base_instructions/default.md",
+      "sha256": "ac8ae107a0d72fe3476b430afb161ea4e67da2e446d778aefc44828160559807",
+      "bytes": 20903
+    },
+    "legal": {
+      "license": {
+        "sourcePath": "packages/core/prompt-layer/upstream/LICENSE",
+        "packagedPath": "third_party/openai-codex/LICENSE",
+        "sha256": "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+        "bytes": 10926
+      },
+      "notice": {
+        "sourcePath": "packages/core/prompt-layer/upstream/NOTICE",
+        "packagedPath": "third_party/openai-codex/NOTICE",
+        "sha256": "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+        "bytes": 242
+      }
+    }
+  },
+  "developerInstructions": {
+    "path": "instructions/developer-instructions.md",
+    "sha256": "1ed8c59c5514740fc0c7c300bb6d3f0155561353a89bde9bab4fe674d295320f",
+    "bytes": 2377
+  },
+  "compactPrompt": {
+    "path": "instructions/compact-prompt.md",
+    "sha256": "93562559f408364eb7799a91c4a7f9fe7fc2c09c4b315dd026633f9f04ae08c7",
+    "bytes": 780
+  }
+}

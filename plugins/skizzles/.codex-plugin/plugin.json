@@ -1,7 +1,7 @@
 {
   "name": "skizzles",
   "version": "0.1.0",
-  "description": "Portable Codex harness skills, hooks, maintenance tooling, and bundled Container Lab runtime.",
+  "description": "Portable Codex harness skills, hooks, opt-in prompt policy, maintenance tooling, and bundled Container Lab runtime.",
   "author": {
     "name": "Robert Sale"
   },
@@ -12,13 +12,14 @@
   "interface": {
     "displayName": "Skizzles",
     "shortDescription": "A portable Codex harness with bundled Container Lab tooling.",
-    "longDescription": "Skizzles packages reusable skills, hooks, maintenance tooling, and runnable Container Lab CLI/reaper bundles for a consistent Codex development environment.",
+    "longDescription": "Skizzles packages reusable skills, hooks, an explicit reversible prompt-policy lifecycle, maintenance tooling, and runnable Container Lab CLI/reaper bundles for a consistent Codex development environment.",
     "developerName": "Robert Sale",
     "category": "Developer Tools",
     "capabilities": [
       "Skills",
       "Hooks",
       "Developer tooling",
+      "Opt-in prompt policy",
       "Container Lab CLI and reaper"
     ],
     "defaultPrompt": [

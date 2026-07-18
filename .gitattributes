@@ -14,3 +14,4 @@ instructions/skizzles-base.provenance.json text eol=lf
 packages/core/prompt-layer/upstream/default.md whitespace=-trailing-space
 packages/core/prompt-layer/skizzles-base.patch whitespace=-trailing-space
 instructions/skizzles-base.md whitespace=-trailing-space
+plugins/skizzles/instructions/skizzles-base.md whitespace=-trailing-space

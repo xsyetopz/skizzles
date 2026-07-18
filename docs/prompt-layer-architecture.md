@@ -3,8 +3,8 @@
 ## Purpose and status
 
 This document describes the Codex instruction semantics that constrain the
-Skizzles prompt layer, the prompt-layer tooling currently implemented in this
-repository, and the activation work that remains pending. It is maintainer
+Skizzles prompt layer, the prompt-layer tooling implemented in this repository,
+and the separate opt-in activation lifecycle. It is maintainer
 documentation, not a record of any installed Codex configuration.
 
 The status labels below are intentional:
@@ -13,9 +13,9 @@ The status labels below are intentional:
   immutable OpenAI source references.
 - **Implemented Skizzles repository architecture** describes files and commands
   present in this repository.
-- **Pending installer activation behavior** describes the intended host-facing
-  boundary. It is not implemented and must not be treated as an available
-  installer command or packaging contract.
+- **Supported installer activation behavior** describes the implemented,
+  explicit host-facing boundary. Repository packaging and dry runs are not
+  evidence that this boundary has been activated on any host.
 
 ## Verified upstream Codex semantics
 
@@ -252,25 +252,68 @@ Use that command only after confirming none of the listed paths contains
 unrelated work. Restoring only the output or only the manifest creates an
 incoherent digest-locked set and is expected to fail verification.
 
-## Pending installer activation behavior
+## Supported installer activation behavior
 
-The repository does not yet package or activate this prompt policy. The applied
-prompt, provenance, `LICENSE`, and `NOTICE` are not currently staged into the
-generated Skizzles plugin, and the installer does not currently manage
-`model_instructions_file`, `developer_instructions`, or `compact_prompt`.
+The generated plugin stages only the applied base, portable provenance,
+developer policy, local-compaction prompt, portable policy descriptor, and the
+pinned OpenAI `LICENSE` and `NOTICE` under `third_party/openai-codex/`. The
+upstream baseline, patch, manifest, prompt authoring/rebase tooling, and tests
+remain maintainer-only inputs.
 
-The intended future boundary is an explicit, owner-approved operation that
-atomically manages all three settings as one versioned policy and records the
-exact prior values in owner-only receipt state for drift-safe restoration. The
-planned distributable set is the applied prompt, provenance, `LICENSE`, and
-`NOTICE`; the upstream baseline, patch, manifest, and authoring tooling remain
-maintainer inputs. Remote compaction must remain documented as outside the
-guarantee of `compact_prompt`.
+Activation is never implicit in skill, harness, plugin, or orchestration
+configuration installation. The explicit command is:
 
-No command names, receipt paths, host locations, or activation claims are
-specified here because those contracts do not yet exist. Until the installer
-and packaging boundary are implemented and validated, activation is a future
-design constraint rather than supported behavior.
+```sh
+bun run packages/installer/src/cli.ts prompt-policy apply \
+  --source-root /absolute/path/to/selected/skizzles \
+  --codex-home /absolute/target/codex-home \
+  --codex-binary /absolute/path/to/codex --dry-run
+```
+
+Apply validates the descriptor, hashes, provenance, legal inputs, containment,
+and non-symlink source boundary. It copies the applied base to the stable
+owner-only path `CODEX_HOME/.skizzles/prompt-policy/skizzles-base.md`, writes a
+separate pending receipt, and uses native `config/batchWrite` to replace the
+complete `model_instructions_file`, `developer_instructions`, and
+`compact_prompt` values atomically. It never points Codex at a checkout or
+plugin cache. Preview output reports only key names, prior-presence flags,
+digests, byte counts, target classification, and the planned action.
+
+Dry-run app-server reads use a disposable owner-only config snapshot outside
+the selected home and remove it after the preview. The snapshot copies only
+the selected config and the bounded relative read inputs it names, including
+base/compact prompt files, model catalogs, nested role config files, and the
+same fields below profile tables. Every copied source must remain within the
+selected home, traverse no symlink, stay within byte limits, and retain its
+filesystem identity through a no-follow read. Resolved preview paths are
+remapped to selected-home paths before lifecycle comparison. The selected
+`CODEX_HOME` therefore receives no app-server or installer writes during
+preview. Apply, resume, restore, and recovery share one external identity-bound
+lifecycle lock; live owners exclude concurrent operations, while stale and
+incomplete owners are reclaimed only after filesystem and process-start
+identity checks.
+
+The owner-only receipt at
+`CODEX_HOME/.skizzles/prompt-policy-receipt.json` records exact prior presence
+and values. `prompt-policy restore` verifies the selected binary, config path,
+three current replacement values, receipt facts, and managed base digest before
+atomically restoring prior values. Missing prior values are deleted. Drift
+causes no mutation and retains the evidence. Versioned pending and restoring
+states permit safe retry or validated cleanup after interruption.
+Only the current nested app-server wire shape
+`error.data.config_write_error_code = "configVersionConflict"` classifies a
+confirmed pre-write conflict and removes newly created apply evidence. The
+other five `ConfigWriteErrorCode` enum members are allowlisted only for a
+redacted diagnostic. Legacy `code`/`status` fields, unknown values, timeouts,
+closed transports, and other ambiguous write outcomes retain
+pending/restoring evidence. The next locked invocation reads all three values
+and distinguishes exact before, exact after, and drift before deciding whether
+to retry, finalize, restore, or refuse. Protocol diagnostics never expose
+arbitrary app-server error data or stderr.
+
+Applying or restoring requires a new session before instruction changes can be
+evaluated. The configured `compact_prompt` governs local compaction only;
+provider-managed remote compaction can bypass it.
 
 ## Sources and provenance
 

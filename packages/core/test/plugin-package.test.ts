@@ -8,6 +8,7 @@ import {
   readFile,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -104,6 +105,133 @@ describe("deterministic plugin packaging", () => {
       await readFile(join(first, "packages/installer/src/cli.ts"), "utf8"),
     ).toContain("fixture cli");
     expect(await Bun.file(join(first, "README.md")).exists()).toBe(false);
+    expect(await filesUnder(join(first, "instructions"))).toEqual([
+      "compact-prompt.md",
+      "developer-instructions.md",
+      "skizzles-base.md",
+      "skizzles-base.provenance.json",
+    ]);
+    expect(await filesUnder(join(first, "third_party/openai-codex"))).toEqual([
+      "LICENSE",
+      "NOTICE",
+    ]);
+    expect(
+      await Bun.file(
+        join(first, "packages/core/prompt-layer/upstream/default.md"),
+      ).exists(),
+    ).toBe(false);
+    expect(
+      await Bun.file(
+        join(first, "packages/core/prompt-layer/skizzles-base.patch"),
+      ).exists(),
+    ).toBe(false);
+    expect(
+      await Bun.file(
+        join(first, "packages/core/prompt-layer/manifest.json"),
+      ).exists(),
+    ).toBe(false);
+    expect(
+      await Bun.file(
+        join(first, "packages/installer/src/codex-config.ts"),
+      ).exists(),
+    ).toBe(true);
+    expect(
+      await Bun.file(
+        join(first, "packages/installer/src/prompt-policy.ts"),
+      ).exists(),
+    ).toBe(true);
+  });
+
+  test("rejects tampered prompt-policy content, provenance, legal input, and descriptor shape", async () => {
+    for (const mutation of [
+      "prompt",
+      "provenance",
+      "legal",
+      "descriptor",
+    ] as const) {
+      const root = await fixture();
+      if (mutation === "prompt") {
+        await write(root, "instructions/skizzles-base.md", "tampered\n");
+      } else if (mutation === "provenance") {
+        await write(root, "instructions/skizzles-base.provenance.json", "{}\n");
+      } else if (mutation === "legal") {
+        await write(
+          root,
+          "packages/core/prompt-layer/upstream/NOTICE",
+          "tampered\n",
+        );
+      } else {
+        const path = join(root, "integrations/prompt-policy.json");
+        const descriptor = JSON.parse(await readFile(path, "utf8"));
+        descriptor.unexpected = true;
+        await writeFile(path, `${JSON.stringify(descriptor, null, 2)}\n`);
+      }
+      await expect(stagePlugin(root, join(root, "stage"))).rejects.toThrow();
+    }
+  });
+
+  test("rejects non-canonical prompt-policy legal mappings before staging", async () => {
+    for (const mutation of [
+      "license-source",
+      "notice-packaged",
+      "swapped",
+      "duplicate-source",
+      "duplicate-packaged",
+    ] as const) {
+      const root = await fixture();
+      const path = join(root, "integrations/prompt-policy.json");
+      const descriptor = JSON.parse(await readFile(path, "utf8"));
+      const legal = descriptor.base.legal;
+      if (mutation === "license-source") {
+        legal.license.sourcePath =
+          "packages/core/prompt-layer/upstream/RENAMED-LICENSE";
+      } else if (mutation === "notice-packaged") {
+        legal.notice.packagedPath = "third_party/other/NOTICE";
+      } else if (mutation === "swapped") {
+        [legal.license.sourcePath, legal.notice.sourcePath] = [
+          legal.notice.sourcePath,
+          legal.license.sourcePath,
+        ];
+        [legal.license.packagedPath, legal.notice.packagedPath] = [
+          legal.notice.packagedPath,
+          legal.license.packagedPath,
+        ];
+      } else if (mutation === "duplicate-source") {
+        legal.notice.sourcePath = legal.license.sourcePath;
+      } else {
+        legal.notice.packagedPath = legal.license.packagedPath;
+      }
+      await writeFile(path, `${JSON.stringify(descriptor, null, 2)}\n`);
+      await expect(
+        stagePlugin(root, join(root, "stage")),
+      ).rejects.toBeInstanceOf(PackagingError);
+    }
+  });
+
+  test("rejects symlinked prompt-policy inputs before staging", async () => {
+    const root = await fixture();
+    const prompt = join(root, "instructions/skizzles-base.md");
+    await rm(prompt);
+    await symlink(
+      join(
+        resolve(import.meta.dir, "../../.."),
+        "instructions/skizzles-base.md",
+      ),
+      prompt,
+    );
+    await expect(stagePlugin(root, join(root, "stage"))).rejects.toThrow(
+      "uses a symlinked policy path",
+    );
+
+    const parentRoot = await fixture();
+    await rm(join(parentRoot, "instructions"), { recursive: true });
+    await symlink(
+      join(resolve(import.meta.dir, "../../.."), "instructions"),
+      join(parentRoot, "instructions"),
+    );
+    await expect(
+      stagePlugin(parentRoot, join(parentRoot, "stage")),
+    ).rejects.toThrow("uses a symlinked policy path");
   });
 
   test("check reports generated drift", async () => {
@@ -440,7 +568,15 @@ async function fixture(): Promise<string> {
     "packages/codex-container-lab/cli/src/cli.ts",
     "#!/usr/bin/env bun\nif (import.meta.main) console.log(JSON.stringify({ help: 'fixture cli' }));\n",
   );
-  for (const path of ["config.ts", "core.ts", "doctor.ts", "harness.ts"]) {
+  for (const path of [
+    "codex-config.ts",
+    "config.ts",
+    "core.ts",
+    "doctor.ts",
+    "harness.ts",
+    "prompt-policy-lock.ts",
+    "prompt-policy.ts",
+  ]) {
     await write(
       root,
       `packages/installer/src/${path}`,
@@ -525,6 +661,20 @@ async function fixture(): Promise<string> {
       },
     }),
   );
+  const canonicalRoot = resolve(import.meta.dir, "../../..");
+  for (const path of [
+    "integrations/prompt-policy.json",
+    "instructions/skizzles-base.md",
+    "instructions/skizzles-base.provenance.json",
+    "instructions/developer-instructions.md",
+    "instructions/compact-prompt.md",
+    "packages/core/prompt-layer/upstream/LICENSE",
+    "packages/core/prompt-layer/upstream/NOTICE",
+  ]) {
+    const destination = join(root, path);
+    await mkdir(dirname(destination), { recursive: true });
+    await cp(join(canonicalRoot, path), destination);
+  }
   return root;
 }
 

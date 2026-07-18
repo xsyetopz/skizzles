@@ -75,7 +75,36 @@ bun run packages/installer/src/cli.ts unconfigure \
   --codex-binary /absolute/path/to/codex --dry-run
 ```
 
-Repeat restoration without `--dry-run` only after previewing it. The lifecycle launches that Codex binary's app-server against the selected home and uses native `config/read` plus atomic `config/batchWrite` with version-conflict detection. Its receipt lives at `CODEX_HOME/.skizzles/config-receipt.json`; restoration fails closed if an owned value drifted. It never edits `AGENTS.md`, `developer_instructions`, approvals, permissions, goals, model defaults, MCP registrations, or unrelated feature flags. Do not manually delete the receipt to bypass a conflict.
+Repeat restoration without `--dry-run` only after previewing it. Preview launches that Codex binary's app-server against a disposable isolated config snapshot and leaves the selected `CODEX_HOME` byte-for-byte and entry-for-entry unchanged. Required relative read inputs named by the selected config are privately copied only when they remain inside the selected home and traverse no symlink; resolved preview paths are reported as their selected-home equivalents, and the snapshot is removed after use. Non-preview operations launch the app-server against the selected home and use native `config/read` plus atomic `config/batchWrite` with version-conflict detection. The receipt lives at `CODEX_HOME/.skizzles/config-receipt.json`; restoration fails closed if an owned value drifted. This orchestration lifecycle never edits `AGENTS.md`, `developer_instructions`, approvals, permissions, goals, model defaults, MCP registrations, or unrelated feature flags. Do not manually delete the receipt to bypass a conflict.
+
+## Apply the optional prompt policy
+
+Prompt policy is separate from installation and orchestration configuration. Never run it implicitly. It replaces three complete values as one policy: `model_instructions_file`, `developer_instructions`, and `compact_prompt`. It does not concatenate unknown personal text.
+
+Preview from the selected source checkout or plugin snapshot with explicit roots and an absolute Codex binary:
+
+```sh
+bun run packages/installer/src/cli.ts prompt-policy apply \
+  --source-root /absolute/path/to/selected/skizzles \
+  --codex-home /absolute/target/codex-home \
+  --codex-binary /absolute/path/to/codex --dry-run
+```
+
+Review the prior-presence flags, digests, byte counts, managed-target classification, and planned action. The summary deliberately omits prior personal prompt text and replacement bodies. Preview launches the selected app-server only against a disposable owner-only copy of the selected config and its validated in-home relative read inputs, remaps resolved paths to selected-home values, removes the snapshot, and leaves the selected `CODEX_HOME` byte-for-byte and entry-for-entry unchanged. Escaping, symlinked, oversized, or changed-during-copy relative inputs fail closed. Repeat without `--dry-run` only after explicit approval.
+
+Apply validates the portable descriptor, every policy digest, the generic-base provenance relationship, and the bundled OpenAI `LICENSE` and `NOTICE`. It copies the applied base to `CODEX_HOME/.skizzles/prompt-policy/skizzles-base.md` with owner-only permissions before atomically writing all three config values through the selected Codex app-server. The separate receipt is `CODEX_HOME/.skizzles/prompt-policy-receipt.json`.
+
+Preview exact restoration with:
+
+```sh
+bun run packages/installer/src/cli.ts prompt-policy restore \
+  --codex-home /absolute/target/codex-home \
+  --codex-binary /absolute/path/to/codex --dry-run
+```
+
+Restoration proceeds only when the selected binary and config path match the receipt, all three current values equal the recorded replacements, and the managed prompt digest is unchanged. It then atomically restores each exact prior value, deleting only values that were originally absent. One identity-bound lifecycle lock serializes apply, resume, restore, and interrupted-state cleanup. Only the exact current app-server wire value `error.data.config_write_error_code = "configVersionConflict"` is treated as a confirmed pre-write conflict that can clean newly created apply evidence. The other current `ConfigWriteErrorCode` values remain redacted protocol rejections; missing, legacy-shaped, unknown, timeout, and closed-transport outcomes retain pending or restoring evidence. Drift retains evidence; do not bypass it by manual deletion.
+
+Start a new Codex session after applying or restoring because existing conversation history can retain earlier instructions. `compact_prompt` controls local history compaction only; provider-managed remote compaction may bypass it. Do not claim activation from installation, a dry run, or repository packaging alone.
 
 ## Use Container Lab deliberately
 

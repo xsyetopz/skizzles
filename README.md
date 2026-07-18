@@ -14,6 +14,7 @@ Skizzles is a friendly, reviewable Codex harness: reusable skills, helpful hooks
 - **A practical skill shelf** — auth semantics, Cargo optimization, completion contracts, counterfactual engineering, design proof gates, legacy cleanup, Rinf boundaries, project tooling, and a gated designer runtime.
 - **Installation help** — the public `install-skizzles` skill guides an LLM through optional host wiring after a skill-only install.
 - **A polite config handshake** — enable the hooks, then choose passive native orchestration or the full proactive Fourth Wall experience without trampling the rest of `config.toml`. 🤝
+- **An explicit prompt policy** — preview, apply, and restore the checksum-locked base, developer policy, and local-compaction prompt as one drift-safe opt-in lifecycle.
 
 Everything is maintained once in the canonical roots and workspace packages, then staged into a versioned plugin. 🎯
 
@@ -50,7 +51,9 @@ After installing the complete plugin surface, Skizzles can safely finish the Cod
 - **Passive orchestration** enables the packaged hooks and leaves Codex’s native MultiAgentV2 defaults completely alone.
 - **Aggressive orchestration** also enables MultiAgentV2, keeps seven task slots available, and adds tiny root/subagent pointers to `$fourth-wall` plus the proactive quality-and-speed trigger. 🚀
 
-The configuration lifecycle previews before writing, uses Codex’s own atomic config editor, preserves comments and unrelated settings, and records only the keys it owns for drift-safe restoration. It never edits `AGENTS.md`, personal instructions, approvals, permissions, goals, model defaults, or MCP registrations. See [install-skizzles](skills/install-skizzles/SKILL.md) for the exact commands.
+The orchestration configuration lifecycle previews before writing, uses Codex’s own atomic config editor, preserves comments and unrelated settings, and records only the keys it owns for drift-safe restoration. It never edits `AGENTS.md`, `developer_instructions`, approvals, permissions, goals, model defaults, or MCP registrations.
+
+Prompt policy is a separate explicit surface. `prompt-policy apply` atomically replaces the complete `model_instructions_file`, `developer_instructions`, and `compact_prompt` values after copying the validated base to an owner-only managed path below the selected `CODEX_HOME`. `prompt-policy restore` restores exact prior presence and values only when all three settings and the managed file still match the receipt. Both commands support selected-home-non-writing previews through a disposable isolated config snapshot that privately copies validated in-home relative read inputs and remaps resolved preview paths back to the selected home. Escaping or symlinked relative inputs fail closed. The commands require explicit roots and an absolute Codex binary and serialize the complete lifecycle with a recoverable identity-bound lock. Ambiguous app-server failures retain pending receipt and managed-file evidence for state inspection instead of assuming that a write did not commit. Start a new session after applying or restoring; provider-managed remote compaction may bypass `compact_prompt`. See [install-skizzles](skills/install-skizzles/SKILL.md) for the exact commands.
 
 The optional Luna V2 overlay lives in `runtime/model-catalog.ts`. It regenerates a complete static catalog from the newest valid normal cache or the installed Codex binary, changes only Luna's compatibility marker, and becomes a no-op when upstream enables V2 officially. Its launchd template watches both sources and runs every five minutes; catalog changes take effect after the next app-server restart. See `assets/model-catalog-installation.md` before activating it. 🚀
 
