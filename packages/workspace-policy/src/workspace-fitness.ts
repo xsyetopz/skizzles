@@ -15,7 +15,8 @@ const GENERATED_DIRECTORIES = new Set([
   "vendor",
 ]);
 const GENERATED_FILE_PATTERN = /(?:\.d|\.gen|\.generated)\.ts$/u;
-const PACKAGE_PATH_PATTERN = /(?:^|["'`/])packages\/([a-z0-9-]+)(?:\/|["'`])/gu;
+const PACKAGE_PATH_PATTERN =
+  /(?:^|["'`\\/])packages[\\/]+([a-z0-9-]+)(?:[\\/]+|["'`])/gu;
 const MAX_PUBLIC_EXPORTS = 3;
 const MAX_PUBLIC_BINARIES = 2;
 const MAX_EXECUTABLE_ENTRYPOINT_LINES = 200;
@@ -78,7 +79,12 @@ function validatePackageCycles(
   for (const { manifest } of packages) {
     edges.set(
       manifest.name,
-      Object.keys(manifest.dependencies)
+      [
+        ...new Set([
+          ...Object.keys(manifest.dependencies),
+          ...Object.keys(manifest.devDependencies),
+        ]),
+      ]
         .filter((name) => packagesByName.has(name))
         .sort(),
     );

@@ -237,7 +237,11 @@ function validatePackageDependencies(
       );
     }
   }
-  for (const [name, range] of Object.entries(manifest.dependencies)) {
+  const declaredDependencies = {
+    ...manifest.devDependencies,
+    ...manifest.dependencies,
+  };
+  for (const [name, range] of Object.entries(declaredDependencies)) {
     if (name.startsWith("@skizzles/") && range !== "workspace:*") {
       addFinding(
         findings,

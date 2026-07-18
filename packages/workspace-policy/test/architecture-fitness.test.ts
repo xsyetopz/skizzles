@@ -39,6 +39,36 @@ describe("workspace architecture fitness", () => {
     expect(codes).toContain("private-package-import");
   });
 
+  it("rejects cycles formed only by internal development dependencies", async () => {
+    const root = await fixture();
+    await addPackage(root, "two", "@skizzles/two");
+    const first = packageManifest("@skizzles/example");
+    first.devDependencies["@skizzles/two"] = "workspace:*";
+    const second = packageManifest("@skizzles/two");
+    second.devDependencies["@skizzles/example"] = "workspace:*";
+    await writeManifest(root, "example", first);
+    await writeManifest(root, "two", second);
+
+    const codes = (await validateWorkspaceArchitecture(root)).map(
+      ({ code }) => code,
+    );
+    expect(codes).toContain("package-dependency-cycle");
+  });
+
+  it("requires workspace ranges for internal development dependencies", async () => {
+    const root = await fixture();
+    const manifest = packageManifest("@skizzles/example");
+    manifest.devDependencies["@skizzles/two"] = "^0.1.0";
+    await writeManifest(root, "example", manifest);
+
+    const findings = await validateWorkspaceArchitecture(root);
+    expect(findings).toContainEqual({
+      code: "workspace-range",
+      path: "packages/example",
+      message: "@skizzles/two must use workspace:*",
+    });
+  });
+
   it("enforces current public export and binary budgets", async () => {
     const root = await fixture();
     const manifest = packageManifest("@skizzles/example");
@@ -82,6 +112,15 @@ describe("workspace architecture fitness", () => {
       join(root, "packages/example/src/generated-consumer.ts"),
       'import "../generated/contract.generated.ts";\n',
     );
+    await mkdir(join(root, "packages/example/src/generated"));
+    await writeFile(
+      join(root, "packages/example/src/generated/value.ts"),
+      "export {};\n",
+    );
+    await writeFile(
+      join(root, "packages/example/src/nested-generated-consumer.ts"),
+      'import "./generated/value.ts";\n',
+    );
 
     const codes = (await validateWorkspaceArchitecture(root)).map(
       ({ code }) => code,
@@ -89,6 +128,9 @@ describe("workspace architecture fitness", () => {
     expect(codes).toContain("unowned-package-source");
     expect(codes).toContain("production-to-test-import");
     expect(codes).toContain("production-to-generated-import");
+    expect(
+      codes.filter((code) => code === "production-to-generated-import"),
+    ).toHaveLength(2);
   });
 
   it("requires responsibility records above 650 lines and errors above 800", async () => {
@@ -145,22 +187,28 @@ describe("workspace architecture fitness", () => {
     expect(codes).toContain("thick-executable-entrypoint");
   });
 
-  it("rejects undeclared static filesystem reach-through", async () => {
-    const root = await fixture();
-    await addPackage(root, "two", "@skizzles/two");
-    await writeFile(
-      join(root, "packages/example/src/index.ts"),
-      'export const path = "packages/two/assets/contract.json";\n',
-    );
+  it.each([
+    ["POSIX", "packages/two/assets/contract.json"],
+    ["Windows", "packages\\two\\assets\\contract.json"],
+  ])(
+    "rejects %s-separated static filesystem reach-through",
+    async (_, path) => {
+      const root = await fixture();
+      await addPackage(root, "two", "@skizzles/two");
+      await writeFile(
+        join(root, "packages/example/src/index.ts"),
+        `export const path = ${JSON.stringify(path)};\n`,
+      );
 
-    const findings = await validateWorkspaceArchitecture(root);
-    expect(findings).toContainEqual({
-      code: "hidden-package-filesystem-reach-through",
-      path: "packages/example/src/index.ts",
-      message:
-        "static path reaches packages/two without artifact composition authority",
-    });
-  });
+      const findings = await validateWorkspaceArchitecture(root);
+      expect(findings).toContainEqual({
+        code: "hidden-package-filesystem-reach-through",
+        path: "packages/example/src/index.ts",
+        message:
+          "static path reaches packages/two without artifact composition authority",
+      });
+    },
+  );
 });
 
 async function fixture(): Promise<string> {

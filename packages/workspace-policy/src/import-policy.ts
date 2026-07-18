@@ -9,12 +9,7 @@ import { listFiles } from "./workspace-files.ts";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const IMPORT_EXTENSIONS = new Set([...SOURCE_EXTENSIONS, ".json"]);
-const GENERATED_DIRECTORIES = new Set([
-  "dist",
-  "generated",
-  "node_modules",
-  "vendor",
-]);
+const IMPORT_DISCOVERY_EXCLUSIONS = new Set(["dist", "node_modules", "vendor"]);
 const GENERATED_FILE_PATTERN = /(?:\.d|\.gen|\.generated)\.ts$/u;
 
 export async function validateWorkspaceImports(
@@ -25,13 +20,16 @@ export async function validateWorkspaceImports(
     packages.map((item) => [item.manifest.name, item]),
   );
   for (const item of packages) {
-    const files = (await listFiles(item.root, GENERATED_DIRECTORIES)).filter(
-      (path) =>
-        SOURCE_EXTENSIONS.has(path.slice(path.lastIndexOf("."))) &&
-        !GENERATED_FILE_PATTERN.test(path),
+    const files = (
+      await listFiles(item.root, IMPORT_DISCOVERY_EXCLUSIONS)
+    ).filter((path) =>
+      SOURCE_EXTENSIONS.has(path.slice(path.lastIndexOf("."))),
     );
     for (const sourcePath of files) {
       const relativePath = toPortablePath(relative(item.root, sourcePath));
+      if (isGeneratedOwnership(relativePath)) {
+        continue;
+      }
       validateImports(
         item,
         sourcePath,
@@ -114,10 +112,7 @@ function validateImport(
           findingPath,
           `${specifier} points production code at test ownership`,
         );
-      } else if (
-        targetOwnership.startsWith("generated/") ||
-        GENERATED_FILE_PATTERN.test(targetOwnership)
-      ) {
+      } else if (isGeneratedOwnership(targetOwnership)) {
         addFinding(
           findings,
           "production-to-generated-import",
@@ -165,6 +160,12 @@ function validateImport(
 function packageSubpath(specifier: string, dependency: string): string {
   const suffix = specifier.slice(dependency.length);
   return suffix === "" ? "." : `.${suffix}`;
+}
+
+function isGeneratedOwnership(path: string): boolean {
+  return (
+    path.split("/").includes("generated") || GENERATED_FILE_PATTERN.test(path)
+  );
 }
 
 function stripShebang(source: string): string {
