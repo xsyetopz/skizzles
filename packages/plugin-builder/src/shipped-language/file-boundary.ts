@@ -4,7 +4,7 @@ import { join, relative, resolve, sep } from "node:path";
 import { PackagingError } from "../plugin/contract.ts";
 
 const MAX_LANGUAGE_SURFACE_BYTES = 16 * 1024 * 1024;
-const FORMAT_CONTROL_PATTERN = /\p{Cf}/u;
+const DEFAULT_IGNORABLE_PATTERN = /\p{Default_Ignorable_Code_Point}/u;
 
 export class LanguageSurfaceBoundaryError extends PackagingError {}
 
@@ -188,7 +188,7 @@ export function safeLanguageDiagnosticPath(path: string): string {
         !(codePoint >= 0xd800 && codePoint <= 0xdfff) &&
         codePoint !== 0x2028 &&
         codePoint !== 0x2029 &&
-        !FORMAT_CONTROL_PATTERN.test(character)
+        !DEFAULT_IGNORABLE_PATTERN.test(character)
       );
     })
   ) {

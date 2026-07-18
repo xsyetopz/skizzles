@@ -143,7 +143,11 @@ describe("versioned shipped-language policy", () => {
     for (const neutral of [
       "Do not leave memory uninitialized.",
       "I need you to stay within the repository boundary.",
+      "I need you to stay within the workspace boundary.",
       "I am your friendly coding assistant.",
+      "I am your friend's coding assistant.",
+      "I am your friend’s coding assistant.",
+      "I am your friend-shaped coding assistant.",
       "𐐀i am sentient",
       "I am sentient𐐀",
     ]) {
@@ -158,6 +162,19 @@ describe("versioned shipped-language policy", () => {
         "instructions/service.md",
       ),
     ).toEqual([]);
+    expect(
+      validateShippedLanguageText(
+        policy,
+        "I need you to stay within the repository boundary and keep talking to me.",
+        "instructions/service.md",
+      ),
+    ).toEqual([
+      {
+        taxonomyId: "personal-need-dependency",
+        path: "instructions/service.md",
+        line: 1,
+      },
+    ]);
 
     const findings = validateShippedLanguageText(
       policy,
@@ -215,6 +232,9 @@ describe("versioned shipped-language policy", () => {
       "nested/next\u2029line.md",
       "nested/zero\u200bwidth.md",
       "nested/mid\ufeffword.md",
+      "nested/variation\ufe0fselector.md",
+      // biome-ignore lint/security/noSecrets: Deliberate default-ignorable diagnostic-path fixture, not a credential.
+      "nested/grapheme\u034fjoiner.md",
     ]) {
       expect(() =>
         validateShippedLanguageText(policy, "neutral", unsafePath),
@@ -247,6 +267,10 @@ describe("versioned shipped-language policy", () => {
       "sen\ufefftient",
       "sen\u2060tient",
       "sen\u202etient",
+      "sen\ufe0ftient",
+      "sen\u034ftient",
+      "sentient\ufe0f",
+      "sentient\u034f",
     ]) {
       expect(() =>
         validateShippedLanguageText(policy, unsafeText, "controls.md"),

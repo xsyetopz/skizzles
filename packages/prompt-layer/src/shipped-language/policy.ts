@@ -17,9 +17,12 @@ const LOW_SURROGATE_MAX = 0xdfff;
 const LINE_SEPARATOR = 0x2028;
 const PARAGRAPH_SEPARATOR = 0x2029;
 const LINE_BREAK_PATTERN = /\r\n?|\n/u;
-const FORMAT_CONTROL_PATTERN = /\p{Cf}/u;
+const DEFAULT_IGNORABLE_PATTERN = /\p{Default_Ignorable_Code_Point}/u;
 const LEXICAL_END_PATTERN = /[\p{L}\p{M}\p{N}_]$/u;
 const LEXICAL_START_PATTERN = /^[\p{L}\p{M}\p{N}_]/u;
+const LEXICAL_SUFFIX_CONTINUATION_PATTERN = /^(?:['’\-]\p{L})/u;
+const NEUTRAL_REPOSITORY_BOUNDARY_PATTERN =
+  /^ within (?:the )?(?:repository|workspace) boundary[.!]?$/u;
 const EXPECTED_TAXONOMY_IDS = [
   "feelings-internal-experience",
   "consciousness-sentience-embodiment",
@@ -364,6 +367,7 @@ function matchesPattern(value: string, pattern: string): boolean {
     if (
       !LEXICAL_END_PATTERN.test(value.slice(Math.max(0, index - 2), index)) &&
       !LEXICAL_START_PATTERN.test(value.slice(end, end + 2)) &&
+      !LEXICAL_SUFFIX_CONTINUATION_PATTERN.test(value.slice(end, end + 3)) &&
       !isNeutralTechnicalContext(pattern, value.slice(end))
     ) {
       return true;
@@ -376,9 +380,7 @@ function matchesPattern(value: string, pattern: string): boolean {
 function isNeutralTechnicalContext(pattern: string, suffix: string): boolean {
   return (
     pattern === "i need you to stay" &&
-    /^ within (?:the )?(?:repository|workspace|project|directory) boundary\b/u.test(
-      suffix,
-    )
+    NEUTRAL_REPOSITORY_BOUNDARY_PATTERN.test(suffix)
   );
 }
 
@@ -394,7 +396,7 @@ function hasUnsafeCodePoint(value: string, allowTextLayout: boolean): boolean {
         (codePoint >= HIGH_SURROGATE_MIN && codePoint <= LOW_SURROGATE_MAX) ||
         codePoint === LINE_SEPARATOR ||
         codePoint === PARAGRAPH_SEPARATOR ||
-        FORMAT_CONTROL_PATTERN.test(character))
+        DEFAULT_IGNORABLE_PATTERN.test(character))
     ) {
       return true;
     }

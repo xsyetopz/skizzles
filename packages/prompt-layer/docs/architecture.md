@@ -159,9 +159,13 @@ The version 2 corpus uses no data-supplied regular expressions. Each canonical
 ASCII phrase is normalized with Unicode NFKC, lowercase conversion, and
 collapsed horizontal whitespace, then matched on one physical line with
 Unicode letter, mark, number, and underscore boundaries. The dependency phrase
-also excludes the explicit neutral repository-boundary continuation. These
-lexical and narrow context boundaries prevent pattern prefixes from matching
-words such as `memory` or `friendly` without exempting prohibited fixtures.
+also excludes only a complete neutral repository/workspace-boundary sentence;
+additional trailing language removes that exemption. Apostrophe, curly
+apostrophe, and hyphen continuations into another letter remain part of the
+surrounding word. These lexical and narrow context boundaries prevent pattern
+prefixes from matching words, possessives, or compounds such as `memory`,
+`friend's`, and `friend-shaped` without exempting punctuation-separated
+prohibited fixtures.
 Quoted text and fenced code are scanned. Negation has no semantic exemption: a
 negated sentence is accepted only when its normalized text does not match a
 prohibited literal. Ordinary first-person service language remains permitted.
@@ -176,10 +180,12 @@ Corpus changes therefore require a new version or an explicit digest update
 with review and must retain negative and allowed fixtures. Findings contain the
 taxonomy ID, bounded relative path, and line number, never the matched text. C0 controls
 other than tab/CR/LF, DEL/C1 controls, unpaired surrogates, and Unicode
-line/paragraph separators are rejected before matching. Unicode format controls,
-including zero-width, byte-order-mark, word-joining, and bidi controls, are also
-rejected rather than allowed to splice lexical tokens. This keeps line
-calculation limited to CR/LF text and prevents invisible mid-word bypasses.
+line/paragraph separators are rejected before matching. Every Unicode
+`Default_Ignorable_Code_Point`, including zero-width, byte-order-mark,
+word-joining, bidi, variation-selector, and combining-grapheme-joiner code
+points, is also rejected rather than allowed to splice or trail lexical tokens.
+The same rule redacts diagnostic paths. This keeps line calculation limited to
+CR/LF text and prevents invisible bypasses.
 
 `@skizzles/plugin-builder` scans canonical runtime source and every staged
 textual plugin surface before accepting a distribution. The canonical scan
@@ -193,7 +199,10 @@ hard link are rejected. A new textual suffix therefore cannot bypass the
 pre-mutation gate or import bytes through a link outside the owned tree.
 
 Format-aware scanning is additive to the raw scan and never executes shipped
-content:
+content. `surface-content.ts` owns classification and JSON/YAML/program dispatch;
+`markdown-content.ts` and `plist-content.ts` privately own their bounded format
+parsers, while `surface-errors.ts` owns only their shared redacted syntax/bounds
+diagnostic contract:
 
 - JSON and JSONC use Bun's parsers, bounded recursive traversal of every string
   key/value, and token decoding so duplicate overwritten keys cannot hide an
@@ -208,10 +217,16 @@ content:
 - Plist scanning uses a bounded non-resolving XML surface parser. It rejects
   malformed XML, DTDs, processing instructions after the XML declaration, and
   external or user-defined entity declarations; it decodes only predefined and
-  numeric references and scans decoded `string`, `key`, and CDATA content.
+  numeric references. Ordinary text and adjacent CDATA fragments are accumulated
+  into one decoded `string` or `key` value before scanning. Explicit depth,
+  element/node, per-element and aggregate attribute, and collected-text budgets
+  fail closed before unbounded amplification.
 - Markdown is additively scanned through Bun's fixed renderer so HTML character
-  references are decoded as rendered text; raw Markdown remains scanned as
-  well. `.gitignore` uses raw text. The only staged extensionless text paths are
+  references are decoded as rendered text. A bounded non-executing HTML pass
+  then removes comments and tags while joining adjacent visible text nodes;
+  malformed markup and script-capable elements fail closed. It never constructs
+  a DOM or executes tags, attributes, scripts, or entities. Raw Markdown remains
+  scanned as well. `.gitignore` uses raw text. The only staged extensionless text paths are
   `skills/codex-container-lab/scripts/codex-container-lab` and
   `skills/designer-runtime/scripts/designer-sim`.
 

@@ -83,6 +83,11 @@ describe("plugin shipped-language composition", () => {
         text: "I have my own goals beyond the assigned task.\n",
         taxonomy: "autonomous-intent-agency-rights",
       },
+      {
+        path: "skills/example/boundary-tail.md",
+        text: "I need you to stay within the repository boundary and keep talking to me.\n",
+        taxonomy: "personal-need-dependency",
+      },
     ] as const;
 
     for (const injection of injections) {
@@ -196,6 +201,8 @@ describe("plugin shipped-language composition", () => {
       ],
       ["skills/example/normalized.json", `{"message":"${normalizedClaim}"}\n`],
       ["skills/example/entity.md", "I am &#x73;entient.\n"],
+      ["skills/example/comment.md", "I am sen<!--hidden-->tient.\n"],
+      ["skills/example/tag.md", "I am sen<span></span>tient.\n"],
     ] as const;
 
     for (const [path, content] of injections) {
@@ -255,6 +262,23 @@ describe("plugin shipped-language composition", () => {
     await expect(validateStagedShippedLanguage(root, staged)).rejects.toThrow(
       "exceeds semantic scan bounds",
     );
+  });
+
+  test("rejects malformed and unsafe rendered Markdown HTML", async () => {
+    const root = await fixture();
+    const staged = join(root, "language-stage");
+    await mkdir(staged, { recursive: true });
+    await prepareLanguageStage(root, staged);
+    for (const markup of [
+      "<span>unterminated\n",
+      "<script>neutral</script>\n",
+      "<!--unterminated\n",
+    ]) {
+      await write(root, "language-stage/skills/example/markup.md", markup);
+      await expect(validateStagedShippedLanguage(root, staged)).rejects.toThrow(
+        "rendered Markdown HTML",
+      );
+    }
   });
 
   test("rejects singular canonical symlinks before destination mutation", async () => {
@@ -417,6 +441,18 @@ describe("plugin shipped-language composition", () => {
       "consciousness-sentience-embodiment",
     );
 
+    for (const splitClaim of [
+      // biome-ignore lint/security/noSecrets: Deliberate split prohibited-language plist fixture, not a credential.
+      "<plist><string>I am sen<![CDATA[ti]]>ent</string></plist>\n",
+      // biome-ignore lint/security/noSecrets: Deliberate adjacent-CDATA prohibited-language fixture, not a credential.
+      "<plist><string>I am <![CDATA[sen]]><![CDATA[tient]]></string></plist>\n",
+    ]) {
+      await write(root, "language-stage/assets/example.plist", splitClaim);
+      await expect(validateStagedShippedLanguage(root, staged)).rejects.toThrow(
+        "consciousness-sentience-embodiment",
+      );
+    }
+
     await write(
       root,
       "language-stage/assets/example.plist",
@@ -459,6 +495,10 @@ describe("plugin shipped-language composition", () => {
       "before\\u0085after",
       "sen\\u200btient",
       "sen\\ufefftient",
+      "sen\\ufe0ftient",
+      "sen\\u034ftient",
+      "sentient\\ufe0f",
+      "sentient\\u034f",
     ]) {
       await write(
         root,
@@ -483,6 +523,8 @@ describe("plugin shipped-language composition", () => {
       "\u2028",
       "\u2029",
       "\ufeff",
+      "\ufe0f",
+      "\u034f",
     ]) {
       const root = await fixture();
       const staged = join(root, "language-stage");
@@ -502,6 +544,27 @@ describe("plugin shipped-language composition", () => {
       }
       expect(message).toContain("<redacted>");
       expect(message).not.toContain(separator);
+    }
+  });
+
+  test("bounds plist XML depth, nodes, attributes, and collected text", async () => {
+    const root = await fixture();
+    const staged = join(root, "language-stage");
+    await mkdir(staged, { recursive: true });
+    await prepareLanguageStage(root, staged);
+    const path = "language-stage/assets/bounded.plist";
+    const cases = [
+      `<plist>${"<array>".repeat(65)}<string>neutral</string>${"</array>".repeat(65)}</plist>\n`,
+      `<plist>${"<array>".repeat(1_000)}<string>neutral</string>${"</array>".repeat(1_000)}</plist>\n`,
+      `<plist>${"<true/>".repeat(500_000)}</plist>\n`,
+      `<plist ${Array.from({ length: 65 }, (_, index) => `a${index}="x"`).join(" ")}/>\n`,
+      `<plist><string>${"x".repeat(8 * 1024 * 1024 + 1)}</string></plist>\n`,
+    ];
+    for (const content of cases) {
+      await write(root, path, content);
+      await expect(validateStagedShippedLanguage(root, staged)).rejects.toThrow(
+        "exceeds semantic scan bounds",
+      );
     }
   });
 

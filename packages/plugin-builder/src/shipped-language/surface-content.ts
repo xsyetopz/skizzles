@@ -4,17 +4,18 @@ import { basename, extname } from "node:path";
 import * as Yaml from "yaml";
 import { PackagingError } from "../plugin/contract.ts";
 import { safeLanguageDiagnosticPath } from "./file-boundary.ts";
+import { decodedMarkdownText } from "./markdown-content.ts";
+import { decodedPlistTexts } from "./plist-content.ts";
+import {
+  boundsError,
+  isLanguageSurfaceSyntaxError,
+  syntaxError,
+} from "./surface-errors.ts";
 
 const MAX_SEMANTIC_DEPTH = 64;
 const MAX_SEMANTIC_NODES = 100_000;
 const MAX_SEMANTIC_TEXT_UNITS = 8 * 1024 * 1024;
 const MAX_SURFACE_TEXT_UNITS = 16 * 1024 * 1024;
-const XML_NAME_PATTERN = /^[A-Za-z_:][A-Za-z0-9_.:-]*/u;
-const XML_ATTRIBUTE_PATTERN =
-  /^\s+([A-Za-z_:][A-Za-z0-9_.:-]*)\s*=\s*("[^"]*"|'[^']*')/u;
-const XML_DECLARATION_PATTERN =
-  /^<\?xml\s+version=(?:"1\.[01]"|'1\.[01]')(?:\s+encoding=(?:"UTF-8"|'UTF-8'))?(?:\s+standalone=(?:"(?:yes|no)"|'(?:yes|no)'))?\s*\?>/u;
-const SYNTAX_ERROR_NAME = "LanguageSurfaceSyntaxError";
 const TYPESCRIPT_TRANSPILER = new Bun.Transpiler({
   loader: "ts",
   target: "bun",
@@ -64,7 +65,7 @@ export function semanticSurfaceTexts(
       case "javascript":
         return [transpile(path, text, JAVASCRIPT_TRANSPILER)];
       case "markdown":
-        return [renderMarkdown(path, text)];
+        return [decodedMarkdownText(path, text)];
       case "plist":
         return decodedPlistTexts(path, text);
       case "text":
@@ -334,185 +335,6 @@ function transpile(
   }
 }
 
-function renderMarkdown(path: string, text: string): string {
-  let rendered: string;
-  try {
-    rendered = Bun.markdown.render(text);
-  } catch {
-    throw syntaxError(path, "Markdown");
-  }
-  if (rendered.length > MAX_SEMANTIC_TEXT_UNITS) {
-    throw boundsError(path);
-  }
-  return rendered;
-}
-
-function decodedPlistTexts(path: string, text: string): readonly string[] {
-  const values: string[] = [];
-  const elements: string[] = [];
-  let index = 0;
-  let rootSeen = false;
-
-  if (text.startsWith("<?xml")) {
-    const declaration = XML_DECLARATION_PATTERN.exec(text);
-    if (declaration === null) {
-      throw syntaxError(path, "plist/XML");
-    }
-    index = declaration[0].length;
-  }
-
-  while (index < text.length) {
-    if (text.startsWith("<!--", index)) {
-      const end = text.indexOf("-->", index + 4);
-      if (end === -1 || text.slice(index + 4, end).includes("--")) {
-        throw syntaxError(path, "plist/XML");
-      }
-      index = end + 3;
-      continue;
-    }
-    if (text.startsWith("<![CDATA[", index)) {
-      const end = text.indexOf("]]>", index + 9);
-      if (end === -1 || elements.length === 0) {
-        throw syntaxError(path, "plist/XML");
-      }
-      values.push(text.slice(index + 9, end));
-      index = end + 3;
-      continue;
-    }
-    if (text.startsWith("<!", index) || text.startsWith("<?", index)) {
-      throw syntaxError(path, "plist/XML declaration policy");
-    }
-    if (text[index] === "<") {
-      if (text[index + 1] === "/") {
-        const closing = /^<\/([A-Za-z_:][A-Za-z0-9_.:-]*)\s*>/u.exec(
-          text.slice(index),
-        );
-        const expected = elements.pop();
-        if (
-          closing === null ||
-          expected === undefined ||
-          closing[1] !== expected
-        ) {
-          throw syntaxError(path, "plist/XML");
-        }
-        index += closing[0].length;
-        continue;
-      }
-      const name = XML_NAME_PATTERN.exec(text.slice(index + 1))?.[0];
-      if (name === undefined) {
-        throw syntaxError(path, "plist/XML");
-      }
-      if (elements.length === 0) {
-        if (rootSeen || name !== "plist") {
-          throw syntaxError(path, "plist/XML");
-        }
-        rootSeen = true;
-      }
-      index += name.length + 1;
-      const attributes = new Set<string>();
-      while (true) {
-        const rest = text.slice(index);
-        const terminator = /^\s*(\/?>)/u.exec(rest);
-        if (terminator !== null) {
-          index += terminator[0].length;
-          if (terminator[1] === ">") {
-            elements.push(name);
-          }
-          break;
-        }
-        const attribute = XML_ATTRIBUTE_PATTERN.exec(rest);
-        const attributeName = attribute?.[1];
-        const quotedValue = attribute?.[2];
-        if (
-          attribute === null ||
-          attributeName === undefined ||
-          quotedValue === undefined ||
-          attributes.has(attributeName)
-        ) {
-          throw syntaxError(path, "plist/XML");
-        }
-        attributes.add(attributeName);
-        decodeXmlReferences(path, quotedValue.slice(1, -1));
-        index += attribute[0].length;
-      }
-      continue;
-    }
-
-    const end = text.indexOf("<", index);
-    const next = end === -1 ? text.length : end;
-    const decoded = decodeXmlReferences(path, text.slice(index, next));
-    const current = elements.at(-1);
-    if (current === "string" || current === "key") {
-      values.push(decoded);
-    } else if (elements.length === 0 && decoded.trim().length > 0) {
-      throw syntaxError(path, "plist/XML");
-    }
-    index = next;
-  }
-  if (!rootSeen || elements.length > 0) {
-    throw syntaxError(path, "plist/XML");
-  }
-  return values;
-}
-
-function decodeXmlReferences(path: string, value: string): string {
-  let decoded = "";
-  let index = 0;
-  while (index < value.length) {
-    const character = value[index];
-    if (character === "<" || value.startsWith("]]>", index)) {
-      throw syntaxError(path, "plist/XML");
-    }
-    if (character !== "&") {
-      decoded += character;
-      index += 1;
-      continue;
-    }
-    const end = value.indexOf(";", index + 1);
-    if (end === -1 || end - index > 32) {
-      throw syntaxError(path, "plist/XML entity policy");
-    }
-    const entity = value.slice(index + 1, end);
-    const named = predefinedXmlEntity(entity);
-    decoded += named ?? numericXmlEntity(path, entity);
-    index = end + 1;
-  }
-  return decoded;
-}
-
-function predefinedXmlEntity(entity: string): string | undefined {
-  return { amp: "&", apos: "'", gt: ">", lt: "<", quot: '"' }[entity];
-}
-
-function numericXmlEntity(path: string, entity: string): string {
-  const match = /^#(x[0-9A-Fa-f]+|[0-9]+)$/u.exec(entity);
-  if (match === null) {
-    throw syntaxError(path, "plist/XML entity policy");
-  }
-  const encoded = match[1];
-  if (encoded === undefined) {
-    throw syntaxError(path, "plist/XML entity policy");
-  }
-  const hexadecimal = encoded.startsWith("x");
-  const digits = hexadecimal ? encoded.slice(1) : encoded;
-  const codePoint = Number.parseInt(digits, hexadecimal ? 16 : 10);
-  if (!isXmlCodePoint(codePoint)) {
-    throw syntaxError(path, "plist/XML entity");
-  }
-  return String.fromCodePoint(codePoint);
-}
-
-function isXmlCodePoint(codePoint: number): boolean {
-  return (
-    codePoint === 9 ||
-    codePoint === 10 ||
-    codePoint === 13 ||
-    (codePoint >= 0x20 && codePoint <= 0xd7ff) ||
-    (codePoint >= 0xe000 && codePoint <= 0xfffd) ||
-    (codePoint >= 0x10000 && codePoint <= 0x10ffff)
-  );
-}
-
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
@@ -534,23 +356,5 @@ function classificationError(
 function parseError(path: string, format: string): PackagingError {
   return new PackagingError(
     `Shipped language surface ${safeLanguageDiagnosticPath(path)} is not valid bounded ${format}.`,
-  );
-}
-
-function syntaxError(path: string, format: string): PackagingError {
-  const error = new PackagingError(
-    `Shipped language surface ${safeLanguageDiagnosticPath(path)} is not valid bounded ${format}.`,
-  );
-  error.name = SYNTAX_ERROR_NAME;
-  return error;
-}
-
-function isLanguageSurfaceSyntaxError(error: unknown): boolean {
-  return error instanceof PackagingError && error.name === SYNTAX_ERROR_NAME;
-}
-
-function boundsError(path: string): PackagingError {
-  return new PackagingError(
-    `Shipped language surface ${safeLanguageDiagnosticPath(path)} exceeds semantic scan bounds.`,
   );
 }
