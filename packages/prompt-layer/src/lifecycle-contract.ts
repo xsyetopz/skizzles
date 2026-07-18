@@ -20,6 +20,11 @@ export const PROMPT_LAYER_SOURCE_PATHS = {
   descriptor: "packages/prompt-layer/assets/integrations/prompt-policy.json",
 } as const;
 
+export const PROMPT_POLICY_DESCRIPTOR_PATHS = {
+  canonicalWorkspacePath: PROMPT_LAYER_SOURCE_PATHS.descriptor,
+  packagedPath: "integrations/prompt-policy.json",
+} as const;
+
 export const PROMPT_LAYER_PACKAGE_FILES = [
   [PROMPT_LAYER_SOURCE_PATHS.applied, "instructions/skizzles-base.md"],
   [
@@ -31,15 +36,13 @@ export const PROMPT_LAYER_PACKAGE_FILES = [
     "instructions/developer-instructions.md",
   ],
   [PROMPT_LAYER_SOURCE_PATHS.compact, "instructions/compact-prompt.md"],
-  [PROMPT_LAYER_SOURCE_PATHS.descriptor, "integrations/prompt-policy.json"],
+  [
+    PROMPT_POLICY_DESCRIPTOR_PATHS.canonicalWorkspacePath,
+    PROMPT_POLICY_DESCRIPTOR_PATHS.packagedPath,
+  ],
   [PROMPT_LAYER_SOURCE_PATHS.license, "third_party/openai-codex/LICENSE"],
   [PROMPT_LAYER_SOURCE_PATHS.notice, "third_party/openai-codex/NOTICE"],
 ] as const;
-
-export const PROMPT_POLICY_DESCRIPTOR_PATHS = {
-  canonicalWorkspacePath: PROMPT_LAYER_SOURCE_PATHS.descriptor,
-  packagedPath: "integrations/prompt-policy.json",
-} as const;
 
 export const MANIFEST_PATH = PROMPT_LAYER_SOURCE_PATHS.manifest;
 export const BASELINE_PATH = PROMPT_LAYER_SOURCE_PATHS.baseline;

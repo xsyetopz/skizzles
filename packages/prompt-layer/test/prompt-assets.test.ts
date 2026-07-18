@@ -7,6 +7,7 @@ import {
   buildPrompt,
   checkPrompt,
   normalizeDarwinProcessStartOutput,
+  PROMPT_LAYER_PACKAGE_FILES,
   PROMPT_POLICY_DESCRIPTOR_PATHS,
   PromptLayerError,
   validatePatch,
@@ -34,6 +35,10 @@ describe("prompt asset and patch contracts", () => {
         "packages/prompt-layer/assets/integrations/prompt-policy.json",
       packagedPath: "integrations/prompt-policy.json",
     });
+    expect(PROMPT_LAYER_PACKAGE_FILES).toContainEqual([
+      PROMPT_POLICY_DESCRIPTOR_PATHS.canonicalWorkspacePath,
+      PROMPT_POLICY_DESCRIPTOR_PATHS.packagedPath,
+    ]);
   });
   test("normalizes Darwin process-start output deterministically", () => {
     const expected = `darwin:${Date.UTC(2026, 6, 18, 2, 11, 12) / 1000}`;
