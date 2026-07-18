@@ -65,7 +65,7 @@ export function evaluateHandoffReview(
     );
     evaluateAcceptance(handoff["acceptance"], options);
     evaluatePolicy(handoff["policy"], options);
-    evaluateAuthors(handoff["authors"]);
+    evaluateAuthors(handoff["authors"], options);
     evaluateEvidence(handoff["evidence"], [...inputs, ...artifacts]);
   });
 }
@@ -188,7 +188,10 @@ function evaluatePolicy(
   );
 }
 
-function evaluateAuthors(value: JsonValue | undefined): void {
+function evaluateAuthors(
+  value: JsonValue | undefined,
+  options: EvaluationOptions,
+): void {
   const authors = assertRecord(value, "handoff.authors");
   assertExactKeys(
     authors,
@@ -203,6 +206,13 @@ function evaluateAuthors(value: JsonValue | undefined): void {
   );
   if (selfReview || author === reviewer) {
     reject("SELF_REVIEW", "handoff author and reviewer must be distinct");
+  }
+  if (
+    author !== options.review.author ||
+    reviewer !== options.review.reviewer ||
+    !options.review.eligibleReviewers.has(reviewer)
+  ) {
+    reject("REVIEWER_MISMATCH", "handoff actors are not trusted reviewers");
   }
 }
 

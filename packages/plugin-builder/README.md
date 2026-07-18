@@ -39,9 +39,16 @@ meta-validator. The typed evaluators own repository acceptance semantics that
 JSON Schema cannot express, using explicit clock/version/digest options and
 trusted harness facts.
 Acceptance evaluation binds objective, acceptance, artifact, and runtime-effect
-identities to those trusted facts. Supplied finding labels map to policy
+identities to those trusted facts. Its canonical v3 digest covers the complete
+submitted acceptance record except for a zeroed self-digest field. Trusted test
+results, actor eligibility, judge outcome, findings, run chronology, expiry,
+and prior-run IDs are exact evaluator inputs rather than submission claims.
+Supplied finding labels map to policy
 rejections; plugin-builder does not claim to discover leakage, injection, or
 deception from arbitrary content.
+Asset reads compare root, ancestor, and target device/inode identities before
+and after an identity-bound no-follow read; multi-link files and detected
+ancestor replacement races fail closed.
 
 Executable package sources are bundled to the four stable plugin entrypoints
 plus the installer CLI. The generated bundles are dependency-self-contained

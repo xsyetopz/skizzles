@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   link,
+  mkdir,
   readFile,
   rename,
   rm,
@@ -9,6 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { readContainedJsonAsset } from "../src/agent-contract/asset-boundary.ts";
 import {
   validateCanonicalAgentContracts,
   validateStagedAgentContracts,
@@ -182,6 +184,40 @@ describe("executable incident corpus composition", () => {
       "duplicates materialized input from FW-006",
     );
   });
+
+  for (const corpusPath of [TRUST_CORPUS, ACCEPTANCE_CORPUS]) {
+    it(`rejects duplicate controls in ${corpusPath}`, async () => {
+      const root = await fixture();
+      await mutateJson(root, corpusPath, (corpus) => {
+        const controls = requiredTestArray(corpus["controls"], "controls");
+        const duplicate = JSON.parse(JSON.stringify(controls[0])) as Record<
+          string,
+          unknown
+        >;
+        duplicate["id"] = "DUPLICATE-CONTROL";
+        controls.push(duplicate);
+      });
+      await expect(validateCanonicalAgentContracts(root)).rejects.toThrow(
+        "duplicates input from",
+      );
+    });
+  }
+
+  it("rejects a rejecting case that collapses to its valid control", async () => {
+    const root = await fixture();
+    await mutateJson(root, TRUST_CORPUS, (corpus) => {
+      const control = requiredTestRecord(
+        requiredTestArray(corpus["controls"], "controls")[0],
+        "control",
+      );
+      const incident = corpusCase(corpus, 2);
+      incident["mutations"] = [];
+      incident["inputSha256"] = control["inputSha256"];
+    });
+    await expect(validateCanonicalAgentContracts(root)).rejects.toThrow(
+      "duplicates control input",
+    );
+  });
 });
 
 describe("agent contract filesystem boundary", () => {
@@ -296,6 +332,19 @@ describe("agent contract filesystem boundary", () => {
     );
     expect(message).not.toContain(root);
     expect(message).not.toContain("ENOENT");
+  });
+
+  it("rejects an ancestor replacement race after identity-bound open", async () => {
+    const root = await fixture();
+    const contracts = dirname(join(root, CONTEXT_SCHEMA));
+    const displaced = `${contracts}-displaced`;
+
+    await expect(
+      readContainedJsonAsset(root, CONTEXT_SCHEMA, "race asset", async () => {
+        await rename(contracts, displaced);
+        await mkdir(contracts, { recursive: true });
+      }),
+    ).rejects.toThrow("race asset ancestor identity changed during validation");
   });
 });
 

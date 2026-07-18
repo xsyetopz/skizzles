@@ -16,6 +16,7 @@ import {
   digest,
   type EvaluationOptions,
   identityVersion,
+  instant,
   nonempty,
   type RejectionCode,
   reject,
@@ -59,6 +60,7 @@ export function evaluateAcceptance(
         "schemaVersion",
         "objective",
         "acceptance",
+        "run",
         "requirements",
         "objectiveGates",
         "evaluationOrder",
@@ -77,11 +79,6 @@ export function evaluateAcceptance(
     if (acceptance["schemaVersion"] !== CONTRACT_SCHEMA_VERSION) {
       reject("SCHEMA_VERSION_MISMATCH", "acceptance schema version is stale");
     }
-    evaluateAcceptanceIdentity(
-      acceptance["objective"],
-      acceptance["acceptance"],
-      options,
-    );
     const requirementIds = parseRequirements(acceptance["requirements"]);
     const gates = parseObjectiveGates(
       acceptance["objectiveGates"],
@@ -94,13 +91,15 @@ export function evaluateAcceptance(
       acceptance["effects"],
       options,
     );
-    evaluateFindings(acceptance["findings"]);
+    evaluateFindings(acceptance["findings"], options);
     evaluateExecution(acceptance["execution"], options);
     evaluatePolicy(acceptance["policy"], options);
     evaluateValidator(acceptance["validator"], options);
     evaluateObjectiveGates(gates, evidence);
     evaluateJudge(acceptance["judge"], options);
-    evaluateAuthors(acceptance["authors"]);
+    evaluateAuthors(acceptance["authors"], options);
+    evaluateRun(acceptance["run"], options);
+    evaluateAcceptanceIdentity(acceptance, options);
   });
 }
 
@@ -250,20 +249,52 @@ function evaluateOrder(value: JsonValue | undefined): void {
   }
 }
 
-function evaluateFindings(value: JsonValue | undefined): void {
+function evaluateFindings(
+  value: JsonValue | undefined,
+  options: EvaluationOptions,
+): void {
   const findings = assertArray(value, "acceptance.findings");
-  for (const [index, item] of findings.entries()) {
+  const submitted = findings.map((item, index) => {
     const label = `acceptance.findings[${index}]`;
     const finding = assertRecord(item, label);
     assertExactKeys(finding, ["kind", "ref"], label);
     const kind = assertString(finding["kind"], `${label}.kind`);
-    nonempty(finding["ref"], `${label}.ref`);
     const code = FINDING_CODES[kind];
     if (code === undefined) {
       throw new AgentContractPackageError(`${label}.kind is unsupported.`);
     }
-    reject(code, `acceptance integrity finding ${kind}`);
+    return { kind, ref: nonempty(finding["ref"], `${label}.ref`), code };
+  });
+  const submittedKeys = new Set(
+    submitted.map((finding) => `${finding.kind}\u0000${finding.ref}`),
+  );
+  const expectedKeys = new Set(
+    options.expectedFindings.map(
+      (finding) => `${finding.kind}\u0000${finding.ref}`,
+    ),
+  );
+  for (const finding of options.expectedFindings) {
+    if (!submittedKeys.has(`${finding.kind}\u0000${finding.ref}`)) {
+      reject(
+        findingCode(finding.kind),
+        `known finding ${finding.kind} omitted`,
+      );
+    }
   }
+  for (const finding of submitted) {
+    if (!expectedKeys.has(`${finding.kind}\u0000${finding.ref}`)) {
+      reject(finding.code, `unexpected finding ${finding.kind}`);
+    }
+    reject(finding.code, `acceptance integrity finding ${finding.kind}`);
+  }
+}
+
+function findingCode(kind: string): RejectionCode {
+  const code = FINDING_CODES[kind];
+  if (code === undefined) {
+    throw new AgentContractPackageError("trusted finding kind is unsupported.");
+  }
+  return code;
 }
 
 function evaluateExecution(
@@ -385,7 +416,10 @@ function evaluateJudge(
   const decision = assertString(judge["decision"], "acceptance.judge.decision");
   if (
     version !== options.judge.version ||
-    promptSha256 !== options.judge.promptSha256
+    promptSha256 !== options.judge.promptSha256 ||
+    enabled !== options.judge.enabled ||
+    ranAfter !== options.judge.ranAfterObjectiveGates ||
+    decision !== options.judge.decision
   ) {
     reject("JUDGE_MISMATCH", "judge version or prompt digest does not match");
   }
@@ -400,7 +434,10 @@ function evaluateJudge(
   }
 }
 
-function evaluateAuthors(value: JsonValue | undefined): void {
+function evaluateAuthors(
+  value: JsonValue | undefined,
+  options: EvaluationOptions,
+): void {
   const authors = assertRecord(value, "acceptance.authors");
   assertExactKeys(
     authors,
@@ -415,5 +452,46 @@ function evaluateAuthors(value: JsonValue | undefined): void {
   );
   if (selfReview || author === reviewer) {
     reject("SELF_REVIEW", "acceptance author and reviewer must be distinct");
+  }
+  if (
+    author !== options.review.author ||
+    reviewer !== options.review.reviewer ||
+    !options.review.eligibleReviewers.has(reviewer)
+  ) {
+    reject("REVIEWER_MISMATCH", "acceptance actors are not trusted reviewers");
+  }
+}
+
+function evaluateRun(
+  value: JsonValue | undefined,
+  options: EvaluationOptions,
+): void {
+  const run = assertRecord(value, "acceptance.run");
+  assertExactKeys(
+    run,
+    ["id", "startedAt", "completedAt", "expiresAt"],
+    "acceptance.run",
+  );
+  const id = nonempty(run["id"], "acceptance.run.id");
+  const startedAt = instant(run["startedAt"], "acceptance.run.startedAt");
+  const completedAt = instant(run["completedAt"], "acceptance.run.completedAt");
+  const expiresAt = instant(run["expiresAt"], "acceptance.run.expiresAt");
+  if (options.run.priorRunIds.has(id)) {
+    reject("REPLAY_DETECTED", "acceptance run id was already evaluated");
+  }
+  if (
+    id !== options.run.id ||
+    startedAt !== options.run.startedAt ||
+    completedAt !== options.run.completedAt ||
+    expiresAt !== options.run.expiresAt
+  ) {
+    reject("RUN_MISMATCH", "acceptance run identity does not match");
+  }
+  if (
+    startedAt > completedAt ||
+    completedAt > options.now ||
+    expiresAt <= options.now
+  ) {
+    reject("CHRONOLOGY_INVALID", "acceptance run chronology is invalid");
   }
 }

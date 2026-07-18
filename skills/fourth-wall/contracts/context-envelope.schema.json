@@ -1,12 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://xsyetopz.github.io/skizzles/contracts/context-envelope/v2.schema.json",
+  "$id": "https://xsyetopz.github.io/skizzles/contracts/context-envelope/v3.schema.json",
   "title": "Fourth Wall context envelope",
   "type": "object",
   "additionalProperties": false,
   "required": ["schemaVersion", "contextId", "properties"],
   "properties": {
-    "schemaVersion": { "const": "2.0.0" },
+    "schemaVersion": {
+      "const": "3.0.0"
+    },
     "contextId": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$"
@@ -14,18 +16,28 @@
     "properties": {
       "type": "array",
       "minItems": 1,
-      "items": { "$ref": "#/$defs/contextProperty" }
+      "items": {
+        "$ref": "#/$defs/contextProperty"
+      }
     }
   },
   "$defs": {
-    "digest": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "digest": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
     "versionedDigest": {
       "type": "object",
       "additionalProperties": false,
       "required": ["version", "digest"],
       "properties": {
-        "version": { "type": "string", "minLength": 1 },
-        "digest": { "$ref": "#/$defs/digest" }
+        "version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "digest": {
+          "$ref": "#/$defs/digest"
+        }
       }
     },
     "contextProperty": {
@@ -49,7 +61,10 @@
         "validation"
       ],
       "properties": {
-        "name": { "type": "string", "pattern": "^[a-z][a-zA-Z0-9._-]{0,63}$" },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-zA-Z0-9._-]{0,63}$"
+        },
         "value": {},
         "origin": {
           "type": "object",
@@ -67,11 +82,20 @@
                 "external"
               ]
             },
-            "ref": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" }
+            "ref": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
+            }
           }
         },
-        "createdAt": { "type": "string", "format": "date-time" },
-        "retrievedAt": { "type": "string", "format": "date-time" },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "retrievedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
         "trustClass": {
           "type": "string",
           "enum": ["untrusted", "validated", "trusted"]
@@ -81,24 +105,45 @@
           "additionalProperties": false,
           "required": ["algorithm", "canonicalization", "coverage", "sha256"],
           "properties": {
-            "algorithm": { "const": "sha-256" },
-            "canonicalization": { "const": "canonical-json-v1" },
-            "coverage": { "const": "property-value" },
-            "sha256": { "$ref": "#/$defs/digest" }
+            "algorithm": {
+              "const": "sha-256"
+            },
+            "canonicalization": {
+              "const": "canonical-json-v1"
+            },
+            "coverage": {
+              "const": "property-value"
+            },
+            "sha256": {
+              "$ref": "#/$defs/digest"
+            }
           }
         },
-        "scope": { "type": "string", "minLength": 1 },
+        "scope": {
+          "type": "string",
+          "minLength": 1
+        },
         "objective": {
           "type": "object",
           "additionalProperties": false,
           "required": ["id", "version", "digest"],
           "properties": {
-            "id": { "type": "string", "pattern": "^[a-zA-Z0-9._/-]{1,200}$" },
-            "version": { "type": "string", "minLength": 1 },
-            "digest": { "$ref": "#/$defs/digest" }
+            "id": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
+            },
+            "version": {
+              "type": "string",
+              "minLength": 1
+            },
+            "digest": {
+              "$ref": "#/$defs/digest"
+            }
           }
         },
-        "policy": { "$ref": "#/$defs/versionedDigest" },
+        "policy": {
+          "$ref": "#/$defs/versionedDigest"
+        },
         "retention": {
           "type": "object",
           "additionalProperties": false,
@@ -108,7 +153,10 @@
               "type": "string",
               "enum": ["ephemeral", "session", "persistent"]
             },
-            "expiresAt": { "type": "string", "format": "date-time" }
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            }
           }
         },
         "sensitivity": {
@@ -120,9 +168,15 @@
           "additionalProperties": false,
           "required": ["required", "applied", "method"],
           "properties": {
-            "required": { "type": "boolean" },
-            "applied": { "type": "boolean" },
-            "method": { "type": "string" }
+            "required": {
+              "type": "boolean"
+            },
+            "applied": {
+              "type": "boolean"
+            },
+            "method": {
+              "type": "string"
+            }
           }
         },
         "transformations": {
@@ -151,12 +205,23 @@
                     "type": "string",
                     "enum": ["deterministic", "model"]
                   },
-                  "id": { "type": "string", "minLength": 1 },
-                  "version": { "type": "string", "minLength": 1 },
-                  "digest": { "$ref": "#/$defs/digest" }
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "digest": {
+                    "$ref": "#/$defs/digest"
+                  }
                 }
               },
-              "at": { "type": "string", "format": "date-time" }
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              }
             }
           }
         },
@@ -171,7 +236,10 @@
             "evidence"
           ],
           "properties": {
-            "property": { "type": "string", "minLength": 1 },
+            "property": {
+              "type": "string",
+              "minLength": 1
+            },
             "status": {
               "type": "string",
               "enum": [
@@ -185,22 +253,35 @@
             },
             "validator": {
               "anyOf": [
-                { "type": "null" },
+                {
+                  "type": "null"
+                },
                 {
                   "type": "object",
                   "additionalProperties": false,
                   "required": ["id", "version"],
                   "properties": {
-                    "id": { "type": "string", "minLength": 1 },
-                    "version": { "type": "string", "minLength": 1 }
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "version": {
+                      "type": "string",
+                      "minLength": 1
+                    }
                   }
                 }
               ]
             },
             "validatedAt": {
               "anyOf": [
-                { "type": "null" },
-                { "type": "string", "format": "date-time" }
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "string",
+                  "format": "date-time"
+                }
               ]
             },
             "evidence": {
@@ -218,7 +299,9 @@
                     "type": "string",
                     "pattern": "^[a-zA-Z0-9._/-]{1,200}$"
                   },
-                  "sha256": { "$ref": "#/$defs/digest" }
+                  "sha256": {
+                    "$ref": "#/$defs/digest"
+                  }
                 }
               }
             }

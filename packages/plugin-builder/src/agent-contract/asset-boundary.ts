@@ -10,56 +10,105 @@ export interface ParsedAsset {
   value: JsonValue;
 }
 
+interface PathIdentity {
+  path: string;
+  dev: number | bigint;
+  ino: number | bigint;
+  target: boolean;
+}
+
 export async function readContainedJsonAsset(
   root: string,
   relativePath: string,
   label: string,
+  afterOpen?: () => Promise<void>,
 ): Promise<ParsedAsset> {
   assertFixedRelativePath(relativePath, label);
-  await assertDirectory(root, `${label} root`);
-  const segments = relativePath.split("/");
-  let current = root;
-  let targetIdentity:
-    | { dev: number | bigint; ino: number | bigint }
-    | undefined;
+  const paths = assetPaths(root, relativePath);
+  const before = await snapshotPaths(paths, label);
+  const target = before.at(-1);
+  if (target === undefined) {
+    throw new AgentContractPackageError(`${label} is missing or inaccessible.`);
+  }
+  const bytes = await readIdentityBound(target, label, afterOpen);
+  await verifySnapshot(before, label);
+  return { bytes, value: parseJsonAsset(bytes, label) };
+}
 
-  for (const [index, segment] of segments.entries()) {
+function assetPaths(root: string, relativePath: string): string[] {
+  const result = [root];
+  let current = root;
+  for (const segment of relativePath.split("/")) {
     current = join(current, segment);
-    const metadata = await safeLstat(current, label);
+    result.push(current);
+  }
+  return result;
+}
+
+async function snapshotPaths(
+  paths: readonly string[],
+  label: string,
+): Promise<PathIdentity[]> {
+  const result: PathIdentity[] = [];
+  for (const [index, path] of paths.entries()) {
+    const metadata = await safeLstat(path, label);
+    const target = index === paths.length - 1;
     if (metadata.isSymbolicLink()) {
       throw new AgentContractPackageError(`${label} uses a symlinked path.`);
     }
-    const isTarget = index === segments.length - 1;
-    if (!isTarget && !metadata.isDirectory()) {
+    if (!target && !metadata.isDirectory()) {
       throw new AgentContractPackageError(
         `${label} has a non-directory parent.`,
       );
     }
-    if (isTarget && !metadata.isFile()) {
+    if (target && !metadata.isFile()) {
       throw new AgentContractPackageError(
         `${label} must be a non-symlink regular file.`,
       );
     }
-    if (isTarget && metadata.nlink !== 1) {
+    if (target && metadata.nlink !== 1) {
       throw new AgentContractPackageError(`${label} uses a hardlinked file.`);
     }
-    if (isTarget) {
-      targetIdentity = { dev: metadata.dev, ino: metadata.ino };
-    }
+    result.push({
+      path,
+      dev: metadata.dev,
+      ino: metadata.ino,
+      target,
+    });
   }
-
-  if (targetIdentity === undefined) {
-    throw new AgentContractPackageError(`${label} is missing or inaccessible.`);
-  }
-  const bytes = await readWithoutFollowing(current, label, targetIdentity);
-  return { bytes, value: parseJsonAsset(bytes, label) };
+  return result;
 }
 
-async function assertDirectory(path: string, label: string): Promise<void> {
-  const metadata = await safeLstat(path, label);
-  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+async function verifySnapshot(
+  expected: readonly PathIdentity[],
+  label: string,
+): Promise<void> {
+  try {
+    const actual = await snapshotPaths(
+      expected.map((identity) => identity.path),
+      label,
+    );
+    if (
+      actual.some(
+        (identity, index) =>
+          identity.dev !== expected[index]?.dev ||
+          identity.ino !== expected[index]?.ino ||
+          identity.target !== expected[index]?.target,
+      )
+    ) {
+      throw new AgentContractPackageError(
+        `${label} ancestor identity changed during validation.`,
+      );
+    }
+  } catch (error) {
+    if (
+      error instanceof AgentContractPackageError &&
+      error.message.endsWith("ancestor identity changed during validation.")
+    ) {
+      throw error;
+    }
     throw new AgentContractPackageError(
-      `${label} must be a non-symlink directory.`,
+      `${label} ancestor identity changed during validation.`,
     );
   }
 }
@@ -75,14 +124,17 @@ async function safeLstat(
   }
 }
 
-async function readWithoutFollowing(
-  path: string,
+async function readIdentityBound(
+  expected: PathIdentity,
   label: string,
-  expected: { dev: number | bigint; ino: number | bigint },
+  afterOpen?: () => Promise<void>,
 ): Promise<Buffer> {
   let handle: Awaited<ReturnType<typeof open>>;
   try {
-    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(
+      expected.path,
+      constants.O_RDONLY | constants.O_NOFOLLOW,
+    );
   } catch {
     throw new AgentContractPackageError(`${label} is missing or inaccessible.`);
   }
@@ -98,6 +150,7 @@ async function readWithoutFollowing(
         `${label} changed identity or uses a hardlinked file.`,
       );
     }
+    await afterOpen?.();
     return await handle.readFile();
   } catch (error) {
     if (error instanceof AgentContractPackageError) {

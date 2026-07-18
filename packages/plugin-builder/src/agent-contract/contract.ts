@@ -1,7 +1,7 @@
 export class AgentContractPackageError extends Error {}
 
-export const CONTRACT_SCHEMA_VERSION = "2.0.0";
-export const CONTRACT_CORPUS_VERSION = "2.0.0";
+export const CONTRACT_SCHEMA_VERSION = "3.0.0";
+export const CONTRACT_CORPUS_VERSION = "3.0.0";
 
 export const AGENT_CONTRACT_ASSETS = [
   {
@@ -43,11 +43,11 @@ export type AgentContractAsset = (typeof AGENT_CONTRACT_ASSETS)[number];
 export const PINNED_SCHEMA_DIGESTS = {
   "skills/completion-contract/contracts/acceptance.schema.json":
     // biome-ignore lint/security/noSecrets: Public schema SHA-256 pin, not a credential.
-    "777cbbf8a6e151bc7aebe9539eaaf7927e857505469cb9b8ed55fdddf49e2820",
+    "238b29b5d0f9e5b7b2b1018ffefcb472edf86b1be28add634c8c22801a04a0ae",
   "skills/fourth-wall/contracts/context-envelope.schema.json":
     // biome-ignore lint/security/noSecrets: Public schema SHA-256 pin, not a credential.
-    "f23b35214bca3152bf657abde8b850d540c15ab9a4ddfbf13017b5f59ef96388",
+    "b5484817093732b5aa41699b24bc2a09b607bc9a16b0d991e084edcc3bc9322f",
   "skills/fourth-wall/contracts/handoff-review.schema.json":
     // biome-ignore lint/security/noSecrets: Public schema SHA-256 pin, not a credential.
-    "40d3fcec9a95c79b855e02bfc27ca7acb68f2f6e8b71ebc11b42257891740444",
+    "7eaf35d2ea0d77f7bcc7d65f1a201c9e0f279c8c4020cd5e1439cf46f59e6a7a",
 } as const;

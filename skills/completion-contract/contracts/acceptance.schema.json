@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://xsyetopz.github.io/skizzles/contracts/acceptance/v2.schema.json",
+  "$id": "https://xsyetopz.github.io/skizzles/contracts/acceptance/v3.schema.json",
   "title": "Completion Contract acceptance",
   "type": "object",
   "additionalProperties": false,
@@ -8,6 +8,7 @@
     "schemaVersion",
     "objective",
     "acceptance",
+    "run",
     "requirements",
     "objectiveGates",
     "evaluationOrder",
@@ -23,7 +24,7 @@
   ],
   "properties": {
     "schemaVersion": {
-      "const": "2.0.0"
+      "const": "3.0.0"
     },
     "objective": {
       "type": "object",
@@ -54,6 +55,29 @@
         },
         "digest": {
           "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "startedAt", "completedAt", "expiresAt"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
         }
       }
     },

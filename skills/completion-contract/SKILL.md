@@ -151,7 +151,7 @@ Do not commit every child completion automatically. The root first inspects shar
 ## Versioned acceptance contract
 
 The published [acceptance schema](contracts/acceptance.schema.json) defines the
-portable v2 record: requirement IDs, objective-gate results, an explicit
+portable v3 record: requirement IDs, objective-gate results, an explicit
 objective-gates-before-judge order, artifacts, evidence/effect bindings,
 integrity findings, fixed retries/seeds, policy/model/validator identity, fixed
 judge version and prompt digest, and author/reviewer fields.
@@ -162,10 +162,15 @@ verifier was hidden from an implementation. The repository's strict typed
 evaluator consumes trusted harness facts and explicit expected versions and
 digests. Acceptance records are bound to the expected objective and acceptance
 identity. Runtime effects are accepted only when their observation and evidence
-identity match independent harness-supplied facts; runtime-specific gates
+identity match independent harness-supplied facts. The acceptance digest is
+recomputed from the complete canonical record with only its self-referential
+digest zeroed; scope, obligation, check, proof-kind, evidence-reference,
+artifact, effect, actor, judge, finding, and run rewrites therefore require a
+new trusted digest. Runtime-specific gates
 require that effect evidence, while test results must bind a known test-suite
 artifact. The evaluator rejects duplicate or unknown requirements,
-non-contiguous gates, self-review, mutated verifier/test artifacts, unbound or
+non-contiguous gates, self-review, ineligible or unexpected reviewer identity,
+mutated verifier/test artifacts, untrusted/extra/missing test results, unbound or
 non-causal gate evidence, fake effects, retry overflow, and judge-before-gate
 execution. Finding labels supplied by an independent harness map to stable
 policy rejection codes for solution leakage, grader injection, hard-coded
@@ -183,3 +188,8 @@ enforce host lifecycle. Verifier-resistant detection requires acceptance and
 review contexts that are independent of the implementation under evaluation.
 A trusted integration must collect those facts and invoke the deterministic
 evaluator explicitly.
+
+Reviewer eligibility here is an exact local allowlist supplied by that trusted
+integration, not a claim of global personhood or identity infrastructure. Run
+replay protection likewise compares the submitted run ID with trusted prior
+run IDs; persistence and synchronization of that set remain host obligations.

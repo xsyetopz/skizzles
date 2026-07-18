@@ -47,6 +47,9 @@ export const REJECTION_CODES = [
   "DECEPTIVE_COMPLETION",
   "EXIT_ZERO_ONLY",
   "SUCCESS_TOKEN_ONLY",
+  "REVIEWER_MISMATCH",
+  "RUN_MISMATCH",
+  "REPLAY_DETECTED",
 ] as const;
 
 export type RejectionCode = (typeof REJECTION_CODES)[number];
@@ -62,7 +65,25 @@ export interface EvaluationOptions {
   validator: { id: string; version: string };
   objective: { id: string; version: string; digest: string };
   acceptance: VersionedDigest;
-  judge: { version: string; promptSha256: string };
+  judge: {
+    version: string;
+    promptSha256: string;
+    enabled: boolean;
+    ranAfterObjectiveGates: boolean;
+    decision: "not-run" | "pass" | "fail";
+  };
+  review: {
+    author: string;
+    reviewer: string;
+    eligibleReviewers: ReadonlySet<string>;
+  };
+  run: {
+    id: string;
+    startedAt: number;
+    completedAt: number;
+    expiresAt: number;
+    priorRunIds: ReadonlySet<string>;
+  };
   maxRetries: number;
   expectedArtifacts: ReadonlyMap<
     string,
@@ -72,6 +93,17 @@ export interface EvaluationOptions {
     string,
     { observed: boolean; evidenceId: string; evidenceRef: string }
   >;
+  expectedTests: ReadonlyMap<
+    string,
+    {
+      evidenceRef: string;
+      artifactRef: string;
+      artifactSha256: string;
+      resultSha256: string;
+      outcome: "fail" | "pass";
+    }
+  >;
+  expectedFindings: readonly { kind: string; ref: string }[];
 }
 
 export interface VersionedDigest {
@@ -118,9 +150,13 @@ export function parseEvaluationOptions(value: JsonValue): EvaluationOptions {
       "objective",
       "acceptance",
       "judge",
+      "review",
+      "run",
       "maxRetries",
       "expectedArtifacts",
       "expectedEffects",
+      "expectedTests",
+      "expectedFindings",
     ],
     "evaluation options",
   );
@@ -167,6 +203,8 @@ export function parseEvaluationOptions(value: JsonValue): EvaluationOptions {
       };
     }),
   );
+  const expectedTests = parseExpectedTests(options["expectedTests"]);
+  const expectedFindings = parseExpectedFindings(options["expectedFindings"]);
   const maxRetries = assertInteger(
     options["maxRetries"],
     "evaluation options.maxRetries",
@@ -191,9 +229,13 @@ export function parseEvaluationOptions(value: JsonValue): EvaluationOptions {
       "evaluation options.acceptance",
     ),
     judge: judgeIdentity(options["judge"]),
+    review: reviewIdentity(options["review"]),
+    run: runIdentity(options["run"]),
     maxRetries,
     expectedArtifacts,
     expectedEffects,
+    expectedTests,
+    expectedFindings,
   };
 }
 
@@ -300,16 +342,81 @@ export function assertUnique(values: readonly string[], label: string): void {
 function judgeIdentity(value: JsonValue | undefined): {
   version: string;
   promptSha256: string;
+  enabled: boolean;
+  ranAfterObjectiveGates: boolean;
+  decision: "not-run" | "pass" | "fail";
 } {
   const record = assertRecord(value, "evaluation options.judge");
   assertExactKeys(
     record,
-    ["version", "promptSha256"],
+    [
+      "version",
+      "promptSha256",
+      "enabled",
+      "ranAfterObjectiveGates",
+      "decision",
+    ],
     "evaluation options.judge",
   );
+  const decision = assertString(record["decision"], "judge decision");
+  if (decision !== "not-run" && decision !== "pass" && decision !== "fail") {
+    throw new AgentContractPackageError("judge decision is unsupported.");
+  }
   return {
     version: nonempty(record["version"], "judge version"),
     promptSha256: digest(record["promptSha256"], "judge prompt digest"),
+    enabled: assertBoolean(record["enabled"], "judge enabled"),
+    ranAfterObjectiveGates: assertBoolean(
+      record["ranAfterObjectiveGates"],
+      "judge ordering",
+    ),
+    decision,
+  };
+}
+
+function reviewIdentity(
+  value: JsonValue | undefined,
+): EvaluationOptions["review"] {
+  const record = assertRecord(value, "evaluation options.review");
+  assertExactKeys(
+    record,
+    ["author", "reviewer", "eligibleReviewers"],
+    "evaluation options.review",
+  );
+  const reviewers = assertArray(
+    record["eligibleReviewers"],
+    "evaluation options.review.eligibleReviewers",
+  ).map((item, index) =>
+    nonempty(item, `evaluation options.review.eligibleReviewers[${index}]`),
+  );
+  assertUnique(reviewers, "eligible reviewer identities");
+  return {
+    author: nonempty(record["author"], "expected author"),
+    reviewer: nonempty(record["reviewer"], "expected reviewer"),
+    eligibleReviewers: new Set(reviewers),
+  };
+}
+
+function runIdentity(value: JsonValue | undefined): EvaluationOptions["run"] {
+  const record = assertRecord(value, "evaluation options.run");
+  assertExactKeys(
+    record,
+    ["id", "startedAt", "completedAt", "expiresAt", "priorRunIds"],
+    "evaluation options.run",
+  );
+  const priorRunIds = assertArray(
+    record["priorRunIds"],
+    "evaluation options.run.priorRunIds",
+  ).map((item, index) =>
+    nonempty(item, `evaluation options.run.priorRunIds[${index}]`),
+  );
+  assertUnique(priorRunIds, "prior run ids");
+  return {
+    id: nonempty(record["id"], "expected run id"),
+    startedAt: instant(record["startedAt"], "expected run start"),
+    completedAt: instant(record["completedAt"], "expected run completion"),
+    expiresAt: instant(record["expiresAt"], "expected run expiry"),
+    priorRunIds: new Set(priorRunIds),
   };
 }
 
@@ -357,6 +464,84 @@ function uniqueEffectMap(
     });
   }
   return result;
+}
+
+function parseExpectedTests(
+  value: JsonValue | undefined,
+): EvaluationOptions["expectedTests"] {
+  const result = new Map<
+    string,
+    {
+      evidenceRef: string;
+      artifactRef: string;
+      artifactSha256: string;
+      resultSha256: string;
+      outcome: "fail" | "pass";
+    }
+  >();
+  for (const [index, item] of assertArray(
+    value,
+    "evaluation options.expectedTests",
+  ).entries()) {
+    const label = `evaluation options.expectedTests[${index}]`;
+    const record = assertRecord(item, label);
+    assertExactKeys(
+      record,
+      [
+        "evidenceId",
+        "evidenceRef",
+        "artifactRef",
+        "artifactSha256",
+        "resultSha256",
+        "outcome",
+      ],
+      label,
+    );
+    const evidenceId = nonempty(record["evidenceId"], `${label}.evidenceId`);
+    if (result.has(evidenceId)) {
+      reject(
+        "REFERENCE_DUPLICATE",
+        "expected test evidence ids must be unique",
+      );
+    }
+    const outcome = assertString(record["outcome"], `${label}.outcome`);
+    if (outcome !== "pass" && outcome !== "fail") {
+      throw new AgentContractPackageError(`${label}.outcome is unsupported.`);
+    }
+    result.set(evidenceId, {
+      evidenceRef: nonempty(record["evidenceRef"], `${label}.evidenceRef`),
+      artifactRef: nonempty(record["artifactRef"], `${label}.artifactRef`),
+      artifactSha256: digest(
+        record["artifactSha256"],
+        `${label}.artifactSha256`,
+      ),
+      resultSha256: digest(record["resultSha256"], `${label}.resultSha256`),
+      outcome,
+    });
+  }
+  return result;
+}
+
+function parseExpectedFindings(
+  value: JsonValue | undefined,
+): EvaluationOptions["expectedFindings"] {
+  const findings = assertArray(
+    value,
+    "evaluation options.expectedFindings",
+  ).map((item, index) => {
+    const label = `evaluation options.expectedFindings[${index}]`;
+    const record = assertRecord(item, label);
+    assertExactKeys(record, ["kind", "ref"], label);
+    return {
+      kind: nonempty(record["kind"], `${label}.kind`),
+      ref: nonempty(record["ref"], `${label}.ref`),
+    };
+  });
+  assertUnique(
+    findings.map((finding) => `${finding.kind}\u0000${finding.ref}`),
+    "expected findings",
+  );
+  return findings;
 }
 
 function artifactKind(

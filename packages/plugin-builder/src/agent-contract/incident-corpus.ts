@@ -27,6 +27,11 @@ interface CorpusControl {
   input: JsonValue;
 }
 
+interface ParsedControls {
+  byId: ReadonlyMap<string, CorpusControl>;
+  hashes: ReadonlyMap<string, string>;
+}
+
 export function validateIncidentCorpus(
   value: JsonValue,
   label: string,
@@ -62,7 +67,7 @@ function parseControls(
   value: JsonValue | undefined,
   options: ReturnType<typeof parseEvaluationOptions>,
   label: string,
-): ReadonlyMap<string, CorpusControl> {
+): ParsedControls {
   const items = assertArray(value, `${label}.controls`);
   const controls = items.map((item, index) => {
     const controlLabel = `${label}.controls[${index}]`;
@@ -83,21 +88,30 @@ function parseControls(
     return parsed;
   });
   const result = new Map<string, CorpusControl>();
+  const hashes = new Map<string, string>();
   for (const control of controls) {
     if (result.has(control.id)) {
       throw new AgentContractPackageError(
         `${label} has duplicate control ids.`,
       );
     }
+    const hash = sha256Json(control.input);
+    const previous = hashes.get(hash);
+    if (previous !== undefined) {
+      throw new AgentContractPackageError(
+        `${label} control ${control.id} duplicates input from ${previous}.`,
+      );
+    }
     result.set(control.id, control);
+    hashes.set(hash, control.id);
   }
-  return result;
+  return { byId: result, hashes };
 }
 
 function evaluateCases(
   value: JsonValue | undefined,
   expectedCases: readonly ExpectedCase[],
-  controls: ReadonlyMap<string, CorpusControl>,
+  controls: ParsedControls,
   options: ReturnType<typeof parseEvaluationOptions>,
   label: string,
 ): void {
@@ -133,7 +147,7 @@ function evaluateCase(
   value: JsonValue,
   index: number,
   expected: ExpectedCase,
-  controls: ReadonlyMap<string, CorpusControl>,
+  controls: ParsedControls,
   options: ReturnType<typeof parseEvaluationOptions>,
   seenIds: Set<string>,
   seenInputs: Map<string, string>,
@@ -171,7 +185,7 @@ function evaluateCase(
     );
   }
   const controlId = assertString(incident["control"], `${caseLabel}.control`);
-  const control = controls.get(controlId);
+  const control = controls.byId.get(controlId);
   if (control === undefined || control.contract !== contract) {
     throw new AgentContractPackageError(
       `${caseLabel} references an invalid control.`,
@@ -184,6 +198,12 @@ function evaluateCase(
   );
   assertInputHash(incident["inputSha256"], input, caseLabel);
   const inputHash = sha256Json(input);
+  const controlCollision = controls.hashes.get(inputHash);
+  if (controlCollision !== undefined && expected.decision === "reject") {
+    throw new AgentContractPackageError(
+      `${caseLabel} duplicates control input from ${controlCollision}.`,
+    );
+  }
   const previousId = seenInputs.get(inputHash);
   if (previousId !== undefined) {
     throw new AgentContractPackageError(

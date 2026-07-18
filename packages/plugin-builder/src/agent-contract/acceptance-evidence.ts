@@ -261,14 +261,13 @@ function validateEvidenceBindings(
   options: EvaluationOptions,
 ): void {
   for (const record of evidence.values()) {
-    if (record.kind === "artifact-hash" || record.kind === "test-result") {
+    if (record.kind === "artifact-hash") {
       const artifact =
         record.artifactRef === null
           ? undefined
           : artifacts.get(record.artifactRef);
       if (
         artifact === undefined ||
-        (record.kind === "test-result" && artifact.kind !== "test-suite") ||
         record.effectRef !== null ||
         record.sha256 !== artifact.sha256 ||
         record.outcome !== "pass"
@@ -276,6 +275,30 @@ function validateEvidenceBindings(
         reject(
           "EVIDENCE_BINDING_INVALID",
           "artifact evidence is not integrity-bound",
+        );
+      }
+      continue;
+    }
+    if (record.kind === "test-result") {
+      const expected = options.expectedTests.get(record.id);
+      const artifact =
+        record.artifactRef === null
+          ? undefined
+          : artifacts.get(record.artifactRef);
+      if (
+        expected === undefined ||
+        artifact === undefined ||
+        artifact.kind !== "test-suite" ||
+        record.ref !== expected.evidenceRef ||
+        record.artifactRef !== expected.artifactRef ||
+        artifact.sha256 !== expected.artifactSha256 ||
+        record.sha256 !== expected.resultSha256 ||
+        record.outcome !== expected.outcome ||
+        record.effectRef !== null
+      ) {
+        reject(
+          "EVIDENCE_BINDING_INVALID",
+          "test result does not match trusted suite and result facts",
         );
       }
       continue;
@@ -328,6 +351,12 @@ function validateEvidenceBindings(
         "EVIDENCE_BINDING_INVALID",
         "effect lacks matching runtime evidence",
       );
+    }
+  }
+  for (const id of options.expectedTests.keys()) {
+    const record = evidence.get(id);
+    if (record === undefined || record.kind !== "test-result") {
+      reject("REFERENCE_MISSING", "trusted test result is absent");
     }
   }
 }

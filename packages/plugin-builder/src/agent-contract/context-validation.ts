@@ -167,7 +167,7 @@ function evaluateValidation(
   if (status === "valid" && !validatorMatched) {
     reject("VALIDATOR_MISMATCH", `${label} validator identity does not match`);
   }
-  if (status === "valid" && !propertyMatched) {
+  if (!propertyMatched) {
     reject("VALIDATOR_MISMATCH", `${label} validation property does not match`);
   }
   if (status === "valid" && validatedAt !== null && !timeMatched) {

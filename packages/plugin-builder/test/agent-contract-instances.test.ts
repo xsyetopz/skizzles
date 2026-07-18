@@ -1,23 +1,19 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import {
-  type AgentContractKind,
-  ContractRejection,
-  type EvaluationOptions,
-  parseEvaluationOptions,
-  type RejectionCode,
-} from "../src/agent-contract/evaluation-contract.ts";
-import { evaluateAgentContract } from "../src/agent-contract/evaluator.ts";
 import type { JsonValue } from "../src/agent-contract/json-value.ts";
 import {
-  assertArray,
-  assertRecord,
-  assertString,
-  canonicalJson,
-  parseJsonAsset,
-} from "../src/agent-contract/json-value.ts";
+  acceptanceMutation,
+  arrayAt,
+  cloneJson,
+  evaluateControl,
+  firstGate,
+  loadControl,
+  propertyAt,
+  recordAt,
+  rejectionCode,
+  requiredValue,
+  trustAcceptanceRecord,
+} from "./agent-contract-test-support.ts";
 import { createTestWorkspace } from "./plugin-package-fixture.ts";
 
 const TRUST_CORPUS =
@@ -154,6 +150,23 @@ describe("context envelope relational evaluation", () => {
       expect(rejectionCode(control)).toBe(testCase.code);
     });
   }
+
+  it("rejects UNTRUSTED_PROPERTY_MISMATCH for an invalid untrusted value", async () => {
+    const control = await loadControl(
+      await fixture(),
+      TRUST_CORPUS,
+      "FW-CONTEXT-CONTROL",
+    );
+    const property = propertyAt(control.input);
+    property["trustClass"] = "untrusted";
+    const validation = recordAt(property, "validation");
+    validation["property"] = "other";
+    validation["status"] = "invalid";
+    validation["validator"] = null;
+    validation["validatedAt"] = null;
+    validation["evidence"] = [];
+    expect(rejectionCode(control)).toBe("VALIDATOR_MISMATCH");
+  });
 });
 
 describe("handoff relational evaluation", () => {
@@ -172,6 +185,13 @@ describe("handoff relational evaluation", () => {
       code: "SELF_REVIEW",
       mutate(input: JsonValue) {
         recordAt(input, "authors")["reviewer"] = "author-agent";
+      },
+    },
+    {
+      name: "ineligible reviewer identity",
+      code: "REVIEWER_MISMATCH",
+      mutate(input: JsonValue) {
+        recordAt(input, "authors")["reviewer"] = "arbitrary-reviewer";
       },
     },
     {
@@ -349,6 +369,7 @@ describe("acceptance causal evaluation", () => {
     );
     firstGate(control.input)["proofKind"] = "test-result";
     firstGate(control.input)["evidenceRefs"] = ["evidence/tests"];
+    trustAcceptanceRecord(control);
     expect(() => evaluateControl(control)).not.toThrow();
   });
 
@@ -410,6 +431,106 @@ describe("acceptance causal evaluation", () => {
     expect(rejectionCode(control)).toBe("EVIDENCE_BINDING_INVALID");
   });
 
+  it("rejects SCOPE_SHRUNK_WITH_UNCHANGED_TRUSTED_ACCEPTANCE_DIGEST", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    recordAt(requiredValue(arrayAt(control.input, "requirements")[0]), "")[
+      "obligation"
+    ] = "Run less work.";
+    expect(rejectionCode(control)).toBe("ACCEPTANCE_MISMATCH");
+  });
+
+  it("rejects UNTRUSTED_EXTRA_TEST_RESULT", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    const extra = cloneJson(
+      requiredValue(arrayAt(control.input, "evidence")[1]),
+    );
+    recordAt(extra, "")["id"] = "evidence/untrusted-extra";
+    arrayAt(control.input, "evidence").push(extra);
+    expect(rejectionCode(control)).toBe("EVIDENCE_BINDING_INVALID");
+  });
+
+  it("rejects omission of a trusted test result", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    arrayAt(control.input, "evidence").splice(1, 1);
+    expect(rejectionCode(control)).toBe("REFERENCE_MISSING");
+  });
+
+  it("rejects trusted test result digest or outcome mismatch", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    recordAt(requiredValue(arrayAt(control.input, "evidence")[1]), "")[
+      "sha256"
+    ] = ZERO_DIGEST;
+    expect(rejectionCode(control)).toBe("EVIDENCE_BINDING_INVALID");
+  });
+
+  it("rejects FORGED_REVIEWER_AND_SELF_REPORTED_JUDGE", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    recordAt(control.input, "authors")["reviewer"] = "arbitrary-reviewer";
+    recordAt(control.input, "judge")["decision"] = "fail";
+    expect(rejectionCode(control)).toBe("JUDGE_MISMATCH");
+  });
+
+  it("rejects an ineligible arbitrary reviewer identity", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    recordAt(control.input, "authors")["reviewer"] = "arbitrary-reviewer";
+    expect(rejectionCode(control)).toBe("REVIEWER_MISMATCH");
+  });
+
+  it("rejects omission of a trusted deceptive-completion finding", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    control.options = {
+      ...control.options,
+      expectedFindings: [
+        { kind: "deceptive-completion", ref: "evidence/known.json" },
+      ],
+    };
+    expect(rejectionCode(control)).toBe("DECEPTIVE_COMPLETION");
+  });
+
+  it("rejects replayed run identities", async () => {
+    const control = await loadControl(
+      await fixture(),
+      ACCEPTANCE_CORPUS,
+      "CC-ACCEPTANCE-CONTROL",
+    );
+    control.options = {
+      ...control.options,
+      run: {
+        ...control.options.run,
+        priorRunIds: new Set([control.options.run.id]),
+      },
+    };
+    expect(rejectionCode(control)).toBe("REPLAY_DETECTED");
+  });
+
   for (const nonCausal of [
     ["process-exit", "evidence/exit", "EXIT_ZERO_ONLY"],
     ["success-token", "evidence/token", "SUCCESS_TOKEN_ONLY"],
@@ -435,105 +556,3 @@ describe("acceptance causal evaluation", () => {
     });
   }
 });
-
-interface LoadedControl {
-  contract: AgentContractKind;
-  input: JsonValue;
-  options: EvaluationOptions;
-}
-
-async function loadControl(
-  root: string,
-  corpusPath: string,
-  controlId: string,
-): Promise<LoadedControl> {
-  const corpus = assertRecord(
-    parseJsonAsset(await readFile(join(root, corpusPath)), "test corpus"),
-    "test corpus",
-  );
-  const options = parseEvaluationOptions(
-    requiredValue(corpus["evaluationOptions"]),
-  );
-  const controls = assertArray(corpus["controls"], "test controls");
-  for (const item of controls) {
-    const control = assertRecord(item, "test control");
-    if (control["id"] === controlId) {
-      return {
-        contract: contractKind(control["contract"]),
-        input: cloneJson(requiredValue(control["input"])),
-        options,
-      };
-    }
-  }
-  throw new Error(`Missing test control ${controlId}.`);
-}
-
-function evaluateControl(control: LoadedControl): void {
-  evaluateAgentContract(control.contract, control.input, control.options);
-}
-
-function rejectionCode(control: LoadedControl): RejectionCode {
-  try {
-    evaluateControl(control);
-  } catch (error) {
-    if (error instanceof ContractRejection) {
-      return error.code;
-    }
-    throw error;
-  }
-  throw new Error("Expected contract evaluation to reject.");
-}
-
-function propertyAt(input: JsonValue): Record<string, JsonValue> {
-  return recordAt(requiredValue(arrayAt(input, "properties")[0]), "");
-}
-
-function firstGate(input: JsonValue): Record<string, JsonValue> {
-  return recordAt(requiredValue(arrayAt(input, "objectiveGates")[0]), "");
-}
-
-function recordAt(value: JsonValue, path: string): Record<string, JsonValue> {
-  let current = assertRecord(value, "test record");
-  if (path.length === 0) {
-    return current;
-  }
-  for (const segment of path.split(".")) {
-    current = assertRecord(current[segment], `test record ${path}`);
-  }
-  return current;
-}
-
-function arrayAt(value: JsonValue, property: string): JsonValue[] {
-  return assertArray(recordAt(value, "")[property], `test array ${property}`);
-}
-
-function cloneJson(value: JsonValue): JsonValue {
-  return parseJsonAsset(Buffer.from(canonicalJson(value)), "test clone");
-}
-
-function requiredValue(value: JsonValue | undefined): JsonValue {
-  if (value === undefined) {
-    throw new Error("Missing test value.");
-  }
-  return value;
-}
-
-function contractKind(value: JsonValue | undefined): AgentContractKind {
-  const kind = assertString(value, "test contract kind");
-  if (
-    kind !== "acceptance" &&
-    kind !== "context-envelope" &&
-    kind !== "handoff-review"
-  ) {
-    throw new Error("Invalid test contract kind.");
-  }
-  return kind;
-}
-
-function acceptanceMutation(
-  name: string,
-  code: RejectionCode,
-  mutate: (input: JsonValue) => void,
-): { name: string; code: RejectionCode; mutate: (input: JsonValue) => void } {
-  return { name, code, mutate };
-}

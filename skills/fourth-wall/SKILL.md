@@ -160,7 +160,7 @@ When observed behavior reveals a reusable routing or lifecycle caveat, follow [r
 ## Versioned trust contracts
 
 The published [context-envelope schema](contracts/context-envelope.schema.json)
-defines the portable v2 JSON shape. Each property records origin/time, trust,
+defines the portable v3 JSON shape. Each property records origin/time, trust,
 canonical SHA-256 coverage, scope/objective/policy identity, retention/expiry,
 sensitivity/redaction, transformations and producers, and property-specific
 validation evidence. The published
@@ -177,7 +177,11 @@ retrieval and every recorded transformation, and canonical calendar timestamps
 are checked without date normalization. Those evaluators reject duplicate
 context properties, incomplete integrity coverage, stale data, unredacted
 secrets, self-review, reference mismatches, and model-transformed data presented
-as validated without property-matched deterministic evidence. The canonical
+as validated without property-matched deterministic evidence. Property names
+must match their containing property in every validation state, including
+untrusted, invalid, and unvalidated records. Contract publication reads bind
+the opened file identity and compare every ancestor identity before and after
+the read, rejecting symlinks, hardlinks, and detected replacement races. The canonical
 public [trust-boundary incident-regression corpus](fixtures/trust-boundary-incidents.json)
 contains valid controls plus executable mutations and stable rejection codes.
 It is implementation-visible regression input, not independent or private
