@@ -10,6 +10,12 @@ const MAX_POLICY_BYTES = 64 * 1024;
 const MAX_DIAGNOSTIC_PATH_UNITS = 512;
 const CONTROL_CHARACTER_MAX = 31;
 const DELETE_CHARACTER = 127;
+const C1_CONTROL_MIN = 128;
+const C1_CONTROL_MAX = 159;
+const HIGH_SURROGATE_MIN = 0xd800;
+const LOW_SURROGATE_MAX = 0xdfff;
+const LINE_SEPARATOR = 0x2028;
+const PARAGRAPH_SEPARATOR = 0x2029;
 const LINE_BREAK_PATTERN = /\r\n?|\n/u;
 const EXPECTED_TAXONOMY_IDS = [
   "feelings-internal-experience",
@@ -163,6 +169,7 @@ export function validateShippedLanguageText(
   sourcePath: string,
 ): readonly ShippedLanguageFinding[] {
   validateDiagnosticPath(sourcePath);
+  validateSurfaceText(text);
   const findings: ShippedLanguageFinding[] = [];
   const seen = new Set<string>();
   const lines = text.split(LINE_BREAK_PATTERN);
@@ -297,13 +304,21 @@ function validateDiagnosticPath(path: string): void {
     path.length > MAX_DIAGNOSTIC_PATH_UNITS ||
     path.startsWith("/") ||
     path.includes("\\") ||
-    hasControlCharacter(path) ||
+    hasUnsafeCodePoint(path, false) ||
     segments.some(
       (segment) => segment.length === 0 || segment === "." || segment === "..",
     )
   ) {
     throw new PromptLayerError(
       "Shipped-language diagnostic path must be a bounded relative POSIX path.",
+    );
+  }
+}
+
+function validateSurfaceText(text: string): void {
+  if (hasUnsafeCodePoint(text, true)) {
+    throw new PromptLayerError(
+      "Shipped-language surface text contains unsupported control or separator code points.",
     );
   }
 }
@@ -325,17 +340,27 @@ function normalizeLine(value: string): string {
   return normalized;
 }
 
-function hasControlCharacter(value: string): boolean {
+function hasUnsafeCodePoint(value: string, allowTextLayout: boolean): boolean {
   for (const character of value) {
     const codePoint = character.codePointAt(0);
     if (
       codePoint !== undefined &&
-      (codePoint <= CONTROL_CHARACTER_MAX || codePoint === DELETE_CHARACTER)
+      ((codePoint <= CONTROL_CHARACTER_MAX &&
+        !(allowTextLayout && isSupportedTextLayout(codePoint))) ||
+        codePoint === DELETE_CHARACTER ||
+        (codePoint >= C1_CONTROL_MIN && codePoint <= C1_CONTROL_MAX) ||
+        (codePoint >= HIGH_SURROGATE_MIN && codePoint <= LOW_SURROGATE_MAX) ||
+        codePoint === LINE_SEPARATOR ||
+        codePoint === PARAGRAPH_SEPARATOR)
     ) {
       return true;
     }
   }
   return false;
+}
+
+function isSupportedTextLayout(codePoint: number): boolean {
+  return codePoint === 9 || codePoint === 10 || codePoint === 13;
 }
 
 function exactRecord(

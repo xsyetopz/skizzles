@@ -165,23 +165,62 @@ remains permitted.
 
 The validator is a product-language fitness function, not a psychological
 effect measurement or a general semantic classifier. It can miss paraphrases,
-translations, and phrases split across lines. It can reject quoted or
-policy-discussion text containing an exact prohibited phrase. Corpus changes
-therefore require a new version or an explicit digest update with review and
-must retain negative and allowed fixtures. Findings contain the taxonomy ID,
-bounded relative path, and line number, never the matched text.
+translations, phrases split across lines, and claims assembled dynamically from
+separate runtime fragments when the fixed transpiler does not emit the exact
+literal. It can reject quoted or policy-discussion text containing an exact
+prohibited phrase. Corpus changes therefore require a new version or an
+explicit digest update with review and must retain negative and allowed
+fixtures. Findings contain the taxonomy ID, bounded relative path, and line
+number, never the matched text. C0 controls
+other than tab/CR/LF, DEL/C1 controls, unpaired surrogates, and Unicode
+line/paragraph separators are rejected before matching. This keeps line
+calculation limited to CR/LF text instead of accepting ambiguous separators.
 
 `@skizzles/plugin-builder` scans canonical runtime source and every staged
 textual plugin surface before accepting a distribution. The canonical scan
 intentionally over-approximates bundled TypeScript by scanning each composed
 package's `src/` tree before destination mutation; resulting staged bundles are
-scanned again. Every non-excluded canonical candidate is decoded and scanned as
-text, so a new textual suffix cannot bypass the pre-mutation gate. At the
-completed stage, Markdown, YAML, JSON, JSONC, TypeScript, plist, `.gitignore`,
-and extensionless runtime files are classified as text. Only the exact corpus
-path, the exact OpenAI/Container Lab legal files, and the exact PNG logo binary
-are excluded. A future unclassified shipped file type fails closed until its
-owner records whether it is a text/UX surface or a binary.
+scanned again. Every non-excluded canonical candidate is decoded and raw-scanned
+as text through a contained, identity-checked, no-follow read, so a new textual
+suffix cannot bypass the pre-mutation gate.
+
+Format-aware scanning is additive to the raw scan and never executes shipped
+content:
+
+- JSON and JSONC use Bun's parsers, bounded recursive traversal of every string
+  key/value, and token decoding so duplicate overwritten keys cannot hide an
+  escaped string.
+- YAML uses Bun's parser, the same bounded traversal, and independent decoding
+  of quoted scalars, including overwritten mappings.
+- TypeScript and JavaScript use fixed Bun transpilers only to parse and reveal
+  escaped runtime literals; the output is scanned without import resolution or
+  execution.
+- Plist scanning decodes only the five predefined XML entities and numeric
+  entities. It never resolves external or user-defined entities.
+- Markdown and `.gitignore` use raw text. The only staged extensionless text
+  paths are `skills/codex-container-lab/scripts/codex-container-lab` and
+  `skills/designer-runtime/scripts/designer-sim`.
+
+The canonical template probe
+`packages/plugin-builder/template/third_party/openai-codex/COPYING` is
+raw-scanned only so the existing exact legal-directory validator retains its
+diagnostic for a forbidden extra file. It is not a staged extensionless
+allowlist entry.
+
+Canonical semantic parsing is a detection pass before the established package
+validators. If a canonical candidate is syntactically malformed, its existing
+format/package owner retains the rejection and diagnostic; malformed content is
+not copied into an accepted stage. At the completed staged boundary, semantic
+parse errors fail closed because no later owner can make that shipped content
+safe.
+
+The completed stage permits Markdown, YAML, JSON, JSONC, TypeScript, JavaScript,
+plist, `.gitignore`, and those two extensionless paths. The exact PNG logo is
+the only binary exclusion. The exact corpus and OpenAI/Container Lab legal files
+are policy/legal exclusions rather than binary classifications. Any other
+staged file type fails closed. Raw findings use the source-file line; findings
+from decoded strings or transpiled text use the line within that deterministic
+semantic representation.
 
 The manifest currently pins OpenAI Codex commit
 `bc5c9161b46feddc13282652fd2cfdf1e5bab4a9`. Its baseline role is explicitly a
@@ -192,7 +231,7 @@ generic upstream compatibility baseline, not a selected-model baseline claim.
 | Command | Current behavior |
 | --- | --- |
 | `bun run prompt:build` | Offline. Verifies all pinned inputs, strictly applies the patch, and transactionally rewrites only the applied prompt and provenance. It also recovers a valid interrupted mutation before building. |
-| `bun run prompt:check` | Offline and non-writing. Refuses active locks, recoverable lock artifacts, or pending transactions, then verifies exact generated output and provenance. |
+| `bun run prompt:check` | Offline and non-writing. Refuses active locks, recoverable lock artifacts, or pending transactions, then verifies the exact language corpus, generated output, and provenance. |
 | `bun run prompt:patch -- <candidate-path>` | Offline. Creates a canonical patch from a reviewed candidate, proves exact replay, and transactionally updates patch, manifest, output, and provenance. If the path is omitted, the current applied output is the candidate. |
 | `bun run prompt:rebase -- <40-hex-commit>` | The only networked operation. Performs normal mutation-lock acquisition, recoverable lock-artifact cleanup, pending-transaction recovery, and lock release. It accepts only a lowercase immutable 40-hex commit, fetches the baseline, `LICENSE`, and `NOTICE` from official raw OpenAI URLs, and reports old-patch replay evidence without applying the newly fetched inputs. |
 | `bun run prompt:rebase -- <40-hex-commit> --candidate <candidate-path>` | After review, refetches the pinned inputs, creates and proves a new exact patch, and transactionally updates all seven canonical/generated files. |

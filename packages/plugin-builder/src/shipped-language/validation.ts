@@ -1,5 +1,5 @@
-import { lstat, readdir, readFile } from "node:fs/promises";
-import { basename, extname, join } from "node:path";
+import { lstat, readdir } from "node:fs/promises";
+import { join } from "node:path";
 import type { ShippedLanguageFinding } from "@skizzles/prompt-layer";
 import {
   PROMPT_LAYER_PACKAGE_FILES,
@@ -20,17 +20,13 @@ import {
   TEMPLATE_PATH,
 } from "../plugin/contract.ts";
 import { listFiles } from "../plugin/distribution-files.ts";
+import {
+  LanguageSurfaceBoundaryError,
+  readContainedLanguageSurface,
+  safeLanguageDiagnosticPath,
+} from "./file-boundary.ts";
+import { semanticSurfaceTexts } from "./surface-content.ts";
 
-const TEXT_SURFACE_EXTENSIONS = new Set([
-  ".gitignore",
-  ".json",
-  ".jsonc",
-  ".md",
-  ".plist",
-  ".ts",
-  ".yaml",
-  ".yml",
-]);
 const CANONICAL_EXCLUSIONS = new Set([
   SHIPPED_LANGUAGE_POLICY_PATHS.canonicalWorkspacePath,
   "packages/container-lab/LICENSE",
@@ -45,12 +41,15 @@ const STAGED_EXCLUSIONS = new Set([
   "third_party/openai-codex/LICENSE",
   "third_party/openai-codex/NOTICE",
 ]);
+const CANONICAL_PROMPT_SURFACES = new Set<string>(
+  PROMPT_LAYER_PACKAGE_FILES.map(([sourcePath]) => sourcePath),
+);
 
 export async function validateCanonicalShippedLanguage(
   repoRoot: string,
 ): Promise<void> {
-  const policyBytes = await readRequired(
-    join(repoRoot, SHIPPED_LANGUAGE_POLICY_PATHS.canonicalWorkspacePath),
+  const policyBytes = await readContainedLanguageSurface(
+    repoRoot,
     SHIPPED_LANGUAGE_POLICY_PATHS.canonicalWorkspacePath,
   );
   const policy = parsePolicy(policyBytes, "canonical shipped-language policy");
@@ -59,8 +58,17 @@ export async function validateCanonicalShippedLanguage(
     if (CANONICAL_EXCLUSIONS.has(path)) {
       continue;
     }
-    assertTextSurface(path, "canonical");
-    await validateFile(repoRoot, path, policy);
+    try {
+      await validateFile(repoRoot, path, policy, "canonical");
+    } catch (error) {
+      if (
+        error instanceof LanguageSurfaceBoundaryError &&
+        CANONICAL_PROMPT_SURFACES.has(path)
+      ) {
+        throw new PackagingError("Canonical prompt-layer verification failed.");
+      }
+      throw error;
+    }
   }
 }
 
@@ -68,12 +76,12 @@ export async function validateStagedShippedLanguage(
   repoRoot: string,
   pluginRoot: string,
 ): Promise<void> {
-  const canonicalBytes = await readRequired(
-    join(repoRoot, SHIPPED_LANGUAGE_POLICY_PATHS.canonicalWorkspacePath),
+  const canonicalBytes = await readContainedLanguageSurface(
+    repoRoot,
     SHIPPED_LANGUAGE_POLICY_PATHS.canonicalWorkspacePath,
   );
-  const stagedBytes = await readRequired(
-    join(pluginRoot, SHIPPED_LANGUAGE_POLICY_PATHS.packagedPath),
+  const stagedBytes = await readContainedLanguageSurface(
+    pluginRoot,
     SHIPPED_LANGUAGE_POLICY_PATHS.packagedPath,
   );
   const policy = parsePolicy(
@@ -91,8 +99,7 @@ export async function validateStagedShippedLanguage(
     if (STAGED_EXCLUSIONS.has(path)) {
       continue;
     }
-    assertTextSurface(path, "staged");
-    await validateFile(pluginRoot, path, policy);
+    await validateFile(pluginRoot, path, policy, "staged");
   }
 }
 
@@ -143,7 +150,7 @@ async function addTree(
       const metadata = await lstat(absolutePath);
       if (metadata.isSymbolicLink()) {
         throw new PackagingError(
-          `${relativeRoot}/${relativePath} is an unsupported symlink.`,
+          `${safeLanguageDiagnosticPath(`${relativeRoot}/${relativePath}`)} is an unsupported symlink.`,
         );
       }
       if (metadata.isDirectory()) {
@@ -152,7 +159,7 @@ async function addTree(
         paths.add(`${relativeRoot}/${relativePath}`);
       } else {
         throw new PackagingError(
-          `${relativeRoot}/${relativePath} is not a regular file or directory.`,
+          `${safeLanguageDiagnosticPath(`${relativeRoot}/${relativePath}`)} is not a regular file or directory.`,
         );
       }
     }
@@ -160,60 +167,52 @@ async function addTree(
   await visit(join(repoRoot, relativeRoot));
 }
 
-function assertTextSurface(path: string, mode: "canonical" | "staged"): void {
-  if (mode === "canonical") {
-    return;
-  }
-  const name = basename(path);
-  const extension = extname(name);
-  if (
-    (extension === "" && !name.startsWith(".")) ||
-    TEXT_SURFACE_EXTENSIONS.has(extension === "" ? name : extension)
-  ) {
-    return;
-  }
-  throw new PackagingError(
-    `${mode} shipped file ${path} has no explicit language-policy surface classification.`,
-  );
-}
-
 async function validateFile(
   root: string,
   path: string,
   policy: ReturnType<typeof parseShippedLanguagePolicy>,
+  mode: "canonical" | "staged",
 ): Promise<void> {
-  const bytes = await readRequired(join(root, path), path);
+  const bytes = await readContainedLanguageSurface(root, path);
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     throw new PackagingError(
-      `Shipped language surface ${path} is not valid UTF-8.`,
+      `Shipped language surface ${safeLanguageDiagnosticPath(path)} is not valid UTF-8.`,
     );
   }
-  let finding: ShippedLanguageFinding | undefined;
+  const semanticTexts = semanticSurfaceTexts(path, text, mode);
+  const finding = firstFinding(policy, text, path);
+  if (finding !== undefined) {
+    throw findingError(finding);
+  }
+  for (const semanticText of semanticTexts) {
+    const semanticFinding = firstFinding(policy, semanticText, path);
+    if (semanticFinding !== undefined) {
+      throw findingError(semanticFinding);
+    }
+  }
+}
+
+function firstFinding(
+  policy: ReturnType<typeof parseShippedLanguagePolicy>,
+  text: string,
+  path: string,
+): ShippedLanguageFinding | undefined {
   try {
-    [finding] = validateShippedLanguageText(policy, text, path);
+    return validateShippedLanguageText(policy, text, path)[0];
   } catch {
     throw new PackagingError(
-      `Shipped language surface ${path} has an unsafe diagnostic path.`,
-    );
-  }
-  if (finding !== undefined) {
-    throw new PackagingError(
-      `${finding.path}:${finding.line}: prohibited shipped-language taxonomy ${finding.taxonomyId}.`,
+      `Shipped language surface ${safeLanguageDiagnosticPath(path)} has unsafe path or text controls.`,
     );
   }
 }
 
-async function readRequired(path: string, label: string): Promise<Buffer> {
-  try {
-    return await readFile(path);
-  } catch {
-    throw new PackagingError(
-      `Unable to read shipped language surface ${label}.`,
-    );
-  }
+function findingError(finding: ShippedLanguageFinding): PackagingError {
+  return new PackagingError(
+    `${finding.path}:${finding.line}: prohibited shipped-language taxonomy ${finding.taxonomyId}.`,
+  );
 }
 
 function parsePolicy(

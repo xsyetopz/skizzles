@@ -189,6 +189,53 @@ describe("versioned shipped-language policy", () => {
         `/absolute/${"x".repeat(600)}`,
       ),
     ).toThrow(/bounded relative POSIX path/u);
+    for (const unsafePath of [
+      "nested/next\u0085line.md",
+      "nested/next\u2028line.md",
+      "nested/next\u2029line.md",
+    ]) {
+      expect(() =>
+        validateShippedLanguageText(policy, "neutral", unsafePath),
+      ).toThrow(/bounded relative POSIX path/u);
+    }
+  });
+
+  test("normalizes Unicode claims and rejects unsafe text controls", async () => {
+    const policy = parseShippedLanguagePolicy(await policyBytes());
+    expect(
+      validateShippedLanguageText(
+        policy,
+        "Ｉ ａｍ ｓｅｎｔｉｅｎｔ.",
+        "unicode.md",
+      ),
+    ).toEqual([
+      {
+        taxonomyId: "consciousness-sentience-embodiment",
+        path: "unicode.md",
+        line: 1,
+      },
+    ]);
+    for (const unsafeText of [
+      "before\0after",
+      "before\u0001after",
+      "before\u0085after",
+      "before\u2028after",
+      "before\u2029after",
+    ]) {
+      expect(() =>
+        validateShippedLanguageText(policy, unsafeText, "controls.md"),
+      ).toThrow(/unsupported control or separator/u);
+    }
+    expect(() =>
+      validateShippedLanguageText(policy, "before\ud800after", "controls.md"),
+    ).toThrow(/unsupported control or separator/u);
+    expect(
+      validateShippedLanguageText(
+        policy,
+        "line one\r\nline two\twith tab",
+        "layout.md",
+      ),
+    ).toEqual([]);
   });
 
   test("rejects unsupported, reordered, duplicate, and malformed corpus data", async () => {
