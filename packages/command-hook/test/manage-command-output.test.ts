@@ -182,12 +182,23 @@ describe("managed command output hook", () => {
       join(pluginRoot, "runtime/codex-command.ts"),
       join(symlinkedRoot, "runtime/codex-command.ts"),
     );
+    const pluginRootAlias = join(temporaryRoot, "plugin-root-alias");
+    symlinkSync(pluginRoot, pluginRootAlias, "dir");
+    const symlinkedRuntimeRoot = join(temporaryRoot, "symlinked-runtime");
+    mkdirSync(symlinkedRuntimeRoot);
+    symlinkSync(
+      join(pluginRoot, "runtime"),
+      join(symlinkedRuntimeRoot, "runtime"),
+      "dir",
+    );
 
     for (const arguments_ of [
       [],
       ["--plugin-root", "relative/plugin"],
       ["--plugin-root", incompleteRoot],
       ["--plugin-root", symlinkedRoot],
+      ["--plugin-root", pluginRootAlias],
+      ["--plugin-root", symlinkedRuntimeRoot],
       ["--unknown", pluginRoot],
       ["--plugin-root", pluginRoot, "extra"],
     ]) {
@@ -210,7 +221,7 @@ describe("managed command output hook", () => {
       "cmd",
     );
     const argumentMarker = join(temporaryRoot, "arguments.json");
-    const injectionMarker = join(process.cwd(), "injected");
+    const injectionMarker = join(temporaryRoot, "injected");
     rmSync(injectionMarker, { force: true });
     const executionEnvironment = { ...process.env };
     delete executionEnvironment["PLUGIN_ROOT"];
@@ -218,6 +229,7 @@ describe("managed command output hook", () => {
     executionEnvironment["FIXTURE_EXIT"] = "23";
 
     const execution = Bun.spawnSync(["bash", "-c", rewritten], {
+      cwd: temporaryRoot,
       stdout: "pipe",
       stderr: "pipe",
       env: executionEnvironment,

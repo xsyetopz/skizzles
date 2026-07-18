@@ -31,10 +31,18 @@ function pluginRootFrom(arguments_: string[]): string | undefined {
   }
 
   try {
+    if (!lstatSync(arguments_[1]).isDirectory()) {
+      return;
+    }
     const pluginRoot = realpathSync(arguments_[1]);
+    const runtimeRoot = join(pluginRoot, "runtime");
     const supervisor = join(pluginRoot, "runtime", "codex-command.ts");
     if (
-      !(statSync(pluginRoot).isDirectory() && lstatSync(supervisor).isFile())
+      !(
+        statSync(pluginRoot).isDirectory() &&
+        lstatSync(runtimeRoot).isDirectory() &&
+        lstatSync(supervisor).isFile()
+      )
     ) {
       return;
     }
