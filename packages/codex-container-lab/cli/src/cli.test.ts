@@ -21,6 +21,7 @@ import { initializeSyncBaseline } from "./sync";
 import type { LabMetadata } from "./types";
 
 const temporary: string[] = [];
+const canonicalPositivePid = /^[1-9][0-9]*$/;
 afterEach(async () => {
   await Promise.all(
     temporary
@@ -30,6 +31,45 @@ afterEach(async () => {
 });
 
 describe("CLI process boundary", () => {
+  test("does not treat an empty PID publication as ready", async () => {
+    const root = await mkdtemp(
+      join(tmpdir(), "container-lab-pid-publication-"),
+    );
+    temporary.push(root);
+    const pidPath = join(root, "run.pid");
+    await writeFile(pidPath, "");
+
+    const pending = waitForPublishedPid(pidPath);
+    expect(
+      await Promise.race([
+        pending.then(() => "resolved"),
+        Bun.sleep(25).then(() => "waiting"),
+      ]),
+    ).toBe("waiting");
+
+    await writeFile(pidPath, "12345");
+    await expect(pending).resolves.toBe(12345);
+  });
+
+  test("accepts only canonical positive safe-integer PID publications", () => {
+    for (const text of [
+      "",
+      " ",
+      "0",
+      "-1",
+      "+1",
+      "01",
+      "1.5",
+      "123x",
+      "123\n",
+      "9007199254740992",
+    ])
+      expect(parsePublishedPid(text)).toBeUndefined();
+
+    expect(parsePublishedPid("1")).toBe(1);
+    expect(parsePublishedPid("9007199254740991")).toBe(9007199254740991);
+  });
+
   test("real public serialization clips worst-case escaped transcripts to 16 KiB", () => {
     const encoded = serializePublicJson({
       labId: "lab-1",
@@ -224,10 +264,8 @@ describe("CLI process boundary", () => {
     expect(new TextDecoder().decode((await reader.read()).value)).toContain(
       "early-output",
     );
-    const pid = Number((await waitForFile(fixture.pidPath)).trim());
-    const descendant = Number(
-      (await waitForFile(fixture.descendantPath)).trim(),
-    );
+    const pid = await waitForPublishedPid(fixture.pidPath);
+    const descendant = await waitForPublishedPid(fixture.descendantPath);
     child.kill("SIGINT");
     expect(await child.exited).toBe(130);
     await drain(reader);
@@ -242,10 +280,8 @@ describe("CLI process boundary", () => {
     expect(new TextDecoder().decode((await reader.read()).value)).toContain(
       "early-output",
     );
-    const pid = Number((await waitForFile(fixture.pidPath)).trim());
-    const descendant = Number(
-      (await waitForFile(fixture.descendantPath)).trim(),
-    );
+    const pid = await waitForPublishedPid(fixture.pidPath);
+    const descendant = await waitForPublishedPid(fixture.descendantPath);
     child.kill("SIGTERM");
     expect(await child.exited).toBe(143);
     await drain(reader);
@@ -260,10 +296,8 @@ describe("CLI process boundary", () => {
     expect(new TextDecoder().decode((await reader.read()).value)).toContain(
       "early-output",
     );
-    const pid = Number((await waitForFile(fixture.pidPath)).trim());
-    const descendant = Number(
-      (await waitForFile(fixture.descendantPath)).trim(),
-    );
+    const pid = await waitForPublishedPid(fixture.pidPath);
+    const descendant = await waitForPublishedPid(fixture.descendantPath);
     expect(await child.exited).toBe(124);
     await drain(reader);
     expect(await waitForProcessExit(pid)).toBe(true);
@@ -469,7 +503,7 @@ async function attachedFixture() {
   const descendantPath = join(root, "descendant.pid");
   await writeFile(
     dockerPath,
-    `#!${process.execPath}\nconst args = process.argv.slice(2);\nconst joined = args.join(" ");\nconst pidPath = process.env.FAKE_PID_FILE;\nif (joined.includes("termination_result()")) {\n  let pid; try { pid = Number((await Bun.file(pidPath).text()).trim()); } catch { console.log("codex-container-lab-termination:unavailable"); process.exit(0); }\n  const signal = joined.includes("kill -INT") ? "SIGINT" : joined.includes("kill -TERM") ? "SIGTERM" : "SIGKILL";\n  try { process.kill(-pid, signal); console.log("codex-container-lab-termination:signaled"); } catch { console.log("codex-container-lab-termination:absent"); }\n  process.exit(0);\n}\nconsole.log("early-output"); console.error("early-error");\nif (process.env.FAKE_EXIT) process.exit(Number(process.env.FAKE_EXIT));\nconst running = Bun.spawn(["/bin/sh", "-c", "trap 'exit 130' INT; trap 'exit 143' TERM; (trap '' INT TERM; while :; do sleep 1; done) & echo $! > $FAKE_DESC_FILE; while :; do sleep 1; done"], { detached: true, stdin: "ignore", stdout: "inherit", stderr: "inherit" });\nawait Bun.write(pidPath, String(running.pid));\nconst code = await running.exited;\ntry { process.kill(-running.pid, "SIGTERM"); } catch {}\nawait Bun.sleep(100);\ntry { process.kill(-running.pid, 0); process.kill(-running.pid, "SIGKILL"); } catch {}\nfor (let i=0;i<100;i++) { try { process.kill(-running.pid, 0); await Bun.sleep(10); } catch { break; } }\nprocess.exit(code);\n`,
+    `#!${process.execPath}\nconst args = process.argv.slice(2);\nconst joined = args.join(" ");\nconst pidPath = process.env.FAKE_PID_FILE;\nif (joined.includes("termination_result()")) {\n  let pid; try { const text = await Bun.file(pidPath).text(); if (!/^[1-9][0-9]*$/.test(text)) throw new Error("invalid PID"); pid = Number(text); if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("invalid PID"); } catch { console.log("codex-container-lab-termination:unavailable"); process.exit(0); }\n  const signal = joined.includes("kill -INT") ? "SIGINT" : joined.includes("kill -TERM") ? "SIGTERM" : "SIGKILL";\n  try { process.kill(-pid, signal); console.log("codex-container-lab-termination:signaled"); } catch { console.log("codex-container-lab-termination:absent"); }\n  process.exit(0);\n}\nconsole.log("early-output"); console.error("early-error");\nif (process.env.FAKE_EXIT) process.exit(Number(process.env.FAKE_EXIT));\nconst running = Bun.spawn(["/bin/sh", "-c", "trap 'exit 130' INT; trap 'exit 143' TERM; (trap '' INT TERM; while :; do sleep 1; done) & printf %s $! > $FAKE_DESC_FILE; while :; do sleep 1; done"], { detached: true, stdin: "ignore", stdout: "inherit", stderr: "inherit" });\nawait Bun.write(pidPath, String(running.pid));\nconst code = await running.exited;\ntry { process.kill(-running.pid, "SIGTERM"); } catch {}\nawait Bun.sleep(100);\ntry { process.kill(-running.pid, 0); process.kill(-running.pid, "SIGKILL"); } catch {}\nfor (let i=0;i<100;i++) { try { process.kill(-running.pid, 0); await Bun.sleep(10); } catch { break; } }\nprocess.exit(code);\n`,
   );
   await chmod(dockerPath, 0o755);
   return { root, owner, stateRoot, runtimeRoot, pidPath, descendantPath, bin };
@@ -528,15 +562,24 @@ async function drain(
   }
 }
 
-async function waitForFile(path: string): Promise<string> {
+function parsePublishedPid(text: string): number | undefined {
+  if (text !== text.trim() || !canonicalPositivePid.test(text))
+    return undefined;
+  const pid = Number(text);
+  return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
+}
+
+async function waitForPublishedPid(path: string): Promise<number> {
   for (let attempt = 0; attempt < 100; attempt++) {
     try {
-      return await Bun.file(path).text();
+      const pid = parsePublishedPid(await Bun.file(path).text());
+      if (pid !== undefined) return pid;
     } catch {
-      await Bun.sleep(10);
+      // The fixture has not published a PID yet.
     }
+    await Bun.sleep(10);
   }
-  throw new Error("fixture PID was not published");
+  throw new Error("fixture did not publish a valid PID");
 }
 
 function processExists(pid: number): boolean {
