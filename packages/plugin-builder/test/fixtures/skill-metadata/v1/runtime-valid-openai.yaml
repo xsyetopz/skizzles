@@ -3,6 +3,8 @@ interface:
   short_description: "Validate executable metadata behavior"
   brand_color: "#a1B2c3"
   default_prompt: "Use $example to validate executable metadata behavior."
+  icon_small: "./assets/icon.png"
+  icon_large: "assets/icon.png"
 dependencies:
   tools:
     - type: "cli"

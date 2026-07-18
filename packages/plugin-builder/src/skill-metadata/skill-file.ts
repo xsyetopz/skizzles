@@ -11,6 +11,7 @@ import {
 import {
   assertExactKeys,
   boundedString,
+  containsUnsafeBodyCharacter,
   decodeMetadataText,
 } from "./text-contract.ts";
 import { parseStrictYamlObject } from "./yaml-contract.ts";
@@ -45,6 +46,11 @@ function validateSkillFile(record: SkillMetadataRecord): string {
   }
   const frontmatter = text.slice(FRONTMATTER_OPEN.length, closingOffset);
   const body = text.slice(closingOffset + FRONTMATTER_CLOSE.length);
+  if (containsUnsafeBodyCharacter(body)) {
+    throw new SkillMetadataError(
+      `${record.skill.relativePath}: skill body contains unsafe invisible or control characters.`,
+    );
+  }
   const value = parseStrictYamlObject(frontmatter, record.skill.relativePath);
   assertExactKeys(
     value,

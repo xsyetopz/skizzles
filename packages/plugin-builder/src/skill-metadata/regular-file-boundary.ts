@@ -2,7 +2,10 @@ import { constants } from "node:fs";
 import { lstat, open, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { SkillMetadataError } from "./contract.ts";
-import { diagnosticPath } from "./diagnostic-path.ts";
+import {
+  containsUnsafePathCharacter,
+  diagnosticPath,
+} from "./diagnostic-path.ts";
 
 interface StableRegularFile {
   bytes?: Uint8Array;
@@ -21,7 +24,9 @@ async function readStableRegularFile(
     true,
   );
   if (file.bytes === undefined) {
-    throw new SkillMetadataError(`${relativePath}: could not be read.`);
+    throw new SkillMetadataError(
+      `${diagnosticPath(relativePath)}: could not be read.`,
+    );
   }
   return file.bytes;
 }
@@ -44,11 +49,11 @@ async function accessStableRegularFile(
   const absoluteRoot = resolve(root);
   const absolutePath = join(absoluteRoot, ...relativePath.split("/"));
   const rootRealPath = await realpath(absoluteRoot).catch((error: unknown) => {
-    throw filesystemError(error, relativePath);
+    throw filesystemBoundaryError(error, relativePath);
   });
   const ancestors = await snapshotAncestors(absoluteRoot, relativePath);
   const before = await lstat(absolutePath).catch((error: unknown) => {
-    throw filesystemError(error, relativePath);
+    throw filesystemBoundaryError(error, relativePath);
   });
   validateRegularFile(before, relativePath, maximumBytes);
   await assertRealPathContained(rootRealPath, absolutePath, relativePath);
@@ -57,7 +62,7 @@ async function accessStableRegularFile(
   try {
     handle = await open(absolutePath, safeOpenFlags());
   } catch (error) {
-    throw filesystemError(error, relativePath);
+    throw filesystemBoundaryError(error, relativePath);
   }
   try {
     const opened = await handle.stat();
@@ -73,7 +78,7 @@ async function accessStableRegularFile(
     await assertRealPathContained(rootRealPath, absolutePath, relativePath);
     await revalidateAncestors(ancestors, relativePath);
     const after = await lstat(absolutePath).catch((error: unknown) => {
-      throw filesystemError(error, relativePath);
+      throw filesystemBoundaryError(error, relativePath);
     });
     validateRegularFile(after, relativePath, maximumBytes);
     assertSameIdentity(opened, after, relativePath);
@@ -103,11 +108,11 @@ async function snapshotAncestors(
     }
     // biome-ignore lint/performance/noAwaitInLoops: each ancestor must be checked before resolving the next path component.
     const metadata = await lstat(cursor).catch((error: unknown) => {
-      throw filesystemError(error, relativePath);
+      throw filesystemBoundaryError(error, relativePath);
     });
     if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
       throw new SkillMetadataError(
-        `${relativePath}: has an unsupported path ancestor.`,
+        `${diagnosticPath(relativePath)}: has an unsupported path ancestor.`,
       );
     }
     snapshots.push({ absolutePath: cursor, metadata });
@@ -123,7 +128,7 @@ async function revalidateAncestors(
     // biome-ignore lint/performance/noAwaitInLoops: the ordered identity chain is the filesystem security boundary.
     const actual = await lstat(snapshot.absolutePath).catch(
       (error: unknown) => {
-        throw filesystemError(error, relativePath);
+        throw filesystemBoundaryError(error, relativePath);
       },
     );
     if (actual.isSymbolicLink() || !actual.isDirectory()) {
@@ -139,7 +144,7 @@ async function assertRealPathContained(
   relativePath: string,
 ): Promise<void> {
   const resolvedFile = await realpath(absolutePath).catch((error: unknown) => {
-    throw filesystemError(error, relativePath);
+    throw filesystemBoundaryError(error, relativePath);
   });
   const containedPath = relative(rootRealPath, resolvedFile);
   if (
@@ -169,17 +174,17 @@ function validateRegularFile(
 ): void {
   if (metadata.isSymbolicLink() || !metadata.isFile()) {
     throw new SkillMetadataError(
-      `${relativePath}: must be a self-contained regular file.`,
+      `${diagnosticPath(relativePath)}: must be a self-contained regular file.`,
     );
   }
   if (metadata.nlink !== 1) {
     throw new SkillMetadataError(
-      `${relativePath}: must have exactly one filesystem link.`,
+      `${diagnosticPath(relativePath)}: must have exactly one filesystem link.`,
     );
   }
   if (metadata.size === 0 || metadata.size > maximumBytes) {
     throw new SkillMetadataError(
-      `${relativePath}: size must be between 1 and ${maximumBytes} bytes.`,
+      `${diagnosticPath(relativePath)}: size must be between 1 and ${maximumBytes} bytes.`,
     );
   }
 }
@@ -208,6 +213,7 @@ function assertContainedRelativePath(relativePath: string): void {
   if (
     relativePath.length === 0 ||
     relativePath.includes("\\") ||
+    containsUnsafePathCharacter(relativePath) ||
     segments.some(
       (segment) => segment === "" || segment === "." || segment === "..",
     ) ||
@@ -225,7 +231,10 @@ function changedDuringValidation(relativePath: string): SkillMetadataError {
   );
 }
 
-function filesystemError(error: unknown, path: string): SkillMetadataError {
+function filesystemBoundaryError(
+  error: unknown,
+  path: string,
+): SkillMetadataError {
   const safePath = diagnosticPath(path);
   if (isNodeError(error) && error.code === "ENOENT") {
     return new SkillMetadataError(`${safePath}: does not exist.`);
@@ -242,4 +251,8 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
-export { inspectStableRegularFile, readStableRegularFile };
+export {
+  filesystemBoundaryError,
+  inspectStableRegularFile,
+  readStableRegularFile,
+};

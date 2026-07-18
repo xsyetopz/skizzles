@@ -1,6 +1,10 @@
 import { SkillMetadataError, type SkillMetadataFile } from "./contract.ts";
 
 const DEFAULT_IGNORABLE_CHARACTER = /\p{Default_Ignorable_Code_Point}/u;
+const BODY_ALLOWED_CONTROLS = new Set([9, 10]);
+const C0_CONTROL_MAX = 31;
+const DELETE_CONTROL = 127;
+const C1_CONTROL_MAX = 159;
 
 function decodeMetadataText(file: SkillMetadataFile): string {
   let text: string;
@@ -46,7 +50,29 @@ function boundedString(
 function containsControlCharacter(value: string): boolean {
   for (const character of value) {
     const code = character.codePointAt(0);
-    if (code !== undefined && (code < 32 || code === 127)) {
+    if (
+      code !== undefined &&
+      (code <= C0_CONTROL_MAX ||
+        (code >= DELETE_CONTROL && code <= C1_CONTROL_MAX))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function containsUnsafeBodyCharacter(value: string): boolean {
+  if (DEFAULT_IGNORABLE_CHARACTER.test(value)) {
+    return true;
+  }
+  for (const character of value) {
+    const code = character.codePointAt(0);
+    if (
+      code !== undefined &&
+      !BODY_ALLOWED_CONTROLS.has(code) &&
+      (code <= C0_CONTROL_MAX ||
+        (code >= DELETE_CONTROL && code <= C1_CONTROL_MAX))
+    ) {
       return true;
     }
   }
@@ -106,6 +132,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 export {
   assertExactKeys,
   boundedString,
+  containsUnsafeBodyCharacter,
   decodeMetadataText,
   objectValue,
   sameStrings,

@@ -18,6 +18,8 @@ import {
 } from "./contract.ts";
 import { isApprovedMcpEndpoint } from "./mcp-endpoint-v1.ts";
 import {
+  APPROVED_BARE_MCP_IDENTITIES,
+  APPROVED_CLI_IDENTITIES,
   APPROVED_LOCAL_MCP_COMMANDS,
   SKILL_METADATA_CONTRACT_VERSION,
 } from "./official-contract-v1.ts";
@@ -60,6 +62,8 @@ const PRODUCTS = new Set([
 const APPROVED_LOCAL_COMMAND_BY_VALUE = new Map<string, string>(
   APPROVED_LOCAL_MCP_COMMANDS.map(({ command, value }) => [value, command]),
 );
+const APPROVED_BARE_MCP_IDENTITY_SET = new Set(APPROVED_BARE_MCP_IDENTITIES);
+const APPROVED_CLI_IDENTITY_SET = new Set(APPROVED_CLI_IDENTITIES);
 
 async function validateOpenAiMetadata(
   root: string,
@@ -274,6 +278,11 @@ function validateToolDependency(
         `${path}: ${itemPath} CLI dependency contains MCP-only fields.`,
       );
     }
+    if (!APPROVED_CLI_IDENTITY_SET.has(identifier)) {
+      throw new SkillMetadataError(
+        `${path}: ${itemPath} must match an approved CLI identity.`,
+      );
+    }
     return;
   }
   validateMcpEndpoint(tool, itemPath, path, identifier);
@@ -336,6 +345,11 @@ function validateMcpEndpoint(
     );
   }
   if (!(hasTransport && hasUrl)) {
+    if (!APPROVED_BARE_MCP_IDENTITY_SET.has(identifier)) {
+      throw new SkillMetadataError(
+        `${path}: ${itemPath} must match an approved bare MCP identity.`,
+      );
+    }
     return;
   }
   const transport = boundedString(

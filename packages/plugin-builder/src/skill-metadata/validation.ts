@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { readSkillAssetInventory } from "./asset-inventory.ts";
 import {
   type SkillAssetBinding,
   SkillMetadataError,
@@ -11,7 +12,7 @@ import { sameStrings } from "./text-contract.ts";
 
 async function validateCanonicalSkillMetadata(repoRoot: string): Promise<void> {
   const records = await readSkillMetadata(repoRoot, "canonical");
-  await validateRecords(repoRoot, records);
+  await validateRecords(repoRoot, records, "canonical");
 }
 
 async function validateStagedSkillMetadata(
@@ -19,9 +20,13 @@ async function validateStagedSkillMetadata(
   stagedRoot: string,
 ): Promise<void> {
   const canonical = await readSkillMetadata(repoRoot, "canonical");
-  const canonicalAssets = await validateRecords(repoRoot, canonical);
+  const canonicalAssets = await validateRecords(
+    repoRoot,
+    canonical,
+    "canonical",
+  );
   const staged = await readStagedMetadata(stagedRoot);
-  const stagedAssets = await validateRecords(stagedRoot, staged);
+  const stagedAssets = await validateRecords(stagedRoot, staged, "staged");
   assertMetadataParity(canonical, canonicalAssets, staged, stagedAssets);
 }
 
@@ -44,9 +49,11 @@ async function readStagedMetadata(
 async function validateRecords(
   root: string,
   records: readonly SkillMetadataRecord[],
+  mode: "canonical" | "staged",
 ): Promise<readonly SkillAssetBinding[]> {
   const names = new Set<string>();
-  const assets = new Map<string, SkillAssetBinding>();
+  const inventory = await readSkillAssetInventory(root, records, mode);
+  const assets = new Map(inventory.map((asset) => [asset.relativePath, asset]));
   for (const record of records) {
     const skillName = validateSkillFile(record);
     if (names.has(skillName)) {
@@ -63,7 +70,16 @@ async function validateRecords(
         record.openai,
       );
       for (const asset of recordAssets) {
-        assets.set(asset.relativePath, asset);
+        const inventoried = assets.get(asset.relativePath);
+        if (
+          inventoried === undefined ||
+          inventoried.sha256 !== asset.sha256 ||
+          !Buffer.from(inventoried.bytes).equals(Buffer.from(asset.bytes))
+        ) {
+          throw new SkillMetadataError(
+            `${asset.relativePath}: referenced icon is not bound to the asset inventory.`,
+          );
+        }
       }
     }
   }

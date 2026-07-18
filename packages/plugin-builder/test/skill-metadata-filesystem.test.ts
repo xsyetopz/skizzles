@@ -7,6 +7,7 @@ import {
   mkdir,
   rename,
   symlink,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -30,14 +31,14 @@ describe("canonical skill metadata filesystem boundaries", () => {
   it("rejects unsafe icon symlinks", async () => {
     expect.hasAssertions();
     const root = await fixture();
-    await write(root, "skills/example/icon.png", "icon");
-    await symlink("icon.png", join(root, "skills/example/icon-link"));
+    await write(root, "skills/example/assets/icon.png", "icon");
+    await symlink("icon.png", join(root, "skills/example/assets/icon-link"));
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      'interface:\n  display_name: "Example Skill"\n  short_description: "Validate example skill metadata"\n  icon_small: "./icon-link"\n',
+      'interface:\n  display_name: "Example Skill"\n  short_description: "Validate example skill metadata"\n  icon_small: "./assets/icon-link"\n',
     );
-    await rejectsMetadata(root, "must be a self-contained regular file");
+    await rejectsMetadata(root, "asset entries must not be symlinks");
 
     const skillPath = join(root, "skills/example/SKILL.md");
     await rename(skillPath, join(root, "skills/example/original-skill.md"));
@@ -65,32 +66,46 @@ describe("canonical skill metadata filesystem boundaries", () => {
     await rejectsMetadata(openaiRoot, "must have exactly one filesystem link");
 
     const assetRoot = await fixture();
-    const iconPath = join(assetRoot, "skills/example/icon.png");
-    await write(assetRoot, "skills/example/icon.png", "icon");
-    await link(iconPath, join(assetRoot, "skills/example/icon-copy.png"));
+    const iconPath = join(assetRoot, "skills/example/assets/icon.png");
+    await write(assetRoot, "skills/example/assets/icon.png", "icon");
+    await link(
+      iconPath,
+      join(assetRoot, "skills/example/assets/icon-copy.png"),
+    );
     await write(
       assetRoot,
       "skills/example/agents/openai.yaml",
-      'interface:\n  icon_small: "./icon.png"\n',
+      'interface:\n  icon_small: "./assets/icon.png"\n',
     );
     await rejectsMetadata(assetRoot, "must have exactly one filesystem link");
   });
 
   it("rejects Unicode-invisible, comment-only, and punctuation-only bodies", async () => {
     const root = await fixture();
-    for (const body of [
-      // biome-ignore lint/security/noSecrets: explicit Unicode-invisible adversarial fixture, not a credential.
-      "\u200B\u200D\uFEFF\u0301\uFE0F",
-      "<!-- hidden only -->",
-      "# *** ---",
-      "🧪✨",
-    ]) {
+    for (const body of ["<!-- hidden only -->", "# *** ---", "🧪✨"]) {
       // biome-ignore lint/performance/noAwaitInLoops: every invisible class is an independent adversarial fixture.
       await writeSkill(
         root,
         `---\nname: example\ndescription: Visible body fixture.\n---\n${body}\n`,
       );
       await rejectsMetadata(root, "must contain visible instructional content");
+    }
+
+    for (const body of [
+      // biome-ignore lint/security/noSecrets: explicit Unicode-invisible adversarial fixture, not a credential.
+      "\u200B\u200D\uFEFF\u0301\uFE0F",
+      // biome-ignore lint/security/noSecrets: explicit bidi-control adversarial fixture, not a credential.
+      "visible\u202Einstructions",
+    ]) {
+      // biome-ignore lint/performance/noAwaitInLoops: each unsafe Unicode class is an independent body probe.
+      await writeSkill(
+        root,
+        `---\nname: example\ndescription: Visible body fixture.\n---\n${body}\n`,
+      );
+      await rejectsMetadata(
+        root,
+        "skill body contains unsafe invisible or control characters",
+      );
     }
 
     await writeSkill(
@@ -128,6 +143,22 @@ describe("canonical skill metadata filesystem boundaries", () => {
     ).rejects.toThrow(
       "Skill metadata path must remain within its declared root",
     );
+
+    const assetRoot = await fixture();
+    const unsafeAssetName = "\u009B-icon.png";
+    await write(
+      assetRoot,
+      `skills/example/assets/${unsafeAssetName}`,
+      "unsafe",
+    );
+    const error = await validateCanonicalSkillMetadata(assetRoot).then(
+      () => undefined,
+      (reason: unknown) => reason,
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("Skill asset entry path is unsafe.");
+    expect((error as Error).message).not.toContain(unsafeAssetName);
+    expect((error as Error).message.split("\n")).toHaveLength(1);
   });
 
   it("never accepts out-of-root bytes during skill, metadata, and icon ancestor swaps", async () => {
@@ -146,18 +177,68 @@ describe("canonical skill metadata filesystem boundaries", () => {
 describe("staged skill metadata", () => {
   it("binds icon paths and bytes into canonical/staged parity", async () => {
     const root = await fixture();
-    await write(root, "skills/example/icon.png", "BBBB");
+    await write(root, "skills/example/assets/icon.png", "BBBB");
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      'interface:\n  icon_small: "./icon.png"\n  icon_large: "./icon.png"\n',
+      'interface:\n  icon_small: "./assets/icon.png"\n  icon_large: "./assets/icon.png"\n',
     );
     const staged = join(root, "stage");
     await cp(join(root, "skills"), join(staged, "skills"), { recursive: true });
-    await write(staged, "skills/example/icon.png", "AAAA");
+    await write(staged, "skills/example/assets/icon.png", "AAAA");
     await expect(validateStagedSkillMetadata(root, staged)).rejects.toThrow(
       "staged skill metadata differs from canonical bytes",
     );
+  });
+
+  it("inventories every unreferenced asset for exact staged parity", async () => {
+    for (const mutation of [
+      "extra",
+      "missing",
+      "drift",
+      "symlink",
+      "hardlink",
+      "excluded",
+    ] as const) {
+      // biome-ignore lint/performance/noAwaitInLoops: each parity failure needs an isolated canonical/staged tree.
+      const root = await fixture();
+      await write(root, "skills/example/assets/unreferenced.bin", "canonical");
+      const staged = join(root, "stage");
+      await cp(join(root, "skills"), join(staged, "skills"), {
+        recursive: true,
+      });
+      if (mutation === "extra") {
+        await write(staged, "skills/example/assets/rogue.png", "rogue");
+      } else if (mutation === "missing") {
+        await unlink(join(staged, "skills/example/assets/unreferenced.bin"));
+      } else if (mutation === "drift") {
+        await write(
+          staged,
+          "skills/example/assets/unreferenced.bin",
+          "altered",
+        );
+      } else if (mutation === "symlink") {
+        await symlink(
+          "unreferenced.bin",
+          join(staged, "skills/example/assets/rogue-link"),
+        );
+      } else if (mutation === "hardlink") {
+        const source = join(staged, "skills/example/assets/hardlink-source");
+        await writeFile(source, "linked");
+        await link(
+          source,
+          join(staged, "skills/example/assets/rogue-hardlink"),
+        );
+      } else {
+        await write(
+          staged,
+          "skills/example/assets/node_modules/rogue.js",
+          "rogue",
+        );
+      }
+      // biome-ignore lint/performance/noAwaitInLoops: each isolated mutation is asserted before fixture cleanup.
+      await expect(validateStagedSkillMetadata(root, staged)).rejects.toThrow();
+    }
   });
   it("rejects staged byte drift and missing or extra metadata", async () => {
     const root = await fixture();

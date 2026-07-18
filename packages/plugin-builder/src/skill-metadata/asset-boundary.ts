@@ -15,12 +15,17 @@ async function validateContainedAsset(
   key: string,
 ): Promise<SkillAssetBinding> {
   if (
-    !value.startsWith("./") ||
     isAbsolute(value) ||
     value.includes("\\") ||
     value.split("/").includes("..") ||
     value.endsWith("/")
   ) {
+    throw containmentError(metadataPath, key);
+  }
+  const normalizedParts = value
+    .split("/")
+    .filter((component) => component !== ".");
+  if (normalizedParts.length < 2 || normalizedParts[0] !== "assets") {
     throw containmentError(metadataPath, key);
   }
   const skillRoot = resolve(root, "skills", directoryName);

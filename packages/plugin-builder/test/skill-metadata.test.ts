@@ -2,8 +2,13 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import {
+  assertExactSkillMetadataFixtureBindings,
+  SKILL_METADATA_FIXTURE_BINDINGS,
+} from "../src/skill-metadata/official-contract-v1.ts";
 import { validateCanonicalSkillMetadata } from "../src/skill-metadata/validation.ts";
 import {
+  assertPinnedFixtureContent,
   assertPinnedProvenance,
   pinnedFixture,
   rejectsMetadata,
@@ -101,8 +106,32 @@ describe("canonical skill metadata", () => {
     await assertPinnedProvenance();
   });
 
+  it("rejects removable, reordered, extended, and byte-mutated fixture provenance", async () => {
+    expect.hasAssertions();
+    const bindings = SKILL_METADATA_FIXTURE_BINDINGS.map((binding) => ({
+      ...binding,
+    }));
+    for (const mutation of [
+      [],
+      bindings.slice(1),
+      [...bindings].reverse(),
+      [...bindings, { file: "extra.yaml", sha256: "0".repeat(64) }],
+    ]) {
+      expect(() => assertExactSkillMetadataFixtureBindings(mutation)).toThrow(
+        "differ from the pinned inventory",
+      );
+    }
+    const mutatedFixture = new TextEncoder().encode(
+      `${await pinnedFixture("official-valid-openai.yaml")}# mutation\n`,
+    );
+    expect(() =>
+      assertPinnedFixtureContent("official-valid-openai.yaml", mutatedFixture),
+    ).toThrow("fixture bytes differ from the pinned digest");
+  });
+
   it("executes the pinned Codex 0.144.5 metadata contract fixtures", async () => {
     const root = await fixture();
+    await write(root, "skills/example/assets/icon.png", "runtime-icon");
     await write(
       root,
       "skills/example/agents/openai.yaml",
@@ -117,7 +146,7 @@ describe("canonical skill metadata", () => {
     );
     await rejectsMetadata(
       root,
-      "display_name must be a nonempty bounded string",
+      "icon_small must be a contained relative asset path",
     );
   });
 
@@ -314,7 +343,7 @@ describe("canonical skill metadata", () => {
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      'dependencies:\n  tools:\n    - type: "mcp"\n      value: "docs"\n    - type: "mcp"\n      value: "docs"\n',
+      'dependencies:\n  tools:\n    - type: "mcp"\n      value: "github"\n    - type: "mcp"\n      value: "github"\n',
     );
     await rejectsMetadata(root, "duplicate dependency identity");
 
@@ -341,6 +370,20 @@ describe("canonical skill metadata", () => {
       root,
       "policy.products contains an unsupported product",
     );
+
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      'dependencies:\n  tools:\n    - type: "mcp"\n      value: "attackerDefinedConnector"\n',
+    );
+    await rejectsMetadata(root, "must match an approved bare MCP identity");
+
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      'dependencies:\n  tools:\n    - type: "cli"\n      value: "attacker-defined-cli"\n',
+    );
+    await rejectsMetadata(root, "must match an approved CLI identity");
   });
 
   it("rejects root-dot and dynamic DNS aliases without network lookup", async () => {

@@ -59,7 +59,7 @@ export const SKILL_METADATA_CONTRACT_PROVENANCE = Object.freeze({
   filesystemLimitation:
     "Files are read through no-follow descriptors when the host exposes O_NOFOLLOW, with root/ancestor/leaf identity and realpath containment revalidated after each read. The fallback uses the same identity and containment checks. Without openat-style directory descriptors, a privileged or kernel-level hostile writer remains outside the validator threat model.",
   repositoryNarrowing:
-    "Codex 0.144.5 runtime accepts short_description through 1024 characters and generally ignores unknown metadata fields. This repository deliberately requires quoted strings, exact known fields, 25-64 character short descriptions, unique products, and closed approved MCP network or local-command identities for deterministic authoring and supply-chain safety.",
+    "Codex 0.144.5 runtime accepts short_description through 1024 characters, plugin-shared parent icon paths, and arbitrary dependency identity strings, and generally ignores unknown metadata fields. This repository deliberately requires quoted strings, exact known fields, 25-64 character short descriptions, skill-local assets paths, unique products, and closed approved bare MCP, network MCP, local-command MCP, or CLI identities for deterministic authoring and supply-chain safety.",
   version: SKILL_METADATA_CONTRACT_VERSION,
 });
 
@@ -83,3 +83,56 @@ export const APPROVED_MCP_ENDPOINTS: readonly ApprovedMcpEndpoint[] =
 export const APPROVED_LOCAL_MCP_COMMANDS = Object.freeze([
   Object.freeze({ command: "gh-mcp", value: "local-gh" }),
 ]);
+
+export const APPROVED_BARE_MCP_IDENTITIES = Object.freeze([
+  "github",
+  "openaiDeveloperDocs",
+]);
+
+export const APPROVED_CLI_IDENTITIES = Object.freeze(["gh"]);
+
+export interface SkillMetadataFixtureBinding {
+  file: string;
+  sha256: string;
+}
+
+export const SKILL_METADATA_FIXTURE_BINDINGS: readonly SkillMetadataFixtureBinding[] =
+  Object.freeze([
+    Object.freeze({
+      file: "official-valid-SKILL.md",
+      sha256:
+        "5e113d5e58f0eb36d43ac39dd4f50daf840eaddcff9c3b1cc1a016f30f1e5579",
+    }),
+    Object.freeze({
+      file: "official-invalid-description-SKILL.md",
+      sha256:
+        "9f4d44352df38433e7fc1d022d8dc76a2228778159189605c932b1978f48720b",
+    }),
+    Object.freeze({
+      file: "official-valid-openai.yaml",
+      sha256:
+        "9f06af1a8469f02f6595de2aac361cd8a0770e31f6bcf2808b096ce0db5cdcbc",
+    }),
+    Object.freeze({
+      file: "runtime-valid-openai.yaml",
+      sha256:
+        "8ecbe663e6167177f5b84fe489f38daf26888a0e3d0a065022e6732334a4aed0",
+    }),
+    Object.freeze({
+      file: "runtime-invalid-openai.yaml",
+      sha256:
+        "990e8f47f7528eaec082a099f841ba70c9f3f2a94ff2dc9e4505eddb2ee051b9",
+    }),
+  ]);
+
+export function assertExactSkillMetadataFixtureBindings(
+  value: unknown,
+): asserts value is readonly SkillMetadataFixtureBinding[] {
+  if (
+    JSON.stringify(value) !== JSON.stringify(SKILL_METADATA_FIXTURE_BINDINGS)
+  ) {
+    throw new Error(
+      "Skill metadata fixture bindings differ from the pinned inventory.",
+    );
+  }
+}

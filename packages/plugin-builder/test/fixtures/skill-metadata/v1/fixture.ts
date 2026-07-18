@@ -4,9 +4,14 @@ import { createHash } from "node:crypto";
 import { mkdir, rename, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  APPROVED_BARE_MCP_IDENTITIES,
+  APPROVED_CLI_IDENTITIES,
+  APPROVED_LOCAL_MCP_COMMANDS,
   APPROVED_MCP_ENDPOINTS,
+  assertExactSkillMetadataFixtureBindings,
   SKILL_METADATA_CONTRACT_PROVENANCE,
   SKILL_METADATA_CONTRACT_VERSION,
+  SKILL_METADATA_FIXTURE_BINDINGS,
 } from "../../../../src/skill-metadata/official-contract-v1.ts";
 import { readStableRegularFile } from "../../../../src/skill-metadata/regular-file-boundary.ts";
 import { validateCanonicalSkillMetadata } from "../../../../src/skill-metadata/validation.ts";
@@ -46,6 +51,16 @@ async function assertPinnedProvenance(): Promise<void> {
   // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
   expect(provenance.approvedMcpEndpoints).toEqual(APPROVED_MCP_ENDPOINTS);
   // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+  expect(provenance.approvedBareMcpIdentities).toEqual(
+    APPROVED_BARE_MCP_IDENTITIES,
+  );
+  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+  expect(provenance.approvedCliIdentities).toEqual(APPROVED_CLI_IDENTITIES);
+  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+  expect(provenance.approvedLocalMcpCommands).toEqual(
+    APPROVED_LOCAL_MCP_COMMANDS,
+  );
+  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
   expect(provenance.networkLimitation).toBe(
     SKILL_METADATA_CONTRACT_PROVENANCE.networkLimitation,
   );
@@ -57,12 +72,24 @@ async function assertPinnedProvenance(): Promise<void> {
   expect(provenance.repositoryNarrowing).toBe(
     SKILL_METADATA_CONTRACT_PROVENANCE.repositoryNarrowing,
   );
-  for (const fixture of provenance.fixtures) {
+  assertExactSkillMetadataFixtureBindings(provenance.fixtures);
+  for (const fixture of SKILL_METADATA_FIXTURE_BINDINGS) {
     // biome-ignore lint/performance/noAwaitInLoops: each declared fixture is independently bound to its recorded digest.
     const bytes = await Bun.file(`${import.meta.dir}/${fixture.file}`).bytes();
-    // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
-    expect(createHash("sha256").update(bytes).digest("hex")).toBe(
-      fixture.sha256,
+    assertPinnedFixtureContent(fixture.file, bytes);
+  }
+}
+
+function assertPinnedFixtureContent(file: string, bytes: Uint8Array): void {
+  const binding = SKILL_METADATA_FIXTURE_BINDINGS.find(
+    (candidate) => candidate.file === file,
+  );
+  if (
+    binding === undefined ||
+    createHash("sha256").update(bytes).digest("hex") !== binding.sha256
+  ) {
+    throw new Error(
+      "Skill metadata fixture bytes differ from the pinned digest.",
     );
   }
 }
@@ -89,19 +116,21 @@ async function runAncestorSwapProbe(
     ),
   };
   await mkdir(join(skillDirectory, "agents"), { recursive: true });
+  await mkdir(join(skillDirectory, "assets"), { recursive: true });
   await writeFile(join(skillDirectory, "SKILL.md"), canonical.skill);
   await writeFile(
     join(root, "skills/example/agents/openai.yaml"),
     canonical.openai,
   );
-  await writeFile(join(skillDirectory, "icon.png"), canonical.icon);
+  await writeFile(join(skillDirectory, "assets/icon.png"), canonical.icon);
   await mkdir(join(outsideDirectory, "agents"), { recursive: true });
+  await mkdir(join(outsideDirectory, "assets"), { recursive: true });
   await writeFile(join(outsideDirectory, "SKILL.md"), "outside-skill");
   await writeFile(
     join(outsideDirectory, "agents/openai.yaml"),
     "outside-openai",
   );
-  await writeFile(join(outsideDirectory, "icon.png"), "outside-icon");
+  await writeFile(join(outsideDirectory, "assets/icon.png"), "outside-icon");
 
   const swapOnce = async (): Promise<void> => {
     await rename(skillDirectory, parkedDirectory);
@@ -129,7 +158,7 @@ async function runAncestorSwapProbe(
         expected: canonical.openai,
         path: "skills/example/agents/openai.yaml",
       },
-      { expected: canonical.icon, path: "skills/example/icon.png" },
+      { expected: canonical.icon, path: "skills/example/assets/icon.png" },
     ]) {
       try {
         // biome-ignore lint/performance/noAwaitInLoops: each read races the same adversarial filesystem transition.
@@ -153,6 +182,7 @@ async function runAncestorSwapProbe(
 }
 
 export {
+  assertPinnedFixtureContent,
   assertPinnedProvenance,
   pinnedFixture,
   rejectsMetadata,

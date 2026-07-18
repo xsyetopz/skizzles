@@ -25,7 +25,11 @@ async function readSkillMetadata(
     );
   }
 
-  const entries = await readdir(skillsRoot, { withFileTypes: true });
+  const entries = await readdir(skillsRoot, { withFileTypes: true }).catch(
+    (error: unknown) => {
+      throw filesystemError(error, `${label} skills directory`);
+    },
+  );
   entries.sort((left, right) => left.name.localeCompare(right.name, "en"));
   const records: SkillMetadataRecord[] = [];
   for (const entry of entries) {
