@@ -1,4 +1,4 @@
-import { lstat, readdir, readFile } from "node:fs/promises";
+import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   OPENAI_METADATA_MAX_BYTES,
@@ -7,6 +7,7 @@ import {
   type SkillMetadataFile,
   type SkillMetadataRecord,
 } from "./contract.ts";
+import { readStableRegularFile } from "./regular-file-boundary.ts";
 
 async function readSkillMetadata(
   root: string,
@@ -46,7 +47,6 @@ async function readSkillMetadata(
       `${entryPath}/SKILL.md`,
       SKILL_FILE_MAX_BYTES,
     );
-    // biome-ignore lint/performance/noAwaitInLoops: sorted sequential reads preserve deterministic first-failure diagnostics.
     const openai = await readOptionalBoundedFile(
       root,
       `${entryPath}/agents/openai.yaml`,
@@ -69,20 +69,10 @@ async function readBoundedFile(
   relativePath: string,
   maximumBytes: number,
 ): Promise<SkillMetadataFile> {
-  const absolutePath = join(root, ...relativePath.split("/"));
-  await assertNoSymlinkComponents(root, relativePath);
-  const metadata = await lstat(absolutePath).catch((error: unknown) => {
-    throw filesystemError(error, relativePath);
-  });
-  if (!metadata.isFile()) {
-    throw new SkillMetadataError(`${relativePath}: must be a regular file.`);
-  }
-  if (metadata.size === 0 || metadata.size > maximumBytes) {
-    throw new SkillMetadataError(
-      `${relativePath}: size must be between 1 and ${maximumBytes} bytes.`,
-    );
-  }
-  return { bytes: await readFile(absolutePath), relativePath };
+  return {
+    bytes: await readStableRegularFile(root, relativePath, maximumBytes),
+    relativePath,
+  };
 }
 
 async function readOptionalBoundedFile(
@@ -100,29 +90,6 @@ async function readOptionalBoundedFile(
       return;
     }
     throw error;
-  }
-}
-
-async function assertNoSymlinkComponents(
-  root: string,
-  relativePath: string,
-): Promise<void> {
-  let cursor = root;
-  for (const part of relativePath.split("/")) {
-    cursor = join(cursor, part);
-    let metadata: Awaited<ReturnType<typeof lstat>>;
-    try {
-      // biome-ignore lint/performance/noAwaitInLoops: every ancestor must be checked before following the next component.
-      metadata = await lstat(cursor);
-    } catch (error) {
-      if (isNodeError(error) && error.code === "ENOENT") {
-        return;
-      }
-      throw filesystemError(error, relativePath);
-    }
-    if (metadata.isSymbolicLink()) {
-      throw new SkillMetadataError(`${relativePath}: is a symlink.`);
-    }
   }
 }
 

@@ -1,4 +1,3 @@
-import { isIP } from "node:net";
 import { validateContainedAsset } from "./asset-boundary.ts";
 import {
   BRAND_COLOR_LENGTH,
@@ -6,6 +5,8 @@ import {
   DEFAULT_PROMPT_MAX_LENGTH,
   ICON_PATH_MAX_LENGTH,
   INTERFACE_TEXT_MAX_LENGTH,
+  SHORT_DESCRIPTION_MAX_LENGTH,
+  SHORT_DESCRIPTION_MIN_LENGTH,
   SkillMetadataError,
   type SkillMetadataFile,
   TOOL_IDENTIFIER_MAX_LENGTH,
@@ -14,6 +15,8 @@ import {
   TRANSPORT_MAX_LENGTH,
   URL_MAX_LENGTH,
 } from "./contract.ts";
+import { isApprovedMcpEndpoint } from "./mcp-endpoint-v1.ts";
+import { SKILL_METADATA_CONTRACT_VERSION } from "./official-contract-v1.ts";
 import {
   assertExactKeys,
   boundedString,
@@ -34,6 +37,7 @@ const INTERFACE_KEYS = [
 const POLICY_KEYS = ["allow_implicit_invocation"] as const;
 const DEPENDENCIES_KEYS = ["tools"] as const;
 const TOOL_KEYS = ["description", "transport", "type", "url", "value"] as const;
+const SKILL_NAME_CONTINUATION = /[a-z0-9-]/u;
 
 async function validateOpenAiMetadata(
   root: string,
@@ -43,6 +47,7 @@ async function validateOpenAiMetadata(
   const value = parseStrictYamlObject(
     decodeMetadataText(file),
     file.relativePath,
+    { requireQuotedStringValues: true },
   );
   assertExactKeys(value, OPENAI_KEYS, file.relativePath, "metadata", true);
   if ("interface" in value) {
@@ -76,13 +81,31 @@ async function validateInterface(
       boundedString(value[key], path, key, INTERFACE_TEXT_MAX_LENGTH);
     }
   }
+  if ("short_description" in value) {
+    const shortDescription = boundedString(
+      value["short_description"],
+      path,
+      "short_description",
+      SHORT_DESCRIPTION_MAX_LENGTH,
+    );
+    if ([...shortDescription].length < SHORT_DESCRIPTION_MIN_LENGTH) {
+      throw new SkillMetadataError(
+        `${path}: short_description must contain 25 to 64 characters.`,
+      );
+    }
+  }
   if ("default_prompt" in value) {
-    boundedString(
+    const defaultPrompt = boundedString(
       value["default_prompt"],
       path,
       "default_prompt",
       DEFAULT_PROMPT_MAX_LENGTH,
     );
+    if (!mentionsSkillInvocation(defaultPrompt, directoryName)) {
+      throw new SkillMetadataError(
+        `${path}: default_prompt must explicitly mention $${directoryName}.`,
+      );
+    }
   }
   if ("brand_color" in value) {
     const color = boundedString(
@@ -109,6 +132,22 @@ async function validateInterface(
       await validateContainedAsset(root, directoryName, iconPath, path, key);
     }
   }
+}
+
+function mentionsSkillInvocation(prompt: string, skillName: string): boolean {
+  const token = `$${skillName}`;
+  let offset = prompt.indexOf(token);
+  while (offset >= 0) {
+    const nextCharacter = prompt[offset + token.length];
+    if (
+      nextCharacter === undefined ||
+      !SKILL_NAME_CONTINUATION.test(nextCharacter)
+    ) {
+      return true;
+    }
+    offset = prompt.indexOf(token, offset + token.length);
+  }
+  return false;
 }
 
 function validatePolicy(value: Record<string, unknown>, path: string): void {
@@ -169,7 +208,7 @@ function validateToolDependency(
   }
   identities.add(identifier);
   validateToolDescription(tool, itemPath, path);
-  validateToolEndpoint(tool, itemPath, path);
+  validateToolEndpoint(tool, itemPath, path, identifier);
 }
 
 function validateToolDescription(
@@ -191,6 +230,7 @@ function validateToolEndpoint(
   tool: Record<string, unknown>,
   itemPath: string,
   path: string,
+  identifier: string,
 ): void {
   const hasTransport = "transport" in tool;
   const hasUrl = "url" in tool;
@@ -219,70 +259,11 @@ function validateToolEndpoint(
     `${itemPath}.url`,
     URL_MAX_LENGTH,
   );
-  if (!isSafeHttpsUrl(url)) {
+  if (!isApprovedMcpEndpoint(identifier, url)) {
     throw new SkillMetadataError(
-      `${path}: ${itemPath}.url must be a safe HTTPS URL.`,
+      `${path}: ${itemPath} must match approved MCP endpoint contract ${SKILL_METADATA_CONTRACT_VERSION}.`,
     );
   }
-}
-
-function isSafeHttpsUrl(value: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return false;
-  }
-  return (
-    parsed.protocol === "https:" &&
-    parsed.username === "" &&
-    parsed.password === "" &&
-    parsed.hostname !== "" &&
-    parsed.hash === "" &&
-    !isLocalNetworkHost(parsed.hostname)
-  );
-}
-
-function isLocalNetworkHost(hostname: string): boolean {
-  const normalized = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-  if (
-    normalized === "localhost" ||
-    normalized.endsWith(".localhost") ||
-    normalized.endsWith(".local") ||
-    normalized.endsWith(".internal") ||
-    !normalized.includes(".") ||
-    isIP(normalized) !== 0 ||
-    normalized === "::1" ||
-    normalized === "0:0:0:0:0:0:0:1" ||
-    normalized.startsWith("fe80:") ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd")
-  ) {
-    return true;
-  }
-  const octets = normalized.split(".").map(Number);
-  if (!isIpv4(octets)) {
-    return false;
-  }
-  const first = octets[0];
-  const second = octets[1];
-  return (
-    first === 10 ||
-    first === 127 ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168) ||
-    first === 0
-  );
-}
-
-function isIpv4(octets: number[]): octets is [number, number, number, number] {
-  return (
-    octets.length === 4 &&
-    octets.every(
-      (octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255,
-    )
-  );
 }
 
 export { validateOpenAiMetadata };

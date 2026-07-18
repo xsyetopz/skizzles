@@ -1,0 +1,18 @@
+interface:
+  display_name: "Example Skill"
+  short_description: "Validate pinned skill metadata"
+  default_prompt: "Use $example to validate pinned skill metadata."
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "openaiDeveloperDocs"
+      description: "OpenAI Docs MCP server"
+      transport: "streamable_http"
+      url: "https://developers.openai.com/mcp"
+    - type: "mcp"
+      value: "github"
+      description: "GitHub MCP server"
+      transport: "streamable_http"
+      url: "https://api.githubcopilot.com/mcp/"
+policy:
+  allow_implicit_invocation: true

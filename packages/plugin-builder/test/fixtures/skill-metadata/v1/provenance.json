@@ -1,0 +1,34 @@
+{
+  "version": "skizzles.skill-metadata/v1",
+  "observedCodexCliVersion": "0.144.5",
+  "approvedMcpEndpoints": [
+    {
+      "url": "https://developers.openai.com/mcp",
+      "value": "openaiDeveloperDocs"
+    },
+    {
+      "url": "https://api.githubcopilot.com/mcp/",
+      "value": "github"
+    }
+  ],
+  "filesystemLimitation": "Final files are read through identity-checked no-follow descriptors. Node does not expose openat path walking here, and staging copies occur after validation; the transaction owner must guard ancestor replacement and bind copied bytes to validated bytes.",
+  "sources": [
+    {
+      "locator": "$CODEX_HOME/skills/.system/skill-creator/SKILL.md",
+      "sha256": "da44c88f6b3845a8fa8c60792ec9a722110a55a9793c279757b48fefb11f819c"
+    },
+    {
+      "locator": "$CODEX_HOME/skills/.system/skill-creator/references/openai_yaml.md",
+      "sha256": "ffac39318e408108141d40f820968e59f70434a891694f9bf1d25be8237b150c"
+    },
+    {
+      "locator": "$CODEX_HOME/skills/.system/skill-creator/scripts/quick_validate.py",
+      "sha256": "6cc9dc3199c935916cf6f73fcbbbb0e3bb1b58c8f5109fefa499978908164f51"
+    },
+    {
+      "locator": "official Codex manual lines 8514-8539",
+      "sha256": "523c876b69ad9670759e81ad7b5589e192296076e4ea48b9bc145bb76e2015c3"
+    }
+  ],
+  "networkLimitation": "Static validation approves exact declared endpoint identities only. It does not resolve DNS or attest connection-time addresses; the MCP client retains DNS, rebinding, redirect, and egress enforcement."
+}

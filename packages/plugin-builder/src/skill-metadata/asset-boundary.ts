@@ -1,6 +1,6 @@
-import { lstat, realpath } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { SkillMetadataError } from "./contract.ts";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+import { ICON_ASSET_MAX_BYTES, SkillMetadataError } from "./contract.ts";
+import { inspectStableRegularFile } from "./regular-file-boundary.ts";
 
 async function validateContainedAsset(
   root: string,
@@ -23,31 +23,16 @@ async function validateContainedAsset(
   if (!isContained(skillRoot, assetPath)) {
     throw containmentError(metadataPath, key);
   }
-  const pathParts = relative(skillRoot, assetPath).split(sep);
-  let cursor = skillRoot;
-  for (const part of pathParts) {
-    cursor = join(cursor, part);
-    // biome-ignore lint/performance/noAwaitInLoops: containment requires checking each path component without following a symlink.
-    const metadata = await lstat(cursor).catch(() => {
-      throw new SkillMetadataError(
-        `${metadataPath}: ${key} must reference an existing regular file.`,
-      );
-    });
-    if (metadata.isSymbolicLink()) {
-      throw new SkillMetadataError(`${metadataPath}: ${key} is a symlink.`);
+  await inspectStableRegularFile(
+    skillRoot,
+    relative(skillRoot, assetPath).split(sep).join("/"),
+    ICON_ASSET_MAX_BYTES,
+  ).catch((error: unknown) => {
+    if (error instanceof SkillMetadataError) {
+      throw new SkillMetadataError(`${metadataPath}: ${key} ${error.message}`);
     }
-  }
-  const metadata = await lstat(assetPath);
-  if (!metadata.isFile()) {
-    throw new SkillMetadataError(
-      `${metadataPath}: ${key} must reference a regular file.`,
-    );
-  }
-  const resolvedSkillRoot = await realpath(skillRoot);
-  const resolvedAsset = await realpath(assetPath);
-  if (!isContained(resolvedSkillRoot, resolvedAsset)) {
-    throw containmentError(metadataPath, key);
-  }
+    throw error;
+  });
 }
 
 function containmentError(

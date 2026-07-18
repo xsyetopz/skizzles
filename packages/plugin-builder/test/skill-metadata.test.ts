@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
   copyFile,
   cp,
+  link,
   mkdir,
   rename,
   symlink,
@@ -14,21 +15,18 @@ import {
   validateCanonicalSkillMetadata,
   validateStagedSkillMetadata,
 } from "../src/skill-metadata/validation.ts";
+import {
+  assertPinnedProvenance,
+  pinnedFixture,
+  rejectsMetadata,
+  writeSkill,
+} from "./fixtures/skill-metadata/v1/fixture.ts";
 import { createTestWorkspace, write } from "./plugin-package-fixture.ts";
 
 const { cleanup, fixture } = createTestWorkspace();
 const INVALID_UTF8_LEADING_BYTE = 255;
 const OVERSIZED_OPENAI_METADATA_BYTES = 65_537;
 afterEach(cleanup);
-
-async function rejectsMetadata(root: string, needle: string): Promise<void> {
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from test cases.
-  await expect(validateCanonicalSkillMetadata(root)).rejects.toThrow(needle);
-}
-
-async function skill(root: string, content: string): Promise<void> {
-  await write(root, "skills/example/SKILL.md", content);
-}
 
 describe("canonical skill metadata", () => {
   it("accepts every real canonical skill", async () => {
@@ -38,38 +36,87 @@ describe("canonical skill metadata", () => {
   });
 
   it("rejects missing, malformed, non-zero, and unterminated frontmatter", async () => {
+    expect.hasAssertions();
     const root = await fixture();
-    await skill(root, "name: example\ndescription: Fixture skill.\n");
+    await writeSkill(root, "name: example\ndescription: Fixture skill.\n");
     await rejectsMetadata(root, "must start with YAML frontmatter at byte 0");
 
-    await skill(root, "---\nname: [broken\ndescription: x\n---\n");
+    await writeSkill(root, "---\nname: [broken\ndescription: x\n---\n");
     await rejectsMetadata(root, "contains invalid YAML");
 
-    await skill(root, " \n---\nname: example\ndescription: x\n---\n");
+    await writeSkill(root, " \n---\nname: example\ndescription: x\n---\n");
     await rejectsMetadata(root, "must start with YAML frontmatter at byte 0");
 
-    await skill(root, "---\nname: example\ndescription: x\n");
+    await writeSkill(root, "---\nname: example\ndescription: x\n");
     await rejectsMetadata(root, "frontmatter must end with an exact --- line");
   });
 
   it("requires exact frontmatter keys and matching directory name", async () => {
+    expect.hasAssertions();
     const root = await fixture();
-    await skill(root, "---\nname: other\ndescription: x\nextra: true\n---\n");
-    await rejectsMetadata(
+    await writeSkill(
       root,
-      "frontmatter keys must be exactly: description, name",
+      "---\nname: other\ndescription: x\nextra: true\n---\n",
     );
+    await rejectsMetadata(root, "frontmatter contains unsupported key");
 
-    await skill(root, "---\nname: other\ndescription: x\n---\n");
+    await writeSkill(root, "---\nname: other\ndescription: x\n---\n");
     await rejectsMetadata(root, "name must match skill directory");
 
-    await skill(root, "---\nname: example\ndescription: x\n---\n");
-    await rejectsMetadata(root, "skill body must be nonempty");
+    await writeSkill(root, "---\nname: bad--name\ndescription: x\n---\nbody\n");
+    await rejectsMetadata(root, "name must use canonical kebab-case");
+
+    await writeSkill(root, "---\nname: example\ndescription: x\n---\n");
+    await rejectsMetadata(root, "must contain visible instructional content");
+  });
+
+  it("accepts each official optional frontmatter field independently", async () => {
+    for (const optionalField of [
+      "license: MIT",
+      "allowed-tools: Bash(git:*) Read",
+      'metadata:\n  author: OpenAI\n  version: "1.0"',
+    ]) {
+      // biome-ignore lint/performance/noAwaitInLoops: each field gets an independent workspace and causal validation.
+      const root = await fixture();
+      await writeSkill(
+        root,
+        `---\nname: example\ndescription: Official optional field fixture.\n${optionalField}\n---\nvisible body\n`,
+      );
+      await expect(
+        validateCanonicalSkillMetadata(root),
+      ).resolves.toBeUndefined();
+    }
+  });
+
+  it("pins current official valid and invalid artifacts with provenance", async () => {
+    const root = await fixture();
+    await writeSkill(root, await pinnedFixture("official-valid-SKILL.md"));
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      await pinnedFixture("official-valid-openai.yaml"),
+    );
+    await expect(validateCanonicalSkillMetadata(root)).resolves.toBeUndefined();
+
+    await writeSkill(
+      root,
+      await pinnedFixture("official-invalid-description-SKILL.md"),
+    );
+    await rejectsMetadata(root, "must not contain angle-bracket markup");
+
+    await writeSkill(
+      root,
+      "---\nname: example\ndescription: Use ＜unsafe＞ compatibility markup.\n---\nbody\n",
+    );
+    await rejectsMetadata(root, "must not contain angle-bracket markup");
+
+    await assertPinnedProvenance();
   });
 
   it("rejects YAML aliases, tags, and merge keys", async () => {
+    expect.hasAssertions();
     const root = await fixture();
-    await skill(
+    await writeSkill(
       root,
       "---\nbase: &base {description: x}\nname: example\ndescription: x\nmerged: *base\n---\n",
     );
@@ -78,13 +125,13 @@ describe("canonical skill metadata", () => {
       "must not contain YAML aliases, anchors, tags, or merge keys",
     );
 
-    await skill(
+    await writeSkill(
       root,
       "---\nname: example\nname: repeated\ndescription: x\n---\nbody\n",
     );
     await rejectsMetadata(root, "contains invalid YAML");
 
-    await skill(
+    await writeSkill(
       root,
       "---\nname: example\ndescription: x\n<<: {other: value}\n---\nbody\n",
     );
@@ -93,7 +140,7 @@ describe("canonical skill metadata", () => {
       "must not contain YAML aliases, anchors, tags, or merge keys",
     );
 
-    await skill(root, "---\nname: example\ndescription: !str x\n---\n");
+    await writeSkill(root, "---\nname: example\ndescription: !str x\n---\n");
     await rejectsMetadata(
       root,
       "must not contain YAML aliases, anchors, tags, or merge keys",
@@ -105,21 +152,21 @@ describe("canonical skill metadata", () => {
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      "interface:\n  display_name: Example\n  short_description: Example\n  brand_color: blue\npolicy:\n  allow_implicit_invocation: true\n",
+      'interface:\n  display_name: "Example Skill"\n  short_description: "Validate example skill metadata"\n  brand_color: "blue"\npolicy:\n  allow_implicit_invocation: true\n',
     );
     await rejectsMetadata(root, "brand_color must use canonical #RRGGBB");
 
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      "interface:\n  display_name: Example\n  short_description: Example\npolicy:\n  allow_implicit_invocation: maybe\n",
+      'interface:\n  display_name: "Example Skill"\n  short_description: "Validate example skill metadata"\npolicy:\n  allow_implicit_invocation: "maybe"\n',
     );
     await rejectsMetadata(root, "allow_implicit_invocation must be a boolean");
 
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      "interface:\n  display_name: Example\n  short_description: Example\n  icon_small: ../secret.png\n",
+      'interface:\n  display_name: "Example Skill"\n  short_description: "Validate example skill metadata"\n  icon_small: "../secret.png"\n',
     );
     await rejectsMetadata(
       root,
@@ -129,50 +176,105 @@ describe("canonical skill metadata", () => {
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      "interface: {}\ndependencies:\n  tools:\n    - type: mcp\n      value: openaiDeveloperDocs\n      description: OpenAI Docs MCP server\n      transport: streamable_http\n      url: https://developers.openai.com/mcp\n",
+      await pinnedFixture("official-valid-openai.yaml"),
     );
     await expect(validateCanonicalSkillMetadata(root)).resolves.toBeUndefined();
   });
 
-  it("rejects unsupported dependency declarations and unknown keys", async () => {
+  it("enforces quoted UI strings, short descriptions, and named prompts", async () => {
+    expect.hasAssertions();
     const root = await fixture();
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      "interface:\n  display_name: Example\n  short_description: Example\npolicy:\n  allow_implicit_invocation: true\nunknown: true\n",
+      "interface:\n  display_name: Example Skill\n",
+    );
+    await rejectsMetadata(
+      root,
+      "string values must use single or double quotes",
+    );
+
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      'interface:\n  short_description: "Too short"\n',
+    );
+    await rejectsMetadata(root, "must contain 25 to 64 characters");
+
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      'interface:\n  default_prompt: "Use this skill to validate metadata."\n',
+    );
+    await rejectsMetadata(root, "must explicitly mention $example");
+
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      'interface:\n  default_prompt: "Use $example-other to validate metadata."\n',
+    );
+    await rejectsMetadata(root, "must explicitly mention $example");
+  });
+
+  it("rejects unsupported dependency declarations and unknown keys", async () => {
+    expect.hasAssertions();
+    const root = await fixture();
+    await write(
+      root,
+      "skills/example/agents/openai.yaml",
+      'interface:\n  display_name: "Example Skill"\n  short_description: "Validate example skill metadata"\npolicy:\n  allow_implicit_invocation: true\nunknown: true\n',
     );
     await rejectsMetadata(root, "contains unsupported key");
 
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      "dependencies:\n  tools:\n    - type: package\n      value: example\n",
+      'dependencies:\n  tools:\n    - type: "package"\n      value: "example"\n',
     );
     await rejectsMetadata(root, "dependency type must be mcp");
 
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      "dependencies:\n  tools:\n    - type: mcp\n      value: docs\n      transport: streamable_http\n      url: http://localhost/mcp\n",
+      'dependencies:\n  tools:\n    - type: "mcp"\n      value: "openaiDeveloperDocs"\n      transport: "streamable_http"\n      url: "http://localhost/mcp"\n',
     );
-    await rejectsMetadata(root, "must be a safe HTTPS URL");
+    await rejectsMetadata(root, "must match approved MCP endpoint contract");
 
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      "dependencies:\n  tools:\n    - type: mcp\n      value: docs\n      transport: streamable_http\n      url: https://[::ffff:127.0.0.1]/mcp\n",
+      'dependencies:\n  tools:\n    - type: "mcp"\n      value: "openaiDeveloperDocs"\n      transport: "streamable_http"\n      url: "https://[::ffff:127.0.0.1]/mcp"\n',
     );
-    await rejectsMetadata(root, "must be a safe HTTPS URL");
+    await rejectsMetadata(root, "must match approved MCP endpoint contract");
 
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      "dependencies:\n  tools:\n    - type: mcp\n      value: docs\n    - type: mcp\n      value: docs\n",
+      'dependencies:\n  tools:\n    - type: "mcp"\n      value: "docs"\n    - type: "mcp"\n      value: "docs"\n',
     );
     await rejectsMetadata(root, "duplicate MCP dependency");
   });
 
+  it("rejects root-dot and dynamic DNS aliases without network lookup", async () => {
+    expect.hasAssertions();
+    const root = await fixture();
+    for (const url of [
+      "https://developers.openai.com./mcp",
+      "https://127.0.0.1.nip.io/mcp",
+      "https://developers-openai.example/mcp",
+    ]) {
+      // biome-ignore lint/performance/noAwaitInLoops: every alias is an independent closed-policy probe.
+      await write(
+        root,
+        "skills/example/agents/openai.yaml",
+        `dependencies:\n  tools:\n    - type: "mcp"\n      value: "openaiDeveloperDocs"\n      transport: "streamable_http"\n      url: "${url}"\n`,
+      );
+      await rejectsMetadata(root, "must match approved MCP endpoint contract");
+    }
+  });
+
   it("enforces UTF-8, LF, and bounded metadata files", async () => {
+    expect.hasAssertions();
     const root = await fixture();
     await writeFile(
       join(root, "skills/example/SKILL.md"),
@@ -180,7 +282,7 @@ describe("canonical skill metadata", () => {
     );
     await rejectsMetadata(root, "must be valid UTF-8");
 
-    await skill(
+    await writeSkill(
       root,
       "---\r\nname: example\r\ndescription: x\r\n---\r\nbody\r\n",
     );
@@ -195,20 +297,75 @@ describe("canonical skill metadata", () => {
   });
 
   it("rejects unsafe icon symlinks", async () => {
+    expect.hasAssertions();
     const root = await fixture();
     await write(root, "skills/example/icon.png", "icon");
     await symlink("icon.png", join(root, "skills/example/icon-link"));
     await write(
       root,
       "skills/example/agents/openai.yaml",
-      "interface:\n  display_name: Example\n  short_description: Example\n  icon_small: ./icon-link\n",
+      'interface:\n  display_name: "Example Skill"\n  short_description: "Validate example skill metadata"\n  icon_small: "./icon-link"\n',
     );
-    await rejectsMetadata(root, "is a symlink");
+    await rejectsMetadata(root, "must be a self-contained regular file");
 
     const skillPath = join(root, "skills/example/SKILL.md");
     await rename(skillPath, join(root, "skills/example/original-skill.md"));
     await symlink("original-skill.md", skillPath);
-    await rejectsMetadata(root, "is a symlink");
+    await rejectsMetadata(root, "must be a self-contained regular file");
+  });
+
+  it("rejects hard-linked skill, OpenAI metadata, and icon files", async () => {
+    expect.hasAssertions();
+    const skillRoot = await fixture();
+    const skillPath = join(skillRoot, "skills/example/SKILL.md");
+    const originalSkill = join(skillRoot, "skills/example/original-skill.md");
+    await rename(skillPath, originalSkill);
+    await link(originalSkill, skillPath);
+    await rejectsMetadata(skillRoot, "must have exactly one filesystem link");
+
+    const openaiRoot = await fixture();
+    const openaiPath = join(openaiRoot, "skills/example/agents/openai.yaml");
+    await write(
+      openaiRoot,
+      "skills/example/agents/openai.yaml",
+      'interface:\n  display_name: "Example Skill"\n',
+    );
+    await link(openaiPath, join(openaiRoot, "skills/example/openai-copy.yaml"));
+    await rejectsMetadata(openaiRoot, "must have exactly one filesystem link");
+
+    const assetRoot = await fixture();
+    const iconPath = join(assetRoot, "skills/example/icon.png");
+    await write(assetRoot, "skills/example/icon.png", "icon");
+    await link(iconPath, join(assetRoot, "skills/example/icon-copy.png"));
+    await write(
+      assetRoot,
+      "skills/example/agents/openai.yaml",
+      'interface:\n  icon_small: "./icon.png"\n',
+    );
+    await rejectsMetadata(assetRoot, "must have exactly one filesystem link");
+  });
+
+  it("rejects Unicode-invisible, comment-only, and punctuation-only bodies", async () => {
+    const root = await fixture();
+    for (const body of [
+      // biome-ignore lint/security/noSecrets: explicit Unicode-invisible adversarial fixture, not a credential.
+      "\u200B\u200D\uFEFF\u0301\uFE0F",
+      "<!-- hidden only -->",
+      "# *** ---",
+    ]) {
+      // biome-ignore lint/performance/noAwaitInLoops: every invisible class is an independent adversarial fixture.
+      await writeSkill(
+        root,
+        `---\nname: example\ndescription: Visible body fixture.\n---\n${body}\n`,
+      );
+      await rejectsMetadata(root, "must contain visible instructional content");
+    }
+
+    await writeSkill(
+      root,
+      "---\nname: example\ndescription: Visible body fixture.\n---\n\n# 例\n",
+    );
+    await expect(validateCanonicalSkillMetadata(root)).resolves.toBeUndefined();
   });
 
   it("allows a skill without optional openai.yaml", async () => {

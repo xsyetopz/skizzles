@@ -30,7 +30,7 @@ function boundedString(
     typeof value !== "string" ||
     value.trim() !== value ||
     value.length === 0 ||
-    value.length > maximumLength ||
+    [...value].length > maximumLength ||
     containsControlCharacter(value)
   ) {
     throw new SkillMetadataError(
