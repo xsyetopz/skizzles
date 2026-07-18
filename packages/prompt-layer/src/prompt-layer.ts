@@ -22,6 +22,7 @@ export {
   PROMPT_LAYER_SOURCE_PATHS,
   PROMPT_POLICY_DESCRIPTOR_PATHS,
   PromptLayerError,
+  SHIPPED_LANGUAGE_POLICY_PATHS,
 } from "./lifecycle-contract.ts";
 export { normalizeDarwinProcessStartOutput } from "./mutation/process-identity.ts";
 export {
@@ -31,6 +32,15 @@ export {
   parseImmutableCommit,
   rebasePrompt,
 } from "./prompt-lifecycle.ts";
+export type {
+  ShippedLanguageFinding,
+  ShippedLanguagePolicy,
+  ShippedLanguageTaxonomy,
+} from "./shipped-language/policy.ts";
+export {
+  parseShippedLanguagePolicy,
+  validateShippedLanguageText,
+} from "./shipped-language/policy.ts";
 
 async function runCli(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);

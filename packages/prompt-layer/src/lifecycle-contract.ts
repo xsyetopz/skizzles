@@ -18,11 +18,18 @@ export const PROMPT_LAYER_SOURCE_PATHS = {
     "packages/prompt-layer/assets/instructions/developer-instructions.md",
   compact: "packages/prompt-layer/assets/instructions/compact-prompt.md",
   descriptor: "packages/prompt-layer/assets/integrations/prompt-policy.json",
+  shippedLanguagePolicy:
+    "packages/prompt-layer/assets/evaluations/shipped-language-policy.v1.json",
 } as const;
 
 export const PROMPT_POLICY_DESCRIPTOR_PATHS = {
   canonicalWorkspacePath: PROMPT_LAYER_SOURCE_PATHS.descriptor,
   packagedPath: "integrations/prompt-policy.json",
+} as const;
+
+export const SHIPPED_LANGUAGE_POLICY_PATHS = {
+  canonicalWorkspacePath: PROMPT_LAYER_SOURCE_PATHS.shippedLanguagePolicy,
+  packagedPath: "evaluations/shipped-language-policy.v1.json",
 } as const;
 
 export const PROMPT_LAYER_PACKAGE_FILES = [
@@ -36,6 +43,10 @@ export const PROMPT_LAYER_PACKAGE_FILES = [
     "instructions/developer-instructions.md",
   ],
   [PROMPT_LAYER_SOURCE_PATHS.compact, "instructions/compact-prompt.md"],
+  [
+    SHIPPED_LANGUAGE_POLICY_PATHS.canonicalWorkspacePath,
+    SHIPPED_LANGUAGE_POLICY_PATHS.packagedPath,
+  ],
   [
     PROMPT_POLICY_DESCRIPTOR_PATHS.canonicalWorkspacePath,
     PROMPT_POLICY_DESCRIPTOR_PATHS.packagedPath,
@@ -70,7 +81,10 @@ export const TRANSACTION_PATHS = {
   ],
 } as const;
 
-export const CANONICAL_PATHS = TRANSACTION_PATHS.rebase;
+export const CANONICAL_PATHS = [
+  ...TRANSACTION_PATHS.rebase,
+  SHIPPED_LANGUAGE_POLICY_PATHS.canonicalWorkspacePath,
+] as const;
 
 export interface FileFact {
   path: string;

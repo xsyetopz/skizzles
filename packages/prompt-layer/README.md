@@ -5,6 +5,9 @@ prompt policy assets, and their integrity-preserving lifecycle.
 
 The public package entrypoint exports the offline build/check/patch APIs, the
 networked immutable-commit rebase API, and the canonical-to-packaged asset map.
+It also exports the strict parser and literal validator for the versioned
+shipped-language evaluation corpus. Findings contain only taxonomy IDs and
+bounded relative path/line locations.
 The `skizzles-prompt-layer` binary exposes the same lifecycle to repository
 scripts. Canonical prompt assets live only under `assets/`; the plugin builder
 stages their stable public destinations.

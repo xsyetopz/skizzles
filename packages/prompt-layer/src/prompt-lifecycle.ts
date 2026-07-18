@@ -34,6 +34,7 @@ import {
   PATCH_PATH,
   PROVENANCE_PATH,
   PromptLayerError,
+  SHIPPED_LANGUAGE_POLICY_PATHS,
   UPSTREAM_PATH,
 } from "./lifecycle-contract.ts";
 import { assertNoActiveMutation, withMutationLock } from "./mutation/lock.ts";
@@ -45,6 +46,7 @@ import {
   errorMessage,
   readRequiredFile,
 } from "./repository-boundary.ts";
+import { parseShippedLanguagePolicy } from "./shipped-language/policy.ts";
 import {
   assertNoPendingTransaction,
   commitWriteSet,
@@ -83,6 +85,12 @@ export async function checkPrompt(
 }
 
 async function checkPromptContents(root: string): Promise<void> {
+  parseShippedLanguagePolicy(
+    await readRequiredFile(
+      join(root, SHIPPED_LANGUAGE_POLICY_PATHS.canonicalWorkspacePath),
+      "shipped-language policy",
+    ),
+  );
   const generated = await generatePrompt(root);
   await compareGenerated(
     join(root, OUTPUT_PATH),

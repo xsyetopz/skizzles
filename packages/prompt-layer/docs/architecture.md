@@ -129,6 +129,8 @@ generic upstream baseline.
 | `packages/prompt-layer/assets/instructions/developer-instructions.md` | Canonical static developer policy. |
 | `packages/prompt-layer/assets/instructions/compact-prompt.md` | Canonical local-compaction continuation policy. |
 | `packages/prompt-layer/assets/integrations/prompt-policy.json` | Canonical portable policy descriptor and packaged-path contract. |
+| `packages/prompt-layer/assets/evaluations/shipped-language-policy.v1.json` | Version-bound lexical taxonomy with prohibited and allowed fixtures, staged at `evaluations/shipped-language-policy.v1.json`. |
+| `packages/prompt-layer/src/shipped-language/policy.ts` | Strict corpus parser, exact-byte integrity binding, deterministic literal matcher, and redacted finding contract. |
 
 Tests follow the contract owner rather than mirroring an obsolete source
 monolith:
@@ -141,6 +143,7 @@ monolith:
 | `packages/prompt-layer/test/process-identity.test.ts` | PID reuse, Darwin identity normalization, locale/timezone stability, and fail-closed identity behavior. |
 | `packages/prompt-layer/test/prompt-transaction.test.ts` | Promotion-fault rollback, hostile journal rejection, crash recovery preflight, and symlink containment. |
 | `packages/prompt-layer/test/prompt-cli-hygiene.test.ts` | CLI argument rejection, LF enforcement, and machine-path hygiene. |
+| `packages/prompt-layer/test/shipped-language-policy.test.ts` | Corpus shape and byte binding, ordered taxonomy coverage, allowed/prohibited fixtures, and lexical context behavior. |
 | `packages/prompt-layer/test/prompt-fixture.ts` | Narrow package-owned fixture construction and cleanup shared by those contract suites; never imported by production code. |
 
 `@skizzles/plugin-builder` depends on `@skizzles/prompt-layer` through its
@@ -149,6 +152,36 @@ public `instructions/*`, `integrations/prompt-policy.json`, and
 `third_party/openai-codex/{LICENSE,NOTICE}` destinations. Prompt authoring
 inputs, lifecycle code, tests, the manifest, and the upstream baseline are not
 distributed.
+
+### Deterministic shipped-language scope
+
+The version 1 corpus uses no data-supplied regular expressions. Each canonical
+ASCII phrase is normalized with Unicode NFKC, lowercase conversion, and
+collapsed horizontal whitespace, then matched as a literal substring on one
+physical line. Quoted text and fenced code are scanned. Negation has no semantic
+exemption: a negated sentence is accepted only when its normalized text does
+not contain a prohibited literal. Ordinary first-person service language
+remains permitted.
+
+The validator is a product-language fitness function, not a psychological
+effect measurement or a general semantic classifier. It can miss paraphrases,
+translations, and phrases split across lines. It can reject quoted or
+policy-discussion text containing an exact prohibited phrase. Corpus changes
+therefore require a new version or an explicit digest update with review and
+must retain negative and allowed fixtures. Findings contain the taxonomy ID,
+bounded relative path, and line number, never the matched text.
+
+`@skizzles/plugin-builder` scans canonical runtime source and every staged
+textual plugin surface before accepting a distribution. The canonical scan
+intentionally over-approximates bundled TypeScript by scanning each composed
+package's `src/` tree before destination mutation; resulting staged bundles are
+scanned again. Every non-excluded canonical candidate is decoded and scanned as
+text, so a new textual suffix cannot bypass the pre-mutation gate. At the
+completed stage, Markdown, YAML, JSON, JSONC, TypeScript, plist, `.gitignore`,
+and extensionless runtime files are classified as text. Only the exact corpus
+path, the exact OpenAI/Container Lab legal files, and the exact PNG logo binary
+are excluded. A future unclassified shipped file type fails closed until its
+owner records whether it is a text/UX surface or a binary.
 
 The manifest currently pins OpenAI Codex commit
 `bc5c9161b46feddc13282652fd2cfdf1e5bab4a9`. Its baseline role is explicitly a
