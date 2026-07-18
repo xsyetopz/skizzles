@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -138,7 +139,43 @@ export async function checkPlugin(repoRoot = defaultRepoRoot()): Promise<void> {
 }
 
 function defaultRepoRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  let candidate = dirname(fileURLToPath(import.meta.url));
+  while (true) {
+    if (isSkizzlesWorkspace(candidate)) {
+      return candidate;
+    }
+    const parent = dirname(candidate);
+    if (parent === candidate) {
+      throw new PackagingError("Unable to locate the Skizzles workspace root.");
+    }
+    candidate = parent;
+  }
+}
+
+function isSkizzlesWorkspace(candidate: string): boolean {
+  if (!existsSync(join(candidate, TEMPLATE_PATH))) {
+    return false;
+  }
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(
+      readFileSync(join(candidate, "package.json"), "utf8"),
+    );
+  } catch {
+    return false;
+  }
+  if (!isObject(manifest)) {
+    return false;
+  }
+  return (
+    manifest["name"] === "skizzles" &&
+    Array.isArray(manifest["workspaces"]) &&
+    manifest["workspaces"].includes("packages/*")
+  );
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function asPackagingError<T>(operation: () => Promise<T>): Promise<T> {

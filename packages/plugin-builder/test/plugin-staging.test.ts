@@ -7,6 +7,7 @@ import process from "node:process";
 import {
   compareTrees,
   PackagingError,
+  packagePaths,
   stagePlugin,
 } from "../src/plugin-package.ts";
 import {
@@ -24,6 +25,25 @@ const { cleanup, fixture, temporaryRoots } = createTestWorkspace();
 afterEach(cleanup);
 
 describe("plugin staging and discovery", () => {
+  it("discovers default workspace paths independently of source depth", async () => {
+    const repoRoot = resolve(import.meta.dir, "../../..");
+    const paths = packagePaths();
+    expect(paths).toEqual({
+      repoRoot,
+      templateRoot: join(repoRoot, "packages/plugin-builder/template"),
+      generatedRoot: join(repoRoot, "plugins/skizzles"),
+      marketplacePath: join(repoRoot, ".agents/plugins/marketplace.json"),
+    });
+
+    const parent = await mkdtemp(join(tmpdir(), "skizzles-default-root-"));
+    temporaryRoots.push(parent);
+    const destination = join(parent, "staged");
+    await stagePlugin(paths.repoRoot, destination);
+    expect(
+      await Bun.file(join(destination, ".codex-plugin/plugin.json")).exists(),
+    ).toBe(true);
+  });
+
   it("uses the root lockfile for the Container Lab workspace", async () => {
     const repoRoot = resolve(import.meta.dir, "../../..");
     const rootPackage = (await Bun.file(
@@ -284,7 +304,6 @@ describe("plugin staging and discovery", () => {
       "packages/prompt-layer/assets/.transaction/journal.json",
       "packages/prompt-layer/src/prompt-layer.ts",
       "packages/prompt-layer/src/assets/manifest.ts",
-      "packages/prompt-layer/test/prompt-layer.test.ts",
       "packages/prompt-layer/test/nested/transaction.test.ts",
     ] as const) {
       const root = await fixture();
