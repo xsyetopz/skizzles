@@ -21,6 +21,10 @@ incomplete launch context fails closed without rewriting the original command.
 The plugin builder stages the separate command-supervisor package at
 `runtime/codex-command.ts`.
 
+The executable path is also the plugin builder's canonical staging contract.
+Its classifier, normalization, policy, and command contract are privately owned
+under `src/manage-command-output/`; generated hooks retain their existing path.
+
 ## Development
 
 ```sh

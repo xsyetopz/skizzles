@@ -26,7 +26,7 @@ import {
   type JsonObject,
   parseCatalogCache,
   parseJson,
-} from "./catalog-schema.ts";
+} from "./schema.ts";
 
 export const MODEL_CACHE_TTL_MS = 300_000;
 

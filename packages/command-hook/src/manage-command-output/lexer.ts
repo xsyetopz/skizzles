@@ -1,4 +1,4 @@
-import type { SimpleCommand } from "./types.ts";
+import type { SimpleCommand } from "./contract.ts";
 
 type LexerState = {
   commands: SimpleCommand[];

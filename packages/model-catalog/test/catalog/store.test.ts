@@ -19,7 +19,7 @@ import {
   prepareCatalogStorePaths,
   validateCatalogStorePaths,
   writePrivateAtomic,
-} from "../src/catalog-store.ts";
+} from "../../src/catalog/store.ts";
 
 const roots: string[] = [];
 

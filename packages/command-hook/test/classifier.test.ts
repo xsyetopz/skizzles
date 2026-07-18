@@ -1,12 +1,12 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, test } from "bun:test";
+import type { SimpleCommand } from "../src/manage-command-output/contract.ts";
 import { simpleCommands } from "../src/manage-command-output/lexer.ts";
 import { normalizeCommand } from "../src/manage-command-output/normalize.ts";
 import {
   isManagedScript,
   isRecognized,
 } from "../src/manage-command-output/policy.ts";
-import type { SimpleCommand } from "../src/manage-command-output/types.ts";
 
 function classifies(script: string): boolean {
   return simpleCommands(script)?.some(isRecognized) ?? false;

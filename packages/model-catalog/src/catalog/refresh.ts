@@ -1,18 +1,18 @@
 import { join, resolve } from "node:path";
-import { applyLunaV2Overlay, type LunaOverlay } from "./catalog-schema.ts";
+import {
+  bundledCatalog,
+  type CommandLimits,
+  clientVersion,
+  preflightCatalog,
+} from "../codex-child.ts";
+import { applyLunaV2Overlay, type LunaOverlay } from "./schema.ts";
 import {
   cachedCatalog,
   digest,
   prepareCatalogStorePaths,
   validateCatalogStorePaths,
   writePrivateAtomic,
-} from "./catalog-store.ts";
-import {
-  bundledCatalog,
-  type CommandLimits,
-  clientVersion,
-  preflightCatalog,
-} from "./codex-child.ts";
+} from "./store.ts";
 
 const DEFAULT_MAX_CATALOG_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_STDERR_BYTES = 16 * 1024;

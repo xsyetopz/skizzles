@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
 
-const packageRoot = resolve(import.meta.dir, "..");
+const packageRoot = resolve(import.meta.dir, "../..");
 const hook = join(packageRoot, "src/manage-command-output.ts");
 const hookAsset = join(packageRoot, "assets/hooks.json");
 let temporaryRoot: string;

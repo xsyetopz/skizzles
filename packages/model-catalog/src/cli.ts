@@ -5,14 +5,14 @@ import {
   type CatalogRefreshResult,
   refreshCatalog,
   resolveCatalogPaths,
-} from "./catalog-refresh.ts";
+} from "./catalog/refresh.ts";
 import {
   prepareCatalogStorePaths,
   validateCatalogStorePaths,
   validatePhysicalDirectory,
   validatePhysicalRegularFile,
   writePrivateAtomic,
-} from "./catalog-store.ts";
+} from "./catalog/store.ts";
 import { CodexChildError } from "./codex-child.ts";
 import { renderLaunchAgent } from "./launch-agent.ts";
 

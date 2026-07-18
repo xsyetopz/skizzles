@@ -1,6 +1,6 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { describe, expect, test } from "bun:test";
-import { parseCatalogCache } from "../src/catalog-schema.ts";
+import { parseCatalogCache } from "../../src/catalog/schema.ts";
 
 describe("model catalog schema validation", () => {
   test("preserves loose JSON fields while typing the cache envelope", () => {

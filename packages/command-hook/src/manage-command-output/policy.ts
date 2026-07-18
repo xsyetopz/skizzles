@@ -1,6 +1,6 @@
+import type { SimpleCommand } from "./contract.ts";
 import { simpleCommands } from "./lexer.ts";
 import { normalizeCommand } from "./normalize.ts";
-import type { SimpleCommand } from "./types.ts";
 
 const containerLabGlobalOptions = new Set([
   "--owner",

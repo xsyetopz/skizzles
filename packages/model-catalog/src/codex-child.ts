@@ -14,7 +14,7 @@ import {
   type JsonObject,
   LUNA_MODEL,
   parseJson,
-} from "./catalog-schema.ts";
+} from "./catalog/schema.ts";
 
 const SEMANTIC_VERSION =
   /(?<![0-9A-Za-z-])((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)(?=\s|$)/;
