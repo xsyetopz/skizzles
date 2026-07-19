@@ -13,6 +13,10 @@ import {
   type SourceFile,
 } from "typescript/unstable/ast";
 import { API, type Diagnostic } from "typescript/unstable/async";
+import {
+  scanTemporaryOwnership,
+  type TemporaryOwnershipUse,
+} from "./temporary.ts";
 
 const SOURCE_DECODER = new TextDecoder();
 const SHEBANG_LINE_TERMINATOR_PATTERN = /[\n\r\u2028\u2029]/u;
@@ -26,12 +30,14 @@ interface SourceDocument {
 interface SourceDependencyResult {
   path: string;
   specifiers?: readonly string[];
+  temporaryOwnership?: readonly TemporaryOwnershipUse[];
   error?: string;
 }
 
 interface StaticDependencyResult {
   path: string;
   specifiers?: readonly string[];
+  temporaryOwnership?: readonly TemporaryOwnershipUse[];
   error?: string;
 }
 
@@ -74,7 +80,12 @@ class TypeScriptSourceDependencyBackend implements SourceDependencyBackend {
         });
         continue;
       }
-      results.push({ path, specifiers: scanStaticDependencies(sourceFile) });
+      const temporaryOwnership = scanTemporaryOwnership(sourceFile);
+      results.push({
+        path,
+        specifiers: scanStaticDependencies(sourceFile),
+        ...(temporaryOwnership.length === 0 ? {} : { temporaryOwnership }),
+      });
     }
     return results;
   }
@@ -180,6 +191,9 @@ async function parseSourceDependencies(
         specifiers: [
           ...new Set([...runtime, ...(parsed.specifiers ?? [])]),
         ].sort((left, right) => left.localeCompare(right)),
+        ...(parsed.temporaryOwnership === undefined
+          ? {}
+          : { temporaryOwnership: parsed.temporaryOwnership }),
       };
     } catch (error) {
       return { path: document.path, error: errorMessage(error) };

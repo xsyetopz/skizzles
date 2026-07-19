@@ -63,6 +63,11 @@ interface RebasePromptOptions extends AuthorPromptOptions {
   fetcher?: PromptFetcher;
 }
 
+export interface CheckPromptOptions
+  extends Pick<MutationOptions, "processIdentityProvider" | "signal"> {
+  workspace?: PromptWorkspace;
+}
+
 export async function buildPrompt(
   repoRoot = defaultPromptRepoRoot(),
   options: MutationOptions = {},
@@ -91,8 +96,20 @@ async function buildPromptWithWorkspace(
 
 export async function checkPrompt(
   repoRoot = defaultPromptRepoRoot(),
-  options: Pick<MutationOptions, "processIdentityProvider" | "signal"> = {},
+  options: CheckPromptOptions = {},
 ): Promise<void> {
+  if (options.workspace !== undefined) {
+    if (
+      options.signal !== undefined &&
+      options.signal !== options.workspace.signal
+    ) {
+      throw new PromptLayerError(
+        "Injected prompt workspace and cancellation signal must share one owner.",
+      );
+    }
+    await checkPromptWithWorkspace(repoRoot, options, options.workspace);
+    return;
+  }
   await withPromptWorkspace(options.signal, (workspace) =>
     checkPromptWithWorkspace(repoRoot, options, workspace),
   );

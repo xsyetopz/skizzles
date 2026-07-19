@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
   chmod,
   mkdir,
-  mkdtemp,
   readdir,
   readFile,
   rename,
@@ -12,7 +11,6 @@ import {
   utimes,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import { PackagingError, stagePlugin } from "../../../src/plugin/api.ts";
@@ -30,7 +28,11 @@ const PRESERVED_BYTES = Buffer.from(
   "\0\u0001\u0002\u007f\u0080\u00ff",
   "latin1",
 );
-const { cleanup, fixture, temporaryRoots } = createTestWorkspace();
+const {
+  cleanup,
+  fixture,
+  temporaryRoot: allocateTemporaryRoot,
+} = createTestWorkspace();
 afterEach(cleanup);
 
 describe("plugin destination transactions", () => {
@@ -332,9 +334,7 @@ describe("plugin destination transactions", () => {
 });
 
 async function temporaryRoot(prefix: string): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), prefix));
-  temporaryRoots.push(root);
-  return root;
+  return allocateTemporaryRoot(prefix.replace(/-$/u, ""));
 }
 
 async function transactionArtifacts(parent: string): Promise<string[]> {

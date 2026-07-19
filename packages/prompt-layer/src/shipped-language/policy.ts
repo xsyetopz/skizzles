@@ -5,7 +5,7 @@ const POLICY_SCHEMA = "skizzles.shipped-language-policy.v2";
 const POLICY_VERSION = 2;
 const POLICY_SHA256 =
   // biome-ignore lint/security/noSecrets: This is an integrity digest for the public evaluation corpus.
-  "c77277abd15169d8a9cafc83a520c7c7b54054e59b8be7a36360bf386c4a0467";
+  "444d0182b07c1bb92f5703459b133b47c10bb81484625a289281d748bde53f53";
 const MAX_POLICY_BYTES = 64 * 1024;
 const MAX_DIAGNOSTIC_PATH_UNITS = 512;
 const CONTROL_CHARACTER_MAX = 31;
@@ -28,6 +28,9 @@ const EXPECTED_TAXONOMY_IDS = [
   "feelings-internal-experience",
   "consciousness-sentience-embodiment",
   "friendship-attachment-reciprocity",
+  "fabricated-personal-backstory",
+  "exclusivity-secret-dyadic-pull",
+  "relationship-substitution",
   "personal-need-dependency",
   "autonomous-intent-agency-rights",
   "unsupported-certainty-false-completion",

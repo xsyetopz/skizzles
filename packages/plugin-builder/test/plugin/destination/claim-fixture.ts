@@ -1,12 +1,4 @@
-import {
-  mkdir,
-  mkdtemp,
-  readdir,
-  readFile,
-  rename,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
@@ -139,10 +131,11 @@ async function waitForFile(
   throw new Error(`Timed out waiting for ${path}`);
 }
 
-async function temporaryRoot(prefix: string, roots: string[]): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), prefix));
-  roots.push(root);
-  return root;
+async function temporaryRoot(
+  prefix: string,
+  allocate: (purpose: string) => Promise<string>,
+): Promise<string> {
+  return allocate(prefix.replace(/-$/u, ""));
 }
 
 async function seededDestination(parent: string): Promise<string> {
@@ -192,7 +185,7 @@ async function latestHighWater(
 ): Promise<{ path: string; pid: number; token: string }> {
   const names = (await allocatorArtifacts(parent)).filter(
     (candidate) =>
-      !candidate.endsWith(".retired") && !candidate.endsWith(".tmp"),
+      !(candidate.endsWith(".retired") || candidate.endsWith(".tmp")),
   );
   const name = names.at(-1);
   if (name === undefined) throw new Error("recovery high-water not found");

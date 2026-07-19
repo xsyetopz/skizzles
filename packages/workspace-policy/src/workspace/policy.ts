@@ -1,4 +1,5 @@
 import { relative, resolve } from "node:path";
+import { validateWorkspaceArchitecture } from "./architecture-document.ts";
 import type * as Contract from "./contract.ts";
 import { compareFindings, type WorkspacePackage } from "./contract.ts";
 import {
@@ -78,6 +79,9 @@ async function validateWorkspace(
 
   await validateWorkspaceImports(packages, findings);
   await validateWorkspaceFitness(rootManifest, packages, findings);
+  if (options.expectedPackageNames !== undefined) {
+    await validateWorkspaceArchitecture(root, rootManifest, packages, findings);
+  }
   validateExpectedPackageNames(names, options.expectedPackageNames, findings);
   await validateLockfiles(root, findings);
   await validateRootSourceIsolation(root, packageRoots, findings);

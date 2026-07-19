@@ -1,14 +1,10 @@
-import {
-  chmod,
-  cp,
-  mkdir,
-  mkdtemp,
-  readdir,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, cp, mkdir, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { cleanupStale, create } from "@skizzles/run-workspace";
+import {
+  adaptPluginWorkspace,
+  type PluginWorkspace,
+} from "../../src/plugin/workspace.ts";
 
 export const PLUGIN_ROOT_TOKEN = ["$", "{", "PLUGIN_ROOT", "}"].join("");
 export const EXTERNAL_ZOD_IMPORT = /(?:from\s+|require\()["']zod["']/;
@@ -21,25 +17,50 @@ export const MODEL_CATALOG_USAGE =
 export function createTestWorkspace(): {
   cleanup: () => Promise<void>;
   fixture: () => Promise<string>;
-  temporaryRoots: string[];
+  temporaryRoot: (purpose: string) => Promise<string>;
+  workspace: () => Promise<PluginWorkspace>;
 } {
-  const temporaryRoots: string[] = [];
+  let active: PluginWorkspace | undefined;
+  let sequence = 0;
+  const workspace = async (): Promise<PluginWorkspace> => {
+    if (active !== undefined) return active;
+    const stale = await cleanupStale();
+    if (stale.failed.length > 0 || stale.truncated) {
+      throw new Error("Test run workspace stale cleanup did not complete.");
+    }
+    active = adaptPluginWorkspace(await create());
+    return active;
+  };
+  const temporaryRoot = async (purpose: string): Promise<string> => {
+    const owned = await workspace();
+    const path = owned.path(`${purpose}-${sequence}`);
+    sequence += 1;
+    await mkdir(path, { mode: 0o700 });
+    return path;
+  };
   return {
-    temporaryRoots,
-    fixture: () => fixture(temporaryRoots),
+    workspace,
+    temporaryRoot,
+    fixture: () => fixture(temporaryRoot),
     cleanup: async () => {
-      await Promise.all(
-        temporaryRoots
-          .splice(0)
-          .map((path) => rm(path, { force: true, recursive: true })),
-      );
+      if (active === undefined) return;
+      const owned = active;
+      active = undefined;
+      sequence = 0;
+      const report = await owned.close();
+      if (report.state === "cleanup-failed") {
+        throw new Error(
+          `Test run workspace cleanup failed: ${report.error ?? "unknown failure"}.`,
+        );
+      }
     },
   };
 }
 
-async function fixture(temporaryRoots: string[]): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "skizzles-package-test-"));
-  temporaryRoots.push(root);
+async function fixture(
+  temporaryRoot: (purpose: string) => Promise<string>,
+): Promise<string> {
+  const root = await temporaryRoot("fixture");
   await write(
     root,
     "package.json",

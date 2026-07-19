@@ -1,3 +1,6 @@
+import { mkdir } from "node:fs/promises";
+import processRuntime from "node:process";
+import type { RunWorkspace } from "@skizzles/run-workspace";
 import type {
   ConfigEdit,
   ConfigLayer,
@@ -6,6 +9,7 @@ import type {
   ConfigWriteResponse,
   JsonValue,
 } from "./rpc-contract.ts";
+import { type RpcSupervisor, spawnRpcSupervisor } from "./supervisor.ts";
 
 export type ConfigRpcErrorKind = "conflict" | "protocol" | "transport";
 
@@ -23,8 +27,13 @@ export class ConfigRpcError extends Error {
   readonly kind: ConfigRpcErrorKind;
   readonly code: string | undefined;
 
-  constructor(kind: ConfigRpcErrorKind, message: string, code?: string) {
-    super(message);
+  constructor(
+    kind: ConfigRpcErrorKind,
+    message: string,
+    code?: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
     this.name = "ConfigRpcError";
     this.kind = kind;
     this.code = code;
@@ -54,6 +63,7 @@ export function safeConfigWriteError(error: unknown): Error {
 
 export class AppServerRpc implements ConfigRpc {
   private readonly process: Bun.Subprocess<"pipe", "pipe", "pipe">;
+  private readonly supervisor: RpcSupervisor;
   private nextId = 1;
   private readonly pending = new Map<
     number,
@@ -64,24 +74,38 @@ export class AppServerRpc implements ConfigRpc {
     }
   >();
 
-  private constructor(process: Bun.Subprocess<"pipe", "pipe", "pipe">) {
-    this.process = process;
+  private constructor(supervisor: RpcSupervisor) {
+    this.supervisor = supervisor;
+    this.process = supervisor.process;
   }
 
   static async create(
     codexHome: string,
     codexBinary: string,
+    workspace: RunWorkspace,
   ): Promise<AppServerRpc> {
-    const process = Bun.spawn([codexBinary, "app-server"], {
-      env: { ...Bun.env, CODEX_HOME: codexHome },
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
+    assertAppServerPlatform(processRuntime.platform);
+    const processTemp = workspace.path("process-temp", "codex-app-server");
+    await mkdir(processTemp, { recursive: true, mode: 0o700 });
+    const supervisor = spawnRpcSupervisor([codexBinary, "app-server"], {
+      ...Bun.env,
+      CODEX_HOME: codexHome,
+      TEMP: processTemp,
+      TMP: processTemp,
+      TMPDIR: processTemp,
     });
-    const rpc = new AppServerRpc(process);
+    const rpc = new AppServerRpc(supervisor);
+    try {
+      workspace.registerChild(supervisor.scope);
+    } catch (error) {
+      await supervisor.scope.forceStop();
+      await supervisor.scope.waitForExit();
+      throw error;
+    }
     void rpc.consumeStdout();
     void rpc.consumeStderr();
     try {
+      await supervisor.waitUntilReady();
       await rpc.request("initialize", {
         clientInfo: {
           name: "skizzles_installer",
@@ -93,7 +117,16 @@ export class AppServerRpc implements ConfigRpc {
       rpc.send({ method: "initialized" });
       return rpc;
     } catch (error) {
-      await rpc.close();
+      try {
+        await rpc.close();
+      } catch (cleanup) {
+        throw new ConfigRpcError(
+          "transport",
+          "Codex app-server cleanup failed after startup failure",
+          undefined,
+          { cause: new AggregateError([cleanup, error]) },
+        );
+      }
       throw error;
     }
   }
@@ -117,32 +150,12 @@ export class AppServerRpc implements ConfigRpc {
 
   async close(): Promise<void> {
     this.process.stdin.end();
-    const exited = await Promise.race([
-      this.process.exited.then(() => true),
-      Bun.sleep(2000).then(() => false),
-    ]);
-    if (exited) {
-      return;
+    if (!(await this.supervisor.waitForToolExit(2000))) {
+      await this.supervisor.scope.requestStop();
+      await Bun.sleep(100);
     }
-    this.process.kill();
-    const terminated = await Promise.race([
-      this.process.exited.then(() => true),
-      Bun.sleep(1000).then(() => false),
-    ]);
-    if (terminated) {
-      return;
-    }
-    this.process.kill(9);
-    const killed = await Promise.race([
-      this.process.exited.then(() => true),
-      Bun.sleep(1000).then(() => false),
-    ]);
-    if (!killed) {
-      throw new ConfigRpcError(
-        "transport",
-        "Codex app-server did not terminate after its input was closed",
-      );
-    }
+    await this.supervisor.scope.forceStop();
+    await this.supervisor.scope.waitForExit();
   }
 
   private request(method: string, params: unknown): Promise<unknown> {
@@ -232,6 +245,15 @@ export class AppServerRpc implements ConfigRpc {
       }
       decoder.decode(value, { stream: true });
     }
+  }
+}
+
+function assertAppServerPlatform(platform: NodeJS.Platform): void {
+  if (platform === "win32") {
+    throw new ConfigRpcError(
+      "transport",
+      "Codex app-server process scopes require Windows Job Object support",
+    );
   }
 }
 
@@ -365,3 +387,5 @@ function invalidConfigResponse(): ConfigRpcError {
 function safeMethodName(method: string): string {
   return SAFE_METHOD_PATTERN.test(method) ? method : "unknown method";
 }
+
+export { assertAppServerPlatform };

@@ -79,9 +79,10 @@ zero or printed a success token.
 
 Shipped prompts, skills, examples, and UX use neutral technical language. Negative
 fixtures reject claims of feelings, consciousness, embodiment, friendship, attachment,
-personal need, autonomous intent, rights, or unsupported certainty. Politeness and clear
-service framing remain permitted when they do not imply reciprocal relationship or
-internal experience.
+fabricated personal backstory, exclusivity or secret dyadic pull, relationship
+substitution, personal need, autonomous intent, rights, or unsupported certainty.
+Politeness and clear service framing remain permitted when they do not imply reciprocal
+relationship or internal experience.
 
 This is a product-language and trust rule, not a claim that every self-reference is
 harmful. The source taxonomy is interpretive and its user effects were not directly

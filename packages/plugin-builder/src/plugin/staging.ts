@@ -1,6 +1,4 @@
 import { existsSync, readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AgentContractPackageError } from "../agent-contract/contract.ts";
@@ -48,6 +46,7 @@ import {
 } from "./runtime-bundles.ts";
 import { compareTrees } from "./tree-comparison.ts";
 import { validateGeneratedPlugin } from "./validation.ts";
+import { type PluginWorkspace, withPluginWorkspace } from "./workspace.ts";
 
 export interface PackagePaths {
   repoRoot: string;
@@ -70,20 +69,33 @@ export async function stagePlugin(
   repoRoot: string,
   destination: string,
 ): Promise<void> {
+  await withPluginWorkspace((workspace) =>
+    stagePluginWithWorkspace(repoRoot, destination, workspace),
+  );
+}
+
+export async function stagePluginWithWorkspace(
+  repoRoot: string,
+  destination: string,
+  workspace: PluginWorkspace,
+): Promise<void> {
   const paths = packagePaths(repoRoot);
   await replaceDirectoryTransaction(destination, (privateRoot) =>
-    constructPlugin(paths, privateRoot),
+    constructPlugin(paths, privateRoot, workspace),
   );
 }
 
 async function constructPlugin(
   paths: PackagePaths,
   destination: string,
+  workspace: PluginWorkspace,
 ): Promise<void> {
   await validateCanonicalShippedLanguage(paths.repoRoot);
   await asPackagingError(() => validateCanonicalAgentContracts(paths.repoRoot));
   await asPackagingError(() => validateCanonicalSkillMetadata(paths.repoRoot));
-  await asPackagingError(() => validatePromptPolicySource(paths.repoRoot));
+  await asPackagingError(() =>
+    validatePromptPolicySource(paths.repoRoot, workspace.prompt),
+  );
   await copyCanonicalTree(paths.templateRoot, destination, "plugin template");
 
   for (const [sourcePath, destinationPath] of CANONICAL_TREE_INPUTS) {
@@ -109,10 +121,10 @@ async function constructPlugin(
   }
 
   await bundleCanonicalEntrypoints(paths.repoRoot, destination);
-  await validatePackagedInstaller(paths.repoRoot, destination);
+  await validatePackagedInstaller(paths.repoRoot, destination, workspace);
 
   await asPackagingError(() =>
-    stagePromptPolicyPackage(paths.repoRoot, destination),
+    stagePromptPolicyPackage(paths.repoRoot, destination, workspace.prompt),
   );
 
   await asPackagingError(() =>
@@ -130,35 +142,43 @@ async function constructPlugin(
     paths.repoRoot,
     destination,
     paths.marketplacePath,
+    workspace.prompt,
   );
   await validateStagedShippedLanguage(paths.repoRoot, destination);
 }
 
 export async function buildPlugin(repoRoot = defaultRepoRoot()): Promise<void> {
-  const paths = packagePaths(repoRoot);
-  await stagePlugin(paths.repoRoot, paths.generatedRoot);
+  await withPluginWorkspace(async (workspace) => {
+    const paths = packagePaths(repoRoot);
+    await stagePluginWithWorkspace(
+      paths.repoRoot,
+      paths.generatedRoot,
+      workspace,
+    );
+  });
 }
 
 export async function checkPlugin(repoRoot = defaultRepoRoot()): Promise<void> {
-  const paths = packagePaths(repoRoot);
-  const comparisonParent = await mkdtemp(
-    join(tmpdir(), `${PLUGIN_NAME}-package-check-`),
+  await withPluginWorkspace((workspace) =>
+    checkPluginWithWorkspace(repoRoot, workspace),
   );
-  const comparisonRoot = join(comparisonParent, PLUGIN_NAME);
+}
 
-  try {
-    await stagePlugin(paths.repoRoot, comparisonRoot);
-    await rejectFinderMetadata(paths.generatedRoot, "generated plugin");
-    const drift = await compareTrees(comparisonRoot, paths.generatedRoot);
-    if (drift.length > 0) {
-      throw new PackagingError(
-        `Generated plugin diverges from canonical sources:\n${drift
-          .map((line) => `- ${line}`)
-          .join("\n")}\nRun \`bun run plugin:build\`.`,
-      );
-    }
-  } finally {
-    await rm(comparisonParent, { force: true, recursive: true });
+export async function checkPluginWithWorkspace(
+  repoRoot: string,
+  workspace: PluginWorkspace,
+): Promise<void> {
+  const paths = packagePaths(repoRoot);
+  const comparisonRoot = workspace.path("comparison", PLUGIN_NAME);
+  await stagePluginWithWorkspace(paths.repoRoot, comparisonRoot, workspace);
+  await rejectFinderMetadata(paths.generatedRoot, "generated plugin");
+  const drift = await compareTrees(comparisonRoot, paths.generatedRoot);
+  if (drift.length > 0) {
+    throw new PackagingError(
+      `Generated plugin diverges from canonical sources:\n${drift
+        .map((line) => `- ${line}`)
+        .join("\n")}\nRun \`bun run plugin:build\`.`,
+    );
   }
 }
 

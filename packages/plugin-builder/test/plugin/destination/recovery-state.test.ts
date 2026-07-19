@@ -1,15 +1,9 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
-import {
-  link,
-  readFile,
-  rm,
-  symlink,
-  unlink,
-  writeFile,
-} from "node:fs/promises";
+import { link, readFile, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { replaceDirectoryTransaction } from "../../../src/plugin/destination/transaction.ts";
+import { createTestWorkspace } from "../fixture.ts";
 import {
   allocatorArtifacts,
   claimArtifacts,
@@ -31,13 +25,8 @@ import {
   writeRecoveryWorkerModule,
 } from "./claim-fixture.ts";
 
-const roots: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    roots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
-  );
-});
+const { cleanup, temporaryRoot: allocateTemporaryRoot } = createTestWorkspace();
+afterEach(cleanup);
 
 describe("plugin destination recovery state", () => {
   it("recovers crashes at every recovery-lease publication point", async () => {
@@ -257,5 +246,5 @@ describe("plugin destination recovery state", () => {
 });
 
 function temporaryRoot(prefix: string): Promise<string> {
-  return createTemporaryRoot(prefix, roots);
+  return createTemporaryRoot(prefix, allocateTemporaryRoot);
 }

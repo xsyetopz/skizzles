@@ -14,6 +14,7 @@ import {
   validateSourceModuleCycles,
 } from "./source/graph.ts";
 import { parseSourceDependencies } from "./source/parser.ts";
+import { validateTemporaryOwnership } from "./source/temporary.ts";
 
 const IMPORT_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".json"]);
 
@@ -96,11 +97,29 @@ function consumeParsedSource(
   for (const specifier of specifiers) {
     validateImport(specifier, context);
   }
-  if (relativePath.startsWith("src/")) {
-    const modules = modulesByPackage.get(item) ?? [];
-    modules.push({ path: parsed.path, relativePath, specifiers });
-    modulesByPackage.set(item, modules);
+  if (productionSource(relativePath)) {
+    validateTemporaryOwnership(
+      item,
+      relativePath,
+      parsed.temporaryOwnership ?? [],
+      findings,
+    );
+    if (relativePath.startsWith("src/")) {
+      const modules = modulesByPackage.get(item) ?? [];
+      modules.push({ path: parsed.path, relativePath, specifiers });
+      modulesByPackage.set(item, modules);
+    }
   }
+}
+
+function productionSource(relativePath: string): boolean {
+  const segments = relativePath.split("/");
+  return !(
+    segments.includes("test") ||
+    segments.includes("tests") ||
+    relativePath.includes(".test.") ||
+    relativePath.includes(".spec.")
+  );
 }
 
 function validateImport(

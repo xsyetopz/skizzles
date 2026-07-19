@@ -2,14 +2,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   mkdir,
-  mkdtemp,
   readdir,
   readFile,
   rename,
   rm,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import {
   JOURNAL_FILE,
@@ -22,16 +20,13 @@ import {
   transactionLockPath,
 } from "../../../src/plugin/destination/path.ts";
 import { replaceDirectoryTransaction } from "../../../src/plugin/destination/transaction.ts";
+import { createTestWorkspace } from "../fixture.ts";
 
-const roots: string[] = [];
 const TOKEN_X = "00000000-0000-4000-8000-000000000001";
 const TOKEN_Y = "00000000-0000-4000-8000-000000000002";
 
-afterEach(async () => {
-  await Promise.all(
-    roots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
-  );
-});
+const { cleanup, temporaryRoot: allocateTemporaryRoot } = createTestWorkspace();
+afterEach(cleanup);
 
 describe("plugin destination lock disposal", () => {
   it("blocks on a cleanup path whose owner token differs", async () => {
@@ -226,8 +221,7 @@ function destinationSeed(parent: string): string {
 }
 
 async function temporaryRoot(prefix: string): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), prefix));
-  roots.push(root);
+  const root = await allocateTemporaryRoot(prefix.replace(/-$/u, ""));
   await mkdir(join(root, "plugin"));
   return root;
 }

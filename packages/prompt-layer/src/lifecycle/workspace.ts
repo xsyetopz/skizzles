@@ -74,7 +74,21 @@ async function withPromptWorkspaceUsing<T>(
   } catch (error) {
     outcome = { error, ok: false };
   }
-  const report = await owned.close();
+  let report: CloseReport;
+  try {
+    report = await owned.close();
+  } catch (closeError) {
+    const cause = outcome.ok
+      ? closeError
+      : new AggregateError(
+          [closeError, outcome.error],
+          "workspace cleanup and prompt operation both failed",
+        );
+    throw new PromptLayerError(
+      "Prompt run workspace cleanup failed: close rejected.",
+      { cause },
+    );
+  }
   if (report.state === "cleanup-failed") {
     const message = `Prompt run workspace cleanup failed: ${report.error ?? "unknown failure"}.`;
     if (outcome.ok) {
@@ -90,7 +104,12 @@ async function withPromptWorkspaceUsing<T>(
 
 const systemLifecycle: PromptWorkspaceLifecycle = {
   cleanupStale: async () => {
-    await cleanupStale();
+    const report = await cleanupStale();
+    if (report.failed.length > 0 || report.truncated) {
+      throw new PromptLayerError(
+        "Prompt run workspace stale cleanup did not complete.",
+      );
+    }
   },
   create: async (signal: AbortSignal | undefined) => {
     let workspace: RunWorkspace;

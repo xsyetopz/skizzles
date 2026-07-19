@@ -1,9 +1,11 @@
 #!/usr/bin/env bun
 import process from "node:process";
+import { RunWorkspaceAbortedError } from "@skizzles/run-workspace";
 import { parseInstallerCommand } from "./cli-arguments.ts";
 import { configureCodex, unconfigureCodex } from "./config.ts";
 import { doctor } from "./doctor.ts";
 import { installHarness, uninstallHarness } from "./harness.ts";
+import { runInstallerOperation } from "./lifecycle.ts";
 import {
   applyPromptPolicy,
   promptPolicySummary,
@@ -11,11 +13,25 @@ import {
 } from "./prompt-policy.ts";
 import { installSkills, receiptSummary, uninstallSkills } from "./skills.ts";
 
-export async function main(argv = process.argv.slice(2)): Promise<void> {
+async function main(argv = process.argv.slice(2)): Promise<void> {
   const parsed = parseInstallerCommand(argv);
+  await runInstallerOperation(async (workspace) => {
+    await execute(parsed, workspace);
+  });
+}
+
+async function execute(
+  parsed: ReturnType<typeof parseInstallerCommand>,
+  workspace: import("@skizzles/run-workspace").RunWorkspace,
+): Promise<void> {
   switch (parsed.command) {
     case "doctor": {
-      const report = doctor(parsed.home, parsed.codexHome);
+      const report = doctor(
+        parsed.home,
+        parsed.codexHome,
+        undefined,
+        workspace,
+      );
       console.log(JSON.stringify(report));
       if (!report.ok) {
         process.exitCode = 1;
@@ -23,20 +39,20 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       return;
     }
     case "configure": {
-      const receipt = await configureCodex(parsed);
+      const receipt = await configureCodex({ ...parsed, workspace });
       printConfigSummary(receipt, parsed.dryRun);
       return;
     }
     case "unconfigure": {
-      const receipt = await unconfigureCodex(parsed);
+      const receipt = await unconfigureCodex({ ...parsed, workspace });
       printConfigSummary(receipt, parsed.dryRun);
       return;
     }
     case "prompt-policy": {
       const outcome =
         parsed.action === "apply"
-          ? await applyPromptPolicy(parsed)
-          : await restorePromptPolicy(parsed);
+          ? await applyPromptPolicy({ ...parsed, workspace })
+          : await restorePromptPolicy({ ...parsed, workspace });
       console.log(JSON.stringify(promptPolicySummary(outcome, parsed.dryRun)));
       return;
     }
@@ -112,9 +128,20 @@ function assertNever(value: never): never {
   throw new Error(`unreachable installer command: ${JSON.stringify(value)}`);
 }
 
+function exitCodeForError(error: unknown): 1 | 129 | 130 | 143 {
+  if (error instanceof RunWorkspaceAbortedError) {
+    if (error.signal === "SIGHUP") return 129;
+    if (error.signal === "SIGINT") return 130;
+    if (error.signal === "SIGTERM") return 143;
+  }
+  return 1;
+}
+
 if (import.meta.main) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : "installer failed");
-    process.exit(1);
+    process.exit(exitCodeForError(error));
   });
 }
+
+export { exitCodeForError, main };

@@ -1,14 +1,6 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
-import {
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { PackagingError, stagePlugin } from "../../src/plugin/api.ts";
 import {
@@ -18,17 +10,14 @@ import {
 import { createTestWorkspace, filesUnder, write } from "../plugin/fixture.ts";
 import { integrity } from "./support.ts";
 
-const { cleanup, fixture, temporaryRoots } = createTestWorkspace();
+const { cleanup, fixture, temporaryRoot, workspace } = createTestWorkspace();
 afterEach(cleanup);
 
 describe("prompt-policy containment boundaries", () => {
   it("closed prompt staging rejects forged source paths and destination symlink escapes", async () => {
     const forgedRoot = await fixture();
     const forgedDestination = join(forgedRoot, "direct-stage");
-    const forgedOutside = await mkdtemp(
-      join(tmpdir(), "prompt-policy-forged-source-"),
-    );
-    temporaryRoots.push(forgedOutside);
+    const forgedOutside = await temporaryRoot("prompt-policy-forged-source");
     const outsideContent = "outside source must not be trusted\n";
     await write(forgedOutside, "outside-secret", outsideContent);
     await mkdir(forgedDestination);
@@ -49,7 +38,11 @@ describe("prompt-policy containment boundaries", () => {
       `${JSON.stringify(forgedDescriptor, null, 2)}\n`,
     );
     await expect(
-      stagePromptPolicyPackage(forgedRoot, forgedDestination),
+      stagePromptPolicyPackage(
+        forgedRoot,
+        forgedDestination,
+        (await workspace()).prompt,
+      ),
     ).rejects.toEqual(
       new PromptPolicyPackageError(
         "developer instructions path must be a portable path.",
@@ -65,13 +58,16 @@ describe("prompt-policy containment boundaries", () => {
 
     const symlinkRoot = await fixture();
     const symlinkDestination = join(symlinkRoot, "direct-stage");
-    const outside = await mkdtemp(join(tmpdir(), "prompt-policy-outside-"));
-    temporaryRoots.push(outside);
+    const outside = await temporaryRoot("prompt-policy-outside");
     await write(outside, "preserved.txt", "outside preserved\n");
     await mkdir(symlinkDestination);
     await symlink(outside, join(symlinkDestination, "instructions"));
     await expect(
-      stagePromptPolicyPackage(symlinkRoot, symlinkDestination),
+      stagePromptPolicyPackage(
+        symlinkRoot,
+        symlinkDestination,
+        (await workspace()).prompt,
+      ),
     ).rejects.toEqual(
       new PromptPolicyPackageError(
         "Prompt-policy destination uses an unsafe path.",

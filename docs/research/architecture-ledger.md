@@ -40,7 +40,8 @@ pages without immutable versions include the retrieval date.
 - Record consequential choices as lean ADRs linked to executable confirmation checks.
 - Separate implementation context from acceptance assets; integrity-bind held-outs and
   require causal outcomes before model judgment.
-- Add negative language fixtures for unsupported inner experience, autonomy,
+- Add negative language fixtures for unsupported inner experience, fabricated personal
+  backstory, exclusivity, relationship substitution, autonomy,
   friendship/attachment, embodiment, and certainty claims.
 - Keep deterministic workflow code responsible for capabilities, lifecycle, failure,
   retries, cancellation, and terminal acceptance.

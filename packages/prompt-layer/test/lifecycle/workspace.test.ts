@@ -115,6 +115,34 @@ describe("prompt operation cleanup failures", () => {
       cause: operationError,
     });
   });
+
+  it("retains close and operation failures when close rejects", async () => {
+    const operationError = new PromptLayerError("operation failed");
+    const closeError = new Error("close rejected");
+    const base = cleanupFailureLifecycle();
+    const lifecycle: PromptWorkspaceLifecycle = {
+      cleanupStale: base.cleanupStale,
+      create: async () => {
+        const owned = await base.create(undefined);
+        return { ...owned, close: () => Promise.reject(closeError) };
+      },
+    };
+
+    let rejection: unknown;
+    try {
+      await withPromptWorkspaceUsing(
+        undefined,
+        () => Promise.reject(operationError),
+        lifecycle,
+      );
+    } catch (error) {
+      rejection = error;
+    }
+    expect(rejection).toMatchObject({
+      message: "Prompt run workspace cleanup failed: close rejected.",
+      cause: expect.any(AggregateError),
+    });
+  });
 });
 
 function cleanupFailureLifecycle(): PromptWorkspaceLifecycle {

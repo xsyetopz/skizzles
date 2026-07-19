@@ -104,6 +104,11 @@ contracts. A durable store is not made safer by mislabelling it disposable.
   one root.
 - **Place ambient helpers under root scripts:** rejected because the repository root is
   orchestration and cannot express a TypeScript dependency boundary.
+- **Centralize every process supervisor in the workspace manager:** rejected for now.
+  Installer RPC, plugin runtime smoke, model probing, and security tools have different
+  stdio, protocol, output, and persistence contracts. Their owner-local adapters expose
+  the common `OwnedChild` lifecycle without turning transport behavior into a universal
+  abstraction.
 - **Delete familiar nested directories:** rejected because names are not ownership
   evidence.
 - **Treat PID existence as liveness:** rejected because PIDs are reused.
@@ -117,6 +122,12 @@ be reclaimed without scanning arbitrary temporary content. The package adds life
 code and platform probes, and every creating composition root must propagate its signal
 and register owned children correctly. A caller that continues writing after abort can
 race cleanup; signal-aware composition is therefore an acceptance rule.
+
+The architecture gate is a source-level fitness check, not whole-program taint proof.
+It resolves the supported TypeScript import forms, ambient temp variables, direct
+run-workspace paths, and direct recursive disposal aliases, but deliberately does not
+claim arbitrary object-field or interprocedural data-flow analysis. Owner-local review
+and lifecycle tests remain mandatory for new filesystem abstractions.
 
 Injected macOS tests do not establish native Windows deletion, ACL, PowerShell, or
 process-tree behavior. Bun's Node compatibility must be verified on the supported Bun
@@ -143,9 +154,11 @@ failure recovery, Windows locked-file seams, Unix signals, interrupted cleanup c
 path rejection, and whole-root deletion with same-named outside sentinels. Clean Linux
 and Windows execution must supplement injected platform seams.
 
-Architecture policy rejects new production `mkdtemp` or hard-coded host temporary
-paths outside this owner unless an exact documented durable/atomic exception applies.
-Generated plugin parity proves that bundled consumers retain the same lifecycle.
+Architecture policy rejects new production `mkdtemp`, ambient host-temporary authority,
+hard-coded host temporary paths, and direct recursive disposal of run-workspace nested
+roots outside this owner unless an exact documented durable exception applies. The
+audited allowlist must match the real source capabilities exactly. Generated plugin
+parity proves that bundled consumers retain the same lifecycle.
 
 ## Review and supersession
 

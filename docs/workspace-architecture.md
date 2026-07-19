@@ -14,23 +14,40 @@ explicit `workspace:*` dependency and exported entrypoint.
 
 The current workspace dependency edges are:
 
+<!-- workspace-policy:dependency-edges:start -->
 ```text
+@skizzles/installer -> @skizzles/container-lab
+@skizzles/installer -> @skizzles/prompt-layer
+@skizzles/installer -> @skizzles/run-workspace
+@skizzles/model-catalog -> @skizzles/run-workspace
 @skizzles/plugin-builder -> @skizzles/command-hook
 @skizzles/plugin-builder -> @skizzles/command-supervisor
 @skizzles/plugin-builder -> @skizzles/container-lab
 @skizzles/plugin-builder -> @skizzles/installer
 @skizzles/plugin-builder -> @skizzles/model-catalog
 @skizzles/plugin-builder -> @skizzles/prompt-layer
+@skizzles/plugin-builder -> @skizzles/run-workspace
 @skizzles/plugin-builder -> @skizzles/usage-analyzer
-@skizzles/installer -> @skizzles/container-lab
-@skizzles/installer -> @skizzles/prompt-layer
+@skizzles/prompt-layer -> @skizzles/run-workspace
+@skizzles/workspace-policy -> @skizzles/run-workspace
 ```
+<!-- workspace-policy:dependency-edges:end -->
 
 The plugin builder is the explicit composition owner for all seven canonical
-workspace packages whose public entrypoints or assets it distributes. Other runtime
-relationships cross process boundaries rather than TypeScript imports. The installer
-consumes provider-owned Container Lab and prompt-layer descriptor locations through
-their explicit package exports; it does not traverse sibling private filesystem paths.
+workspace packages whose public entrypoints or assets it distributes.
+`@skizzles/run-workspace` is a supporting lifecycle dependency used during
+composition; it is not an eighth distributed plugin surface. The installer consumes
+provider-owned Container Lab and prompt-layer descriptor locations through their
+explicit package exports; it does not traverse sibling private filesystem paths.
+
+## Run lifecycle ownership
+
+| Lifecycle role | Owner or consumers | Contract |
+| --- | --- | --- |
+| Disposable creator | `@skizzles/run-workspace` | Sole authority for creating, claiming, preserving, closing, and stale-reaping one-run temporary roots. |
+| Injected consumers | `@skizzles/installer`, `@skizzles/model-catalog`, `@skizzles/plugin-builder`, `@skizzles/prompt-layer`, `@skizzles/workspace-policy` | Allocate run-local homes, previews, comparison staging, downloads, reports, and validation artifacts only through an injected or composition-root-created `RunWorkspace`. Same-filesystem destination transactions and their atomic siblings remain destination-owned rather than run-workspace staging. |
+| Child-scope owners | Installer Codex app-server, model-catalog Codex probes, plugin-builder runtime smokes, and workspace-policy security tools | Register the complete owned process scope before awaiting it; workspace close requests stop, waits, escalation, and only then root deletion. |
+| Durable exclusions | Canonical repository inputs, `plugins/skizzles/`, selected-home config/receipts and model-catalog output/status, installer prompt-policy locks, command-supervisor retained output, Container Lab durable manifests, same-filesystem destination transactions and atomic siblings, and separately owned shared caches | Never place durable authority in a disposable run root. Each surface retains its canonical package or host-state owner and separate retention policy. |
 
 ## Canonical and generated paths
 
@@ -94,11 +111,13 @@ descendant detection.
 
 ## Packaging and hygiene
 
-The plugin builder stages into a temporary directory, validates prompt and
-Container Lab contracts, bundles executable entrypoints, validates CLI smokes,
-checks manifest/marketplace/hook paths, and rejects symlinks, Finder metadata,
-credentials, machine paths, caches, logs, databases, and unsupported local
-state. `plugin:check` compares the complete staged tree, including file modes,
+The plugin builder constructs output through a same-filesystem destination transaction.
+Comparison staging, prompt checks, and runtime validation share one owned run workspace;
+the destination transaction remains target-owned so atomic promotion is preserved. The
+builder validates prompt and Container Lab contracts, bundles executable entrypoints,
+validates CLI smokes, checks manifest/marketplace/hook paths, and rejects symlinks,
+Finder metadata, credentials, machine paths, caches, logs, databases, and unsupported
+local state. `plugin:check` compares the complete staged tree, including file modes,
 with `plugins/skizzles/`.
 
 Release preparation updates aligned canonical versions, regenerates the plugin,

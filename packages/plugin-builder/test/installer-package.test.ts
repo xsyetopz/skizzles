@@ -108,6 +108,29 @@ describe("packaged installer runtime", () => {
     expect(performance.now() - startedAt).toBeLessThan(2000);
   });
 
+  it("does not expose the supervisor IPC channel to the staged CLI", async () => {
+    const root = await fixture();
+    await write(
+      root,
+      "packages/installer/src/cli.ts",
+      `if (import.meta.main) {
+  if (typeof process.send === "function") {
+    process.send({ type: "exited", exitCode: 2 });
+    process.exit(0);
+  }
+  console.error("usage: skizzles-installer <command>");
+  process.exit(2);
+}
+`,
+    );
+
+    const staged = join(root, "stage-with-ipc-forgery-attempt");
+    await stagePlugin(root, staged);
+    expect(
+      await Bun.file(join(staged, "packages/installer/src/cli.ts")).exists(),
+    ).toBe(true);
+  });
+
   it("rejects every staged installer runtime extension outside .ts", async () => {
     for (const extension of ["js", "tsx", "cjs", "json"] as const) {
       const root = await fixture();

@@ -12,6 +12,8 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
+import { RunWorkspaceAbortedError } from "@skizzles/run-workspace";
+import { exitCodeForError } from "../src/cli.ts";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -21,6 +23,19 @@ afterEach(() => {
 });
 
 describe("installer CLI target gates", () => {
+  test("maps owned termination signals to conventional shell statuses", () => {
+    expect(
+      exitCodeForError(new RunWorkspaceAbortedError("stopped", "SIGHUP")),
+    ).toBe(129);
+    expect(
+      exitCodeForError(new RunWorkspaceAbortedError("stopped", "SIGINT")),
+    ).toBe(130);
+    expect(
+      exitCodeForError(new RunWorkspaceAbortedError("stopped", "SIGTERM")),
+    ).toBe(143);
+    expect(exitCodeForError(new Error("failure"))).toBe(1);
+  });
+
   test("reports topology-independent public usage", () => {
     const result = runCli([]);
     expect(result.exitCode).toBe(2);

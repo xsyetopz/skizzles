@@ -106,6 +106,122 @@ describe("source parser lifecycle", () => {
     ]);
   });
 
+  it("extracts temporary ownership through aliases, destructuring, and namespaces", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skizzles-temporary-imports-"));
+    roots.push(root);
+    const path = join(root, "temporary.ts");
+    const source = [
+      'import { mkdtemp as allocate } from "node:fs/promises";',
+      'import * as filesystem from "node:fs";',
+      'import * as operatingSystem from "node:os";',
+      "const { mkdtemp: destructured } = filesystem;",
+      "void allocate;",
+      "void destructured;",
+      "void filesystem.mkdtempSync;",
+      "void operatingSystem.tmpdir;",
+      'export const posixRoot = "/tmp/skizzles-run";',
+      "export const windowsRoot = `C:\\\\Temp\\\\skizzles-run`;",
+      "",
+    ].join("\n");
+    await writeFile(path, source);
+
+    expect(
+      await parseSourceDependencies([sourceDocument(path, source)]),
+    ).toEqual([
+      {
+        path,
+        specifiers: ["node:fs", "node:fs/promises", "node:os"],
+        temporaryOwnership: [
+          { kind: "hard-coded-host-temp" },
+          { kind: "mkdtemp" },
+          { kind: "mkdtempSync" },
+          { kind: "tmpdir" },
+        ],
+      },
+    ]);
+  });
+
+  it("ignores temporary words in comments, diagnostics, and unrelated APIs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skizzles-temporary-text-"));
+    roots.push(root);
+    const path = join(root, "text.ts");
+    const source = [
+      "// mkdtemp(), tmpdir(), and /tmp/example are policy documentation.",
+      'const diagnostic = "do not create /tmp/example with mkdtemp or tmpdir";',
+      "const local = { mkdtemp: () => undefined, tmpdir: () => undefined };",
+      'import type { mkdtemp as MkdtempType } from "node:fs/promises";',
+      'import type * as TypeFilesystem from "node:fs";',
+      "type ImportedType = typeof MkdtempType;",
+      "type NamespaceType = typeof TypeFilesystem.mkdtempSync;",
+      "local.mkdtemp();",
+      "local.tmpdir();",
+      "void diagnostic;",
+      "",
+    ].join("\n");
+    await writeFile(path, source);
+
+    expect(
+      await parseSourceDependencies([sourceDocument(path, source)]),
+    ).toEqual([{ path, specifiers: ["node:fs", "node:fs/promises"] }]);
+  });
+
+  it("extracts ambient, re-exported, chained, and nested disposal authority", async () => {
+    const root = await mkdtemp(
+      join(tmpdir(), "skizzles-temporary-capabilities-"),
+    );
+    roots.push(root);
+    const path = join(root, "capabilities.ts");
+    const source = [
+      'import filesystem, { promises as asyncFilesystem, rmSync } from "node:fs";',
+      'export { mkdtemp as allocate } from "node:fs/promises";',
+      "void filesystem.promises.mkdtemp;",
+      "void asyncFilesystem.mkdtemp;",
+      'const required = require("node:fs");',
+      "void required.mkdtempSync;",
+      'const dynamic = await import("node:os");',
+      "void dynamic.tmpdir;",
+      "void process.env.TMPDIR;",
+      // biome-ignore lint/security/noSecrets: Synthetic source text exercises a generated disposable path, not a credential.
+      "const preview = workspace.path(`preview-$" + "{crypto.randomUUID()}`);",
+      "rmSync(preview, { recursive: true, force: true });",
+      "export const interpolated = `/tmp/run-$" + "{crypto.randomUUID()}`;",
+      "",
+    ].join("\n");
+    await writeFile(path, source);
+
+    expect(
+      (await parseSourceDependencies([sourceDocument(path, source)]))[0]
+        ?.temporaryOwnership,
+    ).toEqual([
+      { kind: "ambient-temp-env" },
+      { kind: "hard-coded-host-temp" },
+      { kind: "mkdtemp" },
+      { kind: "mkdtempSync" },
+      { kind: "nested-recursive-disposal" },
+      { kind: "tmpdir" },
+    ]);
+  });
+
+  it("does not attribute shadowed namespace or type-query references", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skizzles-temporary-shadow-"));
+    roots.push(root);
+    const path = join(root, "shadow.ts");
+    const source = [
+      'import * as filesystem from "node:fs";',
+      "type Method = typeof filesystem.mkdtempSync;",
+      "function inspect(filesystem: { mkdtempSync: () => void }) {",
+      "  filesystem.mkdtempSync();",
+      "}",
+      "void inspect;",
+      "",
+    ].join("\n");
+    await writeFile(path, source);
+
+    expect(
+      await parseSourceDependencies([sourceDocument(path, source)]),
+    ).toEqual([{ path, specifiers: ["node:fs"] }]);
+  });
+
   it("fails closed when A, TypeScript, and B are not byte-consistent", async () => {
     const changingDocuments: readonly SourceDocument[] = [
       sourceDocument("/virtual/stale.ts", "export {};"),

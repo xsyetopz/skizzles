@@ -61,6 +61,11 @@ export function createShippedLanguageTestContext(): ShippedLanguageTestContext {
     enableIntendedLogo,
     fixture: workspace.fixture,
     mutateJson,
-    prepareLanguageStage: stagePromptPolicyPackage,
+    prepareLanguageStage: async (root, staged) =>
+      stagePromptPolicyPackage(
+        root,
+        staged,
+        (await workspace.workspace()).prompt,
+      ),
   };
 }

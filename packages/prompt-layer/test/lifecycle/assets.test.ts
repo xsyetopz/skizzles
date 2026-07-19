@@ -1,6 +1,6 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, test } from "bun:test";
-import { readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   authorPromptPatch,
@@ -17,6 +17,7 @@ import {
   cleanupFixtures,
   filesUnder,
   fixture,
+  fixtureDirectory,
   gitBlobId,
   type ManifestFixture,
   PATCH_NEW_IDENTITY,
@@ -97,6 +98,32 @@ describe("prompt asset and patch contracts", () => {
       canonicalHeader("bc5c9161b46feddc13282652fd2cfdf1e5bab4a9"),
     );
     expect(firstPrompt.toString()).toContain("# How you work");
+  });
+
+  test("uses an injected prompt workspace without creating a separate owner", async () => {
+    const root = await fixture();
+    const workspaceRoot = await fixtureDirectory("injected-prompt-workspace");
+    const controller = new AbortController();
+    let sequence = 0;
+    const workspace = {
+      signal: controller.signal,
+      directory: async (purpose: "apply" | "author" | "test") => {
+        const path = join(workspaceRoot, `${purpose}-${sequence}`);
+        sequence += 1;
+        await mkdir(path);
+        return path;
+      },
+      throwIfAborted: () => controller.signal.throwIfAborted(),
+    };
+
+    await checkPrompt(root, { workspace });
+    expect(sequence).toBeGreaterThan(0);
+    await expect(
+      checkPrompt(root, {
+        workspace,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("must share one owner");
   });
 
   test("rejects tampered checksum-locked inputs", async () => {

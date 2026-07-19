@@ -1,9 +1,10 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import process from "node:process";
 import { replaceDirectoryTransaction } from "../../../src/plugin/destination/transaction.ts";
+import { createTestWorkspace } from "../fixture.ts";
 import {
   collectMessages,
   crashAt,
@@ -18,13 +19,8 @@ import {
   writeWorkerModule,
 } from "./claim-fixture.ts";
 
-const roots: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    roots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
-  );
-});
+const { cleanup, temporaryRoot: allocateTemporaryRoot } = createTestWorkspace();
+afterEach(cleanup);
 
 describe("plugin destination atomic claims", () => {
   it("does not recover when only the live controller's helper is killed", async () => {
@@ -289,5 +285,5 @@ describe("plugin destination atomic claims", () => {
 });
 
 function temporaryRoot(prefix: string): Promise<string> {
-  return createTemporaryRoot(prefix, roots);
+  return createTemporaryRoot(prefix, allocateTemporaryRoot);
 }

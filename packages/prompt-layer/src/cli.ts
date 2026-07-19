@@ -24,6 +24,7 @@ export {
   PromptLayerError,
   SHIPPED_LANGUAGE_POLICY_PATHS,
 } from "./lifecycle/contract.ts";
+export type { CheckPromptOptions } from "./lifecycle/operations.ts";
 export {
   authorPromptPatch,
   buildPrompt,
@@ -31,6 +32,7 @@ export {
   parseImmutableCommit,
   rebasePrompt,
 } from "./lifecycle/operations.ts";
+export type { PromptWorkspace } from "./lifecycle/workspace.ts";
 export { normalizeDarwinProcessStartOutput } from "./mutation/process-identity.ts";
 export type {
   ShippedLanguageFinding,

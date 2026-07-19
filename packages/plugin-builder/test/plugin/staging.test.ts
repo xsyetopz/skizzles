@@ -1,7 +1,6 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import {
@@ -21,7 +20,7 @@ import {
   write,
 } from "./fixture.ts";
 
-const { cleanup, fixture, temporaryRoots } = createTestWorkspace();
+const { cleanup, fixture, temporaryRoot } = createTestWorkspace();
 afterEach(cleanup);
 
 describe("plugin staging and discovery", () => {
@@ -35,8 +34,7 @@ describe("plugin staging and discovery", () => {
       marketplacePath: join(repoRoot, ".agents/plugins/marketplace.json"),
     });
 
-    const parent = await mkdtemp(join(tmpdir(), "skizzles-default-root-"));
-    temporaryRoots.push(parent);
+    const parent = await temporaryRoot("default-root");
     const destination = join(parent, "staged");
     await stagePlugin(paths.repoRoot, destination);
     expect(
@@ -87,8 +85,7 @@ describe("plugin staging and discovery", () => {
 
   it("staged hook emits a concrete supervisor command independent of PLUGIN_ROOT", async () => {
     const repoRoot = resolve(import.meta.dir, "../../../..");
-    const parent = await mkdtemp(join(tmpdir(), "skizzles-hook-stage-"));
-    temporaryRoots.push(parent);
+    const parent = await temporaryRoot("hook-stage");
     const stagedRoot = join(parent, "plugin root '$(touch INJECTED); & staged");
     await stagePlugin(repoRoot, stagedRoot);
 

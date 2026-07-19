@@ -3,21 +3,20 @@ import {
   constants,
   existsSync,
   lstatSync,
-  mkdtempSync,
+  mkdirSync,
   readFileSync,
-  rmSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import process from "node:process";
 import containerLabIntegrationDescriptor from "@skizzles/container-lab/integration-descriptor" with {
   type: "json",
 };
+import type { RunWorkspace } from "@skizzles/run-workspace";
 import { harnessReceiptPath, uninstallHarness } from "./harness.ts";
 import { skillsReceiptPath, uninstallSkills } from "./skills.ts";
 
-const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
-const LINE_PATTERN = /\r?\n/;
+const COMMIT_PATTERN = /^[0-9a-f]{40}$/u;
+const LINE_PATTERN = /\r?\n/u;
 
 interface ContainerLabContract {
   configuredRuntime: string;
@@ -265,13 +264,23 @@ function inspectContainerLab(
   descriptor: ContainerLabContract,
   pathValue: string,
   timeoutMs: number,
+  workspace: RunWorkspace,
 ): ContainerLabDoctor {
   const base = {
     version: `configured-${descriptor.configuredRuntime}-unverified`,
   };
-  const root = mkdtempSync(join(tmpdir(), "skizzles-container-lab-doctor-"));
+  const root = workspace.path("container-lab-doctor");
+  mkdirSync(root, { recursive: true, mode: 0o700 });
   try {
-    const environment = { PATH: pathValue, HOME: join(root, "home") };
+    const processTemp = join(root, "tmp");
+    mkdirSync(processTemp, { recursive: true, mode: 0o700 });
+    const environment = {
+      PATH: pathValue,
+      HOME: join(root, "home"),
+      TEMP: processTemp,
+      TMP: processTemp,
+      TMPDIR: processTemp,
+    };
     const help = adminJson(
       operational,
       ["--help"],
@@ -352,15 +361,14 @@ function inspectContainerLab(
       ready: false,
       reason,
     };
-  } finally {
-    rmSync(root, { recursive: true, force: true });
   }
 }
 
 export function doctorContainerLab(
   pathValue = process.env["PATH"] ?? "",
   descriptorPath?: string,
-  timeoutMs = 5_000,
+  timeoutMs = 5000,
+  workspace?: RunWorkspace,
 ): ContainerLabDoctor {
   const descriptor = contract(descriptorPath);
   const operational = executable(descriptor.binaries.operational, pathValue);
@@ -383,13 +391,15 @@ export function doctorContainerLab(
     descriptor,
     pathValue,
     timeoutMs,
+    requiredWorkspace(workspace),
   );
 }
 
 export function doctorBundledContainerLab(
   bundleRoot: string,
   descriptorPath?: string,
-  timeoutMs = 5_000,
+  timeoutMs = 5000,
+  workspace?: RunWorkspace,
 ): ContainerLabDoctor {
   const selectedDescriptor = descriptorPath ?? descriptorForBundle(bundleRoot);
   const descriptor = contract(selectedDescriptor);
@@ -412,6 +422,7 @@ export function doctorBundledContainerLab(
     descriptor,
     process.env["PATH"] ?? "",
     timeoutMs,
+    requiredWorkspace(workspace),
   );
 }
 
@@ -419,8 +430,14 @@ export function doctor(
   home: string,
   codexHome: string,
   pathValue = process.env["PATH"] ?? "",
+  workspace?: RunWorkspace,
 ): DoctorReport {
-  const containerLab = doctorContainerLab(pathValue);
+  const containerLab = doctorContainerLab(
+    pathValue,
+    undefined,
+    5000,
+    workspace,
+  );
   let skills: DoctorReport["installs"]["skills"] = "absent";
   let harness: DoctorReport["installs"]["harness"] = "absent";
   if (existsSync(skillsReceiptPath(codexHome))) {
@@ -447,4 +464,11 @@ export function doctor(
     installs: { skills, harness },
     containerLab,
   };
+}
+
+function requiredWorkspace(workspace: RunWorkspace | undefined): RunWorkspace {
+  if (workspace === undefined) {
+    throw new Error("Container Lab doctor requires a run workspace");
+  }
+  return workspace;
 }

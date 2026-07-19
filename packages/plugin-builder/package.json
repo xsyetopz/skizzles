@@ -23,6 +23,7 @@
     "@skizzles/installer": "workspace:*",
     "@skizzles/model-catalog": "workspace:*",
     "@skizzles/prompt-layer": "workspace:*",
+    "@skizzles/run-workspace": "workspace:*",
     "@skizzles/usage-analyzer": "workspace:*",
     "yaml": "^2.9.0"
   },

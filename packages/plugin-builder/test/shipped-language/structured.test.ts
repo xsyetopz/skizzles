@@ -21,6 +21,21 @@ describe("plugin shipped-language composition and structured formats", () => {
         taxonomy: "friendship-attachment-reciprocity",
       },
       {
+        path: "skills/example/invented-backstory.md",
+        text: "I went through this too, so I know exactly how you feel.\n",
+        taxonomy: "fabricated-personal-backstory",
+      },
+      {
+        path: "skills/example/exclusive-secret.md",
+        text: "Only I understand you, so keep this between us.\n",
+        taxonomy: "exclusivity-secret-dyadic-pull",
+      },
+      {
+        path: "skills/example/relationship-substitution.md",
+        text: "Talk to me instead of a person whenever you need support.\n",
+        taxonomy: "relationship-substitution",
+      },
+      {
         path: "packages/prompt-layer/assets/instructions/developer-instructions.md",
         text: "I have my own goals beyond the assigned task.\n",
         taxonomy: "autonomous-intent-agency-rights",
@@ -97,6 +112,14 @@ describe("plugin shipped-language composition and structured formats", () => {
     await prepareLanguageStage(root, staged);
     for (const [path, text] of [
       ["skills/example/SKILL.md", "I can inspect repository evidence.\n"],
+      [
+        "skills/example/incident.md",
+        "I found a matching incident in the supplied repository history.\n",
+      ],
+      [
+        "skills/example/support.md",
+        "I can help prepare questions for a qualified person.\n",
+      ],
       ["config/example.yaml", "message: I can report a result\n"],
       ["runtime/example.ts", 'console.log("I can report a result");\n'],
       [

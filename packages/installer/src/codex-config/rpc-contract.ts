@@ -43,7 +43,7 @@ export interface ConfigRpc {
 export interface ConfigRpcSession {
   rpc: ConfigRpc;
   configPath: string;
-  cleanup(): void;
+  cleanup(): Promise<void>;
 }
 
 export interface OwnedConfigValue {

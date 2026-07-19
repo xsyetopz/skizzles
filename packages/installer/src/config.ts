@@ -1,5 +1,6 @@
 import { existsSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
+import type { RunWorkspace } from "@skizzles/run-workspace";
 import {
   type ConfigEdit,
   type ConfigRpc,
@@ -41,6 +42,7 @@ export interface ConfigureOptions {
   orchestration: OrchestrationMode;
   dryRun?: boolean;
   rpcFactory?: (codexHome: string, codexBinary: string) => Promise<ConfigRpc>;
+  workspace?: RunWorkspace;
 }
 
 const aggressiveModeHint =
@@ -202,7 +204,7 @@ function pendingConfigureReceipt(
   orchestration: OrchestrationMode,
 ): ConfigReceipt | undefined {
   if (!pathEntryExists(receiptPath)) {
-    return undefined;
+    return;
   }
   const receipt = readReceipt(codexHome);
   validateReceiptTarget(receipt, codexHome, codexBinary);
@@ -295,6 +297,7 @@ export async function configureCodex(
     codexBinary,
     dryRun: options.dryRun,
     rpcFactory: options.rpcFactory,
+    workspace: options.workspace,
   });
   const { rpc } = rpcSession;
   try {
@@ -332,7 +335,7 @@ export async function configureCodex(
     try {
       await rpc.close();
     } finally {
-      rpcSession.cleanup();
+      await rpcSession.cleanup();
     }
   }
 }
@@ -352,6 +355,7 @@ export async function unconfigureCodex(
     codexBinary,
     dryRun: options.dryRun,
     rpcFactory: options.rpcFactory,
+    workspace: options.workspace,
   });
   const { rpc } = rpcSession;
   try {
@@ -392,7 +396,7 @@ export async function unconfigureCodex(
     try {
       await rpc.close();
     } finally {
-      rpcSession.cleanup();
+      await rpcSession.cleanup();
     }
   }
 }

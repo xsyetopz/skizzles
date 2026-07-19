@@ -1,18 +1,16 @@
 import { chmod, lstat, mkdir, realpath } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import process from "node:process";
 import {
   BUNDLED_ENTRYPOINTS,
   INSTALLER_CANONICAL_SOURCE_PATH,
   INSTALLER_PUBLIC_USAGE_PREFIX,
-  INSTALLER_SMOKE_OUTPUT_LIMIT,
-  INSTALLER_SMOKE_TERM_GRACE_MS,
-  INSTALLER_SMOKE_TIMEOUT_MS,
   PackagingError,
   RELATIVE_MODULE_PATTERN,
   WORKSPACE_MODULE_PATTERN,
 } from "./contract.ts";
 import { listFiles, readJsonObject } from "./distribution-files.ts";
+import { runInstallerHelp } from "./runtime-process.ts";
+import type { PluginWorkspace } from "./workspace.ts";
 
 export async function bundleCanonicalEntrypoints(
   repoRoot: string,
@@ -26,10 +24,14 @@ export async function bundleCanonicalEntrypoints(
 export async function validatePackagedInstaller(
   repoRoot: string,
   pluginRoot: string,
+  workspace: PluginWorkspace,
 ): Promise<void> {
   await writeInstallerRuntimeManifest(repoRoot, pluginRoot);
   await validatePackagedInstallerSurface(pluginRoot);
-  await validateInstallerCliHelp(join(pluginRoot, "packages/installer"));
+  await validateInstallerCliHelp(
+    join(pluginRoot, "packages/installer"),
+    workspace,
+  );
 }
 
 async function bundleCanonicalEntrypoint(
@@ -205,126 +207,23 @@ async function validatePackagedInstallerSurface(
   }
 }
 
-async function validateInstallerCliHelp(installerRoot: string): Promise<void> {
-  const child = Bun.spawn([process.execPath, "src/cli.ts", "--help"], {
-    cwd: installerRoot,
-    detached: true,
-    env: { ...process.env, NO_COLOR: "1" },
-    stderr: "pipe",
-    stdout: "pipe",
-  });
-  const outputAbort = new AbortController();
-  const output = Promise.all([
-    readBoundedOutput(child.stdout, outputAbort.signal),
-    readBoundedOutput(child.stderr, outputAbort.signal),
-  ]);
-  const deadline = Promise.withResolvers<"deadline">();
-  const timeout = setTimeout(
-    () => deadline.resolve("deadline"),
-    INSTALLER_SMOKE_TIMEOUT_MS,
-  );
-  try {
-    const completed = Promise.all([child.exited, output] as const);
-    const outcome = await Promise.race([completed, deadline.promise]);
-    if (outcome === "deadline") {
-      throw installerValidationError();
-    }
-    const [exitCode, [stdout, stderr]] = outcome;
-    if (
-      exitCode !== 2 ||
-      stdout.overflow ||
-      stdout.text !== "" ||
-      stderr.overflow ||
-      !stderr.text.startsWith(INSTALLER_PUBLIC_USAGE_PREFIX) ||
-      stderr.text.includes(INSTALLER_CANONICAL_SOURCE_PATH)
-    ) {
-      throw installerValidationError();
-    }
-  } finally {
-    clearTimeout(timeout);
-    outputAbort.abort();
-    await terminateInstallerProcessGroup(child);
-    await child.exited;
-    await output;
-  }
-}
-
-async function readBoundedOutput(
-  stream: ReadableStream<Uint8Array>,
-  signal: AbortSignal,
-): Promise<{ overflow: boolean; text: string }> {
-  const chunks: Uint8Array[] = [];
-  let bytes = 0;
-  let overflow = false;
-  const reader = stream.getReader();
-  const cancel = () => {
-    reader.cancel().catch(() => undefined);
-  };
-  signal.addEventListener("abort", cancel, { once: true });
-  try {
-    while (!signal.aborted) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      if (bytes < INSTALLER_SMOKE_OUTPUT_LIMIT) {
-        chunks.push(value.subarray(0, INSTALLER_SMOKE_OUTPUT_LIMIT - bytes));
-      }
-      bytes += value.byteLength;
-      overflow ||= bytes > INSTALLER_SMOKE_OUTPUT_LIMIT;
-    }
-  } catch (error) {
-    if (!signal.aborted) {
-      throw error;
-    }
-  } finally {
-    signal.removeEventListener("abort", cancel);
-    reader.releaseLock();
-  }
-  return {
-    overflow,
-    text: new TextDecoder().decode(Buffer.concat(chunks)),
-  };
-}
-
-async function terminateInstallerProcessGroup(
-  child: Bun.Subprocess<"ignore", "pipe", "pipe">,
+async function validateInstallerCliHelp(
+  installerRoot: string,
+  workspace: PluginWorkspace,
 ): Promise<void> {
-  signalInstallerProcessGroup(child, "SIGTERM");
-  const exitedDuringGrace = await exitsWithin(
-    child.exited,
-    INSTALLER_SMOKE_TERM_GRACE_MS,
+  const { exitCode, stderr, stdout } = await runInstallerHelp(
+    installerRoot,
+    workspace,
   );
-  signalInstallerProcessGroup(child, "SIGKILL");
-  if (!exitedDuringGrace) {
-    await child.exited;
-  }
-}
-
-function signalInstallerProcessGroup(
-  child: Bun.Subprocess<"ignore", "pipe", "pipe">,
-  signal: NodeJS.Signals,
-): void {
-  try {
-    process.kill(-child.pid, signal);
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ESRCH") {
-      return;
-    }
-    child.kill(signal);
-  }
-}
-
-async function exitsWithin(
-  exited: Promise<number>,
-  milliseconds: number,
-): Promise<boolean> {
-  const timeout = Promise.withResolvers<false>();
-  const timer = setTimeout(() => timeout.resolve(false), milliseconds);
-  try {
-    return await Promise.race([exited.then(() => true), timeout.promise]);
-  } finally {
-    clearTimeout(timer);
+  if (
+    exitCode !== 2 ||
+    stdout.overflow ||
+    stdout.text !== "" ||
+    stderr.overflow ||
+    !stderr.text.startsWith(INSTALLER_PUBLIC_USAGE_PREFIX) ||
+    stderr.text.includes(INSTALLER_CANONICAL_SOURCE_PATH)
+  ) {
+    throw installerValidationError();
   }
 }
 
@@ -373,7 +272,3 @@ async function assertContainedNonSymlinkFile(
 }
 
 // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
-}

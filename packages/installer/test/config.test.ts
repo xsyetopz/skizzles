@@ -325,7 +325,7 @@ describe("Codex configuration lifecycle", () => {
       ).toBe(join(selectedHome, "profiles/base.md"));
     } finally {
       await session.rpc.close();
-      session.cleanup();
+      await session.cleanup();
     }
     expect(existsSync(previewHome)).toBe(false);
     expect(snapshotTree(f.codexHome)).toEqual(before);

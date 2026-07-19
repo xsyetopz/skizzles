@@ -1,5 +1,5 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import {
   chmodSync,
   mkdirSync,
@@ -10,6 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
+import { assertAppServerPlatform } from "../src/codex-config/rpc.ts";
 import { openConfigRpcSession } from "../src/codex-config.ts";
 
 const roots: string[] = [];
@@ -17,6 +18,15 @@ afterEach(() => {
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+it("rejects Windows before app-server process creation", () => {
+  let spawned = false;
+  expect(() => {
+    assertAppServerPlatform("win32");
+    spawned = true;
+  }).toThrow("Windows Job Object support");
+  expect(spawned).toBeFalse();
 });
 function fixture(config: string) {
   const home = `/tmp/skizzles-preview-${crypto.randomUUID()}`;
@@ -33,7 +43,7 @@ function fixture(config: string) {
 }
 
 describe("Codex dry-run snapshot bounds", () => {
-  test("rejects deterministic in-place rewrite during copy and cleans preview", () => {
+  it("rejects deterministic in-place rewrite during copy and cleans preview", () => {
     const f = fixture('model_instructions_file = "changed.md"\n');
     const target = join(f.home, "changed.md");
     writeFileSync(target, "original");
@@ -91,7 +101,7 @@ try {
     });
   });
 
-  test("rejects nested config at depth boundary and cleans preview", async () => {
+  it("rejects nested config at depth boundary and cleans preview", async () => {
     const previewsBefore = previewDirectories();
     const chain = Array.from({ length: 18 }, (_, i) => `c${i}.toml`);
     const f = fixture('[agents.a]\nconfig_file = "c0.toml"\n');
@@ -115,7 +125,7 @@ try {
     expect(previewDirectories()).toEqual(previewsBefore);
   });
 
-  test("accepts the nested-config depth boundary", async () => {
+  it("accepts the nested-config depth boundary", async () => {
     const previewsBefore = previewDirectories();
     const chain = Array.from({ length: 16 }, (_, i) => `c${i}.toml`);
     const f = fixture('[agents.a]\nconfig_file = "c0.toml"\n');
@@ -137,11 +147,11 @@ try {
       dryRun: true,
     });
     await session.rpc.close();
-    session.cleanup();
+    await session.cleanup();
     expect(previewDirectories()).toEqual(previewsBefore);
   });
 
-  test("rejects one file beyond the referenced-file count boundary", async () => {
+  it("rejects one file beyond the referenced-file count boundary", async () => {
     const previewsBefore = previewDirectories();
     const f = fixture(
       Array.from(
@@ -162,7 +172,7 @@ try {
     expect(previewDirectories()).toEqual(previewsBefore);
   });
 
-  test("accepts the referenced-file count boundary", async () => {
+  it("accepts the referenced-file count boundary", async () => {
     const previewsBefore = previewDirectories();
     const f = fixture(
       Array.from(
@@ -179,11 +189,11 @@ try {
       dryRun: true,
     });
     await session.rpc.close();
-    session.cleanup();
+    await session.cleanup();
     expect(previewDirectories()).toEqual(previewsBefore);
   });
 
-  test("allows cycles by copied identity and cleans preview", async () => {
+  it("allows cycles by copied identity and cleans preview", async () => {
     const previewsBefore = previewDirectories();
     const f = fixture('[agents.a]\nconfig_file = "a.toml"\n');
     writeFileSync(
@@ -200,7 +210,7 @@ try {
       dryRun: true,
     });
     await session.rpc.close();
-    session.cleanup();
+    await session.cleanup();
     expect(previewDirectories()).toEqual(previewsBefore);
   });
 });

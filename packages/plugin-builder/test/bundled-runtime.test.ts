@@ -1,15 +1,6 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
-import {
-  chmod,
-  cp,
-  mkdir,
-  mkdtemp,
-  readFile,
-  stat,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { chmod, cp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import {
@@ -29,7 +20,7 @@ import {
   YAML_LAB_ID,
 } from "./plugin/fixture.ts";
 
-const { cleanup, fixture, temporaryRoots } = createTestWorkspace();
+const { cleanup, fixture, temporaryRoot } = createTestWorkspace();
 afterEach(cleanup);
 
 describe("generated plugin runtime bundles", () => {
@@ -77,12 +68,9 @@ describe("generated plugin runtime bundles", () => {
 
   it("ships runnable dependency-self-contained Container Lab bundles", async () => {
     const repoRoot = resolve(import.meta.dir, "../../..");
-    const temporaryRoot = await mkdtemp(
-      join(tmpdir(), "skizzles-container-lab-plugin-"),
-    );
-    temporaryRoots.push(temporaryRoot);
-    const stagedPlugin = join(temporaryRoot, "staged");
-    const isolatedPlugin = join(temporaryRoot, "isolated");
+    const root = await temporaryRoot("container-lab-plugin");
+    const stagedPlugin = join(root, "staged");
+    const isolatedPlugin = join(root, "isolated");
     await stagePlugin(repoRoot, stagedPlugin);
     await cp(stagedPlugin, isolatedPlugin, { recursive: true });
 
@@ -119,11 +107,8 @@ describe("generated plugin runtime bundles", () => {
 
   it("bundles executable workspace packages at only stable public entrypoints", async () => {
     const repoRoot = resolve(import.meta.dir, "../../..");
-    const temporaryRoot = await mkdtemp(
-      join(tmpdir(), "skizzles-workspace-bundles-"),
-    );
-    temporaryRoots.push(temporaryRoot);
-    const stagedPlugin = join(temporaryRoot, "staged");
+    const root = await temporaryRoot("workspace-bundles");
+    const stagedPlugin = join(root, "staged");
     await stagePlugin(repoRoot, stagedPlugin);
 
     for (const path of [
@@ -153,11 +138,8 @@ describe("generated plugin runtime bundles", () => {
 
   it("initializes the bundled Model Catalog and reaches its CLI usage contract", async () => {
     const repoRoot = resolve(import.meta.dir, "../../..");
-    const temporaryRoot = await mkdtemp(
-      join(tmpdir(), "skizzles-model-catalog-bundle-"),
-    );
-    temporaryRoots.push(temporaryRoot);
-    const stagedPlugin = join(temporaryRoot, "plugin");
+    const root = await temporaryRoot("model-catalog-bundle");
+    const stagedPlugin = join(root, "plugin");
     await stagePlugin(repoRoot, stagedPlugin);
 
     const result = Bun.spawnSync(
@@ -180,10 +162,7 @@ describe("generated plugin runtime bundles", () => {
 
   it("exercises bundled YAML manifest configuration with a fake Docker binary", async () => {
     const repoRoot = resolve(import.meta.dir, "../../..");
-    const root = await mkdtemp(
-      join(tmpdir(), "skizzles-container-lab-bundle-config-"),
-    );
-    temporaryRoots.push(root);
+    const root = await temporaryRoot("container-lab-bundle-config");
     const plugin = join(root, "plugin");
     const source = join(root, "source");
     const stateRoot = join(root, "state");

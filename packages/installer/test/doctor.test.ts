@@ -6,6 +6,7 @@ import process from "node:process";
 import containerLabIntegrationDescriptor from "@skizzles/container-lab/integration-descriptor" with {
   type: "json",
 };
+import { create, type RunWorkspace } from "@skizzles/run-workspace";
 import {
   bundledContainerLabPaths,
   doctor,
@@ -16,6 +17,12 @@ import { installHarness } from "../src/harness.ts";
 import { installSkills } from "../src/skills.ts";
 
 const roots: string[] = [];
+const workspaces: RunWorkspace[] = [];
+async function workspace(): Promise<RunWorkspace> {
+  const value = await create();
+  workspaces.push(value);
+  return value;
+}
 function stubs(
   mode: "ready" | "not-ready" | "malformed" | "oversized" | "stderr" | "hang",
 ): string {
@@ -50,10 +57,11 @@ function stubs(
   chmodSync(reaper, 0o755);
   return root;
 }
-afterEach(() => {
+afterEach(async () => {
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
   }
+  await Promise.all(workspaces.splice(0).map((value) => value.close()));
 });
 
 describe("Container Lab doctor", () => {
@@ -66,38 +74,63 @@ describe("Container Lab doctor", () => {
     });
     expect(JSON.stringify(report)).not.toContain(process.cwd());
   });
-  test("classifies ready and installed-not-ready", () => {
-    expect(doctorContainerLab(stubs("ready"))).toMatchObject({
+  test("classifies ready and installed-not-ready", async () => {
+    expect(
+      doctorContainerLab(stubs("ready"), undefined, 5000, await workspace()),
+    ).toMatchObject({
       installed: true,
       compatible: true,
       ready: true,
       version: `configured-${containerLabIntegrationDescriptor.configuredRuntime}-unverified`,
     });
-    expect(doctorContainerLab(stubs("not-ready"))).toMatchObject({
+    expect(
+      doctorContainerLab(
+        stubs("not-ready"),
+        undefined,
+        5000,
+        await workspace(),
+      ),
+    ).toMatchObject({
       installed: true,
       compatible: true,
       ready: false,
       dockerAvailable: false,
     });
   });
-  test("rejects malformed and oversized public output", () => {
-    expect(doctorContainerLab(stubs("malformed"))).toMatchObject({
+  test("rejects malformed and oversized public output", async () => {
+    expect(
+      doctorContainerLab(
+        stubs("malformed"),
+        undefined,
+        5000,
+        await workspace(),
+      ),
+    ).toMatchObject({
       compatible: false,
       reason: "Container Lab returned malformed JSON",
     });
-    expect(doctorContainerLab(stubs("oversized"))).toMatchObject({
+    expect(
+      doctorContainerLab(
+        stubs("oversized"),
+        undefined,
+        5000,
+        await workspace(),
+      ),
+    ).toMatchObject({
       compatible: false,
       reason: "external command exceeded its public output limit",
     });
   });
-  test("uses the descriptor version and output cap", () => {
+  test("uses the descriptor version and output cap", async () => {
     const path = stubs("ready");
     const descriptorPath = join(path, "contract.json");
     const descriptor = structuredClone(containerLabIntegrationDescriptor);
     descriptor.configuredRuntime = "9.8.7";
     descriptor.execution.adminMaxBytes = 8;
     writeFileSync(descriptorPath, JSON.stringify(descriptor));
-    expect(doctorContainerLab(path, descriptorPath)).toMatchObject({
+    expect(
+      doctorContainerLab(path, descriptorPath, 5000, await workspace()),
+    ).toMatchObject({
       version: "configured-9.8.7-unverified",
       compatible: false,
       reason: "external command exceeded its public output limit",
@@ -111,17 +144,21 @@ describe("Container Lab doctor", () => {
       "Skizzles Container Lab descriptor is invalid",
     );
   });
-  test("bounds hanging commands and stderr", () => {
-    expect(doctorContainerLab(stubs("hang"), undefined, 50)).toMatchObject({
+  test("bounds hanging commands and stderr", async () => {
+    expect(
+      doctorContainerLab(stubs("hang"), undefined, 50, await workspace()),
+    ).toMatchObject({
       compatible: false,
       ready: false,
     });
-    expect(doctorContainerLab(stubs("stderr"))).toMatchObject({
+    expect(
+      doctorContainerLab(stubs("stderr"), undefined, 5000, await workspace()),
+    ).toMatchObject({
       compatible: false,
       ready: false,
     });
   });
-  test("derives and validates Skizzles bundled ownership paths", () => {
+  test("derives and validates Skizzles bundled ownership paths", async () => {
     const sourceRoot = resolve(import.meta.dir, "../../..");
     const paths = bundledContainerLabPaths(sourceRoot);
     expect(paths).toMatchObject({
@@ -136,7 +173,9 @@ describe("Container Lab doctor", () => {
         "packages/container-lab/install/com.openai.codex-container-lab-reaper.plist",
       ),
     });
-    expect(doctorBundledContainerLab(sourceRoot)).toMatchObject({
+    expect(
+      doctorBundledContainerLab(sourceRoot, undefined, 5000, await workspace()),
+    ).toMatchObject({
       installed: true,
       compatible: true,
       version: "configured-0.1.0-unverified",

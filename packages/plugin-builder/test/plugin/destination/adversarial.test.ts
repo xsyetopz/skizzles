@@ -2,14 +2,12 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   mkdir,
-  mkdtemp,
   readdir,
   readFile,
   rename,
   rm,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import { PackagingError } from "../../../src/plugin/api.ts";
@@ -18,13 +16,10 @@ import {
   transactionLockPath,
 } from "../../../src/plugin/destination/path.ts";
 import { replaceDirectoryTransaction } from "../../../src/plugin/destination/transaction.ts";
+import { createTestWorkspace } from "../fixture.ts";
 
-const roots: string[] = [];
-afterEach(async () => {
-  await Promise.all(
-    roots.splice(0).map((root) => rm(root, { recursive: true })),
-  );
-});
+const { cleanup, temporaryRoot: allocateTemporaryRoot } = createTestWorkspace();
+afterEach(cleanup);
 
 describe("plugin destination transaction adversarial recovery", () => {
   it("restores a destination replacement swapped after final validation", async () => {
@@ -222,9 +217,7 @@ describe("plugin destination transaction adversarial recovery", () => {
 });
 
 async function temporaryRoot(prefix: string): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), prefix));
-  roots.push(root);
-  return root;
+  return allocateTemporaryRoot(prefix.replace(/-$/u, ""));
 }
 
 async function writeTree(

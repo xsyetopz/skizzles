@@ -2,24 +2,18 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   mkdir,
-  mkdtemp,
   readdir,
   readFile,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { replaceDirectoryTransaction } from "../../../src/plugin/destination/transaction.ts";
+import { createTestWorkspace } from "../fixture.ts";
 
-const roots: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    roots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
-  );
-});
+const { cleanup, temporaryRoot: allocateTemporaryRoot } = createTestWorkspace();
+afterEach(cleanup);
 
 describe("plugin destination cleanup safety", () => {
   it("holds same-target exclusion through committed housekeeping", async () => {
@@ -145,9 +139,7 @@ describe("plugin destination cleanup safety", () => {
 });
 
 async function temporaryRoot(prefix: string): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), prefix));
-  roots.push(root);
-  return root;
+  return allocateTemporaryRoot(prefix.replace(/-$/u, ""));
 }
 
 async function seededDestination(parent: string): Promise<string> {

@@ -1,6 +1,10 @@
 import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { checkPrompt, PROMPT_LAYER_SOURCE_PATHS } from "@skizzles/prompt-layer";
+import {
+  checkPrompt,
+  PROMPT_LAYER_SOURCE_PATHS,
+  type PromptWorkspace,
+} from "@skizzles/prompt-layer";
 import {
   assertPolicyMatchesManifest,
   parseJsonObject,
@@ -33,9 +37,10 @@ import {
 
 export async function verifyCanonicalPromptLayer(
   sourceRoot: string,
+  workspace: PromptWorkspace,
 ): Promise<void> {
   try {
-    await checkPrompt(sourceRoot);
+    await checkPrompt(sourceRoot, { workspace });
   } catch {
     throw new PromptPolicyPackageError(
       "Canonical prompt-layer verification failed.",

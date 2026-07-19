@@ -1,3 +1,4 @@
+import type { PromptWorkspace } from "@skizzles/prompt-layer";
 import {
   assertContainedRegularFile,
   assertNonSymlinkDirectory,
@@ -15,16 +16,18 @@ export { PromptPolicyPackageError } from "./layout.ts";
 
 export async function validatePromptPolicySource(
   sourceRoot: string,
+  workspace: PromptWorkspace,
 ): Promise<void> {
-  await verifyCanonicalPromptLayer(sourceRoot);
+  await verifyCanonicalPromptLayer(sourceRoot, workspace);
   await validatePromptPolicyArtifacts(sourceRoot, sourceRoot, "source");
 }
 
 export async function validatePackagedPromptPolicy(
   sourceRoot: string,
   packageRoot: string,
+  workspace: PromptWorkspace,
 ): Promise<void> {
-  await verifyCanonicalPromptLayer(sourceRoot);
+  await verifyCanonicalPromptLayer(sourceRoot, workspace);
   await validatePromptPolicyArtifacts(sourceRoot, packageRoot, "packaged");
   await validatePackagedPromptSurface(packageRoot);
 }
@@ -32,8 +35,9 @@ export async function validatePackagedPromptPolicy(
 export async function stagePromptPolicyPackage(
   sourceRoot: string,
   packageRoot: string,
+  workspace: PromptWorkspace,
 ): Promise<void> {
-  await validatePromptPolicySource(sourceRoot);
+  await validatePromptPolicySource(sourceRoot, workspace);
   await assertNonSymlinkDirectory(packageRoot, "prompt-policy package root");
 
   for (const [sourcePath, destinationPath] of SOURCE_TO_PACKAGE_FILES) {

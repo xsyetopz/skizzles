@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { PromptWorkspace } from "@skizzles/prompt-layer";
 import {
   ContainerLabPackageError,
   validateContainerLabDescriptor,
@@ -24,6 +25,7 @@ export async function validateGeneratedPlugin(
   repoRoot: string,
   pluginRoot: string,
   marketplacePath: string,
+  workspace: PromptWorkspace,
 ): Promise<void> {
   const manifestPath = join(pluginRoot, ".codex-plugin", "plugin.json");
   const manifest = await readJsonObject(manifestPath, "plugin manifest");
@@ -64,7 +66,7 @@ export async function validateGeneratedPlugin(
     validateContainerLabDescriptor(repoRoot, pluginRoot),
   );
   await asPackagingError(() =>
-    validatePackagedPromptPolicy(repoRoot, pluginRoot),
+    validatePackagedPromptPolicy(repoRoot, pluginRoot, workspace),
   );
   await rejectForbiddenDistributableContent(pluginRoot);
 }

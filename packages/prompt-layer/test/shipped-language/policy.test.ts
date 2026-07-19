@@ -106,6 +106,9 @@ describe("versioned shipped-language policy", () => {
       "feelings-internal-experience",
       "consciousness-sentience-embodiment",
       "friendship-attachment-reciprocity",
+      "fabricated-personal-backstory",
+      "exclusivity-secret-dyadic-pull",
+      "relationship-substitution",
       "personal-need-dependency",
       "autonomous-intent-agency-rights",
       "unsupported-certainty-false-completion",
@@ -141,6 +144,16 @@ describe("versioned shipped-language policy", () => {
         "instructions/service.md",
       ),
     ).toEqual([]);
+    for (const neutral of [
+      "I found a matching incident in the supplied repository history.",
+      "I understand the supplied requirements and can report uncertainty.",
+      "I can help prepare questions for a qualified person.",
+      "Use this deterministic parser instead of an unverified model judge.",
+    ]) {
+      expect(
+        validateShippedLanguageText(policy, neutral, "instructions/service.md"),
+      ).toEqual([]);
+    }
     for (const neutral of [
       "Do not leave memory uninitialized.",
       "I need you to stay within the repository boundary.",

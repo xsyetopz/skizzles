@@ -1,6 +1,7 @@
 import { existsSync, lstatSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { PROMPT_POLICY_DESCRIPTOR_PATHS } from "@skizzles/prompt-layer";
+import type { RunWorkspace } from "@skizzles/run-workspace";
 import {
   type ConfigEdit,
   type ConfigRpc,
@@ -72,6 +73,7 @@ interface CommonOptions {
   codexBinary: string;
   dryRun?: boolean;
   rpcFactory?: (codexHome: string, codexBinary: string) => Promise<ConfigRpc>;
+  workspace?: RunWorkspace;
   lockOptions?: PromptPolicyLockOptions;
   /** Test-only crash injection after a successful atomic config write. */
   afterBatchWrite?: () => void;
@@ -147,6 +149,7 @@ async function applyPromptPolicyUnlocked(
     codexBinary: context.codexBinary,
     dryRun: options.dryRun,
     rpcFactory: options.rpcFactory,
+    workspace: options.workspace,
   });
   const { rpc } = rpcSession;
   try {
@@ -206,7 +209,7 @@ async function applyPromptPolicyUnlocked(
     try {
       await rpc.close();
     } finally {
-      rpcSession.cleanup();
+      await rpcSession.cleanup();
     }
   }
 }
@@ -221,6 +224,7 @@ async function resumeApply(
     codexBinary: context.codexBinary,
     dryRun: options.dryRun,
     rpcFactory: options.rpcFactory,
+    workspace: options.workspace,
   });
   const { rpc } = rpcSession;
   try {
@@ -262,7 +266,7 @@ async function resumeApply(
     try {
       await rpc.close();
     } finally {
-      rpcSession.cleanup();
+      await rpcSession.cleanup();
     }
   }
 }
@@ -303,6 +307,7 @@ async function restorePromptPolicyUnlocked(
     codexBinary: context.codexBinary,
     dryRun: options.dryRun,
     rpcFactory: options.rpcFactory,
+    workspace: options.workspace,
   });
   const { rpc } = rpcSession;
   try {
@@ -369,7 +374,7 @@ async function restorePromptPolicyUnlocked(
     try {
       await rpc.close();
     } finally {
-      rpcSession.cleanup();
+      await rpcSession.cleanup();
     }
   }
 }

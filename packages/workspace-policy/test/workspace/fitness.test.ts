@@ -170,6 +170,45 @@ describe("mandatory workspace architecture fitness", () => {
     ).toHaveLength(2);
   });
 
+  it("rejects disposable temporary-root ownership in production source", async () => {
+    const root = await fixture();
+    await writeFile(
+      join(root, "packages/example/src/index.ts"),
+      [
+        'import { mkdtemp as allocate } from "node:fs/promises";',
+        'import { tmpdir as temporaryDirectory } from "node:os";',
+        "void allocate;",
+        "void temporaryDirectory;",
+        'export const root = "/private/tmp/example-run";',
+        "",
+      ].join("\n"),
+    );
+
+    const findings = (await validateWorkspace(root)).filter(
+      ({ code }) => code === "disposable-temp-ownership",
+    );
+    expect(findings).toEqual([
+      {
+        code: "disposable-temp-ownership",
+        path: "packages/example/src/index.ts",
+        message:
+          "hard-coded-host-temp is disposable temporary-root authority owned by @skizzles/run-workspace",
+      },
+      {
+        code: "disposable-temp-ownership",
+        path: "packages/example/src/index.ts",
+        message:
+          "mkdtemp is disposable temporary-root authority owned by @skizzles/run-workspace",
+      },
+      {
+        code: "disposable-temp-ownership",
+        path: "packages/example/src/index.ts",
+        message:
+          "tmpdir is disposable temporary-root authority owned by @skizzles/run-workspace",
+      },
+    ]);
+  });
+
   it("requires responsibility records above 650 lines and errors above 800", async () => {
     const root = await fixture();
     const packageRoot = join(root, "packages/example");
