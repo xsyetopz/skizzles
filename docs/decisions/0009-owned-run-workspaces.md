@@ -51,8 +51,8 @@ exited. The manager never infers tree ownership from a PID.
 
 Creation uses the canonical platform temporary directory, a private managed parent,
 an unpredictable root, and an exclusive owner-only marker. The strict marker records
-the schema/version, run identifier, root name and filesystem identity, creation/update
-time, owner PID and process-start identity, lifecycle state, and optional preservation
+the schema/version, run identifier, root name and filesystem identity, creation time,
+owner PID and process-start identity, lifecycle state, and optional preservation
 or failure reason. Unsupported, malformed, oversized, symlinked, or identity-mismatched
 markers are not deletion authority.
 

@@ -93,6 +93,15 @@
         "typescript": "^7.0.2",
       },
     },
+    "packages/run-workspace": {
+      "name": "@skizzles/run-workspace",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/usage-analyzer": {
       "name": "@skizzles/usage-analyzer",
       "version": "0.1.0",
@@ -158,6 +167,8 @@
     "@skizzles/plugin-builder": ["@skizzles/plugin-builder@workspace:packages/plugin-builder"],
 
     "@skizzles/prompt-layer": ["@skizzles/prompt-layer@workspace:packages/prompt-layer"],
+
+    "@skizzles/run-workspace": ["@skizzles/run-workspace@workspace:packages/run-workspace"],
 
     "@skizzles/usage-analyzer": ["@skizzles/usage-analyzer@workspace:packages/usage-analyzer"],
 
