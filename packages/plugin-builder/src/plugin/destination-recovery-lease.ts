@@ -64,7 +64,7 @@ async function acquireRecoveryLease(
     await Promise.resolve(
       checkpoint?.("recovery-helper-ready", String(helper.pid)),
     );
-    const owner = ownerForProcess(helper.pid);
+    const owner = await ownerForProcess(helper.pid);
     records = await inspectRecoveryHighWaters(target);
     latest = records.at(-1);
     if (latest !== undefined && !(await claimRetirementConfirmed(latest))) {

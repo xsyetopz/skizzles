@@ -67,10 +67,27 @@ async function recoverRecoveryHighWaterTemps(
     if (claim === undefined || claim.owner.token !== token) {
       throw lockedDestinationError();
     }
-    if (await claimRetirementConfirmed(claim)) {
+    const canonical = await readClaim(
+      recoveryHighWaterPath(target, parsedGeneration),
+    );
+    if (canonical !== undefined) {
+      if (
+        canonical.owner.token !== token ||
+        canonical.identity.dev !== claim.identity.dev ||
+        canonical.identity.ino !== claim.identity.ino ||
+        canonical.links !== 2n ||
+        claim.links !== 2n ||
+        !(await claimRetirementConfirmed(canonical))
+      ) {
+        throw lockedDestinationError();
+      }
       await removeClaim(claim);
-      await removeRetirementArtifacts(claim);
+      continue;
     }
+    if (!(await claimRetirementConfirmed(claim)))
+      throw lockedDestinationError();
+    await removeClaim(claim);
+    await removeRetirementArtifacts(claim);
   }
 }
 

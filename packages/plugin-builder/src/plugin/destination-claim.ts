@@ -40,6 +40,7 @@ const CLAIM_MODE = 0o600;
 
 interface ClaimSnapshot {
   identity: FileIdentity;
+  links: bigint;
   owner: LockOwner;
   path: string;
 }
@@ -88,7 +89,7 @@ async function acquireClaim(
   let temporary: string | undefined;
   try {
     await checkpoint?.("claim-helper-ready", String(helper.pid));
-    const owner = ownerForProcess(helper.pid);
+    const owner = await ownerForProcess(helper.pid);
     const canonical = transactionClaimPath(target);
     temporary = join(
       target.parent,
@@ -151,7 +152,7 @@ async function readClaim(path: string): Promise<ClaimSnapshot | undefined> {
       throw new PackagingError("Plugin staging claim is unsafe.");
     }
     const owner = parseOwner(parsePrivateJson(await handle.readFile("utf8")));
-    return { path, identity: identity(metadata), owner };
+    return { path, identity: identity(metadata), links: metadata.nlink, owner };
   } finally {
     await handle.close();
   }

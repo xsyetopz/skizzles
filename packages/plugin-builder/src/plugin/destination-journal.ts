@@ -7,6 +7,8 @@ const JOURNAL_FILE = "journal.json";
 const PROTOCOL_VERSION = 2;
 const PRIVATE_JSON_LIMIT = 16_384;
 const PRIVATE_JSON_DEPTH_LIMIT = 32;
+const OWNER_IDENTIFICATION_RETRY_MS = 5;
+const OWNER_IDENTIFICATION_TIMEOUT_MS = 500;
 const DECIMAL_IDENTITY_PATTERN = /^(?:0|[1-9][0-9]*)$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -213,20 +215,30 @@ async function ownerRemainsActive(
   return ownerIsActive(owner);
 }
 
-function ownerForProcess(pid: number): LockOwner {
-  const identity = processIdentity(pid);
-  const controller = processIdentity(process.pid);
-  if (identity.state !== "alive" || controller.state !== "alive") {
-    throw new PackagingError("Plugin staging could not identify lock owner.");
+async function ownerForProcess(pid: number): Promise<LockOwner> {
+  const deadline = performance.now() + OWNER_IDENTIFICATION_TIMEOUT_MS;
+  while (true) {
+    const identity = processIdentity(pid);
+    const controller = processIdentity(process.pid);
+    if (identity.state === "alive" && controller.state === "alive") {
+      return {
+        controllerPid: process.pid,
+        controllerStartIdentity: controller.value,
+        version: PROTOCOL_VERSION,
+        pid,
+        processStartIdentity: identity.value,
+        token: randomUUID(),
+      };
+    }
+    if (
+      identity.state === "dead" ||
+      controller.state === "dead" ||
+      performance.now() >= deadline
+    ) {
+      throw new PackagingError("Plugin staging could not identify lock owner.");
+    }
+    await Bun.sleep(OWNER_IDENTIFICATION_RETRY_MS);
   }
-  return {
-    controllerPid: process.pid,
-    controllerStartIdentity: controller.value,
-    version: PROTOCOL_VERSION,
-    pid,
-    processStartIdentity: identity.value,
-    token: randomUUID(),
-  };
 }
 
 function ownerControllerIsDead(owner: LockOwner): boolean {
