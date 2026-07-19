@@ -11,6 +11,7 @@ export interface LabComposeContext {
 }
 
 const labelPrefix = "io.openai.codex-container-lab";
+export const emptyComposeEnvironmentFile = "/dev/null";
 
 export function generateBaseCompose(config: LabConfig): string | undefined {
   if (config.mode.kind === "compose") {
@@ -142,8 +143,10 @@ function labelTopLevelResources(
 
 export interface ComposeCommandOptions {
   projectName: string;
-  overrideFile: string;
+  overrideFile?: string;
   baseFile?: string;
+  sourceFiles?: readonly string[];
+  environmentFile?: string;
 }
 
 /** Arguments following the docker executable. File ordering is semantically significant. */
@@ -152,11 +155,12 @@ export function composeCommandArgs(
   options: ComposeCommandOptions,
 ): string[] {
   const sourceFiles =
-    config.mode.kind === "compose"
+    options.sourceFiles ??
+    (config.mode.kind === "compose"
       ? config.mode.files
       : options.baseFile
         ? [options.baseFile]
-        : [];
+        : []);
   if (sourceFiles.length === 0) {
     throw new Error(
       "an internal base Compose file is required for image and dockerfile modes",
@@ -164,13 +168,15 @@ export function composeCommandArgs(
   }
   return [
     "compose",
+    ...(options.environmentFile === undefined
+      ? []
+      : ["--env-file", options.environmentFile]),
     "--project-directory",
     config.repoRoot,
     "--project-name",
     options.projectName,
     ...sourceFiles.flatMap((file) => ["-f", file]),
-    "-f",
-    options.overrideFile,
+    ...(options.overrideFile === undefined ? [] : ["-f", options.overrideFile]),
   ];
 }
 

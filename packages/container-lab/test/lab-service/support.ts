@@ -280,7 +280,10 @@ async function durableFixture(
       join(sourceRoot, ".codex-container-lab.yaml"),
       "image: { name: node:24, service: dev }\n",
     );
-    await writeFile(join(runtimeRoot, "base.compose.yaml"), "services: {}\n");
+    await writeFile(
+      join(runtimeRoot, "source.compose.json"),
+      '{"services":{"dev":{}}}',
+    );
     await writeFile(
       join(runtimeRoot, "override.compose.yaml"),
       "services: {}\n",
@@ -307,6 +310,7 @@ async function durableFixture(
     updatedAt: new Date(0).toISOString(),
     endpoints: [],
     findings: [],
+    composeEnvironment: [],
     secretEnvironment: [],
     ...(state === "ready"
       ? { runtime: readyRuntime(sourceRoot, runtimeRoot) }
@@ -362,7 +366,7 @@ export function readyRuntime(
   sourceRoot: string,
   runtimeRoot: string,
 ): NonNullable<LabMetadata["runtime"]> {
-  const baseFile = join(runtimeRoot, "base.compose.yaml");
+  const sourceFile = join(runtimeRoot, "source.compose.json");
   const overrideFile = join(runtimeRoot, "override.compose.yaml");
   return {
     config: {
@@ -372,20 +376,23 @@ export function readyRuntime(
       runtime: { workspace: "/workspace", shell: ["/bin/sh", "-lc"] },
       ports: [],
       forwardEnvironment: [],
+      composeEnvironment: [],
       secretEnvironment: [],
     },
     composeArgs: [
       "compose",
+      "--env-file",
+      "/dev/null",
       "--project-directory",
       sourceRoot,
       "--project-name",
       "ccl-durable",
       "-f",
-      baseFile,
+      sourceFile,
       "-f",
       overrideFile,
     ],
-    baseFile,
+    sourceFile,
     overrideFile,
     findings: [],
   };

@@ -49,6 +49,7 @@ export function fixtureLab(root: string, owner: string): LabMetadata {
     updatedAt: new Date(0).toISOString(),
     endpoints: [],
     findings: [],
+    composeEnvironment: [],
     secretEnvironment: [],
   };
 }
@@ -89,9 +90,9 @@ async function oversizedPreviewFixture(
     .update(await realpath(commonGit))
     .digest("hex")
     .slice(0, 12);
-  const baseFile = join(lab.runtimeRoot, "base.compose.yaml");
+  const sourceFile = join(lab.runtimeRoot, "source.compose.json");
   const overrideFile = join(lab.runtimeRoot, "override.compose.yaml");
-  await writeFile(baseFile, "services: {}\n");
+  await writeFile(sourceFile, '{"services":{"dev":{}}}');
   await writeFile(overrideFile, "services: {}\n");
   lab.runtime = {
     config: {
@@ -101,20 +102,23 @@ async function oversizedPreviewFixture(
       runtime: { workspace: "/workspace", shell: ["/bin/sh", "-lc"] },
       ports: [],
       forwardEnvironment: [],
+      composeEnvironment: [],
       secretEnvironment: [],
     },
     composeArgs: [
       "compose",
+      "--env-file",
+      "/dev/null",
       "--project-directory",
       lab.sourceRoot,
       "--project-name",
       lab.composeProject,
       "-f",
-      baseFile,
+      sourceFile,
       "-f",
       overrideFile,
     ],
-    baseFile,
+    sourceFile,
     overrideFile,
     findings: [],
   };
@@ -141,12 +145,12 @@ async function attachedFixture(trackTemporaryPath: (root: string) => string) {
   const lab = fixtureLab(root, owner);
   lab.state = "ready";
   lab.modeKind = "image";
-  const baseFile = join(lab.runtimeRoot, "base.compose.yaml");
+  const sourceFile = join(lab.runtimeRoot, "source.compose.json");
   const overrideFile = join(lab.runtimeRoot, "override.compose.yaml");
   await mkdir(lab.workspace, { recursive: true });
   await mkdir(lab.sourceRoot, { recursive: true });
   await writeFile(lab.manifestPath, "image: { name: node:24, service: dev }\n");
-  await writeFile(baseFile, "services: {}\n");
+  await writeFile(sourceFile, '{"services":{"dev":{}}}');
   await writeFile(overrideFile, "services: {}\n");
   lab.runtime = {
     config: {
@@ -156,20 +160,23 @@ async function attachedFixture(trackTemporaryPath: (root: string) => string) {
       runtime: { workspace: "/workspace", shell: ["/bin/sh", "-lc"] },
       ports: [],
       forwardEnvironment: [],
+      composeEnvironment: [],
       secretEnvironment: [],
     },
     composeArgs: [
       "compose",
+      "--env-file",
+      "/dev/null",
       "--project-directory",
       lab.sourceRoot,
       "--project-name",
       lab.composeProject,
       "-f",
-      baseFile,
+      sourceFile,
       "-f",
       overrideFile,
     ],
-    baseFile,
+    sourceFile,
     overrideFile,
     findings: [],
   };
@@ -185,7 +192,7 @@ async function attachedFixture(trackTemporaryPath: (root: string) => string) {
   const descendantIdentityPath = `${descendantPath}.identity.json`;
   await writeFile(
     dockerPath,
-    `#!${process.execPath}\nconst args = process.argv.slice(2);\nconst joined = args.join(" ");\nconst pidPath = process.env.FAKE_PID_FILE;\nconst descendantPath = process.env.FAKE_DESC_FILE;\nconst token = process.env.FAKE_TEST_TOKEN;\nconst identity = (pid) => {\n  const result = Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(pid)]);\n  const processGroup = Number(result.stdout.toString().trim());\n  if (!Number.isSafeInteger(processGroup) || processGroup <= 0) throw new Error("invalid process group");\n  return JSON.stringify({ version: 1, pid, processGroup, token });\n};\nif (joined.includes("termination_result()")) {\n  let pid; try { const text = await Bun.file(pidPath).text(); if (!/^[1-9][0-9]*$/.test(text)) throw new Error("invalid PID"); pid = Number(text); if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("invalid PID"); } catch { console.log("codex-container-lab-termination:unavailable"); process.exit(0); }\n  const signal = joined.includes("kill -INT") ? "SIGINT" : joined.includes("kill -TERM") ? "SIGTERM" : "SIGKILL";\n  try { process.kill(-pid, signal); console.log("codex-container-lab-termination:signaled"); } catch { console.log("codex-container-lab-termination:absent"); }\n  process.exit(0);\n}\nconsole.log("early-output"); console.error("early-error");\nif (process.env.FAKE_EXIT) process.exit(Number(process.env.FAKE_EXIT));\nconst running = Bun.spawn(["/bin/sh", "-c", "trap 'exit 130' INT; trap 'exit 143' TERM; (trap '' INT TERM; while :; do sleep 1; done) & printf '%s\\n' $!; while :; do sleep 1; done", token], { detached: true, stdin: "ignore", stdout: "pipe", stderr: "inherit" });\nconst reader = running.stdout.getReader();\nconst published = await reader.read();\nconst descendant = Number(new TextDecoder().decode(published.value).trim());\nif (!Number.isSafeInteger(descendant) || descendant <= 0) throw new Error("invalid descendant PID");\nawait Bun.write(${JSON.stringify(leaderIdentityPath)}, identity(running.pid));\nawait Bun.write(${JSON.stringify(descendantIdentityPath)}, identity(descendant));\nawait Bun.write(pidPath, String(running.pid));\nawait Bun.write(descendantPath, String(descendant));\nconst code = await running.exited;\ntry { process.kill(-running.pid, "SIGTERM"); } catch {}\nfor (let i = 0; i < 100; i++) {\n  try { process.kill(-running.pid, 0); } catch { break; }\n  await Promise.resolve();\n}\ntry { process.kill(-running.pid, 0); process.kill(-running.pid, "SIGKILL"); } catch {}\nprocess.exit(code);\n`,
+    `#!${process.execPath}\nconst args = process.argv.slice(2);\nconst joined = args.join(" ");\nconst pidPath = ${JSON.stringify(pidPath)};\nconst descendantPath = ${JSON.stringify(descendantPath)};\nconst token = ${JSON.stringify(testToken)};\nconst identity = (pid) => {\n  const result = Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(pid)]);\n  const processGroup = Number(result.stdout.toString().trim());\n  if (!Number.isSafeInteger(processGroup) || processGroup <= 0) throw new Error("invalid process group");\n  return JSON.stringify({ version: 1, pid, processGroup, token });\n};\nif (joined.includes("termination_result()")) {\n  let pid; try { const text = await Bun.file(pidPath).text(); if (!/^[1-9][0-9]*$/.test(text)) throw new Error("invalid PID"); pid = Number(text); if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("invalid PID"); } catch { console.log("codex-container-lab-termination:unavailable"); process.exit(0); }\n  const signal = joined.includes("kill -INT") ? "SIGINT" : joined.includes("kill -TERM") ? "SIGTERM" : "SIGKILL";\n  try { process.kill(-pid, signal); console.log("codex-container-lab-termination:signaled"); } catch { console.log("codex-container-lab-termination:absent"); }\n  process.exit(0);\n}\nconsole.log("early-output"); console.error("early-error");\nif (process.env.BUILDKIT_PROGRESS?.startsWith("fixture-exit:")) process.exit(Number(process.env.BUILDKIT_PROGRESS.slice(13)));\nconst running = Bun.spawn(["/bin/sh", "-c", "trap 'exit 130' INT; trap 'exit 143' TERM; (trap '' INT TERM; while :; do sleep 1; done) & printf '%s\\n' $!; while :; do sleep 1; done", token], { detached: true, stdin: "ignore", stdout: "pipe", stderr: "inherit" });\nconst reader = running.stdout.getReader();\nconst published = await reader.read();\nconst descendant = Number(new TextDecoder().decode(published.value).trim());\nif (!Number.isSafeInteger(descendant) || descendant <= 0) throw new Error("invalid descendant PID");\nawait Bun.write(${JSON.stringify(leaderIdentityPath)}, identity(running.pid));\nawait Bun.write(${JSON.stringify(descendantIdentityPath)}, identity(descendant));\nawait Bun.write(pidPath, String(running.pid));\nawait Bun.write(descendantPath, String(descendant));\nconst code = await running.exited;\ntry { process.kill(-running.pid, "SIGTERM"); } catch {}\nfor (let i = 0; i < 100; i++) {\n  try { process.kill(-running.pid, 0); } catch { break; }\n  await Promise.resolve();\n}\ntry { process.kill(-running.pid, 0); process.kill(-running.pid, "SIGKILL"); } catch {}\nprocess.exit(code);\n`,
   );
   await chmod(dockerPath, 0o755);
   return {
@@ -235,9 +242,9 @@ function spawnRun(
         ...process.env,
         ...extra,
         PATH: `${fixture.bin}:${process.env["PATH"] ?? ""}`,
-        FAKE_PID_FILE: fixture.pidPath,
-        FAKE_DESC_FILE: fixture.descendantPath,
-        FAKE_TEST_TOKEN: fixture.testToken,
+        ...(extra["FAKE_EXIT"] === undefined
+          ? {}
+          : { BUILDKIT_PROGRESS: `fixture-exit:${extra["FAKE_EXIT"]}` }),
       },
     },
   );

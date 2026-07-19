@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstat, mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
+import process from "node:process";
 import { safeStateName } from "../files.ts";
 import { compareManifests } from "./comparison.ts";
 import type {
@@ -9,6 +10,13 @@ import type {
   StoredPreview,
   SyncJournal,
 } from "./contract.ts";
+import {
+  assertDirectoryIdentities,
+  captureDeleteParentDirectories,
+  createPlannedDirectories,
+  planCreatedDirectories,
+  retireCreatedDirectories,
+} from "./directories.ts";
 import { syncDirectory, writeDurableJson } from "./durability.ts";
 import {
   buildGitManifest,
@@ -19,19 +27,15 @@ import {
   assertPreviewBinding,
   canonicalPreviewRoots,
   previewBinding,
+  verifyFreshPreview,
 } from "./preview.ts";
 import { rollbackJournalSafely } from "./recovery.ts";
 import {
   applyChange,
-  assertDirectoryIdentities,
   assertExpectedEntry,
   backupTargets,
-  captureDeleteParentDirectories,
-  cleanupCreatedDirectories,
   cleanupPublications,
-  createPlannedDirectories,
   planBackupRecords,
-  planCreatedDirectories,
   stageSources,
   validateBackupArtifacts,
 } from "./staging.ts";
@@ -43,6 +47,7 @@ import {
 import { parseBaselineFile, parseStoredPreview } from "./validation/preview.ts";
 
 interface ValidatedSync {
+  environment: NodeJS.ProcessEnv;
   sourceRoot: string;
   targetRoot: string;
   source: GitManifest;
@@ -84,7 +89,8 @@ export async function applySyncWithHooks(
       "Unknown or already-used synchronization preview token",
     ),
   );
-  const validated = await validatePreview(options, preview, state);
+  const environment = options.environment ?? process.env;
+  const validated = await validatePreview(options, preview, state, environment);
   await claimPreview(state, previewPath, options.token);
   const transaction = await prepareTransaction(state, preview, validated);
   return await executeTransaction(options, preview, transaction, hooks);
@@ -94,6 +100,7 @@ async function validatePreview(
   options: ApplySyncOptions,
   preview: StoredPreview,
   state: SyncStatePaths,
+  environment: NodeJS.ProcessEnv,
 ): Promise<ValidatedSync> {
   const { sourceRoot, targetRoot } = await canonicalPreviewRoots(options);
   assertPreviewBinding(preview, options, sourceRoot, targetRoot);
@@ -108,8 +115,8 @@ async function validatePreview(
   }
 
   const [source, target, baselineValue] = await Promise.all([
-    buildGitManifest(sourceRoot),
-    buildGitManifest(targetRoot),
+    buildGitManifest(sourceRoot, environment),
+    buildGitManifest(targetRoot, environment),
     readRequiredUnknownJson(
       state.baseline,
       "Synchronization baseline is missing; initialize it when the lab is created",
@@ -153,7 +160,7 @@ async function validatePreview(
   if (idle === false) {
     throw new Error("Synchronization apply requires an idle lab");
   }
-  return { sourceRoot, targetRoot, source };
+  return { environment, sourceRoot, targetRoot, source };
 }
 
 async function claimPreview(
@@ -252,13 +259,14 @@ async function executeTransaction(
     backupDir,
     journal,
     journalPath,
+    environment,
     sourceRoot,
     stagedRoot,
     targetRoot,
   } = transaction;
   let appliedJournalPublished = false;
   try {
-    await verifyFreshPreview(preview, sourceRoot, targetRoot);
+    await verifyFreshPreview(preview, sourceRoot, targetRoot, environment);
     const idleImmediatelyBeforeMutation = await options.idleGuard();
     if (idleImmediatelyBeforeMutation === false) {
       throw new Error("Synchronization apply requires an idle lab");
@@ -342,7 +350,7 @@ async function executeTransaction(
         ),
       );
       if (journal.createdDirectories.length > 0) {
-        await cleanupCreatedDirectories(targetRoot, journal.createdDirectories);
+        await retireCreatedDirectories(targetRoot, journal.createdDirectories);
       }
       journal.createdDirectories = [];
       journal.state = "rolledBack";
@@ -412,23 +420,6 @@ function assertPreviewSemantics(
     JSON.stringify(expectedTargets) !== JSON.stringify(preview.expectedTargets)
   ) {
     throw new Error("Synchronization preview semantic payload is invalid");
-  }
-}
-
-async function verifyFreshPreview(
-  preview: StoredPreview,
-  sourceRoot: string,
-  targetRoot: string,
-): Promise<void> {
-  const [freshSource, freshTarget] = await Promise.all([
-    buildGitManifest(sourceRoot),
-    buildGitManifest(targetRoot),
-  ]);
-  if (
-    freshSource.digest !== preview.sourceDigest ||
-    freshTarget.digest !== preview.targetDigest
-  ) {
-    throw new Error("Synchronization preview became stale before mutation");
   }
 }
 

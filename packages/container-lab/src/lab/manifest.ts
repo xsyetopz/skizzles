@@ -1,11 +1,11 @@
 import { posix } from "node:path";
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
 import { parse as parseYaml } from "yaml";
+import { parseManifestEnvironmentLists } from "./environment.ts";
 
 export const manifestName = ".codex-container-lab.yaml";
 
 const serviceNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
-const environmentNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const uriSchemePattern = /^[a-z][a-z0-9+.-]*$/;
 
 type IssuePath = Array<string | number>;
@@ -48,6 +48,7 @@ export interface ParsedManifest {
   runtime: RuntimeConfig;
   ports: Record<string, PortManifest>;
   environment: string[];
+  compose_environment: string[];
   secret_environment: string[];
 }
 
@@ -161,12 +162,6 @@ function parseRelativePath(value: unknown): string | undefined {
   }
   const parsed = value.trim();
   return parsed.length > 0 ? parsed : undefined;
-}
-
-function parseEnvironmentName(value: unknown): string | undefined {
-  return typeof value === "string" && environmentNamePattern.test(value)
-    ? value
-    : undefined;
 }
 
 function parseShellArgument(value: unknown): string | undefined {
@@ -436,24 +431,6 @@ function parsePorts(
   return parsed;
 }
 
-function parseEnvironment(
-  value: unknown,
-  path: IssuePath,
-  issues: ValidationIssue[],
-): string[] {
-  if (value === undefined) {
-    return [];
-  }
-  return parseStringArray(
-    value,
-    path,
-    issues,
-    parseEnvironmentName,
-    "must be an environment variable name",
-    0,
-  );
-}
-
 function validateManifest(document: unknown): ParsedManifest {
   const issues: ValidationIssue[] = [];
   const manifest = asObject(document, [], issues);
@@ -471,6 +448,7 @@ function validateManifest(document: unknown): ParsedManifest {
       "runtime",
       "ports",
       "environment",
+      "compose_environment",
       "secret_environment",
     ],
     [],
@@ -481,9 +459,17 @@ function validateManifest(document: unknown): ParsedManifest {
   const runtime = parseRuntime(manifest["runtime"], ["runtime"], issues);
   validateRuntimePaths(runtime, issues);
   const ports = parsePorts(manifest["ports"], ["ports"], issues);
-  const { environment, secretEnvironment } = parseEnvironmentLists(
-    manifest,
-    issues,
+  const {
+    composeEnvironment,
+    environment,
+    secretEnvironment,
+    issues: environmentIssues,
+  } = parseManifestEnvironmentLists(manifest);
+  issues.push(
+    ...environmentIssues.map((issue) => ({
+      path: issue.path,
+      message: issue.message,
+    })),
   );
   validateUniquePortTargets(ports, issues);
 
@@ -497,6 +483,7 @@ function validateManifest(document: unknown): ParsedManifest {
     runtime,
     ports,
     environment,
+    compose_environment: composeEnvironment,
     secret_environment: secretEnvironment,
   };
 }
@@ -553,47 +540,6 @@ function validateRuntimePaths(
       "first argv item must be a normalized absolute executable path",
     );
   }
-}
-
-function parseEnvironmentLists(
-  manifest: Record<string, unknown>,
-  issues: ValidationIssue[],
-): { environment: string[]; secretEnvironment: string[] } {
-  const environment = parseEnvironment(
-    manifest["environment"],
-    ["environment"],
-    issues,
-  );
-  if (new Set(environment).size !== environment.length) {
-    addIssue(
-      issues,
-      ["environment"],
-      "environment forwarding names must be unique",
-    );
-  }
-  const secretEnvironment = parseEnvironment(
-    manifest["secret_environment"],
-    ["secret_environment"],
-    issues,
-  );
-  if (new Set(secretEnvironment).size !== secretEnvironment.length) {
-    addIssue(
-      issues,
-      ["secret_environment"],
-      "secret environment names must be unique",
-    );
-  }
-  const overlappingEnvironment = environment.filter((name) =>
-    secretEnvironment.includes(name),
-  );
-  if (overlappingEnvironment.length > 0) {
-    addIssue(
-      issues,
-      ["secret_environment"],
-      `must not overlap environment: ${overlappingEnvironment.join(", ")}`,
-    );
-  }
-  return { environment, secretEnvironment };
 }
 
 function validateUniquePortTargets(

@@ -35,6 +35,7 @@ ports:
     service: api
     target: 5353
 environment: [TERM, DEBUG]
+compose_environment: [PROJECT_NAME]
 secret_environment: [REGISTRY_TOKEN]
 `,
       root,
@@ -54,6 +55,7 @@ secret_environment: [REGISTRY_TOKEN]
       { name: "dns", service: "api", target: 5353 },
     ]);
     expect(config.forwardEnvironment).toEqual(["TERM", "DEBUG"]);
+    expect(config.composeEnvironment).toEqual(["PROJECT_NAME"]);
     expect(config.secretEnvironment).toEqual(["REGISTRY_TOKEN"]);
   });
 
@@ -212,6 +214,15 @@ secret_environment: [TOKEN, TOKEN]
       parseLabConfig(
         `
 image: { name: node:24, service: dev }
+compose_environment: [PROJECT, PROJECT]
+`,
+        root,
+      ),
+    ).toThrow("Compose environment names must be unique");
+    expect(() =>
+      parseLabConfig(
+        `
+image: { name: node:24, service: dev }
 secret_environment: [BAD-NAME]
 `,
         root,
@@ -227,6 +238,42 @@ secret_environment: [TOKEN]
         root,
       ),
     ).toThrow("must not overlap environment: TOKEN");
+    expect(() =>
+      parseLabConfig(
+        `
+image: { name: node:24, service: dev }
+compose_environment: [TOKEN]
+secret_environment: [TOKEN]
+`,
+        root,
+      ),
+    ).toThrow("must not overlap compose_environment: TOKEN");
+    for (const field of [
+      "environment",
+      "compose_environment",
+      "secret_environment",
+    ]) {
+      expect(() =>
+        parseLabConfig(
+          `image: { name: node:24, service: dev }\n${field}: [COMPOSE_PROJECT_NAME]\n`,
+          root,
+        ),
+      ).toThrow("must not use the reserved COMPOSE_ prefix");
+    }
+    expect(() =>
+      parseLabConfig(
+        "image: { name: node:24, service: dev }\nsecret_environment: [HOME]\n",
+        root,
+      ),
+    ).toThrow("must not overlap fixed Docker client environment: HOME");
+    expect(() =>
+      parseLabConfig(
+        `image: { name: node:24, service: dev }
+compose_environment: [${Array.from({ length: 65 }, (_, index) => `VALUE_${index}`).join(", ")}]
+`,
+        root,
+      ),
+    ).toThrow("compose_environment: must contain at most 64 items");
     expect(() =>
       parseLabConfig(
         `
@@ -296,6 +343,25 @@ ports:
     );
     await expect(loadLabConfig(repository)).rejects.toThrow(
       "resolves outside repository",
+    );
+  });
+
+  test("rejects an implicit project .env interpolation source", async () => {
+    const repository = await mkdtemp(join(tmpdir(), "container-lab-dotenv-"));
+    temporaryRoots.push(repository);
+    await Bun.write(
+      join(repository, ".codex-container-lab.yaml"),
+      "compose: { files: [compose.yaml], command_service: app }\n",
+    );
+    await Bun.write(
+      join(repository, "compose.yaml"),
+      "services: { app: { image: node:24 } }\n",
+    );
+    // biome-ignore lint/security/noSecrets: This is a fixed non-secret interpolation fixture.
+    await Bun.write(join(repository, ".env"), "PROJECT_VALUE=ambient\n");
+
+    await expect(loadLabConfig(repository)).rejects.toThrow(
+      "project .env is not supported",
     );
   });
 });

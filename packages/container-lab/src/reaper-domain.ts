@@ -46,6 +46,7 @@ export type ReaperOptions = {
   dbPath: string;
   roots?: StateRoots;
   docker?: DockerRunner;
+  environment?: NodeJS.ProcessEnv;
   beforeOwnerLock?: (ownerKey: string) => void | Promise<void>;
   beforeRecheck?: (ownerKey: string) => void | Promise<void>;
   stateReader?: (database: Database, owner: string) => ThreadState;
@@ -206,6 +207,7 @@ export async function reapArchivedOwners(
                   roots,
                   claimed,
                   options.docker ?? defaultDockerRunner,
+                  options.environment ?? {},
                   async () => {
                     await options.beforeRecheck?.(owner.ownerKey);
                     let rechecked: ThreadState;
@@ -389,6 +391,7 @@ async function cleanupExactLab(
   roots: StateRoots,
   lab: import("./state/lab/contract.ts").LabMetadata,
   docker: DockerRunner,
+  environment: NodeJS.ProcessEnv,
   authorize: () => Promise<void>,
 ): Promise<void> {
   const labLock = labLockPath(roots.stateRoot, lab.owner, lab.id);
@@ -443,7 +446,7 @@ async function cleanupExactLab(
   }
   // Exact container removal terminates an attached exec before waiting for its
   // activity lock; filesystem and synchronization state remain untouched here.
-  await cleanupManagedLabDockerResources(lab, docker);
+  await cleanupManagedLabDockerResources(lab, docker, environment);
   await withFileLock(
     activityLock,
     async () =>
@@ -454,7 +457,7 @@ async function cleanupExactLab(
           lab = await readLab(roots, lab.owner, lab.id);
           await validateReaperLab(roots, lab.owner, lab.ownerKey, lab);
           await authorize();
-          await recoverLabSync(roots, lab);
+          await recoverLabSync(roots, lab, environment);
           await assertOwnerStateDirectory(
             roots.stateRoot,
             lab.ownerKey,
@@ -463,7 +466,7 @@ async function cleanupExactLab(
           await inspectTrustedLabRuntimeDirectories(roots, lab, {
             inspectWorkspace: false,
           });
-          await cleanupManagedLabDockerResources(lab, docker);
+          await cleanupManagedLabDockerResources(lab, docker, environment);
           if (
             await inspectTrustedLabRuntimeDirectories(roots, lab, {
               inspectWorkspace: false,

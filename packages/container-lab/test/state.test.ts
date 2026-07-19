@@ -171,6 +171,12 @@ describe("owner resolution and durable state", () => {
         },
       },
       {
+        message: "environment metadata mismatch",
+        mutate: (value) => {
+          persistedConfig(value)["composeEnvironment"] = ["PROJECT_VALUE"];
+        },
+      },
+      {
         message: "invalid container runtime",
         mutate: (value) => {
           const config = persistedConfig(value);
@@ -200,6 +206,15 @@ describe("owner resolution and durable state", () => {
         message: "invalid runtime files or findings",
         mutate: (value) => {
           persistedRuntime(value)["baseFile"] = join(root, "unexpected.yaml");
+        },
+      },
+      {
+        message: "invalid runtime files or findings",
+        mutate: (value) => {
+          persistedRuntime(value)["sourceFile"] = join(
+            root,
+            "outside-source.json",
+          );
         },
       },
       {
@@ -251,6 +266,7 @@ function fixtureReadyLab(
       runtime: { workspace: "/workspace", shell: ["/bin/sh", "-lc"] },
       ports: [],
       forwardEnvironment: [],
+      composeEnvironment: [],
       secretEnvironment: [],
     },
     composeArgs: [
@@ -362,6 +378,7 @@ function fixtureLab(root: string, owner: string): LabMetadata {
     updatedAt: new Date(0).toISOString(),
     endpoints: [],
     findings: [],
+    composeEnvironment: [],
     secretEnvironment: [],
   };
 }

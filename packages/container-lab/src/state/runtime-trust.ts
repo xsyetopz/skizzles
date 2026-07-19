@@ -125,6 +125,13 @@ export async function assertReadyLabFilesystem(
     lab.runtime.overrideFile,
     "Compose override",
   );
+  if (lab.runtime.sourceFile) {
+    await assertRealFileInside(
+      runtime,
+      lab.runtime.sourceFile,
+      "immutable Compose source",
+    );
+  }
   if (lab.runtime.baseFile) {
     await assertRealFileInside(
       runtime,
@@ -133,7 +140,7 @@ export async function assertReadyLabFilesystem(
     );
   }
   const mode = lab.runtime.config.mode;
-  if (mode.kind === "compose") {
+  if (mode.kind === "compose" && !lab.runtime.sourceFile) {
     for (const path of mode.files) {
       await assertRealFileInside(source, path, "project Compose file");
     }

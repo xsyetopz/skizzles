@@ -10,4 +10,5 @@ ports:
     target: 6379
     scheme: redis
 environment: []
+compose_environment: []
 secret_environment: []

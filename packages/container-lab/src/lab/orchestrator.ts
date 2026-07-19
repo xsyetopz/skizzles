@@ -42,8 +42,9 @@ export type { RunOutput } from "./attached-run.ts";
 export async function recoverLabSync(
   roots: StateRoots,
   lab: LabMetadata,
+  environment: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
-  await recoverManagedLabSync(roots, lab);
+  await recoverManagedLabSync(roots, lab, environment);
 }
 
 export class ContainerLabService {
@@ -70,14 +71,10 @@ export class ContainerLabService {
   }> {
     await this.reconcileOwner();
     const labs = await listLabs(this.roots, this.owner);
-    const secretEnvironment = [
-      ...new Set(labs.flatMap((lab) => lab.secretEnvironment)),
-    ];
     return {
       ok: true,
       dockerAvailable: await dockerAvailable(
         this.docker,
-        secretEnvironment,
         this.environment,
       ).catch(() => false),
       labs: labs.length,
@@ -129,7 +126,7 @@ export class ContainerLabService {
     return compactLabStatus(
       lab,
       lab.state === "ready" && lab.runtime
-        ? await stackStatus(runtimeFromLab(lab), this.docker)
+        ? await stackStatus(runtimeFromLab(lab), this.docker, this.environment)
         : undefined,
     );
   }
@@ -173,6 +170,7 @@ export class ContainerLabService {
       service,
       tailLines,
       this.docker,
+      this.environment,
     );
     return {
       labId: id,
@@ -194,8 +192,8 @@ export class ContainerLabService {
           this.labLock(id),
           async () => {
             const lab = await this.requireReady(id);
-            await assertSourceRepositoryIdentity(lab);
-            await recoverManagedLabSync(this.roots, lab);
+            await assertSourceRepositoryIdentity(lab, this.environment);
+            await recoverManagedLabSync(this.roots, lab, this.environment);
             const sourceRoot =
               direction === "push" ? lab.sourceRoot : lab.workspace;
             const targetRoot =
@@ -207,6 +205,7 @@ export class ContainerLabService {
               sourceRoot,
               targetRoot,
               maxEntries: 100,
+              environment: this.environment,
             });
             return publicSyncPreview(preview, id, direction);
           },
@@ -226,8 +225,8 @@ export class ContainerLabService {
           this.labLock(id),
           async () => {
             const lab = await this.requireReady(id);
-            await assertSourceRepositoryIdentity(lab);
-            await recoverManagedLabSync(this.roots, lab);
+            await assertSourceRepositoryIdentity(lab, this.environment);
+            await recoverManagedLabSync(this.roots, lab, this.environment);
             const sourceRoot =
               direction === "push" ? lab.sourceRoot : lab.workspace;
             const targetRoot =
@@ -240,6 +239,7 @@ export class ContainerLabService {
               sourceRoot,
               targetRoot,
               idleGuard: () => true,
+              environment: this.environment,
             });
             return { labId: id, direction, applied: result.applied };
           },

@@ -25,7 +25,14 @@ export interface SyncIdentity {
   labId: string;
 }
 
-export interface PreviewSyncOptions extends SyncIdentity {
+export interface SyncGitOptions {
+  /** Service-constructed environment sanitized by the local Git adapter. */
+  environment?: NodeJS.ProcessEnv;
+}
+
+export interface InitializeSyncOptions extends SyncIdentity, SyncGitOptions {}
+
+export interface PreviewSyncOptions extends SyncIdentity, SyncGitOptions {
   direction: SyncDirection;
   sourceRoot: string;
   targetRoot: string;

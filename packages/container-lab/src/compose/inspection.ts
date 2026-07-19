@@ -29,7 +29,6 @@ const hostNamespaceKeys = [
 const environmentNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const socketPathPattern =
   /(?:^|\/)docker\.sock$|(?:^|\/)podman\.sock$|\.sock$/i;
-const regexSyntaxPattern = /[.*+?^${}()|[\]\\]/g;
 
 /** Report trusted-project privilege surfaces without returning paths, values, or secret names. */
 export function inspectComposeModel(
@@ -180,25 +179,30 @@ function inspectTopLevelResources(
   }
 }
 
-/**
- * Validate environment-backed Compose secret sources without inspecting or
- * retaining their values. The no-interpolation model also lets us reject
- * source-name references from plaintext service environment definitions.
- */
-export function validateSecretEnvironmentModel(
+/** Validate every host-environment read preserved by the raw Compose model. */
+export function validateComposeEnvironmentModel(
   model: ComposeModel,
-  declaredNames: readonly string[],
+  composeNames: readonly string[],
+  secretNames: readonly string[],
   environment: NodeJS.ProcessEnv,
 ): void {
-  const declared = new Set(declaredNames);
-  validateSecretDefinitions(model, declared, environment);
-  validatePlaintextServiceEnvironment(model, declaredNames, declared);
+  const compose = new Set(composeNames);
+  const secrets = new Set(secretNames);
+  validateInterpolation(model, compose);
+  validateImplicitServiceEnvironment(model, compose, secrets);
+  rejectServiceEnvironmentFiles(model);
+  validateImplicitBuildArguments(model, compose);
+  validateSecretDefinitions(model, secrets, environment);
+  rejectEnvironmentBackedConfigs(model);
+}
 
-  const referenced = referencedSecretNameInModel(model, declaredNames);
-  if (referenced) {
-    throw new Error(
-      `Compose model references declared secret environment source: ${referenced}`,
-    );
+function rejectServiceEnvironmentFiles(model: ComposeModel): void {
+  for (const service of Object.values(model.services ?? {})) {
+    if (Object.hasOwn(service, "env_file")) {
+      throw new Error(
+        "Compose service env_file is not supported; declare explicit environment inputs",
+      );
+    }
   }
 }
 
@@ -207,15 +211,13 @@ function validateSecretDefinitions(
   declared: ReadonlySet<string>,
   environment: NodeJS.ProcessEnv,
 ): void {
+  const used = new Set<string>();
   for (const definition of Object.values(model.secrets ?? {})) {
-    if (
-      !isRecord(definition) ||
-      typeof definition["environment"] !== "string"
-    ) {
+    if (!(isRecord(definition) && Object.hasOwn(definition, "environment"))) {
       continue;
     }
     const source = definition["environment"];
-    if (!environmentNamePattern.test(source)) {
+    if (typeof source !== "string" || !environmentNamePattern.test(source)) {
       throw new Error(
         "Compose secret environment source is invalid or undeclared",
       );
@@ -233,167 +235,146 @@ function validateSecretDefinitions(
         `Compose secret environment source is unavailable: ${source}`,
       );
     }
+    used.add(source);
+  }
+  for (const source of declared) {
+    if (!used.has(source)) {
+      throw new Error(
+        `declared secret environment source is not used by a top-level secret: ${source}`,
+      );
+    }
   }
 }
 
-function validatePlaintextServiceEnvironment(
+function validateImplicitServiceEnvironment(
   model: ComposeModel,
-  declaredNames: readonly string[],
-  declared: ReadonlySet<string>,
+  compose: ReadonlySet<string>,
+  secrets: ReadonlySet<string>,
 ): void {
   for (const [serviceName, service] of Object.entries(model.services ?? {})) {
-    validateServiceEnvironment(
-      serviceName,
-      service["environment"],
-      declaredNames,
-      declared,
-    );
+    const serviceEnvironment = service["environment"];
+    if (Array.isArray(serviceEnvironment)) {
+      for (const entry of serviceEnvironment) {
+        if (typeof entry !== "string") {
+          continue;
+        }
+        const separator = entry.indexOf("=");
+        const name = separator < 0 ? entry : entry.slice(0, separator);
+        rejectSecretServiceEnvironment(serviceName, name, secrets);
+        if (separator < 0) {
+          requireComposeAuthorization(name, compose, "service environment");
+        }
+      }
+    } else if (isRecord(serviceEnvironment)) {
+      for (const [name, value] of Object.entries(serviceEnvironment)) {
+        rejectSecretServiceEnvironment(serviceName, name, secrets);
+        if (value === null) {
+          requireComposeAuthorization(name, compose, "service environment");
+        }
+      }
+    }
   }
 }
 
-function validateServiceEnvironment(
-  serviceName: string,
-  environment: unknown,
-  declaredNames: readonly string[],
-  declared: ReadonlySet<string>,
+function validateImplicitBuildArguments(
+  model: ComposeModel,
+  compose: ReadonlySet<string>,
 ): void {
-  if (Array.isArray(environment)) {
-    validateServiceEnvironmentList(
-      serviceName,
-      environment,
-      declaredNames,
-      declared,
-    );
-  } else if (isRecord(environment)) {
-    validateServiceEnvironmentMap(
-      serviceName,
-      environment,
-      declaredNames,
-      declared,
-    );
-  }
-}
-
-function validateServiceEnvironmentList(
-  serviceName: string,
-  environment: unknown[],
-  declaredNames: readonly string[],
-  declared: ReadonlySet<string>,
-): void {
-  for (const entry of environment) {
-    if (typeof entry !== "string") {
+  for (const service of Object.values(model.services ?? {})) {
+    const build = service["build"];
+    if (!isRecord(build)) {
       continue;
     }
-    const separator = entry.indexOf("=");
-    const key = separator < 0 ? entry : entry.slice(0, separator);
-    const value = separator < 0 ? "" : entry.slice(separator + 1);
-    rejectPlaintextSecretReference(
-      serviceName,
-      key,
-      value,
-      declaredNames,
-      declared,
-    );
+    const args = build["args"];
+    if (Array.isArray(args)) {
+      for (const entry of args) {
+        if (typeof entry === "string" && !entry.includes("=")) {
+          requireComposeAuthorization(entry, compose, "build argument");
+        }
+      }
+    } else if (isRecord(args)) {
+      for (const [name, value] of Object.entries(args)) {
+        if (value === null) {
+          requireComposeAuthorization(name, compose, "build argument");
+        }
+      }
+    }
   }
 }
 
-function validateServiceEnvironmentMap(
-  serviceName: string,
-  environment: Record<string, unknown>,
-  declaredNames: readonly string[],
-  declared: ReadonlySet<string>,
-): void {
-  for (const [key, value] of Object.entries(environment)) {
-    rejectPlaintextSecretReference(
-      serviceName,
-      key,
-      value,
-      declaredNames,
-      declared,
-    );
-  }
-}
-
-function rejectPlaintextSecretReference(
-  serviceName: string,
-  key: string,
-  value: unknown,
-  declaredNames: readonly string[],
-  declared: ReadonlySet<string>,
-): void {
-  const referenced = declared.has(key)
-    ? key
-    : referencedSecretName(value, declaredNames);
-  if (referenced) {
-    throw plaintextSecretEnvironmentError(serviceName, referenced);
-  }
-}
-
-function referencedSecretName(
-  value: unknown,
-  names: readonly string[],
-): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  return names.find((name) => {
-    const escaped = name.replace(regexSyntaxPattern, "\\$&");
-    return new RegExp(
-      `\\$${escaped}(?![A-Za-z0-9_])|\\$\\{${escaped}(?![A-Za-z0-9_])`,
-    ).test(value);
-  });
-}
-
-function referencedSecretNameInModel(
+function validateInterpolation(
   model: ComposeModel,
-  names: readonly string[],
-): string | undefined {
+  compose: ReadonlySet<string>,
+): void {
   const pending: unknown[] = [model];
   while (pending.length > 0) {
     const value = pending.pop();
-    const direct = referencedSecretName(value, names);
-    if (direct) {
-      return direct;
-    }
-    const keyReference = enqueueNestedValues(value, names, pending);
-    if (keyReference) {
-      return keyReference;
+    if (typeof value === "string") {
+      for (const name of interpolationNames(value)) {
+        requireComposeAuthorization(name, compose, "interpolation");
+      }
+    } else if (Array.isArray(value)) {
+      pending.push(...value);
+    } else if (isRecord(value)) {
+      pending.push(...Object.values(value));
     }
   }
-  return undefined;
 }
 
-function enqueueNestedValues(
-  value: unknown,
-  names: readonly string[],
-  pending: unknown[],
-): string | undefined {
-  if (Array.isArray(value)) {
-    for (const nested of value) {
-      pending.push(nested);
+function interpolationNames(value: string): string[] {
+  const names: string[] = [];
+  for (let index = 0; index < value.length; index++) {
+    if (value[index] !== "$") {
+      continue;
     }
-    return undefined;
-  }
-  if (!isRecord(value)) {
-    return undefined;
-  }
-  for (const [key, nested] of Object.entries(value)) {
-    const keyReference = referencedSecretName(key, names);
-    if (keyReference) {
-      return keyReference;
+    const next = value[index + 1];
+    if (next === "$") {
+      index++;
+      continue;
     }
-    pending.push(nested);
+    const start = next === "{" ? index + 2 : index + 1;
+    const first = value[start];
+    if (!(first && /[A-Za-z_]/.test(first))) {
+      continue;
+    }
+    let end = start + 1;
+    while (end < value.length && /[A-Za-z0-9_]/.test(value[end] ?? "")) {
+      end++;
+    }
+    names.push(value.slice(start, end));
+    index = end - 1;
   }
-  return undefined;
+  return names;
 }
 
-function plaintextSecretEnvironmentError(
+function requireComposeAuthorization(
+  name: string,
+  compose: ReadonlySet<string>,
+  kind: string,
+): void {
+  if (!(environmentNamePattern.test(name) && compose.has(name))) {
+    throw new Error(`Compose ${kind} reads undeclared environment: ${name}`);
+  }
+}
+
+function rejectSecretServiceEnvironment(
   service: string,
-  source: string,
-): Error {
-  return new Error(
-    `Compose service plaintext environment references declared secret source: ${service}:${source}`,
-  );
+  name: string,
+  secrets: ReadonlySet<string>,
+): void {
+  if (secrets.has(name)) {
+    throw new Error(
+      `Compose service plaintext environment references declared secret source: ${service}:${name}`,
+    );
+  }
+}
+
+function rejectEnvironmentBackedConfigs(model: ComposeModel): void {
+  for (const definition of Object.values(model.configs ?? {})) {
+    if (isRecord(definition) && Object.hasOwn(definition, "environment")) {
+      throw new Error("Compose top-level configs.environment is not supported");
+    }
+  }
 }
 
 function inspectVolume(

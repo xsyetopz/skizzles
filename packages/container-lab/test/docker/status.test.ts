@@ -109,9 +109,23 @@ function runtime(): LabRuntime {
       runtime: { workspace: "/workspace", shell: ["/bin/sh", "-lc"] },
       ports: [],
       forwardEnvironment: [],
+      composeEnvironment: [],
       secretEnvironment: [],
     },
-    composeArgs: ["compose", "--project-name", "ccl-project"],
+    composeArgs: [
+      "compose",
+      "--env-file",
+      "/dev/null",
+      "--project-directory",
+      "/tmp/source",
+      "--project-name",
+      "ccl-project",
+      "-f",
+      "/tmp/runtime/source.compose.json",
+      "-f",
+      "/tmp/runtime/override.compose.yaml",
+    ],
+    sourceFile: "/tmp/runtime/source.compose.json",
     overrideFile: "/tmp/runtime/override.compose.yaml",
     findings: [],
   };
@@ -136,6 +150,7 @@ function lab(): LabMetadata {
     updatedAt: new Date(0).toISOString(),
     endpoints: [],
     findings: [],
+    composeEnvironment: [],
     secretEnvironment: [],
   };
 }

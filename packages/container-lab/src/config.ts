@@ -1,4 +1,4 @@
-import { readFile, realpath, stat } from "node:fs/promises";
+import { lstat, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import process from "node:process";
 import {
@@ -63,6 +63,7 @@ export interface LabConfig {
   runtime: RuntimeConfig;
   ports: DeclaredPort[];
   forwardEnvironment: string[];
+  composeEnvironment: string[];
   secretEnvironment: string[];
 }
 
@@ -108,6 +109,7 @@ export function parseLabConfig(
       ...port,
     })),
     forwardEnvironment: [...value.environment],
+    composeEnvironment: [...value.compose_environment],
     secretEnvironment: [...value.secret_environment],
   };
 }
@@ -130,6 +132,7 @@ export async function loadLabConfig(
     root,
     manifestPath,
   );
+  await assertComposeInputPolicy(config);
   const paths =
     config.mode.kind === "compose"
       ? config.mode.files
@@ -148,6 +151,26 @@ export async function loadLabConfig(
     }
   }
   return config;
+}
+
+/** Reject implicit project interpolation inputs that are not durably bound. */
+export async function assertComposeInputPolicy(
+  config: LabConfig,
+): Promise<void> {
+  if (config.mode.kind !== "compose") {
+    return;
+  }
+  try {
+    await lstat(resolve(config.repoRoot, ".env"));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  throw new Error(
+    "project .env is not supported; declare non-secret inputs with compose_environment",
+  );
 }
 
 async function assertRealPathInside(

@@ -241,7 +241,7 @@ describe("lab cleanup and state trust", () => {
     expect(Buffer.byteLength(encoded)).toBeLessThan(16 * 1024);
   });
 
-  test("durable runtime validation rejects invalid and overlapping secret environment names", async () => {
+  test("durable runtime validation rejects invalid and overlapping environment names", async () => {
     const fixture = await durableFixture("thread-secret-state", "ready", true);
     const runtime = fixture.lab.runtime;
     if (!runtime) {
@@ -252,9 +252,21 @@ describe("lab cleanup and state trust", () => {
       "invalid secret environment",
     );
     runtime.config.secretEnvironment = ["TERM"];
+    runtime.config.forwardEnvironment = [];
+    runtime.config.composeEnvironment = ["TERM"];
+    await expect(writeLab(fixture.roots, fixture.lab)).rejects.toThrow(
+      "invalid secret environment",
+    );
+    runtime.config.composeEnvironment = [];
     runtime.config.forwardEnvironment = ["TERM"];
     await expect(writeLab(fixture.roots, fixture.lab)).rejects.toThrow(
       "invalid secret environment",
+    );
+    runtime.config.secretEnvironment = [];
+    fixture.lab.composeEnvironment = ["TERM"];
+    fixture.lab.secretEnvironment = ["TERM"];
+    await expect(writeLab(fixture.roots, fixture.lab)).rejects.toThrow(
+      "overlapping environment metadata",
     );
   });
 });

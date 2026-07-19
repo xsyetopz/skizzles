@@ -6945,7 +6945,7 @@ var require_public_api = __commonJS((exports) => {
 });
 
 // packages/container-lab/src/cli.ts
-import process13 from "process";
+import process12 from "process";
 import { StringDecoder } from "string_decoder";
 
 // packages/container-lab/src/cli/arguments.ts
@@ -7125,43 +7125,171 @@ async function dispatchCliCommand(service, args, signal) {
 }
 
 // packages/container-lab/src/lab/orchestrator.ts
-import process12 from "process";
+import process11 from "process";
 
 // packages/container-lab/src/docker.ts
 import { spawn as spawn2 } from "child_process";
-import process7 from "process";
 
 // packages/container-lab/src/docker/attached-process.ts
-import { posix } from "path";
+import { posix as posix2 } from "path";
+
+// packages/container-lab/src/lab/environment.ts
+var environmentNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+var dockerClientEnvironmentNames = [
+  "PATH",
+  "HOME",
+  "DOCKER_CONTEXT",
+  "DOCKER_HOST",
+  "DOCKER_CONFIG",
+  "DOCKER_CERT_PATH",
+  "DOCKER_TLS_VERIFY",
+  "DOCKER_API_VERSION",
+  "DOCKER_DEFAULT_PLATFORM",
+  "DOCKER_CUSTOM_HEADERS",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "NODE_EXTRA_CA_CERTS",
+  "SSH_AUTH_SOCK",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "NO_COLOR",
+  "BUILDKIT_PROGRESS"
+];
+function isDockerClientEnvironmentName(name) {
+  return dockerClientEnvironmentNames.includes(name);
+}
+function parseManifestEnvironmentLists(manifest) {
+  const issues = [];
+  const environment = parseList(manifest["environment"], "environment", issues);
+  requireUnique(environment, "environment", "environment forwarding names must be unique", issues);
+  const composeEnvironment = parseList(manifest["compose_environment"], "compose_environment", issues);
+  requireUnique(composeEnvironment, "compose_environment", "Compose environment names must be unique", issues);
+  const secretEnvironment = parseList(manifest["secret_environment"], "secret_environment", issues);
+  requireUnique(secretEnvironment, "secret_environment", "secret environment names must be unique", issues);
+  for (const name of secretEnvironment) {
+    if (isDockerClientEnvironmentName(name)) {
+      issues.push({
+        path: ["secret_environment"],
+        message: `must not overlap fixed Docker client environment: ${name}`
+      });
+    }
+  }
+  rejectOverlap(secretEnvironment, environment, "environment", issues);
+  rejectOverlap(secretEnvironment, composeEnvironment, "compose_environment", issues);
+  return { composeEnvironment, environment, secretEnvironment, issues };
+}
+function parseList(value, field, issues) {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    issues.push({ path: [field], message: "must be an array" });
+    return [];
+  }
+  if (value.length > 64) {
+    issues.push({ path: [field], message: "must contain at most 64 items" });
+  }
+  const parsed = [];
+  for (const [index, item] of value.entries()) {
+    if (typeof item === "string" && environmentNamePattern.test(item) && !item.startsWith("COMPOSE_")) {
+      parsed.push(item);
+    } else {
+      issues.push({
+        path: [field, String(index)],
+        message: typeof item === "string" && item.startsWith("COMPOSE_") ? "must not use the reserved COMPOSE_ prefix" : "must be an environment variable name"
+      });
+    }
+  }
+  return parsed;
+}
+function requireUnique(names, field, message, issues) {
+  if (new Set(names).size !== names.length) {
+    issues.push({ path: [field], message });
+  }
+}
+function rejectOverlap(secretNames, otherNames, otherField, issues) {
+  const overlap = otherNames.filter((name) => secretNames.includes(name));
+  if (overlap.length > 0) {
+    issues.push({
+      path: ["secret_environment"],
+      message: `must not overlap ${otherField}: ${overlap.join(", ")}`
+    });
+  }
+}
 
 // packages/container-lab/src/docker/environment.ts
 function shellQuote(value) {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
-function secretComposeEnvironment(names, environment) {
-  const result = scrubSecretEnvironment(names, environment);
-  for (const name of names) {
-    if (Object.hasOwn(environment, name) && typeof environment[name] === "string") {
-      result[name] = environment[name];
+function dockerClientEnvironment(environment) {
+  return selectPresentEnvironment(dockerClientEnvironmentNames, environment);
+}
+function composeInvocationEnvironment(composeNames, forwardNames, environment) {
+  const result = dockerClientEnvironment(environment);
+  copyPresentEnvironment(result, composeNames, environment);
+  copyPresentEnvironment(result, forwardNames, environment);
+  return result;
+}
+function composeUpEnvironment(composeNames, forwardNames, secretNames, environment) {
+  const result = composeInvocationEnvironment(composeNames, forwardNames, environment);
+  for (const name of secretNames) {
+    if (name.startsWith("COMPOSE_")) {
+      throw new Error(`reserved Compose environment variable: ${name}`);
     }
+    if (Object.hasOwn(result, name)) {
+      throw new Error(`secret environment variable conflicts with a non-secret Docker capability: ${name}`);
+    }
+    const value = environment[name];
+    if (!Object.hasOwn(environment, name) || typeof value !== "string") {
+      throw new Error(`secret environment variable is unavailable: ${name}`);
+    }
+    Object.defineProperty(result, name, {
+      configurable: true,
+      enumerable: true,
+      value,
+      writable: true
+    });
   }
   return result;
 }
-function scrubSecretEnvironment(names, environment) {
-  const result = { ...environment };
-  for (const name of names) {
-    delete result[name];
-  }
+function selectPresentEnvironment(names, environment) {
+  const result = {};
+  copyPresentEnvironment(result, names, environment);
   return result;
+}
+function copyPresentEnvironment(target, names, environment) {
+  for (const name of names) {
+    if (name.startsWith("COMPOSE_")) {
+      continue;
+    }
+    const value = environment[name];
+    if (Object.hasOwn(environment, name) && typeof value === "string") {
+      Object.defineProperty(target, name, {
+        configurable: true,
+        enumerable: true,
+        value,
+        writable: true
+      });
+    }
+  }
 }
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // packages/container-lab/src/docker/runtime.ts
-import { mkdir, writeFile } from "fs/promises";
-import { join } from "path";
-import process2 from "process";
+import { mkdir, rm, writeFile } from "fs/promises";
+import { join as join2 } from "path";
 
 // node_modules/.bun/yaml@2.9.0/node_modules/yaml/dist/index.js
 var composer = require_composer();
@@ -7211,6 +7339,7 @@ var $visitAsync = visit.visitAsync;
 
 // packages/container-lab/src/compose/generation.ts
 var labelPrefix = "io.openai.codex-container-lab";
+var emptyComposeEnvironmentFile = "/dev/null";
 function generateBaseCompose(config) {
   if (config.mode.kind === "compose") {
     return;
@@ -7296,19 +7425,19 @@ function labelTopLevelResources(resources, labels) {
   return Object.fromEntries(Object.entries(resources ?? {}).filter(([, definition]) => !definition?.["external"]).map(([name]) => [name, { labels }]));
 }
 function composeCommandArgs(config, options) {
-  const sourceFiles = config.mode.kind === "compose" ? config.mode.files : options.baseFile ? [options.baseFile] : [];
+  const sourceFiles = options.sourceFiles ?? (config.mode.kind === "compose" ? config.mode.files : options.baseFile ? [options.baseFile] : []);
   if (sourceFiles.length === 0) {
     throw new Error("an internal base Compose file is required for image and dockerfile modes");
   }
   return [
     "compose",
+    ...options.environmentFile === undefined ? [] : ["--env-file", options.environmentFile],
     "--project-directory",
     config.repoRoot,
     "--project-name",
     options.projectName,
     ...sourceFiles.flatMap((file) => ["-f", file]),
-    "-f",
-    options.overrideFile
+    ...options.overrideFile === undefined ? [] : ["-f", options.overrideFile]
   ];
 }
 function internalImageTag(ownerKey, labId) {
@@ -7342,9 +7471,8 @@ var hostNamespaceKeys = [
   "userns_mode",
   "cgroup"
 ];
-var environmentNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
+var environmentNamePattern2 = /^[A-Za-z_][A-Za-z0-9_]*$/;
 var socketPathPattern = /(?:^|\/)docker\.sock$|(?:^|\/)podman\.sock$|\.sock$/i;
-var regexSyntaxPattern = /[.*+?^${}()|[\]\\]/g;
 function inspectComposeModel(model) {
   const findings = [];
   for (const [serviceName, service] of Object.entries(model.services ?? {})) {
@@ -7412,22 +7540,31 @@ function inspectTopLevelResources(findings, model) {
     });
   }
 }
-function validateSecretEnvironmentModel(model, declaredNames, environment) {
-  const declared = new Set(declaredNames);
-  validateSecretDefinitions(model, declared, environment);
-  validatePlaintextServiceEnvironment(model, declaredNames, declared);
-  const referenced = referencedSecretNameInModel(model, declaredNames);
-  if (referenced) {
-    throw new Error(`Compose model references declared secret environment source: ${referenced}`);
+function validateComposeEnvironmentModel(model, composeNames, secretNames, environment) {
+  const compose = new Set(composeNames);
+  const secrets = new Set(secretNames);
+  validateInterpolation(model, compose);
+  validateImplicitServiceEnvironment(model, compose, secrets);
+  rejectServiceEnvironmentFiles(model);
+  validateImplicitBuildArguments(model, compose);
+  validateSecretDefinitions(model, secrets, environment);
+  rejectEnvironmentBackedConfigs(model);
+}
+function rejectServiceEnvironmentFiles(model) {
+  for (const service of Object.values(model.services ?? {})) {
+    if (Object.hasOwn(service, "env_file")) {
+      throw new Error("Compose service env_file is not supported; declare explicit environment inputs");
+    }
   }
 }
 function validateSecretDefinitions(model, declared, environment) {
+  const used = new Set;
   for (const definition of Object.values(model.secrets ?? {})) {
-    if (!isRecord3(definition) || typeof definition["environment"] !== "string") {
+    if (!(isRecord3(definition) && Object.hasOwn(definition, "environment"))) {
       continue;
     }
     const source = definition["environment"];
-    if (!environmentNamePattern.test(source)) {
+    if (typeof source !== "string" || !environmentNamePattern2.test(source)) {
       throw new Error("Compose secret environment source is invalid or undeclared");
     }
     if (!declared.has(source)) {
@@ -7436,87 +7573,117 @@ function validateSecretDefinitions(model, declared, environment) {
     if (!Object.hasOwn(environment, source) || typeof environment[source] !== "string") {
       throw new Error(`Compose secret environment source is unavailable: ${source}`);
     }
+    used.add(source);
+  }
+  for (const source of declared) {
+    if (!used.has(source)) {
+      throw new Error(`declared secret environment source is not used by a top-level secret: ${source}`);
+    }
   }
 }
-function validatePlaintextServiceEnvironment(model, declaredNames, declared) {
+function validateImplicitServiceEnvironment(model, compose, secrets) {
   for (const [serviceName, service] of Object.entries(model.services ?? {})) {
-    validateServiceEnvironment(serviceName, service["environment"], declaredNames, declared);
+    const serviceEnvironment = service["environment"];
+    if (Array.isArray(serviceEnvironment)) {
+      for (const entry of serviceEnvironment) {
+        if (typeof entry !== "string") {
+          continue;
+        }
+        const separator = entry.indexOf("=");
+        const name = separator < 0 ? entry : entry.slice(0, separator);
+        rejectSecretServiceEnvironment(serviceName, name, secrets);
+        if (separator < 0) {
+          requireComposeAuthorization(name, compose, "service environment");
+        }
+      }
+    } else if (isRecord3(serviceEnvironment)) {
+      for (const [name, value] of Object.entries(serviceEnvironment)) {
+        rejectSecretServiceEnvironment(serviceName, name, secrets);
+        if (value === null) {
+          requireComposeAuthorization(name, compose, "service environment");
+        }
+      }
+    }
   }
 }
-function validateServiceEnvironment(serviceName, environment, declaredNames, declared) {
-  if (Array.isArray(environment)) {
-    validateServiceEnvironmentList(serviceName, environment, declaredNames, declared);
-  } else if (isRecord3(environment)) {
-    validateServiceEnvironmentMap(serviceName, environment, declaredNames, declared);
-  }
-}
-function validateServiceEnvironmentList(serviceName, environment, declaredNames, declared) {
-  for (const entry of environment) {
-    if (typeof entry !== "string") {
+function validateImplicitBuildArguments(model, compose) {
+  for (const service of Object.values(model.services ?? {})) {
+    const build = service["build"];
+    if (!isRecord3(build)) {
       continue;
     }
-    const separator = entry.indexOf("=");
-    const key = separator < 0 ? entry : entry.slice(0, separator);
-    const value = separator < 0 ? "" : entry.slice(separator + 1);
-    rejectPlaintextSecretReference(serviceName, key, value, declaredNames, declared);
+    const args = build["args"];
+    if (Array.isArray(args)) {
+      for (const entry of args) {
+        if (typeof entry === "string" && !entry.includes("=")) {
+          requireComposeAuthorization(entry, compose, "build argument");
+        }
+      }
+    } else if (isRecord3(args)) {
+      for (const [name, value] of Object.entries(args)) {
+        if (value === null) {
+          requireComposeAuthorization(name, compose, "build argument");
+        }
+      }
+    }
   }
 }
-function validateServiceEnvironmentMap(serviceName, environment, declaredNames, declared) {
-  for (const [key, value] of Object.entries(environment)) {
-    rejectPlaintextSecretReference(serviceName, key, value, declaredNames, declared);
-  }
-}
-function rejectPlaintextSecretReference(serviceName, key, value, declaredNames, declared) {
-  const referenced = declared.has(key) ? key : referencedSecretName(value, declaredNames);
-  if (referenced) {
-    throw plaintextSecretEnvironmentError(serviceName, referenced);
-  }
-}
-function referencedSecretName(value, names) {
-  if (typeof value !== "string") {
-    return;
-  }
-  return names.find((name) => {
-    const escaped = name.replace(regexSyntaxPattern, "\\$&");
-    return new RegExp(`\\$${escaped}(?![A-Za-z0-9_])|\\$\\{${escaped}(?![A-Za-z0-9_])`).test(value);
-  });
-}
-function referencedSecretNameInModel(model, names) {
+function validateInterpolation(model, compose) {
   const pending = [model];
   while (pending.length > 0) {
     const value = pending.pop();
-    const direct = referencedSecretName(value, names);
-    if (direct) {
-      return direct;
-    }
-    const keyReference = enqueueNestedValues(value, names, pending);
-    if (keyReference) {
-      return keyReference;
+    if (typeof value === "string") {
+      for (const name of interpolationNames(value)) {
+        requireComposeAuthorization(name, compose, "interpolation");
+      }
+    } else if (Array.isArray(value)) {
+      pending.push(...value);
+    } else if (isRecord3(value)) {
+      pending.push(...Object.values(value));
     }
   }
-  return;
 }
-function enqueueNestedValues(value, names, pending) {
-  if (Array.isArray(value)) {
-    for (const nested of value) {
-      pending.push(nested);
+function interpolationNames(value) {
+  const names = [];
+  for (let index = 0;index < value.length; index++) {
+    if (value[index] !== "$") {
+      continue;
     }
-    return;
-  }
-  if (!isRecord3(value)) {
-    return;
-  }
-  for (const [key, nested] of Object.entries(value)) {
-    const keyReference = referencedSecretName(key, names);
-    if (keyReference) {
-      return keyReference;
+    const next = value[index + 1];
+    if (next === "$") {
+      index++;
+      continue;
     }
-    pending.push(nested);
+    const start = next === "{" ? index + 2 : index + 1;
+    const first = value[start];
+    if (!(first && /[A-Za-z_]/.test(first))) {
+      continue;
+    }
+    let end = start + 1;
+    while (end < value.length && /[A-Za-z0-9_]/.test(value[end] ?? "")) {
+      end++;
+    }
+    names.push(value.slice(start, end));
+    index = end - 1;
   }
-  return;
+  return names;
 }
-function plaintextSecretEnvironmentError(service, source) {
-  return new Error(`Compose service plaintext environment references declared secret source: ${service}:${source}`);
+function requireComposeAuthorization(name, compose, kind) {
+  if (!(environmentNamePattern2.test(name) && compose.has(name))) {
+    throw new Error(`Compose ${kind} reads undeclared environment: ${name}`);
+  }
+}
+function rejectSecretServiceEnvironment(service, name, secrets) {
+  if (secrets.has(name)) {
+    throw new Error(`Compose service plaintext environment references declared secret source: ${service}:${name}`);
+  }
+}
+function rejectEnvironmentBackedConfigs(model) {
+  for (const definition of Object.values(model.configs ?? {})) {
+    if (isRecord3(definition) && Object.hasOwn(definition, "environment")) {
+      throw new Error("Compose top-level configs.environment is not supported");
+    }
+  }
 }
 function inspectVolume(findings, service, volume) {
   let isBind = false;
@@ -7573,6 +7740,398 @@ function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// packages/container-lab/src/config.ts
+import { lstat, readFile, realpath, stat } from "fs/promises";
+import { isAbsolute, relative, resolve } from "path";
+import process2 from "process";
+
+// packages/container-lab/src/lab/manifest.ts
+import { posix } from "path";
+var manifestName = ".codex-container-lab.yaml";
+var serviceNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
+var uriSchemePattern = /^[a-z][a-z0-9+.-]*$/;
+function isValidContainerPath(value, allowRoot) {
+  if (!value.startsWith("/") || value.includes("\x00") || !allowRoot && value === "/") {
+    return false;
+  }
+  return posix.normalize(value) === value && value.split("/").every((part) => part !== "." && part !== "..");
+}
+function isRecord4(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function hasOwn(value, key) {
+  return Object.hasOwn(value, key);
+}
+function addIssue(issues, path, message) {
+  issues.push({ path, message });
+}
+function rejectUnknownKeys(value, allowed, path, issues) {
+  const allowedSet = new Set(allowed);
+  for (const key of Object.keys(value)) {
+    if (!allowedSet.has(key)) {
+      addIssue(issues, [...path, key], "unknown key");
+    }
+  }
+}
+function asObject(value, path, issues) {
+  if (!isRecord4(value)) {
+    addIssue(issues, path, "must be an object");
+    return;
+  }
+  return value;
+}
+function requiredString(value, key, path, issues, validate, message) {
+  const fieldPath = [...path, key];
+  if (!hasOwn(value, key)) {
+    addIssue(issues, fieldPath, "is required");
+    return;
+  }
+  const parsed = validate(value[key]);
+  if (parsed === undefined) {
+    addIssue(issues, fieldPath, message);
+  }
+  return parsed;
+}
+function optionalString(value, key, path, issues, validate, message, defaultValue) {
+  if (!hasOwn(value, key)) {
+    return defaultValue;
+  }
+  const parsed = validate(value[key]);
+  if (parsed === undefined) {
+    addIssue(issues, [...path, key], message);
+    return defaultValue;
+  }
+  return parsed;
+}
+function parseServiceName(value) {
+  if (typeof value !== "string") {
+    return;
+  }
+  const parsed = value.trim();
+  return serviceNamePattern.test(parsed) ? parsed : undefined;
+}
+function parseRelativePath(value) {
+  if (typeof value !== "string") {
+    return;
+  }
+  const parsed = value.trim();
+  return parsed.length > 0 ? parsed : undefined;
+}
+function parseShellArgument(value) {
+  if (typeof value !== "string" || value.length === 0 || value.includes("\x00")) {
+    return;
+  }
+  return value;
+}
+function parseNonEmptyTrimmedString(value) {
+  if (typeof value !== "string") {
+    return;
+  }
+  const parsed = value.trim();
+  return parsed.length > 0 ? parsed : undefined;
+}
+function parseStringArray(value, path, issues, itemParser, itemMessage, minimumLength) {
+  if (!Array.isArray(value)) {
+    addIssue(issues, path, "must be an array");
+    return [];
+  }
+  if (value.length < minimumLength) {
+    addIssue(issues, path, `must contain at least ${minimumLength} item${minimumLength === 1 ? "" : "s"}`);
+  }
+  const parsed = [];
+  for (const [index, item] of value.entries()) {
+    const candidate = itemParser(item);
+    if (candidate === undefined) {
+      addIssue(issues, [...path, index], itemMessage);
+    } else {
+      parsed.push(candidate);
+    }
+  }
+  return parsed;
+}
+function parseCompose(value, path, issues) {
+  const record = asObject(value, path, issues);
+  if (!record) {
+    return;
+  }
+  rejectUnknownKeys(record, ["files", "command_service"], path, issues);
+  let files = [];
+  if (hasOwn(record, "files")) {
+    files = parseStringArray(record["files"], [...path, "files"], issues, parseRelativePath, "must be a non-empty relative path", 1);
+  } else {
+    addIssue(issues, [...path, "files"], "is required");
+  }
+  const commandService = requiredString(record, "command_service", path, issues, parseServiceName, "must be a Compose service name");
+  return commandService === undefined ? undefined : { files, command_service: commandService };
+}
+function parseDockerfile(value, path, issues) {
+  const record = asObject(value, path, issues);
+  if (!record) {
+    return;
+  }
+  rejectUnknownKeys(record, ["path", "context", "service"], path, issues);
+  const dockerfilePath = requiredString(record, "path", path, issues, parseRelativePath, "must be a non-empty relative path");
+  const context = optionalString(record, "context", path, issues, parseRelativePath, "must be a non-empty relative path", ".");
+  const service = requiredString(record, "service", path, issues, parseServiceName, "must be a Compose service name");
+  return dockerfilePath === undefined || service === undefined ? undefined : { path: dockerfilePath, context, service };
+}
+function parseImage(value, path, issues) {
+  const record = asObject(value, path, issues);
+  if (!record) {
+    return;
+  }
+  rejectUnknownKeys(record, ["name", "service"], path, issues);
+  const name = requiredString(record, "name", path, issues, parseNonEmptyTrimmedString, "must be a non-empty string");
+  const service = requiredString(record, "service", path, issues, parseServiceName, "must be a Compose service name");
+  return name === undefined || service === undefined ? undefined : { name, service };
+}
+function parseRuntime(value, path, issues) {
+  if (value === undefined) {
+    return { workspace: "/workspace", shell: ["/bin/sh", "-lc"] };
+  }
+  const record = asObject(value, path, issues);
+  if (!record) {
+    return { workspace: "/workspace", shell: ["/bin/sh", "-lc"] };
+  }
+  rejectUnknownKeys(record, ["workspace", "shell"], path, issues);
+  const workspace = optionalString(record, "workspace", path, issues, (candidate) => typeof candidate === "string" ? candidate : undefined, "must be a string", "/workspace");
+  const shell = hasOwn(record, "shell") ? parseStringArray(record["shell"], [...path, "shell"], issues, parseShellArgument, "must be a non-empty shell argument without NUL", 1) : ["/bin/sh", "-lc"];
+  return { workspace, shell };
+}
+function parsePort(value, path, issues) {
+  const record = asObject(value, path, issues);
+  if (!record) {
+    return;
+  }
+  rejectUnknownKeys(record, ["service", "target", "scheme"], path, issues);
+  const service = requiredString(record, "service", path, issues, parseServiceName, "must be a Compose service name");
+  let target;
+  if (!hasOwn(record, "target")) {
+    addIssue(issues, [...path, "target"], "is required");
+  } else if (typeof record["target"] !== "number" || !Number.isInteger(record["target"]) || record["target"] < 1 || record["target"] > 65535) {
+    addIssue(issues, [...path, "target"], "must be an integer between 1 and 65535");
+  } else {
+    target = record["target"];
+  }
+  let scheme;
+  if (hasOwn(record, "scheme")) {
+    if (typeof record["scheme"] !== "string" || !uriSchemePattern.test(record["scheme"])) {
+      addIssue(issues, [...path, "scheme"], "must be a URI scheme");
+    } else {
+      scheme = record["scheme"];
+    }
+  }
+  return service === undefined || target === undefined ? undefined : { service, target, ...scheme === undefined ? {} : { scheme } };
+}
+function parsePorts(value, path, issues) {
+  if (value === undefined) {
+    return {};
+  }
+  const record = asObject(value, path, issues);
+  if (!record) {
+    return {};
+  }
+  const parsed = {};
+  for (const [name, port] of Object.entries(record)) {
+    const parsedName = parseServiceName(name);
+    if (parsedName === undefined) {
+      addIssue(issues, [...path, name], "must be a Compose service name");
+    }
+    const parsedPort = parsePort(port, [...path, name], issues);
+    if (parsedPort && parsedName !== undefined) {
+      parsed[parsedName] = parsedPort;
+    }
+  }
+  return parsed;
+}
+function validateManifest(document) {
+  const issues = [];
+  const manifest = asObject(document, [], issues);
+  if (!manifest) {
+    throw new Error(`invalid ${manifestName}: ${issues.map(formatIssue).join("; ")}`);
+  }
+  rejectUnknownKeys(manifest, [
+    "compose",
+    "dockerfile",
+    "image",
+    "runtime",
+    "ports",
+    "environment",
+    "compose_environment",
+    "secret_environment"
+  ], [], issues);
+  const modes = parseManifestModes(manifest, issues);
+  const runtime = parseRuntime(manifest["runtime"], ["runtime"], issues);
+  validateRuntimePaths(runtime, issues);
+  const ports = parsePorts(manifest["ports"], ["ports"], issues);
+  const {
+    composeEnvironment,
+    environment,
+    secretEnvironment,
+    issues: environmentIssues
+  } = parseManifestEnvironmentLists(manifest);
+  issues.push(...environmentIssues.map((issue) => ({
+    path: issue.path,
+    message: issue.message
+  })));
+  validateUniquePortTargets(ports, issues);
+  if (issues.length > 0) {
+    throw new Error(`invalid ${manifestName}: ${issues.map(formatIssue).join("; ")}`);
+  }
+  return {
+    ...modes,
+    runtime,
+    ports,
+    environment,
+    compose_environment: composeEnvironment,
+    secret_environment: secretEnvironment
+  };
+}
+function parseManifestModes(manifest, issues) {
+  const compose = hasOwn(manifest, "compose") ? parseCompose(manifest["compose"], ["compose"], issues) : undefined;
+  const dockerfile = hasOwn(manifest, "dockerfile") ? parseDockerfile(manifest["dockerfile"], ["dockerfile"], issues) : undefined;
+  const image = hasOwn(manifest, "image") ? parseImage(manifest["image"], ["image"], issues) : undefined;
+  const modeCount = ["compose", "dockerfile", "image"].filter((key) => hasOwn(manifest, key)).length;
+  if (modeCount !== 1) {
+    addIssue(issues, [], "exactly one of compose, dockerfile, or image must be configured");
+  }
+  return {
+    ...compose === undefined ? {} : { compose },
+    ...dockerfile === undefined ? {} : { dockerfile },
+    ...image === undefined ? {} : { image }
+  };
+}
+function validateRuntimePaths(runtime, issues) {
+  if (!isValidContainerPath(runtime.workspace, false)) {
+    addIssue(issues, ["runtime", "workspace"], "must be a normalized absolute container path other than /");
+  }
+  const shellExecutable = runtime.shell[0];
+  if (shellExecutable === undefined || !isValidContainerPath(shellExecutable, false)) {
+    addIssue(issues, ["runtime", "shell"], "first argv item must be a normalized absolute executable path");
+  }
+}
+function validateUniquePortTargets(ports, issues) {
+  const portTargets = Object.values(ports).map((port) => `${port.service}:${port.target}`);
+  if (new Set(portTargets).size !== portTargets.length) {
+    addIssue(issues, ["ports"], "service and target pairs must be unique");
+  }
+}
+function parseLabManifest(source, sourcePath) {
+  let document;
+  try {
+    document = $parse(source);
+  } catch (error) {
+    throw new Error(`invalid YAML in ${sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  return validateManifest(document);
+}
+function formatIssue(issue) {
+  const location = issue.path.length > 0 ? `${issue.path.join(".")}: ` : "";
+  return `${location}${issue.message}`;
+}
+
+// packages/container-lab/src/config.ts
+var manifestName2 = manifestName;
+function resolveRepoPath(repoRoot, candidate) {
+  if (isAbsolute(candidate)) {
+    throw new Error(`project path must be relative: ${candidate}`);
+  }
+  const root = resolve(repoRoot);
+  const resolved = resolve(root, candidate);
+  const fromRoot = relative(root, resolved);
+  if (fromRoot === ".." || fromRoot.startsWith(`..${process2.platform === "win32" ? "\\" : "/"}`) || isAbsolute(fromRoot)) {
+    throw new Error(`project path escapes repository: ${candidate}`);
+  }
+  return resolved;
+}
+function parseLabConfig(source, repoRoot, sourcePath = resolve(repoRoot, manifestName2)) {
+  const value = parseLabManifest(source, sourcePath);
+  const root = resolve(repoRoot);
+  let mode;
+  if (value.compose) {
+    mode = {
+      kind: "compose",
+      files: value.compose.files.map((file) => resolveRepoPath(root, file)),
+      commandService: value.compose.command_service
+    };
+  } else if (value.dockerfile) {
+    mode = {
+      kind: "dockerfile",
+      dockerfile: resolveRepoPath(root, value.dockerfile.path),
+      context: resolveRepoPath(root, value.dockerfile.context),
+      commandService: value.dockerfile.service
+    };
+  } else if (value.image) {
+    mode = {
+      kind: "image",
+      image: value.image.name,
+      commandService: value.image.service
+    };
+  } else {
+    throw new Error(`invalid ${manifestName2}: no mode configured`);
+  }
+  return {
+    repoRoot: root,
+    manifestPath: resolve(sourcePath),
+    mode,
+    runtime: value.runtime,
+    ports: Object.entries(value.ports).map(([name, port]) => ({
+      name,
+      ...port
+    })),
+    forwardEnvironment: [...value.environment],
+    composeEnvironment: [...value.compose_environment],
+    secretEnvironment: [...value.secret_environment]
+  };
+}
+async function loadLabConfig(repoRoot, sourcePath = resolve(repoRoot, manifestName2)) {
+  const root = resolve(repoRoot);
+  const manifestPath = resolveRepoPath(root, relative(root, resolve(sourcePath)));
+  await assertRealPathInside(root, manifestPath);
+  if (!(await stat(manifestPath)).isFile()) {
+    throw new Error("lab manifest must be a regular file");
+  }
+  const config = parseLabConfig(await readFile(manifestPath, "utf8"), root, manifestPath);
+  await assertComposeInputPolicy(config);
+  const paths = config.mode.kind === "compose" ? config.mode.files : config.mode.kind === "dockerfile" ? [config.mode.dockerfile, config.mode.context] : [];
+  for (const projectPath of paths) {
+    await assertRealPathInside(root, projectPath);
+  }
+  if (config.mode.kind === "dockerfile") {
+    if (!(await stat(config.mode.context)).isDirectory()) {
+      throw new Error("dockerfile context must be a directory");
+    }
+    if (!(await stat(config.mode.dockerfile)).isFile()) {
+      throw new Error("dockerfile path must be a regular file");
+    }
+  }
+  return config;
+}
+async function assertComposeInputPolicy(config) {
+  if (config.mode.kind !== "compose") {
+    return;
+  }
+  try {
+    await lstat(resolve(config.repoRoot, ".env"));
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  throw new Error("project .env is not supported; declare non-secret inputs with compose_environment");
+}
+async function assertRealPathInside(repoRoot, projectPath) {
+  const [realRoot, realProjectPath] = await Promise.all([
+    realpath(repoRoot),
+    realpath(projectPath)
+  ]);
+  const fromRoot = relative(realRoot, realProjectPath);
+  if (fromRoot === ".." || fromRoot.startsWith(`..${process2.platform === "win32" ? "\\" : "/"}`) || isAbsolute(fromRoot)) {
+    throw new Error(`project path resolves outside repository: ${projectPath}`);
+  }
+}
+
 // packages/container-lab/src/public/output.ts
 function redactPublicText(value, maxBytes = 2000, maxLines = 8) {
   const redacted = value.replace(/\/(?:[^\s"'\\]|\\.)+/g, "[path]").replace(/\b[a-f0-9]{64}\b/gi, "[redacted]").replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[redacted]").replace(/\bcodex-container-lab:[A-Za-z0-9._-]+\b/g, "[redacted]").replace(/\bccl-[a-z0-9][a-z0-9-]*\b/gi, "[redacted]").replace(/io\.openai\.codex-container-lab\.owner=\S+/gi, "io.openai.codex-container-lab.owner=[redacted]").replace(/(?:ownerKey|runtimeRoot|stateRoot|composeArgs|managedImage)\s*[=:]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "[redacted]").split(`
@@ -7594,36 +8153,61 @@ function truncateUtf8(value, maxBytes) {
   return output;
 }
 
+// packages/container-lab/src/docker/source.ts
+import { join } from "path";
+function immutableComposeArguments(runtime) {
+  const expectedSource = join(runtime.metadata.runtimeRoot, "source.compose.json");
+  const expectedOverride = join(runtime.metadata.runtimeRoot, "override.compose.yaml");
+  if (runtime.sourceFile !== expectedSource || runtime.overrideFile !== expectedOverride) {
+    throw new Error("lab runtime has no valid immutable Compose source; recreate the lab");
+  }
+  const expected = composeCommandArgs(runtime.config, {
+    projectName: runtime.metadata.composeProject,
+    overrideFile: expectedOverride,
+    sourceFiles: [expectedSource],
+    environmentFile: emptyComposeEnvironmentFile
+  });
+  if (runtime.composeArgs.length !== expected.length || !runtime.composeArgs.every((argument, index) => argument === expected[index])) {
+    throw new Error("lab runtime has no valid immutable Compose source; recreate the lab");
+  }
+  return runtime.composeArgs;
+}
+
 // packages/container-lab/src/docker/runtime.ts
 var LOOPBACK_PORT = /^127\.0\.0\.1:(\d+)$/;
 var LEADING_REPLACEMENT_CHARACTER = /^\uFFFD/;
 var COMPOSE_CONFIGURATION_FAILURE = "Docker Compose configuration failed; secret-bearing diagnostics redacted";
-async function dockerAvailableInRuntime(runner, secretEnvironment, environment) {
+async function dockerAvailableInRuntime(runner, environment) {
   return (await runner.run(["info", "--format", "{{.ServerVersion}}"], {
     allowFailure: true,
     timeoutMs: 1e4,
-    env: scrubSecretEnvironment(secretEnvironment, environment)
+    env: dockerClientEnvironment(environment)
   })).code === 0;
 }
 async function prepareLabRuntimeInDocker(metadata, config, runner, environment) {
+  await assertComposeInputPolicy(config);
   await mkdir(metadata.runtimeRoot, { recursive: true, mode: 448 });
   const base = generateBaseCompose(config);
-  const baseFile = base === undefined ? undefined : join(metadata.runtimeRoot, "base.compose.yaml");
-  if (baseFile && base !== undefined) {
-    await writeFile(baseFile, base, { mode: 384 });
+  const generatedBaseFile = base === undefined ? undefined : join2(metadata.runtimeRoot, "base.compose.yaml");
+  if (generatedBaseFile && base !== undefined) {
+    await writeFile(generatedBaseFile, base, { mode: 384 });
   }
-  const overrideFile = join(metadata.runtimeRoot, "override.compose.yaml");
-  await writeFile(overrideFile, `{}
-`, { mode: 384 });
-  const composeArgs = composeCommandArgs(config, {
+  const sourceFile = join2(metadata.runtimeRoot, "source.compose.json");
+  const overrideFile = join2(metadata.runtimeRoot, "override.compose.yaml");
+  const sourceComposeArgs = composeCommandArgs(config, {
     projectName: metadata.composeProject,
-    overrideFile,
-    ...baseFile === undefined ? {} : { baseFile }
+    environmentFile: emptyComposeEnvironmentFile,
+    ...generatedBaseFile === undefined ? {} : { baseFile: generatedBaseFile }
   });
-  const composeEnvironment = secretComposeEnvironment(config.secretEnvironment, environment);
-  const sourceModel = await normalizedModel(composeArgs, runner, composeEnvironment);
-  validateSecretEnvironmentModel(sourceModel, config.secretEnvironment, composeEnvironment);
+  const composeEnvironment = composeInvocationEnvironment(config.composeEnvironment, config.forwardEnvironment, environment);
+  const sourceDocument = await rawSourceDocument(sourceComposeArgs, runner, composeEnvironment);
+  const sourceModel = sourceDocument.model;
+  validateComposeEnvironmentModel(sourceModel, config.composeEnvironment, config.secretEnvironment, environment);
   const findings = inspectComposeModel(sourceModel);
+  await writeFile(sourceFile, sourceDocument.bytes, { mode: 384 });
+  if (generatedBaseFile !== undefined) {
+    await rm(generatedBaseFile);
+  }
   const override = generateOverrideCompose(config, sourceModel, {
     workspaceHostPath: metadata.workspace,
     owner: metadata.owner,
@@ -7631,21 +8215,43 @@ async function prepareLabRuntimeInDocker(metadata, config, runner, environment) 
     labId: metadata.id
   });
   await writeFile(overrideFile, override, { mode: 384 });
+  const composeArgs = composeCommandArgs(config, {
+    projectName: metadata.composeProject,
+    overrideFile,
+    sourceFiles: [sourceFile],
+    environmentFile: emptyComposeEnvironmentFile
+  });
   const finalModel = await normalizedModel(composeArgs, runner, composeEnvironment);
-  validateSecretEnvironmentModel(finalModel, config.secretEnvironment, composeEnvironment);
+  if (!Object.hasOwn(finalModel.services ?? {}, config.mode.commandService)) {
+    throw composeConfigurationFailure();
+  }
   return {
     metadata,
     config,
     composeArgs,
-    ...baseFile === undefined ? {} : { baseFile },
+    sourceFile,
     overrideFile,
     findings
   };
 }
+async function rawSourceDocument(composeArgs, runner, environment) {
+  return await readComposeDocument([
+    ...composeArgs,
+    "config",
+    "--no-interpolate",
+    "--no-normalize",
+    "--no-env-resolution",
+    "--format",
+    "json"
+  ], runner, environment);
+}
 async function normalizedModel(composeArgs, runner, environment) {
+  return (await readComposeDocument([...composeArgs, "config", "--no-env-resolution", "--format", "json"], runner, environment)).model;
+}
+async function readComposeDocument(args, runner, environment) {
   let result;
   try {
-    result = await runner.run([...composeArgs, "config", "--no-interpolate", "--format", "json"], {
+    result = await runner.run(args, {
       timeoutMs: 30000,
       maxOutputBytes: 16 * 1024 * 1024,
       allowFailure: true,
@@ -7654,31 +8260,15 @@ async function normalizedModel(composeArgs, runner, environment) {
   } catch {
     throw composeConfigurationFailure();
   }
-  if (result.code === 0) {
-    const jsonModel = parseNormalizedModel(() => JSON.parse(result.stdout.toString()));
-    if (jsonModel !== undefined) {
-      return jsonModel;
-    }
-  }
-  let yaml;
-  try {
-    yaml = await runner.run([...composeArgs, "config", "--no-interpolate"], {
-      timeoutMs: 30000,
-      maxOutputBytes: 16 * 1024 * 1024,
-      allowFailure: true,
-      env: environment
-    });
-  } catch {
+  if (result.code !== 0) {
     throw composeConfigurationFailure();
   }
-  if (yaml.code !== 0) {
+  const bytes = Buffer.from(result.stdout);
+  const model = parseNormalizedModel(() => JSON.parse(bytes.toString()));
+  if (model === undefined) {
     throw composeConfigurationFailure();
   }
-  const yamlModel = parseNormalizedModel(() => $parse(yaml.stdout.toString()));
-  if (yamlModel === undefined) {
-    throw composeConfigurationFailure();
-  }
-  return yamlModel;
+  return { model, bytes };
 }
 function parseNormalizedModel(parse) {
   try {
@@ -7709,24 +8299,31 @@ function isNullableRecord(value) {
 function composeConfigurationFailure() {
   return new Error(COMPOSE_CONFIGURATION_FAILURE);
 }
-async function runComposeCommand(runtime, args, options, runner) {
-  return await runner.run([...runtime.composeArgs, ...args], {
+async function runComposeCommand(runtime, args, options, runner, environment) {
+  return await runner.run([...immutableComposeArguments(runtime), ...args], {
     ...options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs },
     ...options.allowFailure === undefined ? {} : { allowFailure: options.allowFailure },
     maxOutputBytes: 4 * 1024 * 1024,
     ...options.signal === undefined ? {} : { signal: options.signal },
-    env: scrubSecretEnvironment(runtime.config.secretEnvironment, process2.env)
+    env: composeInvocationEnvironment(runtime.config.composeEnvironment, runtime.config.forwardEnvironment, environment)
   });
 }
 async function provisionLabStackInDocker(runtime, signal, runner, environment) {
   let provisioned;
   try {
-    provisioned = await runner.run([...runtime.composeArgs, "up", "-d", "--wait", "--wait-timeout", "180"], {
+    provisioned = await runner.run([
+      ...immutableComposeArguments(runtime),
+      "up",
+      "-d",
+      "--wait",
+      "--wait-timeout",
+      "180"
+    ], {
       timeoutMs: 30 * 60000,
       ...signal === undefined ? {} : { signal },
       allowFailure: true,
       maxOutputBytes: 4 * 1024 * 1024,
-      env: secretComposeEnvironment(runtime.config.secretEnvironment, environment)
+      env: composeUpEnvironment(runtime.config.composeEnvironment, runtime.config.forwardEnvironment, runtime.config.secretEnvironment, environment)
     });
   } catch {
     throw new Error(signal?.aborted ? "Docker Compose up aborted; secret-bearing diagnostics redacted" : "Docker Compose up failed; secret-bearing diagnostics redacted");
@@ -7749,13 +8346,13 @@ async function provisionLabStackInDocker(runtime, signal, runner, environment) {
     allowFailure: true,
     timeoutMs: 20000,
     ...signal === undefined ? {} : { signal }
-  }, runner);
+  }, runner, environment);
   if (verified.code !== 0) {
     throw new Error("command service compatibility check failed: configured shell, writable workspace, and setsid are required");
   }
   const endpoints = [];
   for (const port of runtime.config.ports) {
-    const result = await runComposeCommand(runtime, ["port", port.service, String(port.target)], { timeoutMs: 20000 }, runner);
+    const result = await runComposeCommand(runtime, ["port", port.service, String(port.target)], { timeoutMs: 20000 }, runner, environment);
     const loopback = result.stdout.toString().trim().split(`
 `).map((line) => line.trim().match(LOOPBACK_PORT)?.[1]).filter((value) => value !== undefined);
     if (loopback.length !== 1) {
@@ -7774,11 +8371,11 @@ async function provisionLabStackInDocker(runtime, signal, runner, environment) {
   }
   return endpoints;
 }
-async function readStackStatus(runtime, runner) {
+async function readStackStatus(runtime, runner, environment) {
   const result = await runComposeCommand(runtime, ["ps", "--format", "json"], {
     allowFailure: true,
     timeoutMs: 20000
-  }, runner);
+  }, runner, environment);
   if (result.code !== 0) {
     return { available: false, error: compactError(result.stderr.toString()) };
   }
@@ -7807,18 +8404,18 @@ async function readStackStatus(runtime, runner) {
     }
   }
 }
-async function readStackLogs(runtime, service, tailLines, runner) {
+async function readStackLogs(runtime, service, tailLines, runner, environment) {
   if (tailLines < 1 || tailLines > 500) {
     throw new Error("tail-lines must be 1..500");
   }
-  const model = await normalizedModel(runtime.composeArgs, runner, scrubSecretEnvironment(runtime.config.secretEnvironment, process2.env));
+  const model = await normalizedModel(immutableComposeArguments(runtime), runner, composeInvocationEnvironment(runtime.config.composeEnvironment, runtime.config.forwardEnvironment, environment));
   if (!Object.hasOwn(model.services ?? {}, service)) {
     throw new Error(`unknown Compose service: ${service}`);
   }
   const result = await runComposeCommand(runtime, ["logs", "--no-color", "--tail", String(tailLines), service], {
     allowFailure: true,
     timeoutMs: 20000
-  }, runner);
+  }, runner, environment);
   return boundedLogTail(`${result.stdout}${result.stderr}`, tailLines, 8 * 1024);
 }
 function runtimeFromMetadata(metadata) {
@@ -7882,7 +8479,7 @@ function compactError(value) {
 
 // packages/container-lab/src/docker/attached-process.ts
 function launchAttachedDockerProcess(runtime, invocation, runner, environment) {
-  const workdir = invocation.cwd === "." ? runtime.config.runtime.workspace : posix.join(runtime.config.runtime.workspace, invocation.cwd);
+  const workdir = invocation.cwd === "." ? runtime.config.runtime.workspace : posix2.join(runtime.config.runtime.workspace, invocation.cwd);
   const pidFile = `/tmp/.codex-container-lab-run-${invocation.runId}.pid`;
   const processIdentity = `CODEX_CONTAINER_LAB_RUN_ID=${invocation.runId}`;
   const wrapper = [
@@ -7899,7 +8496,7 @@ function launchAttachedDockerProcess(runtime, invocation, runner, environment) {
     'exit "$code"'
   ].join("; ");
   const args = [
-    ...runtime.composeArgs,
+    ...immutableComposeArguments(runtime),
     "exec",
     "-T",
     "--workdir",
@@ -7915,10 +8512,10 @@ function launchAttachedDockerProcess(runtime, invocation, runner, environment) {
     ...invocation.argv
   ];
   return runner.spawn(args, {
-    env: scrubSecretEnvironment(runtime.config.secretEnvironment, environment)
+    env: composeInvocationEnvironment(runtime.config.composeEnvironment, runtime.config.forwardEnvironment, environment)
   });
 }
-async function terminateAttachedDockerProcess(runtime, identity2, signal, runner) {
+async function terminateAttachedDockerProcess(runtime, identity2, signal, runner, environment) {
   const pidFile = `/tmp/.codex-container-lab-run-${identity2.runId}.pid`;
   const expectedIdentity = `CODEX_CONTAINER_LAB_RUN_ID=${identity2.runId}`;
   const marker = "codex-container-lab-termination:";
@@ -7944,7 +8541,7 @@ async function terminateAttachedDockerProcess(runtime, identity2, signal, runner
       runtime.config.mode.commandService,
       ...runtime.config.runtime.shell,
       killScript
-    ], { allowFailure: true, timeoutMs: 1e4 }, runner);
+    ], { allowFailure: true, timeoutMs: 1e4 }, runner, environment);
   } catch {
     return { confirmed: false, status: "docker-failure" };
   }
@@ -7966,13 +8563,12 @@ async function terminateAttachedDockerProcess(runtime, identity2, signal, runner
 }
 
 // packages/container-lab/src/docker/cleanup.ts
-import process3 from "process";
 var IMMUTABLE_IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
-async function destroyLabStackInDocker(runtime, runner) {
-  await cleanupLabLabelsInDocker(runtime.metadata, runtime.config.mode.kind === "dockerfile", runner, process3.env);
+async function destroyLabStackInDocker(runtime, runner, environment) {
+  await cleanupLabLabelsInDocker(runtime.metadata, runtime.config.mode.kind === "dockerfile", runner, environment);
 }
 async function cleanupLabLabelsInDocker(metadata, removeInternalImage, runner, environment) {
-  const scrubbedRunner = scrubDockerRunnerEnvironment(runner, metadata.secretEnvironment, environment);
+  const dockerEnvironment = dockerClientEnvironment(environment);
   const exactFilters = [
     "--filter",
     "label=io.openai.codex-container-lab.managed=true",
@@ -8019,32 +8615,33 @@ async function cleanupLabLabelsInDocker(metadata, removeInternalImage, runner, e
     }
   ];
   for (const resource of resources) {
-    const ids = await listBounded(resource.kind, resource.list, scrubbedRunner);
+    const ids = await listBounded(resource.kind, resource.list, runner, dockerEnvironment);
     if (resource.ownership && resource.kind !== "container") {
       for (const id of ids) {
-        await verifyComposeResource(metadata, resource.kind, id, resource.ownership, scrubbedRunner);
+        await verifyComposeResource(metadata, resource.kind, id, resource.ownership, runner, dockerEnvironment);
       }
     }
     if (ids.length > 0) {
-      const removed = await scrubbedRunner.run([...resource.remove, ...ids], {
+      const removed = await runner.run([...resource.remove, ...ids], {
         allowFailure: true,
         timeoutMs: 30000,
-        maxOutputBytes: 1024 * 1024
+        maxOutputBytes: 1024 * 1024,
+        env: dockerEnvironment
       });
       if (removed.code !== 0) {
         throw new Error(`failed to remove managed lab ${resource.kind}s`);
       }
     }
-    const remaining = await listBounded(resource.kind, resource.list, scrubbedRunner);
+    const remaining = await listBounded(resource.kind, resource.list, runner, dockerEnvironment);
     if (remaining.length > 0) {
       throw new Error(`managed lab ${resource.kind}s remain after cleanup`);
     }
   }
   if (removeInternalImage) {
-    await removeManagedInternalImage(metadata, scrubbedRunner);
+    await removeManagedInternalImage(metadata, runner, dockerEnvironment);
   }
 }
-async function removeManagedInternalImage(metadata, runner) {
+async function removeManagedInternalImage(metadata, runner, environment) {
   const tag = internalImageTag(metadata.ownerKey, metadata.id);
   const inspected = await runner.run([
     "image",
@@ -8052,7 +8649,12 @@ async function removeManagedInternalImage(metadata, runner) {
     "--format",
     '{"id":{{json .Id}},"labels":{{json .Config.Labels}}}',
     tag
-  ], { allowFailure: true, timeoutMs: 1e4, maxOutputBytes: 64 * 1024 });
+  ], {
+    allowFailure: true,
+    timeoutMs: 1e4,
+    maxOutputBytes: 64 * 1024,
+    env: environment
+  });
   if (inspected.code !== 0) {
     if (isExactMissingImage(inspected, tag)) {
       return;
@@ -8074,7 +8676,8 @@ async function removeManagedInternalImage(metadata, runner) {
   const removed = await runner.run(["image", "rm", image["id"]], {
     allowFailure: true,
     timeoutMs: 30000,
-    maxOutputBytes: 1024 * 1024
+    maxOutputBytes: 1024 * 1024,
+    env: environment
   });
   if (removed.code !== 0) {
     throw new Error("failed to remove managed Dockerfile image");
@@ -8087,11 +8690,12 @@ function isExactMissingImage(result, tag) {
   const diagnostic = result.stderr.toString().trim();
   return diagnostic === `Error: No such image: ${tag}` || diagnostic === `Error response from daemon: No such image: ${tag}`;
 }
-async function listBounded(kind, args, runner) {
+async function listBounded(kind, args, runner, environment) {
   const listed = await runner.run(args, {
     allowFailure: true,
     timeoutMs: 15000,
-    maxOutputBytes: 1024 * 1024
+    maxOutputBytes: 1024 * 1024,
+    env: environment
   });
   if (listed.code !== 0) {
     throw new Error(`failed to list managed lab ${kind}s`);
@@ -8103,11 +8707,12 @@ async function listBounded(kind, args, runner) {
   }
   return ids;
 }
-async function verifyComposeResource(metadata, kind, id, ownershipLabel, runner) {
+async function verifyComposeResource(metadata, kind, id, ownershipLabel, runner, environment) {
   const inspected = await runner.run([kind, "inspect", id, "--format", "{{json .Labels}}"], {
     allowFailure: true,
     timeoutMs: 1e4,
-    maxOutputBytes: 64 * 1024
+    maxOutputBytes: 64 * 1024,
+    env: environment
   });
   if (inspected.code !== 0) {
     throw new Error(`unable to verify managed ${kind} ownership`);
@@ -8125,31 +8730,16 @@ async function verifyComposeResource(metadata, kind, id, ownershipLabel, runner)
     throw new Error(`refusing to remove ${kind} without exact ownership labels`);
   }
 }
-function scrubDockerRunnerEnvironment(runner, names, environment) {
-  if (names.length === 0) {
-    return runner;
-  }
-  return {
-    run: async (args, options = {}) => await runner.run(args, {
-      ...options,
-      env: scrubSecretEnvironment(names, options.env ?? environment)
-    }),
-    spawn: (args, options = {}) => runner.spawn(args, {
-      ...options,
-      env: scrubSecretEnvironment(names, options.env ?? environment)
-    })
-  };
-}
 
 // packages/container-lab/src/process.ts
-import process6 from "process";
+import process5 from "process";
 
 // packages/container-lab/src/process/execution.ts
 import { spawn } from "child_process";
-import process5 from "process";
+import process4 from "process";
 
 // packages/container-lab/src/process/group.ts
-import process4 from "process";
+import process3 from "process";
 var TERMINATION_GRACE_MS = 250;
 var TERMINATION_CONFIRMATION_MS = 2000;
 var GROUP_POLL_MS = 10;
@@ -8176,7 +8766,7 @@ async function cleanupOwnedProcess(processGroup, command) {
 }
 function signalProcessGroup(processGroup, signal, command) {
   try {
-    process4.kill(-processGroup, signal);
+    process3.kill(-processGroup, signal);
     return true;
   } catch (error) {
     if (isMissingProcess(error)) {
@@ -8187,7 +8777,7 @@ function signalProcessGroup(processGroup, signal, command) {
 }
 function processGroupExists(processGroup, command) {
   try {
-    process4.kill(-processGroup, 0);
+    process3.kill(-processGroup, 0);
     return true;
   } catch (error) {
     if (isMissingProcess(error)) {
@@ -8200,16 +8790,16 @@ function processGroupExists(processGroup, command) {
   }
 }
 async function waitForProcessGroupExit(processGroup, timeoutMs, command) {
-  return await new Promise((resolve, reject) => {
+  return await new Promise((resolve2, reject) => {
     const deadline = Date.now() + timeoutMs;
     const poll = () => {
       try {
         if (!processGroupExists(processGroup, command)) {
-          resolve(true);
+          resolve2(true);
           return;
         }
         if (Date.now() >= deadline) {
-          resolve(false);
+          resolve2(false);
           return;
         }
         setTimeout(poll, GROUP_POLL_MS);
@@ -8251,6 +8841,7 @@ class CommandExecution {
   cap;
   stdoutBytes = 0;
   stderrBytes = 0;
+  outputLimitExceeded;
   child;
   timeout;
   pipeRelease;
@@ -8278,8 +8869,8 @@ class CommandExecution {
     this.cap = options.maxOutputBytes ?? DEFAULT_OUTPUT_BYTES;
   }
   execute() {
-    return new Promise((resolve, reject) => {
-      this.resolve = resolve;
+    return new Promise((resolve2, reject) => {
+      this.resolve = resolve2;
       this.reject = reject;
       this.start();
     });
@@ -8332,10 +8923,10 @@ class CommandExecution {
     this.confirmCleanup();
   };
   onStdout = (chunk) => {
-    this.stdoutBytes = this.collect(this.stdout, chunk, this.stdoutBytes);
+    this.stdoutBytes = this.collect("stdout", this.stdout, chunk, this.stdoutBytes);
   };
   onStderr = (chunk) => {
-    this.stderrBytes = this.collect(this.stderr, chunk, this.stderrBytes);
+    this.stderrBytes = this.collect("stderr", this.stderr, chunk, this.stderrBytes);
   };
   onStreamError = (error) => {
     this.state.processError ??= error;
@@ -8363,12 +8954,17 @@ class CommandExecution {
     this.confirmCleanup();
     this.finish();
   };
-  collect(chunks, chunk, current) {
+  collect(stream, chunks, chunk, current) {
     const remaining = this.cap - current;
     if (remaining > 0) {
       chunks.push(chunk.subarray(0, remaining));
     }
-    return current + chunk.byteLength;
+    const next = current + chunk.byteLength;
+    if (next > this.cap && this.options.rejectOnOutputLimit === true && this.outputLimitExceeded === undefined) {
+      this.outputLimitExceeded = stream;
+      this.confirmCleanup();
+    }
+    return next;
   }
   confirmCleanup() {
     if (this.cleanup !== undefined) {
@@ -8410,7 +9006,7 @@ class CommandExecution {
       return;
     }
     this.teardown();
-    const { resolve, reject } = this;
+    const { resolve: resolve2, reject } = this;
     this.resolve = undefined;
     this.reject = undefined;
     const result = this.commandResult();
@@ -8419,7 +9015,7 @@ class CommandExecution {
       reject(failure);
       return;
     }
-    resolve(result);
+    resolve2(result);
   }
   outcomeFailure(result) {
     if (this.state.cleanupError !== undefined) {
@@ -8431,6 +9027,9 @@ class CommandExecution {
     }
     if (this.state.abortRequested || this.options.signal?.aborted) {
       return new Error(`${this.command} aborted`);
+    }
+    if (this.outputLimitExceeded !== undefined) {
+      return new Error(`${this.command} ${this.outputLimitExceeded} exceeded ${this.cap} byte output limit`);
     }
     if (result.code === 0 || this.options.allowFailure) {
       return;
@@ -8477,13 +9076,13 @@ function asError2(error) {
   return new Error(String(error));
 }
 async function executeCommand(command, args, options) {
-  assertProcessPlatform(process5.platform, command);
+  assertProcessPlatform(process4.platform, command);
   return await new CommandExecution(command, args, options).execute();
 }
 
 // packages/container-lab/src/process.ts
 async function runCommand(command, args, options = {}) {
-  assertProcessPlatform(process6.platform, command);
+  assertProcessPlatform(process5.platform, command);
   if (options.signal?.aborted) {
     throw new Error(`${command} aborted`);
   }
@@ -8492,38 +9091,38 @@ async function runCommand(command, args, options = {}) {
 
 // packages/container-lab/src/docker.ts
 var defaultDockerRunner = {
-  run: async (args, options = {}) => await runCommand("docker", args, options),
-  spawn: (args, options = {}) => spawn2("docker", args, {
-    env: options.env ?? process7.env,
+  run: async (args, options) => await runCommand("docker", args, options),
+  spawn: (args, options) => spawn2("docker", args, {
+    env: options.env,
     stdio: ["pipe", "pipe", "pipe"]
   })
 };
-async function dockerAvailable(runner = defaultDockerRunner, secretEnvironment = [], environment = process7.env) {
-  return await dockerAvailableInRuntime(runner, secretEnvironment, environment);
+async function dockerAvailable(runner, environment = {}) {
+  return await dockerAvailableInRuntime(runner, environment);
 }
-async function prepareLabRuntime(metadata, config, runner = defaultDockerRunner, environment = process7.env) {
+async function prepareLabRuntime(metadata, config, runner, environment = {}) {
   return await prepareLabRuntimeInDocker(metadata, config, runner, environment);
 }
-async function provisionLabStack(runtime, signal, runner = defaultDockerRunner, environment = process7.env) {
+async function provisionLabStack(runtime, signal, runner, environment = {}) {
   return await provisionLabStackInDocker(runtime, signal, runner, environment);
 }
-async function stackStatus(runtime, runner = defaultDockerRunner) {
-  return await readStackStatus(runtime, runner);
+async function stackStatus(runtime, runner, environment = {}) {
+  return await readStackStatus(runtime, runner, environment);
 }
-async function stackLogs(runtime, service, tailLines, runner = defaultDockerRunner) {
-  return await readStackLogs(runtime, service, tailLines, runner);
+async function stackLogs(runtime, service, tailLines, runner, environment = {}) {
+  return await readStackLogs(runtime, service, tailLines, runner, environment);
 }
-async function destroyLabStack(runtime, runner = defaultDockerRunner) {
-  await destroyLabStackInDocker(runtime, runner);
+async function destroyLabStack(runtime, runner, environment = {}) {
+  await destroyLabStackInDocker(runtime, runner, environment);
 }
-async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultDockerRunner, environment = process7.env) {
+async function cleanupLabLabels(metadata, removeInternalImage, runner, environment = {}) {
   await cleanupLabLabelsInDocker(metadata, removeInternalImage, runner, environment);
 }
-function launchDockerRun(runtime, invocation, runner = defaultDockerRunner, environment = process7.env) {
+function launchDockerRun(runtime, invocation, runner, environment = {}) {
   return launchAttachedDockerProcess(runtime, invocation, runner, environment);
 }
-async function terminateDockerRun(runtime, identity2, signal, runner = defaultDockerRunner) {
-  return await terminateAttachedDockerProcess(runtime, identity2, signal, runner);
+async function terminateDockerRun(runtime, identity2, signal, runner, environment = {}) {
+  return await terminateAttachedDockerProcess(runtime, identity2, signal, runner, environment);
 }
 function runtimeFromLab(metadata) {
   return runtimeFromMetadata(metadata);
@@ -8532,15 +9131,15 @@ function runtimeFromLab(metadata) {
 // packages/container-lab/src/locks.ts
 import {
   link,
-  lstat,
+  lstat as lstat2,
   mkdir as mkdir2,
   open,
-  readFile,
-  rm,
+  readFile as readFile2,
+  rm as rm2,
   writeFile as writeFile2
 } from "fs/promises";
 import { dirname } from "path";
-import process8 from "process";
+import process6 from "process";
 async function withFileLock(path, operation, options = {}) {
   const attempts = options.attempts ?? 100;
   const delayMs = options.delayMs ?? 50;
@@ -8550,11 +9149,11 @@ async function withFileLock(path, operation, options = {}) {
     if (options.signal?.aborted) {
       throw new Error("operation was cancelled while waiting for a state lock");
     }
-    const candidate = `${path}.candidate-${process8.pid}-${crypto.randomUUID()}`;
+    const candidate = `${path}.candidate-${process6.pid}-${crypto.randomUUID()}`;
     let acquired = false;
     try {
       await writeFile2(candidate, JSON.stringify({
-        pid: process8.pid,
+        pid: process6.pid,
         createdAt: new Date().toISOString()
       }), { mode: 384, flag: "wx" });
       try {
@@ -8566,7 +9165,7 @@ async function withFileLock(path, operation, options = {}) {
         }
       }
       if (acquired) {
-        const candidateInfo = await lstat(candidate, { bigint: true });
+        const candidateInfo = await lstat2(candidate, { bigint: true });
         const candidateIdentity = identity2(candidateInfo);
         try {
           return await operation();
@@ -8575,7 +9174,7 @@ async function withFileLock(path, operation, options = {}) {
         }
       }
     } finally {
-      await rm(candidate, { force: true });
+      await rm2(candidate, { force: true });
     }
     await removeConfirmedStaleLock(path, staleMs, options.processProbe ?? probeProcess);
     if (attempt + 1 < attempts) {
@@ -8605,9 +9204,9 @@ async function removeConfirmedStaleLock(path, staleMs, processProbe) {
     }
     let record;
     try {
-      const contents = info.isDirectory() ? await readFile(`${path}/owner.json`, "utf8") : await handle.readFile({ encoding: "utf8" });
+      const contents = info.isDirectory() ? await readFile2(`${path}/owner.json`, "utf8") : await handle.readFile({ encoding: "utf8" });
       const value = JSON.parse(contents);
-      if (isRecord4(value) && typeof value["pid"] === "number" && Number.isInteger(value["pid"]) && value["pid"] > 0 && typeof value["createdAt"] === "string") {
+      if (isRecord5(value) && typeof value["pid"] === "number" && Number.isInteger(value["pid"]) && value["pid"] > 0 && typeof value["createdAt"] === "string") {
         record = value;
       }
     } catch {}
@@ -8636,16 +9235,16 @@ async function removeConfirmedStaleLock(path, staleMs, processProbe) {
   }
 }
 async function reclaimSameLock(path, inspected, staleMs, processProbe) {
-  const candidate = `${path}.reclaim-candidate-${process8.pid}-${crypto.randomUUID()}`;
+  const candidate = `${path}.reclaim-candidate-${process6.pid}-${crypto.randomUUID()}`;
   try {
     await writeFile2(candidate, JSON.stringify({
-      pid: process8.pid,
+      pid: process6.pid,
       createdAt: new Date().toISOString()
     }), { mode: 384, flag: "wx" });
-    const candidateIdentity = identity2(await lstat(candidate, { bigint: true }));
+    const candidateIdentity = identity2(await lstat2(candidate, { bigint: true }));
     await claimAndRemoveLock(path, inspected, candidate, candidateIdentity, staleMs, processProbe);
   } finally {
-    await rm(candidate, { force: true });
+    await rm2(candidate, { force: true });
   }
 }
 async function claimAndRemoveLock(path, inspected, claimSource, claimIdentity, staleMs, processProbe) {
@@ -8675,7 +9274,7 @@ async function claimAndRemoveLock(path, inspected, claimSource, claimIdentity, s
     if (!(await hasIdentity(claimPath, claimIdentity) && await hasIdentity(path, inspected))) {
       return;
     }
-    await rm(path, { recursive: true, force: true });
+    await rm2(path, { recursive: true, force: true });
   } finally {
     if (claimed) {
       await removeIfSamePath(claimPath, claimIdentity);
@@ -8704,7 +9303,7 @@ async function removeConfirmedOrphanClaim(claimPath, staleMs, processProbe) {
     } catch {
       return false;
     }
-    if (!isRecord4(value) || typeof value["pid"] !== "number" || !Number.isInteger(value["pid"]) || value["pid"] <= 0 || typeof value["createdAt"] !== "string") {
+    if (!isRecord5(value) || typeof value["pid"] !== "number" || !Number.isInteger(value["pid"]) || value["pid"] <= 0 || typeof value["createdAt"] !== "string") {
       return false;
     }
     const age = Date.now() - Date.parse(value["createdAt"]);
@@ -8730,7 +9329,7 @@ async function removeConfirmedOrphanClaim(claimPath, staleMs, processProbe) {
 async function hasIdentity(path, expected) {
   let current;
   try {
-    current = await lstat(path, { bigint: true });
+    current = await lstat2(path, { bigint: true });
   } catch (error) {
     if (error.code === "ENOENT") {
       return false;
@@ -8744,7 +9343,7 @@ async function removeIfSamePath(path, inspected) {
   if (!await hasIdentity(path, inspected)) {
     return;
   }
-  await rm(path, { recursive: true, force: true });
+  await rm2(path, { recursive: true, force: true });
 }
 function identity2(info) {
   if (info.dev < 0n || info.ino <= 0n) {
@@ -8753,36 +9352,36 @@ function identity2(info) {
   return { dev: info.dev, ino: info.ino };
 }
 function probeProcess(pid) {
-  process8.kill(pid, 0);
+  process6.kill(pid, 0);
 }
-function isRecord4(value) {
+function isRecord5(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // packages/container-lab/src/state/lab/store.ts
-import { rm as rm3 } from "fs/promises";
+import { rm as rm4 } from "fs/promises";
 
 // packages/container-lab/src/files.ts
 import { createHash, randomUUID } from "crypto";
 import { createReadStream } from "fs";
 import {
-  lstat as lstat3,
+  lstat as lstat4,
   mkdir as mkdir3,
-  readFile as readFile2,
+  readFile as readFile3,
   readlink,
   rename,
-  rm as rm2,
+  rm as rm3,
   writeFile as writeFile3
 } from "fs/promises";
 import path from "path";
 
 // packages/container-lab/src/trusted-filesystem.ts
 import { constants } from "fs";
-import { lstat as lstat2, open as open2, readdir, realpath } from "fs/promises";
-import { isAbsolute, join as join2, relative, resolve, sep } from "path";
+import { lstat as lstat3, open as open2, readdir, realpath as realpath2 } from "fs/promises";
+import { isAbsolute as isAbsolute2, join as join3, relative as relative2, resolve as resolve2, sep } from "path";
 async function canonicalDirectoryRoot(root, label) {
-  const canonical = await realpath(root);
-  const info = await lstat2(canonical);
+  const canonical = await realpath2(root);
+  const info = await lstat3(canonical);
   if (!info.isDirectory()) {
     throw new Error(`${label} is not a directory: ${root}`);
   }
@@ -8794,7 +9393,7 @@ async function exactDirectoryChain(root, segments, label, options = {}) {
 async function readTrustedUnknownJson(root, parentSegments, fileName, label, options = {}) {
   assertExactSegment(fileName, label);
   const before = await exactDirectoryChainIdentity(root, parentSegments, `${label} parent`, options);
-  const candidate = join2(resolve(root), ...parentSegments, fileName);
+  const candidate = join3(resolve2(root), ...parentSegments, fileName);
   if (!before) {
     let unexpected;
     try {
@@ -8842,7 +9441,7 @@ async function readTrustedDirectory(root, segments, label, options = {}) {
   if (!before) {
     return;
   }
-  const entries = await readdir(join2(resolve(root), ...segments), {
+  const entries = await readdir(join3(resolve2(root), ...segments), {
     withFileTypes: true
   });
   const after = await exactDirectoryChainIdentity(root, segments, label, options);
@@ -8852,20 +9451,20 @@ async function readTrustedDirectory(root, segments, label, options = {}) {
   return entries;
 }
 async function exactDirectoryChainIdentity(root, segments, label, options) {
-  let candidate = resolve(root);
+  let candidate = resolve2(root);
   const rootInfo = await lstatBigIntIfPresent(candidate);
   if (!rootInfo) {
     return;
   }
   assertRealDirectory(rootInfo, `configured ${label}`);
-  let expected = await realpath(candidate);
+  let expected = await realpath2(candidate);
   const identities = [
     { path: candidate, device: rootInfo.dev, inode: rootInfo.ino }
   ];
   for (const segment of segments) {
     assertExactSegment(segment, label);
-    candidate = join2(candidate, segment);
-    expected = join2(expected, segment);
+    candidate = join3(candidate, segment);
+    expected = join3(expected, segment);
     const identity3 = await exactDirectory(candidate, expected, label, options);
     if (!identity3) {
       return;
@@ -8875,32 +9474,32 @@ async function exactDirectoryChainIdentity(root, segments, label, options) {
   return identities;
 }
 async function realDirectory(candidate, label) {
-  const info = await lstat2(candidate);
+  const info = await lstat3(candidate);
   if (!info.isDirectory() || info.isSymbolicLink()) {
     throw new Error(`${label} is not a real directory`);
   }
-  return await realpath(candidate);
+  return await realpath2(candidate);
 }
 async function assertRealFileInside(root, candidate, label) {
-  const info = await lstat2(candidate);
+  const info = await lstat3(candidate);
   if (!info.isFile() || info.isSymbolicLink()) {
     throw new Error(`${label} is not a real file`);
   }
-  assertCanonicalInside(root, await realpath(candidate), label, false);
+  assertCanonicalInside(root, await realpath2(candidate), label, false);
 }
 async function assertRealDirectoryInside(root, candidate, label) {
   const canonical = await realDirectory(candidate, label);
   assertCanonicalInside(root, canonical, label, true);
 }
 function assertCanonicalInside(root, candidate, label, allowRoot) {
-  const fromRoot = relative(root, candidate);
-  if (!allowRoot && fromRoot === "" || fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+  const fromRoot = relative2(root, candidate);
+  if (!allowRoot && fromRoot === "" || fromRoot === ".." || fromRoot.startsWith(`..${sep}`) || isAbsolute2(fromRoot)) {
     throw new Error(`${label} resolves outside its trusted root`);
   }
 }
 async function lstatBigIntIfPresent(candidate) {
   try {
-    return await lstat2(candidate, { bigint: true });
+    return await lstat3(candidate, { bigint: true });
   } catch (error) {
     if (error.code === "ENOENT") {
       return;
@@ -8916,7 +9515,7 @@ async function exactDirectory(candidate, expected, label, options) {
   assertRealDirectory(info, label);
   let canonical;
   try {
-    canonical = await realpath(candidate);
+    canonical = await realpath2(candidate);
   } catch (error) {
     if (error.code === "ENOENT") {
       return;
@@ -8942,7 +9541,7 @@ function assertRealFile(info, label) {
   }
 }
 async function assertSameOpenedFile(candidate, opened, label) {
-  const current = await lstat2(candidate, { bigint: true });
+  const current = await lstat3(candidate, { bigint: true });
   if (current.isSymbolicLink()) {
     throw new Error(`${label} contains unsafe indirection`);
   }
@@ -8958,7 +9557,7 @@ function sameDirectoryChain(left, right) {
   return left.length === right.length && left.every((entry, index) => entry.path === right[index]?.path && entry.device === right[index]?.device && entry.inode === right[index]?.inode);
 }
 function assertExactSegment(segment, label) {
-  if (segment.length === 0 || segment === "." || segment === ".." || segment.includes("/") || segment.includes("\\") || segment.includes("\x00") || isAbsolute(segment)) {
+  if (segment.length === 0 || segment === "." || segment === ".." || segment.includes("/") || segment.includes("\\") || segment.includes("\x00") || isAbsolute2(segment)) {
     throw new Error(`${label} contains an unsafe path segment`);
   }
 }
@@ -8985,17 +9584,17 @@ function safeStateName(value, label = "identifier") {
 async function canonicalRoot(root) {
   return await canonicalDirectoryRoot(root, "Synchronization root");
 }
-async function guardedPath(root, relative2, createParents = false) {
-  safeRelativePath(relative2);
+async function guardedPath(root, relative3, createParents = false) {
+  safeRelativePath(relative3);
   const canonical = await canonicalRoot(root);
-  const parts = relative2.split("/");
+  const parts = relative3.split("/");
   let parent = canonical;
   for (const part of parts.slice(0, -1)) {
     parent = path.join(parent, part);
     try {
-      const stat = await lstat3(parent);
-      if (stat.isSymbolicLink() || !stat.isDirectory()) {
-        throw new Error(`Unsafe synchronization parent for ${relative2}`);
+      const stat2 = await lstat4(parent);
+      if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
+        throw new Error(`Unsafe synchronization parent for ${relative3}`);
       }
     } catch (error) {
       if (error.code !== "ENOENT") {
@@ -9009,40 +9608,40 @@ async function guardedPath(root, relative2, createParents = false) {
   }
   const result = path.join(canonical, ...parts);
   if (result !== canonical && !result.startsWith(`${canonical}${path.sep}`)) {
-    throw new Error(`Synchronization path escapes its root: ${relative2}`);
+    throw new Error(`Synchronization path escapes its root: ${relative3}`);
   }
   return result;
 }
-async function describeSyncFile(root, relative2) {
-  const absolute = await guardedPath(root, relative2);
-  const stat = await lstat3(absolute);
-  const mode = stat.mode & 511;
-  if (stat.isSymbolicLink()) {
+async function describeSyncFile(root, relative3) {
+  const absolute = await guardedPath(root, relative3);
+  const stat2 = await lstat4(absolute);
+  const mode = stat2.mode & 511;
+  if (stat2.isSymbolicLink()) {
     const target = await readlink(absolute);
     const bytes = Buffer.from(target);
     return {
-      path: relative2,
+      path: relative3,
       kind: "symlink",
       sha256: sha256(bytes),
       size: bytes.byteLength,
       mode
     };
   }
-  if (!stat.isFile()) {
-    throw new Error(`Eligible Git path is not a regular file or symlink: ${relative2}`);
+  if (!stat2.isFile()) {
+    throw new Error(`Eligible Git path is not a regular file or symlink: ${relative3}`);
   }
-  if (stat.size > MAX_SYNC_FILE_BYTES) {
-    throw new Error(`Eligible Git file exceeds 64 MiB synchronization limit: ${relative2}`);
+  if (stat2.size > MAX_SYNC_FILE_BYTES) {
+    throw new Error(`Eligible Git file exceeds 64 MiB synchronization limit: ${relative3}`);
   }
   const hash = createHash("sha256");
   for await (const chunk of createReadStream(absolute)) {
     hash.update(chunk);
   }
   return {
-    path: relative2,
+    path: relative3,
     kind: "file",
     sha256: hash.digest("hex"),
-    size: stat.size,
+    size: stat2.size,
     mode
   };
 }
@@ -9050,7 +9649,7 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 async function readUnknownJson(file) {
-  const value = JSON.parse(await readFile2(file, "utf8"));
+  const value = JSON.parse(await readFile3(file, "utf8"));
   return value;
 }
 async function writeJsonAtomic(file, value) {
@@ -9061,27 +9660,27 @@ async function writeJsonAtomic(file, value) {
   await rename(temporary, file);
 }
 async function removeIfPresent(file, options = {}) {
-  await rm2(file, { force: true, recursive: options.recursive ?? false });
+  await rm3(file, { force: true, recursive: options.recursive ?? false });
 }
 
 // packages/container-lab/src/state/layout.ts
 import { createHash as createHash2 } from "crypto";
 import { homedir, tmpdir } from "os";
-import { join as join3, resolve as resolve2 } from "path";
-import process9 from "process";
+import { join as join4, resolve as resolve3 } from "path";
+import process7 from "process";
 function defaultStateRoot() {
-  return join3(homedir(), "Library", "Application Support", "OpenAI", "codex-container-lab");
+  return join4(homedir(), "Library", "Application Support", "OpenAI", "codex-container-lab");
 }
 function defaultRuntimeRoot() {
-  return join3(tmpdir(), "codex-container-lab");
+  return join4(tmpdir(), "codex-container-lab");
 }
 function resolveRoots(options = {}) {
   return {
-    stateRoot: resolve2(options.stateRoot ?? process9.env["CODEX_CONTAINER_LAB_STATE_ROOT"] ?? defaultStateRoot()),
-    runtimeRoot: resolve2(options.runtimeRoot ?? process9.env["CODEX_CONTAINER_LAB_RUNTIME_ROOT"] ?? defaultRuntimeRoot())
+    stateRoot: resolve3(options.stateRoot ?? process7.env["CODEX_CONTAINER_LAB_STATE_ROOT"] ?? defaultStateRoot()),
+    runtimeRoot: resolve3(options.runtimeRoot ?? process7.env["CODEX_CONTAINER_LAB_RUNTIME_ROOT"] ?? defaultRuntimeRoot())
   };
 }
-function resolveOwner(explicit, environment = process9.env) {
+function resolveOwner(explicit, environment = process7.env) {
   const owner = explicit ?? environment["CODEX_THREAD_ID"];
   if (owner === undefined || owner.length === 0) {
     throw new Error("owner is required: pass --owner THREAD_ID or set CODEX_THREAD_ID");
@@ -9098,439 +9697,47 @@ function ownerKey(owner) {
   return createHash2("sha256").update(owner).digest("hex");
 }
 function ownerDirectory(stateRoot, owner) {
-  return join3(stateRoot, "owners", ownerKey(owner));
+  return join4(stateRoot, "owners", ownerKey(owner));
 }
 function ownerRuntimeDirectory(runtimeRoot, owner) {
-  return join3(runtimeRoot, ownerKey(owner));
+  return join4(runtimeRoot, ownerKey(owner));
 }
 function ownerManifestPath(stateRoot, owner) {
-  return join3(ownerDirectory(stateRoot, owner), "owner.json");
+  return join4(ownerDirectory(stateRoot, owner), "owner.json");
 }
 function ownerLockPath(stateRoot, owner) {
-  return join3(stateRoot, ".locks", `owner-${ownerKey(owner)}`);
+  return join4(stateRoot, ".locks", `owner-${ownerKey(owner)}`);
 }
 function labLockPath(stateRoot, owner, labId) {
   safeStateName(labId, "lab id");
-  return join3(ownerDirectory(stateRoot, owner), ".locks", `lab-${labId}`);
+  return join4(ownerDirectory(stateRoot, owner), ".locks", `lab-${labId}`);
 }
 function activityLockPath(stateRoot, owner, labId) {
   safeStateName(labId, "lab id");
-  return join3(ownerDirectory(stateRoot, owner), ".locks", `activity-${labId}`);
+  return join4(ownerDirectory(stateRoot, owner), ".locks", `activity-${labId}`);
 }
 function labsDirectory(stateRoot, owner) {
-  return join3(ownerDirectory(stateRoot, owner), "labs");
+  return join4(ownerDirectory(stateRoot, owner), "labs");
 }
 function labManifestPath(stateRoot, owner, labId) {
   safeStateName(labId, "lab id");
-  return join3(labsDirectory(stateRoot, owner), `${labId}.json`);
+  return join4(labsDirectory(stateRoot, owner), `${labId}.json`);
 }
 function expectedLabRuntimeRoot(roots, owner, labId) {
   safeStateName(labId, "lab id");
-  return join3(resolve2(roots.runtimeRoot), ownerKey(owner), labId);
+  return join4(resolve3(roots.runtimeRoot), ownerKey(owner), labId);
 }
 
 // packages/container-lab/src/state/lab/validation.ts
 import {
   isAbsolute as isAbsolute3,
-  join as join4,
+  join as join5,
   parse,
   posix as posix3,
   relative as relative3,
   resolve as resolve4,
   sep as sep2
 } from "path";
-
-// packages/container-lab/src/config.ts
-import { readFile as readFile3, realpath as realpath2, stat } from "fs/promises";
-import { isAbsolute as isAbsolute2, relative as relative2, resolve as resolve3 } from "path";
-import process10 from "process";
-
-// packages/container-lab/src/lab/manifest.ts
-import { posix as posix2 } from "path";
-var manifestName = ".codex-container-lab.yaml";
-var serviceNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
-var environmentNamePattern2 = /^[A-Za-z_][A-Za-z0-9_]*$/;
-var uriSchemePattern = /^[a-z][a-z0-9+.-]*$/;
-function isValidContainerPath(value, allowRoot) {
-  if (!value.startsWith("/") || value.includes("\x00") || !allowRoot && value === "/") {
-    return false;
-  }
-  return posix2.normalize(value) === value && value.split("/").every((part) => part !== "." && part !== "..");
-}
-function isRecord5(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-function hasOwn(value, key) {
-  return Object.hasOwn(value, key);
-}
-function addIssue(issues, path2, message) {
-  issues.push({ path: path2, message });
-}
-function rejectUnknownKeys(value, allowed, path2, issues) {
-  const allowedSet = new Set(allowed);
-  for (const key of Object.keys(value)) {
-    if (!allowedSet.has(key)) {
-      addIssue(issues, [...path2, key], "unknown key");
-    }
-  }
-}
-function asObject(value, path2, issues) {
-  if (!isRecord5(value)) {
-    addIssue(issues, path2, "must be an object");
-    return;
-  }
-  return value;
-}
-function requiredString(value, key, path2, issues, validate, message) {
-  const fieldPath = [...path2, key];
-  if (!hasOwn(value, key)) {
-    addIssue(issues, fieldPath, "is required");
-    return;
-  }
-  const parsed = validate(value[key]);
-  if (parsed === undefined) {
-    addIssue(issues, fieldPath, message);
-  }
-  return parsed;
-}
-function optionalString(value, key, path2, issues, validate, message, defaultValue) {
-  if (!hasOwn(value, key)) {
-    return defaultValue;
-  }
-  const parsed = validate(value[key]);
-  if (parsed === undefined) {
-    addIssue(issues, [...path2, key], message);
-    return defaultValue;
-  }
-  return parsed;
-}
-function parseServiceName(value) {
-  if (typeof value !== "string") {
-    return;
-  }
-  const parsed = value.trim();
-  return serviceNamePattern.test(parsed) ? parsed : undefined;
-}
-function parseRelativePath(value) {
-  if (typeof value !== "string") {
-    return;
-  }
-  const parsed = value.trim();
-  return parsed.length > 0 ? parsed : undefined;
-}
-function parseEnvironmentName(value) {
-  return typeof value === "string" && environmentNamePattern2.test(value) ? value : undefined;
-}
-function parseShellArgument(value) {
-  if (typeof value !== "string" || value.length === 0 || value.includes("\x00")) {
-    return;
-  }
-  return value;
-}
-function parseNonEmptyTrimmedString(value) {
-  if (typeof value !== "string") {
-    return;
-  }
-  const parsed = value.trim();
-  return parsed.length > 0 ? parsed : undefined;
-}
-function parseStringArray(value, path2, issues, itemParser, itemMessage, minimumLength) {
-  if (!Array.isArray(value)) {
-    addIssue(issues, path2, "must be an array");
-    return [];
-  }
-  if (value.length < minimumLength) {
-    addIssue(issues, path2, `must contain at least ${minimumLength} item${minimumLength === 1 ? "" : "s"}`);
-  }
-  const parsed = [];
-  for (const [index, item] of value.entries()) {
-    const candidate = itemParser(item);
-    if (candidate === undefined) {
-      addIssue(issues, [...path2, index], itemMessage);
-    } else {
-      parsed.push(candidate);
-    }
-  }
-  return parsed;
-}
-function parseCompose(value, path2, issues) {
-  const record = asObject(value, path2, issues);
-  if (!record) {
-    return;
-  }
-  rejectUnknownKeys(record, ["files", "command_service"], path2, issues);
-  let files = [];
-  if (hasOwn(record, "files")) {
-    files = parseStringArray(record["files"], [...path2, "files"], issues, parseRelativePath, "must be a non-empty relative path", 1);
-  } else {
-    addIssue(issues, [...path2, "files"], "is required");
-  }
-  const commandService = requiredString(record, "command_service", path2, issues, parseServiceName, "must be a Compose service name");
-  return commandService === undefined ? undefined : { files, command_service: commandService };
-}
-function parseDockerfile(value, path2, issues) {
-  const record = asObject(value, path2, issues);
-  if (!record) {
-    return;
-  }
-  rejectUnknownKeys(record, ["path", "context", "service"], path2, issues);
-  const dockerfilePath = requiredString(record, "path", path2, issues, parseRelativePath, "must be a non-empty relative path");
-  const context = optionalString(record, "context", path2, issues, parseRelativePath, "must be a non-empty relative path", ".");
-  const service = requiredString(record, "service", path2, issues, parseServiceName, "must be a Compose service name");
-  return dockerfilePath === undefined || service === undefined ? undefined : { path: dockerfilePath, context, service };
-}
-function parseImage(value, path2, issues) {
-  const record = asObject(value, path2, issues);
-  if (!record) {
-    return;
-  }
-  rejectUnknownKeys(record, ["name", "service"], path2, issues);
-  const name = requiredString(record, "name", path2, issues, parseNonEmptyTrimmedString, "must be a non-empty string");
-  const service = requiredString(record, "service", path2, issues, parseServiceName, "must be a Compose service name");
-  return name === undefined || service === undefined ? undefined : { name, service };
-}
-function parseRuntime(value, path2, issues) {
-  if (value === undefined) {
-    return { workspace: "/workspace", shell: ["/bin/sh", "-lc"] };
-  }
-  const record = asObject(value, path2, issues);
-  if (!record) {
-    return { workspace: "/workspace", shell: ["/bin/sh", "-lc"] };
-  }
-  rejectUnknownKeys(record, ["workspace", "shell"], path2, issues);
-  const workspace = optionalString(record, "workspace", path2, issues, (candidate) => typeof candidate === "string" ? candidate : undefined, "must be a string", "/workspace");
-  const shell = hasOwn(record, "shell") ? parseStringArray(record["shell"], [...path2, "shell"], issues, parseShellArgument, "must be a non-empty shell argument without NUL", 1) : ["/bin/sh", "-lc"];
-  return { workspace, shell };
-}
-function parsePort(value, path2, issues) {
-  const record = asObject(value, path2, issues);
-  if (!record) {
-    return;
-  }
-  rejectUnknownKeys(record, ["service", "target", "scheme"], path2, issues);
-  const service = requiredString(record, "service", path2, issues, parseServiceName, "must be a Compose service name");
-  let target;
-  if (!hasOwn(record, "target")) {
-    addIssue(issues, [...path2, "target"], "is required");
-  } else if (typeof record["target"] !== "number" || !Number.isInteger(record["target"]) || record["target"] < 1 || record["target"] > 65535) {
-    addIssue(issues, [...path2, "target"], "must be an integer between 1 and 65535");
-  } else {
-    target = record["target"];
-  }
-  let scheme;
-  if (hasOwn(record, "scheme")) {
-    if (typeof record["scheme"] !== "string" || !uriSchemePattern.test(record["scheme"])) {
-      addIssue(issues, [...path2, "scheme"], "must be a URI scheme");
-    } else {
-      scheme = record["scheme"];
-    }
-  }
-  return service === undefined || target === undefined ? undefined : { service, target, ...scheme === undefined ? {} : { scheme } };
-}
-function parsePorts(value, path2, issues) {
-  if (value === undefined) {
-    return {};
-  }
-  const record = asObject(value, path2, issues);
-  if (!record) {
-    return {};
-  }
-  const parsed = {};
-  for (const [name, port] of Object.entries(record)) {
-    const parsedName = parseServiceName(name);
-    if (parsedName === undefined) {
-      addIssue(issues, [...path2, name], "must be a Compose service name");
-    }
-    const parsedPort = parsePort(port, [...path2, name], issues);
-    if (parsedPort && parsedName !== undefined) {
-      parsed[parsedName] = parsedPort;
-    }
-  }
-  return parsed;
-}
-function parseEnvironment2(value, path2, issues) {
-  if (value === undefined) {
-    return [];
-  }
-  return parseStringArray(value, path2, issues, parseEnvironmentName, "must be an environment variable name", 0);
-}
-function validateManifest(document) {
-  const issues = [];
-  const manifest = asObject(document, [], issues);
-  if (!manifest) {
-    throw new Error(`invalid ${manifestName}: ${issues.map(formatIssue).join("; ")}`);
-  }
-  rejectUnknownKeys(manifest, [
-    "compose",
-    "dockerfile",
-    "image",
-    "runtime",
-    "ports",
-    "environment",
-    "secret_environment"
-  ], [], issues);
-  const modes = parseManifestModes(manifest, issues);
-  const runtime = parseRuntime(manifest["runtime"], ["runtime"], issues);
-  validateRuntimePaths(runtime, issues);
-  const ports = parsePorts(manifest["ports"], ["ports"], issues);
-  const { environment, secretEnvironment } = parseEnvironmentLists(manifest, issues);
-  validateUniquePortTargets(ports, issues);
-  if (issues.length > 0) {
-    throw new Error(`invalid ${manifestName}: ${issues.map(formatIssue).join("; ")}`);
-  }
-  return {
-    ...modes,
-    runtime,
-    ports,
-    environment,
-    secret_environment: secretEnvironment
-  };
-}
-function parseManifestModes(manifest, issues) {
-  const compose = hasOwn(manifest, "compose") ? parseCompose(manifest["compose"], ["compose"], issues) : undefined;
-  const dockerfile = hasOwn(manifest, "dockerfile") ? parseDockerfile(manifest["dockerfile"], ["dockerfile"], issues) : undefined;
-  const image = hasOwn(manifest, "image") ? parseImage(manifest["image"], ["image"], issues) : undefined;
-  const modeCount = ["compose", "dockerfile", "image"].filter((key) => hasOwn(manifest, key)).length;
-  if (modeCount !== 1) {
-    addIssue(issues, [], "exactly one of compose, dockerfile, or image must be configured");
-  }
-  return {
-    ...compose === undefined ? {} : { compose },
-    ...dockerfile === undefined ? {} : { dockerfile },
-    ...image === undefined ? {} : { image }
-  };
-}
-function validateRuntimePaths(runtime, issues) {
-  if (!isValidContainerPath(runtime.workspace, false)) {
-    addIssue(issues, ["runtime", "workspace"], "must be a normalized absolute container path other than /");
-  }
-  const shellExecutable = runtime.shell[0];
-  if (shellExecutable === undefined || !isValidContainerPath(shellExecutable, false)) {
-    addIssue(issues, ["runtime", "shell"], "first argv item must be a normalized absolute executable path");
-  }
-}
-function parseEnvironmentLists(manifest, issues) {
-  const environment = parseEnvironment2(manifest["environment"], ["environment"], issues);
-  if (new Set(environment).size !== environment.length) {
-    addIssue(issues, ["environment"], "environment forwarding names must be unique");
-  }
-  const secretEnvironment = parseEnvironment2(manifest["secret_environment"], ["secret_environment"], issues);
-  if (new Set(secretEnvironment).size !== secretEnvironment.length) {
-    addIssue(issues, ["secret_environment"], "secret environment names must be unique");
-  }
-  const overlappingEnvironment = environment.filter((name) => secretEnvironment.includes(name));
-  if (overlappingEnvironment.length > 0) {
-    addIssue(issues, ["secret_environment"], `must not overlap environment: ${overlappingEnvironment.join(", ")}`);
-  }
-  return { environment, secretEnvironment };
-}
-function validateUniquePortTargets(ports, issues) {
-  const portTargets = Object.values(ports).map((port) => `${port.service}:${port.target}`);
-  if (new Set(portTargets).size !== portTargets.length) {
-    addIssue(issues, ["ports"], "service and target pairs must be unique");
-  }
-}
-function parseLabManifest(source, sourcePath) {
-  let document;
-  try {
-    document = $parse(source);
-  } catch (error) {
-    throw new Error(`invalid YAML in ${sourcePath}: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  return validateManifest(document);
-}
-function formatIssue(issue) {
-  const location = issue.path.length > 0 ? `${issue.path.join(".")}: ` : "";
-  return `${location}${issue.message}`;
-}
-
-// packages/container-lab/src/config.ts
-var manifestName2 = manifestName;
-function resolveRepoPath(repoRoot, candidate) {
-  if (isAbsolute2(candidate)) {
-    throw new Error(`project path must be relative: ${candidate}`);
-  }
-  const root = resolve3(repoRoot);
-  const resolved = resolve3(root, candidate);
-  const fromRoot = relative2(root, resolved);
-  if (fromRoot === ".." || fromRoot.startsWith(`..${process10.platform === "win32" ? "\\" : "/"}`) || isAbsolute2(fromRoot)) {
-    throw new Error(`project path escapes repository: ${candidate}`);
-  }
-  return resolved;
-}
-function parseLabConfig(source, repoRoot, sourcePath = resolve3(repoRoot, manifestName2)) {
-  const value = parseLabManifest(source, sourcePath);
-  const root = resolve3(repoRoot);
-  let mode;
-  if (value.compose) {
-    mode = {
-      kind: "compose",
-      files: value.compose.files.map((file) => resolveRepoPath(root, file)),
-      commandService: value.compose.command_service
-    };
-  } else if (value.dockerfile) {
-    mode = {
-      kind: "dockerfile",
-      dockerfile: resolveRepoPath(root, value.dockerfile.path),
-      context: resolveRepoPath(root, value.dockerfile.context),
-      commandService: value.dockerfile.service
-    };
-  } else if (value.image) {
-    mode = {
-      kind: "image",
-      image: value.image.name,
-      commandService: value.image.service
-    };
-  } else {
-    throw new Error(`invalid ${manifestName2}: no mode configured`);
-  }
-  return {
-    repoRoot: root,
-    manifestPath: resolve3(sourcePath),
-    mode,
-    runtime: value.runtime,
-    ports: Object.entries(value.ports).map(([name, port]) => ({
-      name,
-      ...port
-    })),
-    forwardEnvironment: [...value.environment],
-    secretEnvironment: [...value.secret_environment]
-  };
-}
-async function loadLabConfig(repoRoot, sourcePath = resolve3(repoRoot, manifestName2)) {
-  const root = resolve3(repoRoot);
-  const manifestPath = resolveRepoPath(root, relative2(root, resolve3(sourcePath)));
-  await assertRealPathInside(root, manifestPath);
-  if (!(await stat(manifestPath)).isFile()) {
-    throw new Error("lab manifest must be a regular file");
-  }
-  const config = parseLabConfig(await readFile3(manifestPath, "utf8"), root, manifestPath);
-  const paths = config.mode.kind === "compose" ? config.mode.files : config.mode.kind === "dockerfile" ? [config.mode.dockerfile, config.mode.context] : [];
-  for (const projectPath of paths) {
-    await assertRealPathInside(root, projectPath);
-  }
-  if (config.mode.kind === "dockerfile") {
-    if (!(await stat(config.mode.context)).isDirectory()) {
-      throw new Error("dockerfile context must be a directory");
-    }
-    if (!(await stat(config.mode.dockerfile)).isFile()) {
-      throw new Error("dockerfile path must be a regular file");
-    }
-  }
-  return config;
-}
-async function assertRealPathInside(repoRoot, projectPath) {
-  const [realRoot, realProjectPath] = await Promise.all([
-    realpath2(repoRoot),
-    realpath2(projectPath)
-  ]);
-  const fromRoot = relative2(realRoot, realProjectPath);
-  if (fromRoot === ".." || fromRoot.startsWith(`..${process10.platform === "win32" ? "\\" : "/"}`) || isAbsolute2(fromRoot)) {
-    throw new Error(`project path resolves outside repository: ${projectPath}`);
-  }
-}
-
-// packages/container-lab/src/state/lab/validation.ts
 var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
 var LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 var REPOSITORY_HASH = /^[a-f0-9]{12}$/;
@@ -9557,7 +9764,7 @@ function assertLabMetadata(value, roots, owner, labId) {
     if (!isRecord6(value) || value["version"] !== 1 || value["id"] !== labId || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner)) {
       throw new Error("identity mismatch");
     }
-    normalizeSecretEnvironment(value);
+    normalizeEnvironmentMetadata(value);
     if (typeof value["name"] !== "string" || !LAB_NAME.test(value["name"])) {
       throw new Error("invalid name");
     }
@@ -9574,13 +9781,13 @@ function assertLabMetadata(value, roots, owner, labId) {
     if (!isNormalizedAbsolute(value["runtimeRoot"]) || value["runtimeRoot"] !== expectedRuntime) {
       throw new Error("invalid runtime root");
     }
-    if (value["workspace"] !== join4(expectedRuntime, "workspace")) {
+    if (value["workspace"] !== join5(expectedRuntime, "workspace")) {
       throw new Error("invalid workspace root");
     }
     if (!isNormalizedAbsolute(value["sourceRoot"]) || value["sourceRoot"] === parse(value["sourceRoot"]).root) {
       throw new Error("invalid source root");
     }
-    if (value["manifestPath"] !== join4(value["sourceRoot"], manifestName2)) {
+    if (value["manifestPath"] !== join5(value["sourceRoot"], manifestName2)) {
       throw new Error("invalid source manifest relationship");
     }
     if (typeof value["commandService"] !== "string" || !SERVICE_NAME.test(value["commandService"])) {
@@ -9597,6 +9804,16 @@ function assertLabMetadata(value, roots, owner, labId) {
     }
     if (!isEnvironmentNames(value["secretEnvironment"])) {
       throw new Error("invalid secret environment metadata");
+    }
+    if (value["secretEnvironment"].some(isDockerClientEnvironmentName)) {
+      throw new Error("secret environment overlaps Docker client metadata");
+    }
+    if (!isEnvironmentNames(value["composeEnvironment"])) {
+      throw new Error("invalid Compose environment metadata");
+    }
+    const composeEnvironment = new Set(value["composeEnvironment"]);
+    if (value["secretEnvironment"].some((name) => composeEnvironment.has(name))) {
+      throw new Error("overlapping environment metadata");
     }
     if (value["modeKind"] !== undefined && value["modeKind"] !== "compose" && value["modeKind"] !== "dockerfile" && value["modeKind"] !== "image") {
       throw new Error("invalid mode kind");
@@ -9626,6 +9843,7 @@ function validatePersistedRuntime(lab, runtime) {
     "config",
     "composeArgs",
     "baseFile",
+    "sourceFile",
     "overrideFile",
     "findings"
   ]) || !isRecord6(runtime["config"])) {
@@ -9639,15 +9857,22 @@ function validatePersistedRuntime(lab, runtime) {
   if (!isNormalizedAbsolute(runtimeRoot) || typeof composeProject !== "string" || !COMPOSE_PROJECT.test(composeProject)) {
     throw new Error("invalid runtime identity");
   }
-  if (JSON.stringify(config.secretEnvironment) !== JSON.stringify(lab["secretEnvironment"])) {
-    throw new Error("secret environment metadata mismatch");
+  if (JSON.stringify(config.composeEnvironment) !== JSON.stringify(lab["composeEnvironment"]) || JSON.stringify(config.secretEnvironment) !== JSON.stringify(lab["secretEnvironment"])) {
+    throw new Error("environment metadata mismatch");
   }
-  const expectedOverride = join4(runtimeRoot, "override.compose.yaml");
-  const expectedBase = mode.kind === "compose" ? undefined : join4(runtimeRoot, "base.compose.yaml");
-  if (runtime["overrideFile"] !== expectedOverride || runtime["baseFile"] !== expectedBase || !Array.isArray(runtime["findings"]) || !runtime["findings"].every(isFinding) || JSON.stringify(runtime["findings"]) !== JSON.stringify(lab["findings"])) {
+  const expectedOverride = join5(runtimeRoot, "override.compose.yaml");
+  const expectedSource = join5(runtimeRoot, "source.compose.json");
+  const hasImmutableSource = runtime["sourceFile"] !== undefined;
+  const expectedBase = hasImmutableSource || mode.kind === "compose" ? undefined : join5(runtimeRoot, "base.compose.yaml");
+  if (runtime["overrideFile"] !== expectedOverride || runtime["baseFile"] !== expectedBase || hasImmutableSource && runtime["sourceFile"] !== expectedSource || !Array.isArray(runtime["findings"]) || !runtime["findings"].every(isFinding) || JSON.stringify(runtime["findings"]) !== JSON.stringify(lab["findings"])) {
     throw new Error("invalid runtime files or findings");
   }
-  const expectedArgs = composeCommandArgs(config, {
+  const expectedArgs = hasImmutableSource ? composeCommandArgs(config, {
+    projectName: composeProject,
+    overrideFile: expectedOverride,
+    sourceFiles: [expectedSource],
+    environmentFile: emptyComposeEnvironmentFile
+  }) : composeCommandArgs(config, {
     projectName: composeProject,
     overrideFile: expectedOverride,
     ...expectedBase === undefined ? {} : { baseFile: expectedBase }
@@ -9666,6 +9891,7 @@ function validatedPersistedConfig(lab, config) {
     "runtime",
     "ports",
     "forwardEnvironment",
+    "composeEnvironment",
     "secretEnvironment"
   ]) || !isRecord6(config["mode"]) || !isRecord6(config["runtime"])) {
     throw new Error("runtime source identity mismatch");
@@ -9682,7 +9908,11 @@ function validatedPersistedConfig(lab, config) {
     throw new Error("invalid forwarded environment");
   }
   const forwardedEnvironment = new Set(config["forwardEnvironment"]);
-  if (!isEnvironmentNames(config["secretEnvironment"]) || config["secretEnvironment"].some((key) => forwardedEnvironment.has(key))) {
+  if (!isEnvironmentNames(config["composeEnvironment"])) {
+    throw new Error("invalid Compose environment");
+  }
+  const composeEnvironment = new Set(config["composeEnvironment"]);
+  if (!isEnvironmentNames(config["secretEnvironment"]) || config["secretEnvironment"].some(isDockerClientEnvironmentName) || config["secretEnvironment"].some((key) => forwardedEnvironment.has(key) || composeEnvironment.has(key))) {
     throw new Error("invalid secret environment");
   }
   return {
@@ -9695,6 +9925,7 @@ function validatedPersistedConfig(lab, config) {
     },
     ports: config["ports"].map((port) => ({ ...port })),
     forwardEnvironment: [...config["forwardEnvironment"]],
+    composeEnvironment: [...config["composeEnvironment"]],
     secretEnvironment: [...config["secretEnvironment"]]
   };
 }
@@ -9733,20 +9964,28 @@ function validatedPersistedMode(lab, sourceRoot, mode) {
   }
   throw new Error("invalid runtime mode");
 }
-function normalizeSecretEnvironment(lab) {
-  let runtimeNames;
+function normalizeEnvironmentMetadata(lab) {
+  let runtimeComposeNames;
+  let runtimeSecretNames;
   if (isRecord6(lab["runtime"]) && isRecord6(lab["runtime"]["config"])) {
+    if (lab["runtime"]["config"]["composeEnvironment"] === undefined) {
+      lab["runtime"]["config"]["composeEnvironment"] = [];
+    }
     if (lab["runtime"]["config"]["secretEnvironment"] === undefined) {
       lab["runtime"]["config"]["secretEnvironment"] = [];
     }
-    runtimeNames = lab["runtime"]["config"]["secretEnvironment"];
+    runtimeComposeNames = lab["runtime"]["config"]["composeEnvironment"];
+    runtimeSecretNames = lab["runtime"]["config"]["secretEnvironment"];
+  }
+  if (lab["composeEnvironment"] === undefined) {
+    lab["composeEnvironment"] = Array.isArray(runtimeComposeNames) ? [...runtimeComposeNames] : [];
   }
   if (lab["secretEnvironment"] === undefined) {
-    lab["secretEnvironment"] = Array.isArray(runtimeNames) ? [...runtimeNames] : [];
+    lab["secretEnvironment"] = Array.isArray(runtimeSecretNames) ? [...runtimeSecretNames] : [];
   }
 }
 function isEnvironmentNames(value) {
-  return Array.isArray(value) && value.length <= 64 && value.every((key) => typeof key === "string" && ENVIRONMENT_NAME.test(key)) && new Set(value).size === value.length;
+  return Array.isArray(value) && value.length <= 64 && value.every((key) => typeof key === "string" && ENVIRONMENT_NAME.test(key) && !key.startsWith("COMPOSE_")) && new Set(value).size === value.length;
 }
 function isPathInside(root, candidate, allowRoot = false) {
   if (typeof candidate !== "string" || !isNormalizedAbsolute(candidate)) {
@@ -9824,13 +10063,14 @@ async function listLabs(roots, owner) {
   return labs;
 }
 async function removeLabState(stateRoot, owner, labId) {
-  await rm3(labManifestPath(stateRoot, owner, labId), { force: true });
+  await rm4(labManifestPath(stateRoot, owner, labId), { force: true });
 }
 
 // packages/container-lab/src/sync/apply.ts
 import { randomUUID as randomUUID3 } from "crypto";
-import { lstat as lstat8, mkdir as mkdir7, rename as rename4, rm as rm7 } from "fs/promises";
-import path7 from "path";
+import { lstat as lstat10, mkdir as mkdir7, rename as rename4, rm as rm8 } from "fs/promises";
+import path8 from "path";
+import process10 from "process";
 
 // packages/container-lab/src/sync/comparison.ts
 function sameSyncFile(a, b) {
@@ -9884,9 +10124,13 @@ function compareManifestPath(name, before, from, to) {
   };
 }
 
+// packages/container-lab/src/sync/directories.ts
+import { lstat as lstat5, mkdir as mkdir5, rmdir } from "fs/promises";
+import path3 from "path";
+
 // packages/container-lab/src/sync/durability.ts
 import { randomUUID as randomUUID2 } from "crypto";
-import { mkdir as mkdir4, open as open3, rename as rename2, rm as rm4, writeFile as writeFile4 } from "fs/promises";
+import { mkdir as mkdir4, open as open3, rename as rename2, rm as rm5, writeFile as writeFile4 } from "fs/promises";
 import path2 from "path";
 async function syncFile(file) {
   const handle = await open3(file, "r");
@@ -9915,183 +10159,11 @@ async function writeDurableJson(file, value) {
     await rename2(temporary, file);
     await syncDirectory(directory);
   } finally {
-    await rm4(temporary, { force: true });
+    await rm5(temporary, { force: true });
   }
 }
 
-// packages/container-lab/src/sync/git-manifest.ts
-import { execFile } from "child_process";
-import { lstat as lstat4 } from "fs/promises";
-import { promisify } from "util";
-var execFileAsync = promisify(execFile);
-var MAX_SYNC_FILES = 20000;
-var MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
-async function eligibleGitPaths(root) {
-  const canonical = await canonicalRoot(root);
-  const { stdout } = await execFileAsync("git", [
-    "-C",
-    canonical,
-    "ls-files",
-    "-z",
-    "--cached",
-    "--others",
-    "--exclude-standard"
-  ], { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 });
-  const values = stdout.toString("utf8").split("\x00").filter(Boolean).map(safeRelativePath);
-  const unique = [...new Set(values)].sort((a, b) => a.localeCompare(b));
-  if (unique.length > MAX_SYNC_FILES) {
-    throw new Error(`Git workspace exceeds ${MAX_SYNC_FILES} synchronized paths`);
-  }
-  return unique;
-}
-async function buildGitManifest(root) {
-  const canonical = await canonicalRoot(root);
-  const files = Object.create(null);
-  let totalBytes = 0;
-  for (const relative4 of await eligibleGitPaths(canonical)) {
-    try {
-      const stat2 = await lstat4(await guardedPath(canonical, relative4));
-      if (!(stat2.isFile() || stat2.isSymbolicLink())) {
-        continue;
-      }
-      const file = await describeSyncFile(canonical, relative4);
-      totalBytes += file.size;
-      if (totalBytes > MAX_SYNC_TOTAL_BYTES) {
-        throw new Error("Git workspace exceeds 512 MiB synchronization limit");
-      }
-      files[relative4] = file;
-    } catch (error) {
-      if (error.code !== "ENOENT") {
-        throw error;
-      }
-    }
-  }
-  return { root: canonical, digest: manifestDigest(files), files };
-}
-function manifestDigest(files) {
-  const compact = Object.keys(files).sort().map((name) => {
-    const file = files[name];
-    if (!file) {
-      throw new Error(`missing manifest entry: ${name}`);
-    }
-    return [name, file.kind, file.sha256, file.size, file.mode];
-  });
-  return sha256(JSON.stringify(compact));
-}
-
-// packages/container-lab/src/sync/preview.ts
-import { randomBytes } from "crypto";
-import path5 from "path";
-
-// packages/container-lab/src/public/json.ts
-var PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
-function serializePublicJson(value) {
-  let candidate = value;
-  let encoded = `${JSON.stringify(candidate)}
-`;
-  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET && isRecord7(value) && isRecord7(value["transcript"]) && typeof value["transcript"]["text"] === "string") {
-    const characters = Array.from(value["transcript"]["text"]);
-    let low = 0;
-    let high = characters.length;
-    while (low < high) {
-      const start = Math.floor((low + high) / 2);
-      const text2 = characters.slice(start).join("");
-      const transcript = {
-        ...value["transcript"],
-        text: text2,
-        bytes: Buffer.byteLength(text2),
-        lines: text2 ? text2.split(`
-`).length : 0,
-        truncated: true
-      };
-      const attempt = `${JSON.stringify({ ...value, transcript })}
-`;
-      if (Buffer.byteLength(attempt) <= PUBLIC_JSON_BYTE_BUDGET) {
-        high = start;
-      } else {
-        low = start + 1;
-      }
-    }
-    const text = characters.slice(low).join("");
-    candidate = {
-      ...value,
-      transcript: {
-        ...value["transcript"],
-        text,
-        bytes: Buffer.byteLength(text),
-        lines: text ? text.split(`
-`).length : 0,
-        truncated: true
-      }
-    };
-    encoded = `${JSON.stringify(candidate)}
-`;
-  }
-  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET) {
-    throw new Error("public response exceeds the 16 KiB output budget");
-  }
-  return encoded;
-}
-function isRecord7(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// packages/container-lab/src/sync/staging.ts
-import {
-  chmod,
-  copyFile,
-  lstat as lstat5,
-  mkdir as mkdir5,
-  readlink as readlink2,
-  rename as rename3,
-  rm as rm5,
-  rmdir,
-  symlink
-} from "fs/promises";
-import path3 from "path";
-async function backupTargets(targetRoot, records) {
-  for (const record of records) {
-    await assertExpectedEntry(targetRoot, record.path, record.original, "target");
-    if (!(record.existed && record.backup && record.kind) || record.mode === undefined) {
-      continue;
-    }
-    const target = await guardedPath(targetRoot, record.path);
-    const stat2 = await lstat5(target);
-    if (record.kind === "symlink" && stat2.isSymbolicLink()) {
-      await symlink(await readlink2(target), record.backup);
-    } else if (record.kind === "file" && stat2.isFile()) {
-      await copyFile(target, record.backup);
-      await chmod(record.backup, record.mode);
-      await syncFile(record.backup);
-    } else {
-      throw new Error(`Synchronization target is not a regular file or symlink: ${record.path}`);
-    }
-  }
-  const backupDirectory = records.find((record) => record.backup)?.backup;
-  if (backupDirectory) {
-    await syncDirectory(path3.dirname(backupDirectory));
-  }
-}
-async function planBackupRecords(targetRoot, changes, expected, backupDir, journalId) {
-  const records = [];
-  for (const [index, change] of changes.entries()) {
-    const original = expected[change.path] ?? null;
-    const target = await guardedPath(targetRoot, change.path);
-    const publication = path3.join(path3.dirname(target), `.skizzles-sync-${journalId}-${index}.tmp`);
-    records.push({
-      path: change.path,
-      existed: original !== null,
-      ...original ? {
-        kind: original.kind,
-        mode: original.mode,
-        backup: path3.join(backupDir, String(index))
-      } : {},
-      publication,
-      original
-    });
-  }
-  return records;
-}
+// packages/container-lab/src/sync/directories.ts
 async function planCreatedDirectories(targetRoot, changes) {
   const canonical = await canonicalRoot(targetRoot);
   const missing = new Set;
@@ -10168,21 +10240,105 @@ async function createPlannedDirectories(targetRoot, directories, onCreated = () 
     await onCreated(await directoryIdentity(targetRoot, relative4));
   }
 }
-async function cleanupCreatedDirectories(targetRoot, directories) {
+async function assertCreatedDirectoriesRetirable(targetRoot, directories) {
+  const journalOwnedPaths = new Set(directories.map((entry) => entry.path));
   for (const identity3 of [...directories].reverse()) {
-    await assertDirectoryIdentities(targetRoot, [identity3], (relative4) => `recovery conflict at ${relative4}; divergent target directory preserved`);
+    await createdDirectoryRetirementState(targetRoot, identity3, journalOwnedPaths);
+  }
+}
+async function assertRecoveryDirectoryIdentities(targetRoot, journal) {
+  const conflict = (relative4) => `recovery conflict at ${relative4}; divergent target directory preserved`;
+  if (journal.state === "prepared") {
+    await assertCreatedDirectoriesRetirable(targetRoot, journal.createdDirectories);
+  } else {
+    await assertDirectoryIdentities(targetRoot, journal.createdDirectories, conflict);
+  }
+  await assertDirectoryIdentities(targetRoot, journal.deleteParentDirectories, conflict);
+}
+async function retireCreatedDirectories(targetRoot, directories, hooks = {}) {
+  const journalOwnedPaths = new Set(directories.map((entry) => entry.path));
+  for (const identity3 of [...directories].reverse()) {
+    await hooks.beforeRemoval?.(identity3);
+    const state = await createdDirectoryRetirementState(targetRoot, identity3, journalOwnedPaths);
     const directory = await guardedPath(targetRoot, identity3.path);
+    if (state === "absent") {
+      await syncRetirementParent(directory, identity3, journalOwnedPaths, hooks);
+      continue;
+    }
     try {
       await rmdir(directory);
-      await syncDirectory(path3.dirname(directory));
     } catch (error) {
       const code = error.code;
-      if (code === "ENOTEMPTY" || code === "EEXIST") {
-        throw new Error(`recovery conflict at ${identity3.path}; divergent target directory preserved`);
+      if (code === "ENOENT") {
+        await syncRetirementParent(directory, identity3, journalOwnedPaths, hooks);
+        continue;
+      }
+      if (code === "ENOTEMPTY" || code === "EEXIST" || code === "ENOTDIR") {
+        throw createdDirectoryConflict(identity3.path);
       }
       throw error;
     }
+    await hooks.afterRemoval?.(identity3);
+    await syncRetirementParent(directory, identity3, journalOwnedPaths, hooks);
   }
+}
+async function syncRetirementParent(directory, identity3, journalOwnedPaths, hooks) {
+  try {
+    await syncDirectory(path3.dirname(directory));
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      const parent = path3.posix.dirname(identity3.path);
+      if (parent !== "." && journalOwnedPaths.has(parent)) {
+        return;
+      }
+      throw createdDirectoryConflict(identity3.path);
+    }
+    throw error;
+  }
+  await hooks.afterParentSync?.(identity3);
+}
+async function createdDirectoryRetirementState(targetRoot, expected, journalOwnedPaths) {
+  if (await retirementAncestorState(targetRoot, expected.path, journalOwnedPaths) === "retired") {
+    return "absent";
+  }
+  let actual;
+  try {
+    actual = await directoryIdentity(targetRoot, expected.path);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return "absent";
+    }
+    throw createdDirectoryConflict(expected.path);
+  }
+  if (actual.device !== expected.device || actual.inode !== expected.inode) {
+    throw createdDirectoryConflict(expected.path);
+  }
+  return "present";
+}
+async function retirementAncestorState(targetRoot, relative4, journalOwnedPaths) {
+  const canonical = await canonicalRoot(targetRoot);
+  const parts = relative4.split("/").slice(0, -1);
+  for (let index = 1;index <= parts.length; index++) {
+    const ancestor = parts.slice(0, index).join("/");
+    try {
+      const stat2 = await lstat5(path3.join(canonical, ...parts.slice(0, index)));
+      if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
+        throw createdDirectoryConflict(relative4);
+      }
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+      if (journalOwnedPaths.has(ancestor)) {
+        return "retired";
+      }
+      throw createdDirectoryConflict(relative4);
+    }
+  }
+  return "intact";
+}
+function createdDirectoryConflict(relative4) {
+  return new Error(`recovery conflict at ${relative4}; divergent target directory preserved`);
 }
 async function directoryIdentity(root, relative4) {
   const directory = await guardedPath(root, relative4);
@@ -10196,148 +10352,169 @@ async function directoryIdentity(root, relative4) {
     inode: stat2.ino.toString()
   };
 }
-async function stageSources(sourceRoot, changes, stagedRoot) {
-  for (const change of changes) {
-    await stageSourceChange(sourceRoot, stagedRoot, change);
-  }
+
+// packages/container-lab/src/sync/git-manifest.ts
+import { lstat as lstat6 } from "fs/promises";
+import process8 from "process";
+
+// packages/container-lab/src/process/git.ts
+import { isAbsolute as isAbsolute4 } from "path";
+var isolatedGitConfiguration = [
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "core.fsmonitor=false"
+];
+async function runLocalGit(args, options, environment) {
+  assertLocalClone(args);
+  return await runCommand("git", [...isolatedGitConfiguration, ...args], {
+    ...options,
+    env: gitProcessEnvironment(environment)
+  });
 }
-async function stageSourceChange(sourceRoot, stagedRoot, change) {
-  if (change.action === "delete") {
+function assertLocalClone(args) {
+  if (args[0] !== "clone") {
     return;
   }
-  if (!change.file) {
-    throw new Error(`Synchronization preview is missing file details for ${change.path}`);
-  }
-  const source = await guardedPath(sourceRoot, change.path);
-  const target = await guardedPath(stagedRoot, change.path, true);
-  const stat2 = await lstat5(source);
-  if (change.file.kind === "symlink" && stat2.isSymbolicLink()) {
-    await stageSymlink(source, target, change.file);
-    return;
-  }
-  if (change.file.kind === "file" && stat2.isFile()) {
-    await copyFile(source, target);
-    await chmod(target, change.file.mode);
-    const staged = await describeSyncFile(stagedRoot, change.path);
-    if (sameSyncFile(staged, change.file)) {
-      return;
-    }
-    throw new Error("Synchronization preview is stale; source changed");
-  }
-  throw new Error(`Synchronization source changed type during apply: ${change.path}`);
-}
-async function stageSymlink(source, target, expected) {
-  const link2 = await readlink2(source);
-  const bytes = Buffer.from(link2);
-  if (bytes.byteLength !== expected.size || sha256(bytes) !== expected.sha256) {
-    throw new Error("Synchronization preview is stale; source changed");
-  }
-  await symlink(link2, target);
-}
-async function applyChange(sourceRoot, targetRoot, change, record, beforeRename) {
-  const target = await guardedPath(targetRoot, change.path, true);
-  if (change.action === "delete") {
-    await rm5(target, { force: true, recursive: false });
-    await syncDirectory(path3.dirname(target));
-    return;
-  }
-  if (!record.publication) {
-    throw new Error(`Missing synchronization publication for ${change.path}`);
-  }
-  await assertPublicationAvailable(record.publication, change.path);
-  const source = await guardedPath(sourceRoot, change.path);
-  const stat2 = await lstat5(source);
-  try {
-    if (change.file?.kind === "symlink" && stat2.isSymbolicLink()) {
-      await symlink(await readlink2(source), record.publication);
-    } else if (change.file?.kind === "file" && stat2.isFile()) {
-      await copyFile(source, record.publication);
-      await chmod(record.publication, change.file.mode);
-      await syncFile(record.publication);
-    } else {
-      throw new Error(`Synchronization source changed type during apply: ${change.path}`);
-    }
-    await beforeRename?.();
-    await rename3(record.publication, target);
-    await syncDirectory(path3.dirname(target));
-  } catch (error) {
-    await rm5(record.publication, { force: true, recursive: false }).catch(() => {
-      return;
-    });
-    throw error;
+  const source = args.at(-2);
+  const destination = args.at(-1);
+  if (!args.includes("--local") || typeof source !== "string" || typeof destination !== "string" || !isAbsolute4(source) || !isAbsolute4(destination)) {
+    throw new Error("Git clone requires absolute local source and destination");
   }
 }
-async function assertExpectedEntry(root, relative4, expected, side) {
-  let actual = null;
-  try {
-    actual = await describeSyncFile(root, relative4);
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw error;
+function gitProcessEnvironment(environment) {
+  const result = {
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    LANG: "C",
+    LC_ALL: "C"
+  };
+  for (const name of ["PATH", "TMPDIR", "TMP", "TEMP"]) {
+    const value = environment[name];
+    if (Object.hasOwn(environment, name) && typeof value === "string") {
+      result[name] = value;
     }
   }
-  if (!sameSyncFile(actual ?? undefined, expected ?? undefined)) {
-    throw new Error(`Synchronization ${side} changed after preview: ${relative4}`);
-  }
+  return result;
 }
-async function restoreBackups(targetRoot, backups) {
-  for (const record of backups) {
-    const target = await guardedPath(targetRoot, record.path, true);
-    if (!record.existed) {
-      await rm5(target, { force: true, recursive: false });
-      await syncDirectory(path3.dirname(target));
-      continue;
-    }
-    if (!(record.backup && record.publication)) {
-      throw new Error(`Missing synchronization backup for ${record.path}`);
-    }
-    await rm5(record.publication, { force: true, recursive: false });
-    if (record.kind === "symlink") {
-      await symlink(await readlink2(record.backup), record.publication);
-    } else {
-      await copyFile(record.backup, record.publication);
-      if (record.mode !== undefined) {
-        await chmod(record.publication, record.mode);
+
+// packages/container-lab/src/sync/git-manifest.ts
+var MAX_SYNC_FILES = 20000;
+var MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
+async function eligibleGitPaths(root, environment = process8.env) {
+  const canonical = await canonicalRoot(root);
+  const { stdout } = await runLocalGit([
+    "-C",
+    canonical,
+    "ls-files",
+    "-z",
+    "--cached",
+    "--others",
+    "--exclude-standard"
+  ], { maxOutputBytes: 64 * 1024 * 1024, rejectOnOutputLimit: true }, environment);
+  const values = stdout.toString("utf8").split("\x00").filter(Boolean).map(safeRelativePath);
+  const unique = [...new Set(values)].sort((a, b) => a.localeCompare(b));
+  if (unique.length > MAX_SYNC_FILES) {
+    throw new Error(`Git workspace exceeds ${MAX_SYNC_FILES} synchronized paths`);
+  }
+  return unique;
+}
+async function buildGitManifest(root, environment = process8.env) {
+  const canonical = await canonicalRoot(root);
+  const files = Object.create(null);
+  let totalBytes = 0;
+  for (const relative4 of await eligibleGitPaths(canonical, environment)) {
+    try {
+      const stat2 = await lstat6(await guardedPath(canonical, relative4));
+      if (!(stat2.isFile() || stat2.isSymbolicLink())) {
+        continue;
       }
-      await syncFile(record.publication);
+      const file = await describeSyncFile(canonical, relative4);
+      totalBytes += file.size;
+      if (totalBytes > MAX_SYNC_TOTAL_BYTES) {
+        throw new Error("Git workspace exceeds 512 MiB synchronization limit");
+      }
+      files[relative4] = file;
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
     }
-    await rename3(record.publication, target);
-    await syncDirectory(path3.dirname(target));
   }
+  return { root: canonical, digest: manifestDigest(files), files };
 }
-async function validateBackupArtifacts(backups) {
-  for (const record of backups) {
-    if (!(record.existed && record.backup && record.original)) {
-      continue;
+function manifestDigest(files) {
+  const compact = Object.keys(files).sort().map((name) => {
+    const file = files[name];
+    if (!file) {
+      throw new Error(`missing manifest entry: ${name}`);
     }
-    const actual = await describeSyncFile(path3.dirname(record.backup), path3.basename(record.backup));
-    if (!sameSyncFile(actual, record.original)) {
-      throw new Error(`Invalid synchronization backup for ${record.path}`);
-    }
-  }
+    return [name, file.kind, file.sha256, file.size, file.mode];
+  });
+  return sha256(JSON.stringify(compact));
 }
-async function cleanupPublications(backups) {
-  for (const record of backups) {
-    if (!record.publication) {
-      continue;
+
+// packages/container-lab/src/sync/preview.ts
+import { randomBytes } from "crypto";
+import path5 from "path";
+import process9 from "process";
+
+// packages/container-lab/src/public/json.ts
+var PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
+function serializePublicJson(value) {
+  let candidate = value;
+  let encoded = `${JSON.stringify(candidate)}
+`;
+  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET && isRecord7(value) && isRecord7(value["transcript"]) && typeof value["transcript"]["text"] === "string") {
+    const characters = Array.from(value["transcript"]["text"]);
+    let low = 0;
+    let high = characters.length;
+    while (low < high) {
+      const start = Math.floor((low + high) / 2);
+      const text2 = characters.slice(start).join("");
+      const transcript = {
+        ...value["transcript"],
+        text: text2,
+        bytes: Buffer.byteLength(text2),
+        lines: text2 ? text2.split(`
+`).length : 0,
+        truncated: true
+      };
+      const attempt = `${JSON.stringify({ ...value, transcript })}
+`;
+      if (Buffer.byteLength(attempt) <= PUBLIC_JSON_BYTE_BUDGET) {
+        high = start;
+      } else {
+        low = start + 1;
+      }
     }
-    await rm5(record.publication, { force: true, recursive: false });
+    const text = characters.slice(low).join("");
+    candidate = {
+      ...value,
+      transcript: {
+        ...value["transcript"],
+        text,
+        bytes: Buffer.byteLength(text),
+        lines: text ? text.split(`
+`).length : 0,
+        truncated: true
+      }
+    };
+    encoded = `${JSON.stringify(candidate)}
+`;
   }
+  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET) {
+    throw new Error("public response exceeds the 16 KiB output budget");
+  }
+  return encoded;
 }
-async function assertPublicationAvailable(publication, relative4) {
-  try {
-    await lstat5(publication);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return;
-    }
-    throw error;
-  }
-  throw new Error(`Synchronization publication path already exists: ${relative4}`);
+function isRecord7(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // packages/container-lab/src/sync/state.ts
-import { lstat as lstat6, mkdir as mkdir6 } from "fs/promises";
+import { lstat as lstat7, mkdir as mkdir6 } from "fs/promises";
 import path4 from "path";
 async function syncStatePaths(identity3) {
   safeStateName(identity3.labId, "lab id");
@@ -10374,14 +10551,14 @@ async function ensureStateDirectory(stateRoot, relative4) {
       throw error;
     }
   });
-  const stat2 = await lstat6(directory);
+  const stat2 = await lstat7(directory);
   if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
     throw new Error(`Unsafe synchronization state directory: ${relative4}`);
   }
 }
 async function readRequiredUnknownJson(file, message2) {
   try {
-    const stat2 = await lstat6(file);
+    const stat2 = await lstat7(file);
     if (stat2.isSymbolicLink() || !stat2.isFile()) {
       throw new Error("Unsafe synchronization state file");
     }
@@ -10694,7 +10871,7 @@ function expectedDeleteParentPaths(changes) {
 var DEFAULT_TTL_MS = 5 * 60 * 1000;
 async function initializeSyncBaseline(identity3, root) {
   const state = await syncStatePaths(identity3);
-  const manifest = await buildGitManifest(root);
+  const manifest = await buildGitManifest(root, identity3.environment ?? process9.env);
   await writeDurableJson(state.baseline, {
     version: 1,
     files: manifest.files
@@ -10702,9 +10879,10 @@ async function initializeSyncBaseline(identity3, root) {
 }
 async function previewSync(options) {
   const state = await syncStatePaths(options);
+  const environment = options.environment ?? process9.env;
   const [source, target, baselineValue] = await Promise.all([
-    buildGitManifest(options.sourceRoot),
-    buildGitManifest(options.targetRoot),
+    buildGitManifest(options.sourceRoot, environment),
+    buildGitManifest(options.targetRoot, environment),
     readRequiredUnknownJson(state.baseline, "Synchronization baseline is missing; initialize it when the lab is created")
   ]);
   const baseline = parseBaselineFile(baselineValue);
@@ -10769,6 +10947,15 @@ async function canonicalPreviewRoots(options) {
   ]);
   return { sourceRoot, targetRoot };
 }
+async function verifyFreshPreview(preview, sourceRoot, targetRoot, environment) {
+  const [freshSource, freshTarget] = await Promise.all([
+    buildGitManifest(sourceRoot, environment),
+    buildGitManifest(targetRoot, environment)
+  ]);
+  if (freshSource.digest !== preview.sourceDigest || freshTarget.digest !== preview.targetDigest) {
+    throw new Error("Synchronization preview became stale before mutation");
+  }
+}
 function assertPreviewBinding(preview, options, sourceRoot, targetRoot) {
   if (preview.token !== options.token || preview.labId !== options.labId || preview.direction !== options.direction || preview.sourceRoot !== sourceRoot || preview.targetRoot !== targetRoot) {
     throw new Error("Synchronization preview token does not match the requested lab, direction, or roots");
@@ -10806,8 +10993,202 @@ function assertPublicPreviewFitsBudget(preview, options) {
 }
 
 // packages/container-lab/src/sync/recovery.ts
-import { lstat as lstat7, rm as rm6 } from "fs/promises";
+import { lstat as lstat9, rm as rm7 } from "fs/promises";
+import path7 from "path";
+
+// packages/container-lab/src/sync/staging.ts
+import {
+  chmod,
+  copyFile,
+  lstat as lstat8,
+  readlink as readlink2,
+  rename as rename3,
+  rm as rm6,
+  symlink
+} from "fs/promises";
 import path6 from "path";
+async function backupTargets(targetRoot, records) {
+  for (const record of records) {
+    await assertExpectedEntry(targetRoot, record.path, record.original, "target");
+    if (!(record.existed && record.backup && record.kind) || record.mode === undefined) {
+      continue;
+    }
+    const target = await guardedPath(targetRoot, record.path);
+    const stat2 = await lstat8(target);
+    if (record.kind === "symlink" && stat2.isSymbolicLink()) {
+      await symlink(await readlink2(target), record.backup);
+    } else if (record.kind === "file" && stat2.isFile()) {
+      await copyFile(target, record.backup);
+      await chmod(record.backup, record.mode);
+      await syncFile(record.backup);
+    } else {
+      throw new Error(`Synchronization target is not a regular file or symlink: ${record.path}`);
+    }
+  }
+  const backupDirectory = records.find((record) => record.backup)?.backup;
+  if (backupDirectory) {
+    await syncDirectory(path6.dirname(backupDirectory));
+  }
+}
+async function planBackupRecords(targetRoot, changes, expected, backupDir, journalId) {
+  const records = [];
+  for (const [index, change] of changes.entries()) {
+    const original = expected[change.path] ?? null;
+    const target = await guardedPath(targetRoot, change.path);
+    const publication = path6.join(path6.dirname(target), `.skizzles-sync-${journalId}-${index}.tmp`);
+    records.push({
+      path: change.path,
+      existed: original !== null,
+      ...original ? {
+        kind: original.kind,
+        mode: original.mode,
+        backup: path6.join(backupDir, String(index))
+      } : {},
+      publication,
+      original
+    });
+  }
+  return records;
+}
+async function stageSources(sourceRoot, changes, stagedRoot) {
+  for (const change of changes) {
+    await stageSourceChange(sourceRoot, stagedRoot, change);
+  }
+}
+async function stageSourceChange(sourceRoot, stagedRoot, change) {
+  if (change.action === "delete") {
+    return;
+  }
+  if (!change.file) {
+    throw new Error(`Synchronization preview is missing file details for ${change.path}`);
+  }
+  const source = await guardedPath(sourceRoot, change.path);
+  const target = await guardedPath(stagedRoot, change.path, true);
+  const stat2 = await lstat8(source);
+  if (change.file.kind === "symlink" && stat2.isSymbolicLink()) {
+    await stageSymlink(source, target, change.file);
+    return;
+  }
+  if (change.file.kind === "file" && stat2.isFile()) {
+    await copyFile(source, target);
+    await chmod(target, change.file.mode);
+    const staged = await describeSyncFile(stagedRoot, change.path);
+    if (sameSyncFile(staged, change.file)) {
+      return;
+    }
+    throw new Error("Synchronization preview is stale; source changed");
+  }
+  throw new Error(`Synchronization source changed type during apply: ${change.path}`);
+}
+async function stageSymlink(source, target, expected) {
+  const link2 = await readlink2(source);
+  const bytes = Buffer.from(link2);
+  if (bytes.byteLength !== expected.size || sha256(bytes) !== expected.sha256) {
+    throw new Error("Synchronization preview is stale; source changed");
+  }
+  await symlink(link2, target);
+}
+async function applyChange(sourceRoot, targetRoot, change, record, beforeRename) {
+  const target = await guardedPath(targetRoot, change.path, true);
+  if (change.action === "delete") {
+    await rm6(target, { force: true, recursive: false });
+    await syncDirectory(path6.dirname(target));
+    return;
+  }
+  if (!record.publication) {
+    throw new Error(`Missing synchronization publication for ${change.path}`);
+  }
+  await assertPublicationAvailable(record.publication, change.path);
+  const source = await guardedPath(sourceRoot, change.path);
+  const stat2 = await lstat8(source);
+  try {
+    if (change.file?.kind === "symlink" && stat2.isSymbolicLink()) {
+      await symlink(await readlink2(source), record.publication);
+    } else if (change.file?.kind === "file" && stat2.isFile()) {
+      await copyFile(source, record.publication);
+      await chmod(record.publication, change.file.mode);
+      await syncFile(record.publication);
+    } else {
+      throw new Error(`Synchronization source changed type during apply: ${change.path}`);
+    }
+    await beforeRename?.();
+    await rename3(record.publication, target);
+    await syncDirectory(path6.dirname(target));
+  } catch (error) {
+    await rm6(record.publication, { force: true, recursive: false }).catch(() => {
+      return;
+    });
+    throw error;
+  }
+}
+async function assertExpectedEntry(root, relative4, expected, side) {
+  let actual = null;
+  try {
+    actual = await describeSyncFile(root, relative4);
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+  if (!sameSyncFile(actual ?? undefined, expected ?? undefined)) {
+    throw new Error(`Synchronization ${side} changed after preview: ${relative4}`);
+  }
+}
+async function restoreBackups(targetRoot, backups) {
+  for (const record of backups) {
+    const target = await guardedPath(targetRoot, record.path, true);
+    if (!record.existed) {
+      await rm6(target, { force: true, recursive: false });
+      await syncDirectory(path6.dirname(target));
+      continue;
+    }
+    if (!(record.backup && record.publication)) {
+      throw new Error(`Missing synchronization backup for ${record.path}`);
+    }
+    await rm6(record.publication, { force: true, recursive: false });
+    if (record.kind === "symlink") {
+      await symlink(await readlink2(record.backup), record.publication);
+    } else {
+      await copyFile(record.backup, record.publication);
+      if (record.mode !== undefined) {
+        await chmod(record.publication, record.mode);
+      }
+      await syncFile(record.publication);
+    }
+    await rename3(record.publication, target);
+    await syncDirectory(path6.dirname(target));
+  }
+}
+async function validateBackupArtifacts(backups) {
+  for (const record of backups) {
+    if (!(record.existed && record.backup && record.original)) {
+      continue;
+    }
+    const actual = await describeSyncFile(path6.dirname(record.backup), path6.basename(record.backup));
+    if (!sameSyncFile(actual, record.original)) {
+      throw new Error(`Invalid synchronization backup for ${record.path}`);
+    }
+  }
+}
+async function cleanupPublications(backups) {
+  for (const record of backups) {
+    if (!record.publication) {
+      continue;
+    }
+    await rm6(record.publication, { force: true, recursive: false });
+  }
+}
+async function assertPublicationAvailable(publication, relative4) {
+  try {
+    await lstat8(publication);
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  throw new Error(`Synchronization publication path already exists: ${relative4}`);
+}
 
 // packages/container-lab/src/sync/validation/journal.ts
 function parseSyncJournal(value) {
@@ -10945,7 +11326,7 @@ function parseBackups(value) {
 
 // packages/container-lab/src/sync/recovery.ts
 var JOURNAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-async function recoverSyncTransactions(options) {
+async function recoverSyncTransactions(options, hooks = {}) {
   const state = await syncStatePaths(options);
   const allowedTargets = new Set(await Promise.all(options.allowedTargetRoots.map(canonicalRoot)));
   const glob = new Bun.Glob("*.json");
@@ -10954,25 +11335,25 @@ async function recoverSyncTransactions(options) {
     cwd: state.journals,
     onlyFiles: true
   })) {
-    await recoverJournal(state, name, allowedTargets, options.labId);
+    await recoverJournal(state, name, allowedTargets, options.labId, hooks);
     recovered++;
   }
   return recovered;
 }
-async function recoverJournal(state, name, allowedTargets, labId) {
-  const journalId = path6.basename(name, ".json");
+async function recoverJournal(state, name, allowedTargets, labId, hooks) {
+  const journalId = path7.basename(name, ".json");
   if (!JOURNAL_ID.test(journalId)) {
     throw new Error(`Invalid synchronization journal ${name}`);
   }
-  const journalPath = path6.join(state.journals, name);
+  const journalPath = path7.join(state.journals, name);
   const journal = parseSyncJournal(await readRequiredUnknownJson(journalPath, `Invalid synchronization journal ${name}`));
   const provenance = await validateJournalProvenance(state, journal, journalId, allowedTargets, labId);
-  const backupDir = path6.join(state.backups, journalId);
-  await recoverJournalState(state, journal, journalPath, backupDir, provenance);
-  await rm6(backupDir, { recursive: true, force: true });
-  await rm6(journalPath, { force: true });
+  const backupDir = path7.join(state.backups, journalId);
+  await recoverJournalState(state, journal, journalPath, backupDir, provenance, hooks);
+  await rm7(backupDir, { recursive: true, force: true });
+  await rm7(journalPath, { force: true });
 }
-async function recoverJournalState(state, journal, journalPath, backupDir, provenance) {
+async function recoverJournalState(state, journal, journalPath, backupDir, provenance, hooks) {
   const { targetRoot } = provenance;
   if (journal.state === "prepared" || journal.state === "applied" && !provenance.baselinePublished) {
     await assertRecoveryDirectoryIdentities(targetRoot, journal);
@@ -10987,7 +11368,8 @@ async function recoverJournalState(state, journal, journalPath, backupDir, prove
   }
   if (journal.state === "prepared") {
     await cleanupPublications(journal.backups.filter((backup) => journal.mutatedPaths.includes(backup.path)));
-    await cleanupCreatedDirectories(targetRoot, journal.createdDirectories);
+    await retireCreatedDirectories(targetRoot, journal.createdDirectories, hooks.directoryRetirement);
+    await hooks.afterCreatedDirectoriesRetired?.();
   }
   if (journal.state === "prepared") {
     journal.createdDirectories = [];
@@ -11016,7 +11398,7 @@ async function assertAppliedTargets(targetRoot, journal) {
   }
 }
 async function validateJournalProvenance(state, journal, journalId, allowedTargets, expectedLabId) {
-  const preview = parseStoredPreview(await readRequiredUnknownJson(path6.join(state.used, `${journal.previewToken}.json`), "Synchronization journal preview provenance is missing"));
+  const preview = parseStoredPreview(await readRequiredUnknownJson(path7.join(state.used, `${journal.previewToken}.json`), "Synchronization journal preview provenance is missing"));
   if (preview.token !== journal.previewToken || preview.labId !== expectedLabId || preview.binding !== journal.previewBinding || preview.binding !== previewBinding(preview)) {
     throw new Error("Invalid synchronization journal preview provenance");
   }
@@ -11033,12 +11415,12 @@ async function validateJournalProvenance(state, journal, journalId, allowedTarge
   if (targetRoot !== journal.targetRoot || targetRoot !== preview.targetRoot || !allowedTargets.has(targetRoot)) {
     throw new Error(`Synchronization journal targets a root not owned by this lab: ${targetRoot}`);
   }
-  const expectedBaseline = path6.join(await canonicalRoot(path6.dirname(state.baseline)), path6.basename(state.baseline));
+  const expectedBaseline = path7.join(await canonicalRoot(path7.dirname(state.baseline)), path7.basename(state.baseline));
   if (journal.baselinePath !== expectedBaseline) {
     throw new Error("Synchronization journal baseline does not belong to this lab");
   }
   assertJournalMatchesPreview(journal, preview);
-  await resolveCreatingDirectory(targetRoot, journal, path6.join(state.journals, `${journalId}.json`));
+  await resolveCreatingDirectory(targetRoot, journal, path7.join(state.journals, `${journalId}.json`));
   if (journal.state === "prepared" || journal.state === "applied" && !baselinePublished) {
     await assertRecoveryDirectoryIdentities(targetRoot, journal);
   }
@@ -11078,7 +11460,7 @@ async function resolveCreatingDirectory(targetRoot, journal, journalPath) {
     return;
   }
   try {
-    await lstat7(path6.join(targetRoot, ...relative4.split("/")));
+    await lstat9(path7.join(targetRoot, ...relative4.split("/")));
   } catch (error) {
     if (error.code !== "ENOENT") {
       throw error;
@@ -11090,14 +11472,14 @@ async function resolveCreatingDirectory(targetRoot, journal, journalPath) {
   throw new Error(`recovery conflict at ${relative4}; unverified target directory preserved`);
 }
 async function validateJournalRecords(state, journal, journalId, targetRoot) {
-  const backupRoot = path6.join(state.backups, journalId, "target");
+  const backupRoot = path7.join(state.backups, journalId, "target");
   for (const [index, backup] of journal.backups.entries()) {
-    const expectedBackup = path6.join(backupRoot, String(index));
+    const expectedBackup = path7.join(backupRoot, String(index));
     if (backup.existed ? backup.backup !== expectedBackup : backup.backup !== undefined) {
       throw new Error(`Invalid synchronization backup provenance for ${backup.path}`);
     }
     const target = await guardedPath(targetRoot, backup.path);
-    const expectedPublication = path6.join(path6.dirname(target), `.skizzles-sync-${journalId}-${index}.tmp`);
+    const expectedPublication = path7.join(path7.dirname(target), `.skizzles-sync-${journalId}-${index}.tmp`);
     if (backup.publication !== expectedPublication) {
       throw new Error(`Invalid synchronization publication provenance for ${backup.path}`);
     }
@@ -11116,8 +11498,8 @@ async function validateJournalRecords(state, journal, journalId, targetRoot) {
   }
 }
 async function validateBackupDirectory(backupDir) {
-  for (const directory of [backupDir, path6.join(backupDir, "target")]) {
-    const stat2 = await lstat7(directory);
+  for (const directory of [backupDir, path7.join(backupDir, "target")]) {
+    const stat2 = await lstat9(directory);
     if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
       throw new Error("Invalid synchronization backup directory");
     }
@@ -11147,11 +11529,6 @@ async function rollbackJournalSafely(targetRoot, journal) {
   }
   await restoreBackups(targetRoot, restorations);
 }
-async function assertRecoveryDirectoryIdentities(targetRoot, journal) {
-  const conflict = (relative4) => `recovery conflict at ${relative4}; divergent target directory preserved`;
-  await assertDirectoryIdentities(targetRoot, journal.createdDirectories, conflict);
-  await assertDirectoryIdentities(targetRoot, journal.deleteParentDirectories, conflict);
-}
 
 // packages/container-lab/src/sync/apply.ts
 async function applySync(options) {
@@ -11159,14 +11536,15 @@ async function applySync(options) {
 }
 async function applySyncWithHooks(options, hooks = {}) {
   const state = await syncStatePaths(options);
-  const previewPath = path7.join(state.previews, `${safeStateName(options.token, "preview token")}.json`);
+  const previewPath = path8.join(state.previews, `${safeStateName(options.token, "preview token")}.json`);
   const preview = parseStoredPreview(await readRequiredUnknownJson(previewPath, "Unknown or already-used synchronization preview token"));
-  const validated = await validatePreview(options, preview, state);
+  const environment = options.environment ?? process10.env;
+  const validated = await validatePreview(options, preview, state, environment);
   await claimPreview(state, previewPath, options.token);
   const transaction = await prepareTransaction(state, preview, validated);
   return await executeTransaction(options, preview, transaction, hooks);
 }
-async function validatePreview(options, preview, state) {
+async function validatePreview(options, preview, state, environment) {
   const { sourceRoot, targetRoot } = await canonicalPreviewRoots(options);
   assertPreviewBinding(preview, options, sourceRoot, targetRoot);
   if (preview.binding !== previewBinding(preview)) {
@@ -11179,8 +11557,8 @@ async function validatePreview(options, preview, state) {
     throw new Error("Synchronization preview contains conflicts");
   }
   const [source, target, baselineValue] = await Promise.all([
-    buildGitManifest(sourceRoot),
-    buildGitManifest(targetRoot),
+    buildGitManifest(sourceRoot, environment),
+    buildGitManifest(targetRoot, environment),
     readRequiredUnknownJson(state.baseline, "Synchronization baseline is missing; initialize it when the lab is created")
   ]);
   const baseline = parseBaselineFile(baselineValue);
@@ -11200,24 +11578,24 @@ async function validatePreview(options, preview, state) {
   if (idle === false) {
     throw new Error("Synchronization apply requires an idle lab");
   }
-  return { sourceRoot, targetRoot, source };
+  return { environment, sourceRoot, targetRoot, source };
 }
 async function claimPreview(state, previewPath, token) {
-  const claimed = path7.join(state.used, `${token}.json`);
+  const claimed = path8.join(state.used, `${token}.json`);
   await rename4(previewPath, claimed).catch(() => {
     throw new Error("Unknown or already-used synchronization preview token");
   });
   await Promise.all([
-    syncDirectory(path7.dirname(previewPath)),
-    syncDirectory(path7.dirname(claimed))
+    syncDirectory(path8.dirname(previewPath)),
+    syncDirectory(path8.dirname(claimed))
   ]);
 }
 async function prepareTransaction(state, preview, validated) {
   const journalId = randomUUID3();
-  const backupDir = path7.join(state.backups, journalId);
-  const journalPath = path7.join(state.journals, `${journalId}.json`);
-  const stagedRoot = path7.join(backupDir, "source");
-  const targetBackups = path7.join(backupDir, "target");
+  const backupDir = path8.join(state.backups, journalId);
+  const journalPath = path8.join(state.journals, `${journalId}.json`);
+  const stagedRoot = path8.join(backupDir, "source");
+  const targetBackups = path8.join(backupDir, "target");
   const backups = await planBackupRecords(validated.targetRoot, preview.changes, preview.expectedTargets, targetBackups, journalId);
   const journal = {
     version: 1,
@@ -11249,8 +11627,8 @@ async function prepareTransaction(state, preview, validated) {
     await writeDurableJson(journalPath, journal);
   } catch (error) {
     try {
-      await rm7(backupDir, { recursive: true, force: true });
-      await rm7(journalPath, { force: true });
+      await rm8(backupDir, { recursive: true, force: true });
+      await rm8(journalPath, { force: true });
     } catch (cleanupError) {
       throw new Error(`Synchronization preparation failed and recovery state was retained: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`, { cause: error });
     }
@@ -11269,13 +11647,14 @@ async function executeTransaction(options, preview, transaction, hooks) {
     backupDir,
     journal,
     journalPath,
+    environment,
     sourceRoot,
     stagedRoot,
     targetRoot
   } = transaction;
   let appliedJournalPublished = false;
   try {
-    await verifyFreshPreview(preview, sourceRoot, targetRoot);
+    await verifyFreshPreview(preview, sourceRoot, targetRoot, environment);
     const idleImmediatelyBeforeMutation = await options.idleGuard();
     if (idleImmediatelyBeforeMutation === false) {
       throw new Error("Synchronization apply requires an idle lab");
@@ -11310,8 +11689,8 @@ async function executeTransaction(options, preview, transaction, hooks) {
     await cleanupPublications(journal.backups);
     journal.state = "committed";
     await writeDurableJson(journalPath, journal);
-    await rm7(backupDir, { recursive: true, force: true });
-    await rm7(journalPath, { force: true });
+    await rm8(backupDir, { recursive: true, force: true });
+    await rm8(journalPath, { force: true });
     return { applied: preview.changes.length };
   } catch (error) {
     if (appliedJournalPublished) {
@@ -11324,13 +11703,13 @@ async function executeTransaction(options, preview, transaction, hooks) {
       await rollbackJournalSafely(targetRoot, journal);
       await cleanupPublications(journal.backups.filter((backup) => journal.mutatedPaths.includes(backup.path)));
       if (journal.createdDirectories.length > 0) {
-        await cleanupCreatedDirectories(targetRoot, journal.createdDirectories);
+        await retireCreatedDirectories(targetRoot, journal.createdDirectories);
       }
       journal.createdDirectories = [];
       journal.state = "rolledBack";
       await writeDurableJson(journalPath, journal);
-      await rm7(backupDir, { recursive: true, force: true });
-      await rm7(journalPath, { force: true });
+      await rm8(backupDir, { recursive: true, force: true });
+      await rm8(journalPath, { force: true });
     } catch (rollbackError) {
       throw new Error(`Synchronization apply failed and recovery state was retained: ${rollbackError instanceof Error ? rollbackError.message : rollbackError}`, { cause: error });
     }
@@ -11343,7 +11722,7 @@ async function resolveCreatingDirectory2(targetRoot, journal, journalPath) {
     return;
   }
   try {
-    await lstat8(path7.join(targetRoot, ...relative4.split("/")));
+    await lstat10(path8.join(targetRoot, ...relative4.split("/")));
   } catch (error) {
     if (error.code !== "ENOENT") {
       throw error;
@@ -11365,15 +11744,6 @@ function assertPreviewSemantics(preview, baseline, source, target) {
   ]));
   if (JSON.stringify(comparison.changes) !== JSON.stringify(preview.changes) || JSON.stringify(comparison.conflicts) !== JSON.stringify(preview.conflicts) || JSON.stringify(expectedTargets) !== JSON.stringify(preview.expectedTargets)) {
     throw new Error("Synchronization preview semantic payload is invalid");
-  }
-}
-async function verifyFreshPreview(preview, sourceRoot, targetRoot) {
-  const [freshSource, freshTarget] = await Promise.all([
-    buildGitManifest(sourceRoot),
-    buildGitManifest(targetRoot)
-  ]);
-  if (freshSource.digest !== preview.sourceDigest || freshTarget.digest !== preview.targetDigest) {
-    throw new Error("Synchronization preview became stale before mutation");
   }
 }
 async function assertExpectedTargets(targetRoot, preview) {
@@ -11451,7 +11821,7 @@ async function runLockedCommand(context, id, argv, cwd, environment, timeoutSeco
 }
 async function stopAttachedCommand(context, id, runtime, identity3, child, first) {
   for (let attempt = 0;attempt < 20; attempt++) {
-    const result = await terminateDockerRun(runtime, identity3, first, context.docker);
+    const result = await terminateDockerRun(runtime, identity3, first, context.docker, context.environment);
     if (result.confirmed) {
       break;
     }
@@ -11465,9 +11835,9 @@ async function stopAttachedCommand(context, id, runtime, identity3, child, first
     return;
   }
   try {
-    const final = await terminateDockerRun(runtime, identity3, "KILL", context.docker);
+    const final = await terminateDockerRun(runtime, identity3, "KILL", context.docker, context.environment);
     if (!final.confirmed) {
-      await destroyLabStack(runtime, context.docker);
+      await destroyLabStack(runtime, context.docker, context.environment);
       await withFileLock(labLockPath(context.roots.stateRoot, context.owner, id), async () => {
         const current = await readLab(context.roots, context.owner, id);
         if (current.state === "ready") {
@@ -11513,11 +11883,10 @@ function onceClosed(child) {
 // packages/container-lab/src/lab/destruction.ts
 import { createHash as createHash3 } from "crypto";
 import { readdir as readdir2, realpath as realpath3, stat as stat2 } from "fs/promises";
-import { join as join6 } from "path";
-import process11 from "process";
+import { join as join7 } from "path";
 
 // packages/container-lab/src/state/runtime-trust.ts
-import { join as join5, resolve as resolve5 } from "path";
+import { join as join6, resolve as resolve5 } from "path";
 async function exactDirectoryChain2(root, segments, label, options = {}) {
   return await exactDirectoryChain(root, segments, label, options);
 }
@@ -11530,7 +11899,7 @@ function assertTrustedLabRuntimeIdentity(roots, lab, options = {}) {
   const expectedOwner = options.expectedOwner ?? lab.owner;
   const expectedOwnerKey = options.expectedOwnerKey ?? ownerKey(expectedOwner);
   const expectedRuntime = expectedLabRuntimeRoot(roots, expectedOwner, lab.id);
-  if (lab.owner !== expectedOwner || lab.ownerKey !== expectedOwnerKey || resolve5(lab.runtimeRoot) !== expectedRuntime || resolve5(lab.workspace) !== join5(expectedRuntime, "workspace")) {
+  if (lab.owner !== expectedOwner || lab.ownerKey !== expectedOwnerKey || resolve5(lab.runtimeRoot) !== expectedRuntime || resolve5(lab.workspace) !== join6(expectedRuntime, "workspace")) {
     throw new Error(options.containmentMessage ?? "lab runtime containment is invalid");
   }
 }
@@ -11552,22 +11921,25 @@ async function assertReadyLabFilesystem(roots, lab) {
     throw new Error(`lab is not ready: ${lab.state}`);
   }
   const configuredRuntime = await realDirectory(roots.runtimeRoot, "configured runtime root");
-  const ownerRuntime = await realDirectory(join5(roots.runtimeRoot, lab.ownerKey), "owner runtime root");
+  const ownerRuntime = await realDirectory(join6(roots.runtimeRoot, lab.ownerKey), "owner runtime root");
   const runtime = await realDirectory(lab.runtimeRoot, "lab runtime root");
   const workspace = await realDirectory(lab.workspace, "lab workspace");
-  if (ownerRuntime !== join5(configuredRuntime, lab.ownerKey) || runtime !== join5(ownerRuntime, lab.id) || workspace !== join5(runtime, "workspace")) {
+  if (ownerRuntime !== join6(configuredRuntime, lab.ownerKey) || runtime !== join6(ownerRuntime, lab.id) || workspace !== join6(runtime, "workspace")) {
     throw new Error("runtime or workspace resolved outside the configured runtime root");
   }
   const source = await realDirectory(lab.sourceRoot, "lab source root");
   await assertRealFileInside(source, lab.manifestPath, "lab manifest");
   await assertRealFileInside(runtime, lab.runtime.overrideFile, "Compose override");
+  if (lab.runtime.sourceFile) {
+    await assertRealFileInside(runtime, lab.runtime.sourceFile, "immutable Compose source");
+  }
   if (lab.runtime.baseFile) {
     await assertRealFileInside(runtime, lab.runtime.baseFile, "internal Compose base");
   }
   const mode = lab.runtime.config.mode;
-  if (mode.kind === "compose") {
-    for (const path8 of mode.files) {
-      await assertRealFileInside(source, path8, "project Compose file");
+  if (mode.kind === "compose" && !lab.runtime.sourceFile) {
+    for (const path9 of mode.files) {
+      await assertRealFileInside(source, path9, "project Compose file");
     }
   } else if (mode.kind === "dockerfile") {
     await assertRealFileInside(source, mode.dockerfile, "project Dockerfile");
@@ -11610,7 +11982,7 @@ async function destroyManagedLab(context, id) {
       throw error;
     }
     const runtimePresent = await assertDestroyFilesystem(context.roots, lab);
-    await recoverLabSync(context.roots, lab);
+    await recoverLabSync(context.roots, lab, context.environment);
     await cleanupDockerResources(context, lab);
     if (runtimePresent) {
       if (!await inspectTrustedLabRuntimeDirectories(context.roots, lab, {
@@ -11648,8 +12020,8 @@ async function reconcileOwnerLabs(roots, owner) {
     }
   }
 }
-async function recoverLabSync(roots, lab) {
-  if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join6(lab.runtimeRoot, "workspace")) {
+async function recoverLabSync(roots, lab, environment) {
+  if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join7(lab.runtimeRoot, "workspace")) {
     throw new Error("lab runtime containment is invalid");
   }
   try {
@@ -11662,7 +12034,7 @@ async function recoverLabSync(roots, lab) {
     }
     throw error;
   }
-  const journalDirectory = join6(lab.runtimeRoot, "sync", lab.id, "journals");
+  const journalDirectory = join7(lab.runtimeRoot, "sync", lab.id, "journals");
   let journals;
   try {
     journals = await readdir2(journalDirectory);
@@ -11675,32 +12047,32 @@ async function recoverLabSync(roots, lab) {
   if (journals.length === 0) {
     return;
   }
-  await assertSourceRepositoryIdentity(lab);
+  await assertSourceRepositoryIdentity(lab, environment);
   await recoverSyncTransactions({
     stateRoot: lab.runtimeRoot,
     labId: lab.id,
     allowedTargetRoots: [lab.sourceRoot, lab.workspace]
   });
 }
-async function assertSourceRepositoryIdentity(lab) {
-  const commonGit = (await runCommand("git", [
+async function assertSourceRepositoryIdentity(lab, environment) {
+  const commonGit = (await runLocalGit([
     "-C",
     lab.sourceRoot,
     "rev-parse",
     "--path-format=absolute",
     "--git-common-dir"
-  ], { timeoutMs: 1e4 })).stdout.toString().trim();
+  ], { timeoutMs: 1e4 }, environment)).stdout.toString().trim();
   const actual = createHash3("sha256").update(await realpath3(commonGit)).digest("hex").slice(0, 12);
   if (actual !== lab.repoHash) {
     throw new Error("lab source repository identity no longer matches durable state");
   }
 }
-async function cleanupManagedLabDockerResources(lab, docker, environment = process11.env) {
+async function cleanupManagedLabDockerResources(lab, docker, environment) {
   await cleanupLabLabels(lab, lab.modeKind === "dockerfile", docker, environment);
 }
 async function cleanupDockerResources(context, lab) {
   if (lab.runtime) {
-    await destroyLabStack(runtimeFromLab(lab), context.docker);
+    await destroyLabStack(runtimeFromLab(lab), context.docker, context.environment);
     return;
   }
   await cleanupManagedLabDockerResources(lab, context.docker, context.environment);
@@ -11749,11 +12121,11 @@ function activityLock(context, id) {
 // packages/container-lab/src/lab/provisioning.ts
 import { createHash as createHash4 } from "crypto";
 import { mkdir as mkdir9, realpath as realpath4 } from "fs/promises";
-import { join as join8 } from "path";
+import { join as join9 } from "path";
 
 // packages/container-lab/src/state/owner-store.ts
 import { mkdir as mkdir8 } from "fs/promises";
-import { basename, join as join7, resolve as resolve6 } from "path";
+import { basename, join as join8, resolve as resolve6 } from "path";
 async function readReapedOwner(stateRoot, owner) {
   let value;
   try {
@@ -11777,10 +12149,10 @@ async function readReapedOwner(stateRoot, owner) {
 async function ensureOwner(stateRoot, owner) {
   resolveOwner(owner, {});
   const directory = ownerDirectory(stateRoot, owner);
-  await mkdir8(join7(directory, "labs"), { recursive: true, mode: 448 });
-  const path8 = ownerManifestPath(stateRoot, owner);
+  await mkdir8(join8(directory, "labs"), { recursive: true, mode: 448 });
+  const path9 = ownerManifestPath(stateRoot, owner);
   try {
-    const existing = await readOwnerManifest(path8);
+    const existing = await readOwnerManifest(path9);
     if (existing.owner !== owner || existing.ownerKey !== ownerKey(owner)) {
       throw new Error("owner hash collision or mismatched owner manifest");
     }
@@ -11796,25 +12168,25 @@ async function ensureOwner(stateRoot, owner) {
     ownerKey: ownerKey(owner),
     createdAt: new Date().toISOString()
   };
-  await writeJsonAtomic(path8, manifest);
+  await writeJsonAtomic(path9, manifest);
   return manifest;
 }
-async function readOwnerManifest(path8) {
-  const resolvedPath = resolve6(path8);
+async function readOwnerManifest(path9) {
+  const resolvedPath = resolve6(path9);
   const directory = resolve6(resolvedPath, "..");
   const key = basename(directory);
   const owners = resolve6(directory, "..");
   if (basename(resolvedPath) !== "owner.json" || basename(owners) !== "owners") {
-    throw new Error(`invalid owner manifest path: ${path8}`);
+    throw new Error(`invalid owner manifest path: ${path9}`);
   }
   const stateRoot = resolve6(owners, "..");
   const value = await readTrustedUnknownJson(stateRoot, ["owners", key], "owner.json", "owner manifest", { canonicalMismatch: "unsafe-indirection" });
   if (!isRecord8(value) || value["version"] !== 1 || typeof value["owner"] !== "string" || typeof value["ownerKey"] !== "string" || !isTimestamp2(value["createdAt"])) {
-    throw new Error(`invalid owner manifest: ${path8}`);
+    throw new Error(`invalid owner manifest: ${path9}`);
   }
   resolveOwner(value["owner"], {});
-  if (value["ownerKey"] !== ownerKey(value["owner"]) || basename(resolve6(path8, "..")) !== value["ownerKey"]) {
-    throw new Error(`owner manifest hash mismatch: ${path8}`);
+  if (value["ownerKey"] !== ownerKey(value["owner"]) || basename(resolve6(path9, "..")) !== value["ownerKey"]) {
+    throw new Error(`owner manifest hash mismatch: ${path9}`);
   }
   return {
     version: 1,
@@ -11853,20 +12225,20 @@ async function createProvisionedLab(context, name, source, signal) {
     if (existing.length >= 8) {
       throw new Error("an owner may have at most 8 labs");
     }
-    const sourceRoot = (await runCommand("git", ["-C", source, "rev-parse", "--show-toplevel"], {
+    const sourceRoot = (await runLocalGit(["-C", source, "rev-parse", "--show-toplevel"], {
       timeoutMs: 1e4
-    })).stdout.toString().trim();
-    const commonGit = (await runCommand("git", [
+    }, context.environment)).stdout.toString().trim();
+    const commonGit = (await runLocalGit([
       "-C",
       sourceRoot,
       "rev-parse",
       "--path-format=absolute",
       "--git-common-dir"
-    ], { timeoutMs: 1e4 })).stdout.toString().trim();
+    ], { timeoutMs: 1e4 }, context.environment)).stdout.toString().trim();
     const repoHash = createHash4("sha256").update(await realpath4(commonGit)).digest("hex").slice(0, 12);
     const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
     const id = `${requested}-${suffix}`;
-    const runtimeRoot = join8(ownerRuntimeDirectory(context.roots.runtimeRoot, context.owner), id);
+    const runtimeRoot = join9(ownerRuntimeDirectory(context.roots.runtimeRoot, context.owner), id);
     const lab = {
       version: 1,
       id,
@@ -11878,13 +12250,14 @@ async function createProvisionedLab(context, name, source, signal) {
       state: "provisioning",
       sourceRoot,
       runtimeRoot,
-      workspace: join8(runtimeRoot, "workspace"),
-      manifestPath: join8(sourceRoot, ".codex-container-lab.yaml"),
+      workspace: join9(runtimeRoot, "workspace"),
+      manifestPath: join9(sourceRoot, ".codex-container-lab.yaml"),
       commandService: "pending",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       endpoints: [],
       findings: [],
+      composeEnvironment: [],
       secretEnvironment: []
     };
     await withFileLock(labLockPath(context.roots.stateRoot, context.owner, id), async () => await writeLab(context.roots, lab));
@@ -11896,18 +12269,18 @@ async function createProvisionedLab(context, name, source, signal) {
 async function provisionLab(context, id, signal) {
   let lab = await readLab(context.roots, context.owner, id);
   let runtime;
-  let dockerMaterializationStarted = false;
-  let provisioningEnvironment;
   let secretEnvironmentNames = [];
   let failure;
   try {
     await assertProvisioning(context, id, signal);
     await mkdir9(lab.runtimeRoot, { recursive: true, mode: 448 });
     const config = await loadLabConfig(lab.sourceRoot);
+    const composeEnvironmentNames = [...config.composeEnvironment];
     secretEnvironmentNames = [...config.secretEnvironment];
     lab.manifestPath = config.manifestPath;
     lab.commandService = config.mode.commandService;
     lab.modeKind = config.mode.kind;
+    lab.composeEnvironment = composeEnvironmentNames;
     lab.secretEnvironment = secretEnvironmentNames;
     if (config.mode.kind === "dockerfile") {
       lab.managedImage = internalImageTag(lab.ownerKey, lab.id);
@@ -11916,6 +12289,7 @@ async function provisionLab(context, id, signal) {
       current.manifestPath = lab.manifestPath;
       current.commandService = lab.commandService;
       current.modeKind = config.mode.kind;
+      current.composeEnvironment = [...lab.composeEnvironment];
       current.secretEnvironment = [...lab.secretEnvironment];
       if (lab.managedImage === undefined) {
         delete current.managedImage;
@@ -11923,14 +12297,15 @@ async function provisionLab(context, id, signal) {
         current.managedImage = lab.managedImage;
       }
     });
-    provisioningEnvironment = resolveProvisioningEnvironment(secretEnvironmentNames, context.environment);
+    assertSecretEnvironmentAvailable(secretEnvironmentNames, context.environment);
     await assertProvisioning(context, id, signal);
-    const head = (await runCommand("git", ["-C", lab.sourceRoot, "rev-parse", "HEAD"], {
+    const head = (await runLocalGit(["-C", lab.sourceRoot, "rev-parse", "HEAD"], {
       timeoutMs: 1e4,
       ...signal === undefined ? {} : { signal }
-    })).stdout.toString().trim();
-    await runCommand("git", [
+    }, context.environment)).stdout.toString().trim();
+    await runLocalGit([
       "clone",
+      "--local",
       "--no-checkout",
       "--no-tags",
       "--no-hardlinks",
@@ -11939,23 +12314,24 @@ async function provisionLab(context, id, signal) {
     ], {
       timeoutMs: 120000,
       ...signal === undefined ? {} : { signal }
-    });
-    await runCommand("git", ["-C", lab.workspace, "remote", "remove", "origin"], {
+    }, context.environment);
+    await runLocalGit(["-C", lab.workspace, "remote", "remove", "origin"], {
       timeoutMs: 1e4,
       ...signal === undefined ? {} : { signal }
-    });
-    await runCommand("git", ["-C", lab.workspace, "checkout", "--detach", head], {
+    }, context.environment);
+    await runLocalGit(["-C", lab.workspace, "checkout", "--detach", head], {
       timeoutMs: 120000,
       ...signal === undefined ? {} : { signal }
-    });
+    }, context.environment);
     await assertProvisioning(context, id, signal);
     const identity3 = { stateRoot: lab.runtimeRoot, labId: lab.id };
-    await initializeSyncBaseline(identity3, lab.workspace);
+    await initializeSyncBaseline({ ...identity3, environment: context.environment }, lab.workspace);
     const seed = await previewSync({
       ...identity3,
       direction: "push",
       sourceRoot: lab.sourceRoot,
-      targetRoot: lab.workspace
+      targetRoot: lab.workspace,
+      environment: context.environment
     });
     if (seed.conflicts.length > 0) {
       throw new Error("initial workspace synchronization unexpectedly conflicted");
@@ -11966,20 +12342,21 @@ async function provisionLab(context, id, signal) {
       token: seed.token,
       sourceRoot: lab.sourceRoot,
       targetRoot: lab.workspace,
-      idleGuard: () => true
+      idleGuard: () => true,
+      environment: context.environment
     });
     await recoverSyncTransactions({
       ...identity3,
       allowedTargetRoots: [lab.sourceRoot, lab.workspace]
     });
     await assertProvisioning(context, id, signal);
-    dockerMaterializationStarted = true;
-    runtime = await prepareLabRuntime(lab, config, context.docker, provisioningEnvironment);
+    runtime = await prepareLabRuntime(lab, config, context.docker, context.environment);
     lab.findings = runtime.findings;
     const persistedRuntime = {
       config: runtime.config,
       composeArgs: runtime.composeArgs,
       ...runtime.baseFile === undefined ? {} : { baseFile: runtime.baseFile },
+      sourceFile: runtime.sourceFile,
       overrideFile: runtime.overrideFile,
       findings: runtime.findings
     };
@@ -11989,16 +12366,12 @@ async function provisionLab(context, id, signal) {
       current.runtime = persistedRuntime;
     });
     await assertProvisioning(context, id, signal);
-    lab.endpoints = await provisionLabStack(runtime, signal, context.docker, provisioningEnvironment);
+    lab.endpoints = await provisionLabStack(runtime, signal, context.docker, context.environment);
     await assertProvisioning(context, id, signal);
   } catch (error) {
     failure = error;
     if (runtime) {
-      await destroyLabStack(runtime, context.docker).catch(() => {
-        return;
-      });
-    } else if (dockerMaterializationStarted) {
-      await cleanupLabLabels(lab, lab.modeKind === "dockerfile", context.docker, provisioningEnvironment).catch(() => {
+      await destroyLabStack(runtime, context.docker, context.environment).catch(() => {
         return;
       });
     }
@@ -12053,16 +12426,12 @@ function compactError2(error) {
 `).slice(-8).join(`
 `).slice(-4000);
 }
-function resolveProvisioningEnvironment(names, environment) {
-  const resolved = { ...environment };
+function assertSecretEnvironmentAvailable(names, environment) {
   for (const name of names) {
-    delete resolved[name];
     if (!Object.hasOwn(environment, name) || typeof environment[name] !== "string") {
       throw new Error(`secret environment variable is unavailable: ${name}`);
     }
-    resolved[name] = environment[name];
   }
-  return resolved;
 }
 
 // packages/container-lab/src/lab/orchestrator.ts
@@ -12071,7 +12440,7 @@ class ContainerLabService {
   roots;
   docker;
   environment;
-  constructor(owner, roots = resolveRoots(), docker = defaultDockerRunner, environment = process12.env) {
+  constructor(owner, roots = resolveRoots(), docker = defaultDockerRunner, environment = process11.env) {
     this.owner = owner;
     this.roots = roots;
     this.docker = docker;
@@ -12080,16 +12449,13 @@ class ContainerLabService {
   async health() {
     await this.reconcileOwner();
     const labs = await listLabs(this.roots, this.owner);
-    const secretEnvironment = [
-      ...new Set(labs.flatMap((lab) => lab.secretEnvironment))
-    ];
     return {
       ok: true,
-      dockerAvailable: await dockerAvailable(this.docker, secretEnvironment, this.environment).catch(() => false),
+      dockerAvailable: await dockerAvailable(this.docker, this.environment).catch(() => false),
       labs: labs.length
     };
   }
-  async createLab(name = "lab", source = process12.cwd(), signal) {
+  async createLab(name = "lab", source = process11.cwd(), signal) {
     return await createProvisionedLab({
       owner: this.owner,
       roots: this.roots,
@@ -12113,7 +12479,7 @@ class ContainerLabService {
   async labStatus(id) {
     await this.reconcileOwner();
     const lab = await readLab(this.roots, this.owner, id);
-    return compactLabStatus(lab, lab.state === "ready" && lab.runtime ? await stackStatus(runtimeFromLab(lab), this.docker) : undefined);
+    return compactLabStatus(lab, lab.state === "ready" && lab.runtime ? await stackStatus(runtimeFromLab(lab), this.docker, this.environment) : undefined);
   }
   async run(id, argv, cwd = ".", environment = {}, timeoutSeconds = 1800, output, signal) {
     validateAttachedRunRequest(argv, cwd, environment, timeoutSeconds);
@@ -12128,7 +12494,7 @@ class ContainerLabService {
   async logs(id, service, tailLines) {
     await this.reconcileOwner();
     const lab = await this.requireReady(id);
-    const transcript = await stackLogs(runtimeFromLab(lab), service, tailLines, this.docker);
+    const transcript = await stackLogs(runtimeFromLab(lab), service, tailLines, this.docker, this.environment);
     return {
       labId: id,
       service,
@@ -12145,8 +12511,8 @@ class ContainerLabService {
     return await withFileLock(this.activityLock(id), async () => {
       return await withFileLock(this.labLock(id), async () => {
         const lab = await this.requireReady(id);
-        await assertSourceRepositoryIdentity(lab);
-        await recoverLabSync(this.roots, lab);
+        await assertSourceRepositoryIdentity(lab, this.environment);
+        await recoverLabSync(this.roots, lab, this.environment);
         const sourceRoot = direction === "push" ? lab.sourceRoot : lab.workspace;
         const targetRoot = direction === "push" ? lab.workspace : lab.sourceRoot;
         const preview = await previewSync({
@@ -12155,7 +12521,8 @@ class ContainerLabService {
           direction,
           sourceRoot,
           targetRoot,
-          maxEntries: 100
+          maxEntries: 100,
+          environment: this.environment
         });
         return publicSyncPreview(preview, id, direction);
       }, { attempts: 600, delayMs: 50 });
@@ -12166,8 +12533,8 @@ class ContainerLabService {
     return await withFileLock(this.activityLock(id), async () => {
       return await withFileLock(this.labLock(id), async () => {
         const lab = await this.requireReady(id);
-        await assertSourceRepositoryIdentity(lab);
-        await recoverLabSync(this.roots, lab);
+        await assertSourceRepositoryIdentity(lab, this.environment);
+        await recoverLabSync(this.roots, lab, this.environment);
         const sourceRoot = direction === "push" ? lab.sourceRoot : lab.workspace;
         const targetRoot = direction === "push" ? lab.workspace : lab.sourceRoot;
         const result = await applySync({
@@ -12177,7 +12544,8 @@ class ContainerLabService {
           token,
           sourceRoot,
           targetRoot,
-          idleGuard: () => true
+          idleGuard: () => true,
+          environment: this.environment
         });
         return { labId: id, direction, applied: result.applied };
       }, { attempts: 600, delayMs: 50 });
@@ -12274,10 +12642,10 @@ var CONTAINER_LAB_VERSION = package_default.version;
 
 // packages/container-lab/src/cli.ts
 var processIO = {
-  stdout: (value) => process13.stdout.write(value),
-  stderr: (value) => process13.stderr.write(value)
+  stdout: (value) => process12.stdout.write(value),
+  stderr: (value) => process12.stderr.write(value)
 };
-async function cliMain(args = process13.argv.slice(2), environment = process13.env, io = processIO) {
+async function cliMain(args = process12.argv.slice(2), environment = process12.env, io = processIO) {
   try {
     const global = parseGlobalArguments(args);
     if (global.help) {
@@ -12306,8 +12674,8 @@ async function cliMain(args = process13.argv.slice(2), environment = process13.e
         controller.abort("SIGTERM");
       }
     };
-    process13.on("SIGINT", interrupt);
-    process13.on("SIGTERM", terminate);
+    process12.on("SIGINT", interrupt);
+    process12.on("SIGTERM", terminate);
     try {
       if (global.rest[0] === "run") {
         return await runAttached(service, parseRunArguments(global.rest.slice(1)), controller.signal, io);
@@ -12315,8 +12683,8 @@ async function cliMain(args = process13.argv.slice(2), environment = process13.e
       writePublicJson(io, await dispatchCliCommand(service, global.rest, controller.signal));
       return signalExit ?? 0;
     } finally {
-      process13.removeListener("SIGINT", interrupt);
-      process13.removeListener("SIGTERM", terminate);
+      process12.removeListener("SIGINT", interrupt);
+      process12.removeListener("SIGTERM", terminate);
     }
   } catch (error) {
     const usage = error instanceof CliUsageError;
@@ -12336,7 +12704,7 @@ async function runAttached(service, run, signal, io) {
   const exitCode = await service.run(run.lab, run.argv, run.cwd, run.environment, run.timeoutSeconds, {
     stdout: (chunk) => io.stdout(stdoutDecoder.write(chunk)),
     stderr: (chunk) => io.stderr(stderrDecoder.write(chunk)),
-    stdin: process13.stdin
+    stdin: process12.stdin
   }, signal);
   const stdoutTail = stdoutDecoder.end();
   const stderrTail = stderrDecoder.end();
@@ -12355,7 +12723,7 @@ function writePublicJson(io, value) {
   io.stdout(serializePublicJson(value));
 }
 if (import.meta.main) {
-  process13.exit(await cliMain());
+  process12.exit(await cliMain());
 }
 export {
   cliMain

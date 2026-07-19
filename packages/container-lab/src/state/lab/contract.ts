@@ -14,6 +14,7 @@ export type PersistedLabRuntime = {
   config: LabConfig;
   composeArgs: string[];
   baseFile?: string;
+  sourceFile?: string;
   overrideFile: string;
   findings: ComposeInspectionFinding[];
 };
@@ -37,6 +38,7 @@ export type LabMetadata = {
   updatedAt: string;
   endpoints: Endpoint[];
   findings: ComposeInspectionFinding[];
+  composeEnvironment: string[];
   secretEnvironment: string[];
   managedImage?: string;
   error?: string;

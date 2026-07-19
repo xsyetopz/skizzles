@@ -1,6 +1,5 @@
-import { execFile } from "node:child_process";
 import { lstat } from "node:fs/promises";
-import { promisify } from "node:util";
+import process from "node:process";
 import {
   canonicalRoot,
   describeSyncFile,
@@ -9,8 +8,7 @@ import {
   safeRelativePath,
   sha256,
 } from "../files.ts";
-
-const execFileAsync = promisify(execFile);
+import { runLocalGit } from "../process/git.ts";
 
 export interface GitManifest {
   root: string;
@@ -21,10 +19,12 @@ export interface GitManifest {
 const MAX_SYNC_FILES = 20_000;
 const MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
 
-export async function eligibleGitPaths(root: string): Promise<string[]> {
+export async function eligibleGitPaths(
+  root: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<string[]> {
   const canonical = await canonicalRoot(root);
-  const { stdout } = await execFileAsync(
-    "git",
+  const { stdout } = await runLocalGit(
     [
       "-C",
       canonical,
@@ -34,7 +34,8 @@ export async function eligibleGitPaths(root: string): Promise<string[]> {
       "--others",
       "--exclude-standard",
     ],
-    { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 },
+    { maxOutputBytes: 64 * 1024 * 1024, rejectOnOutputLimit: true },
+    environment,
   );
   const values = stdout
     .toString("utf8")
@@ -50,13 +51,16 @@ export async function eligibleGitPaths(root: string): Promise<string[]> {
   return unique;
 }
 
-export async function buildGitManifest(root: string): Promise<GitManifest> {
+export async function buildGitManifest(
+  root: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<GitManifest> {
   const canonical = await canonicalRoot(root);
   // Git paths are untrusted keys. A null-prototype record keeps names such as
   // `__proto__`, `constructor`, and `prototype` as ordinary own properties.
   const files = Object.create(null) as Record<string, SyncFile>;
   let totalBytes = 0;
-  for (const relative of await eligibleGitPaths(canonical)) {
+  for (const relative of await eligibleGitPaths(canonical, environment)) {
     try {
       const stat = await lstat(await guardedPath(canonical, relative));
       if (!(stat.isFile() || stat.isSymbolicLink())) {

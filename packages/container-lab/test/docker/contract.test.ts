@@ -2,11 +2,10 @@
 import { describe, expect, test } from "bun:test";
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { parseLabConfig } from "../../src/config.ts";
 import * as dockerFacade from "../../src/docker.ts";
 import {
   cleanupLabLabels,
@@ -14,8 +13,6 @@ import {
   type DockerSpawnOptions,
   type LabRuntime,
   launchDockerRun,
-  prepareLabRuntime,
-  provisionLabStack,
   terminateDockerRun,
 } from "../../src/docker.ts";
 import type { CommandResult, RunOptions } from "../../src/process.ts";
@@ -59,188 +56,6 @@ class MockDocker implements DockerRunner {
     return new EventEmitter() as ChildProcessWithoutNullStreams;
   }
 }
-
-class SecretRecordingDocker implements DockerRunner {
-  readonly sentinel: string;
-  calls: Array<{ args: string[]; options?: RunOptions }> = [];
-  spawnCalls: Array<{ args: string[]; options?: DockerSpawnOptions }> = [];
-  failConfig = false;
-  failUp = false;
-  constructor(sentinel: string) {
-    this.sentinel = sentinel;
-  }
-  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
-  async run(args: string[], options?: RunOptions): Promise<CommandResult> {
-    this.calls.push({ args, ...(options === undefined ? {} : { options }) });
-    if (args.includes("config")) {
-      if (this.failConfig) {
-        return resultWithError(`configuration echoed ${this.sentinel}`);
-      }
-      return result(
-        JSON.stringify({
-          services: { dev: {} },
-          secrets: { registry: { environment: "REGISTRY_TOKEN" } },
-        }),
-      );
-    }
-    if (args.includes("up") && this.failUp) {
-      return resultWithError(`up echoed ${this.sentinel}`);
-    }
-    return result("");
-  }
-  spawn(
-    args: string[],
-    options?: DockerSpawnOptions,
-  ): ChildProcessWithoutNullStreams {
-    this.spawnCalls.push({
-      args,
-      ...(options === undefined ? {} : { options }),
-    });
-    return new EventEmitter() as ChildProcessWithoutNullStreams;
-  }
-}
-
-describe("secret environment materialization", () => {
-  test("keeps values ephemeral and sends them only to Compose config and up", async () => {
-    const root = await mkdtemp(join(tmpdir(), "container-lab-secret-"));
-    const sentinel = "sentinel-registry-token-8fca7b";
-    try {
-      const docker = new SecretRecordingDocker(sentinel);
-      const config = parseLabConfig(
-        `
-image: { name: node:24, service: dev }
-environment: [TERM]
-secret_environment: [REGISTRY_TOKEN]
-`,
-        join(root, "source"),
-      );
-      const metadata = labAt(root);
-      metadata.secretEnvironment = ["REGISTRY_TOKEN"];
-      const environment = {
-        PATH: "/usr/bin:/bin",
-        TERM: "xterm",
-        REGISTRY_TOKEN: sentinel,
-      };
-      const prepared = await prepareLabRuntime(
-        metadata,
-        config,
-        docker,
-        environment,
-      );
-      await provisionLabStack(prepared, undefined, docker, environment);
-      launchDockerRun(
-        prepared,
-        {
-          runId: "11111111-1111-4111-8111-111111111111",
-          cwd: ".",
-          argv: ["true"],
-          environment: {},
-        },
-        docker,
-        environment,
-      );
-      await cleanupLabLabels(metadata, false, docker, environment);
-
-      const durable = JSON.stringify({
-        metadata,
-        runtime: prepared,
-        findings: prepared.findings,
-      });
-      expect(durable).not.toContain(sentinel);
-      expect(
-        prepared.findings.some((finding) => finding.surface === "secret"),
-      ).toBe(true);
-      expect(JSON.stringify(prepared.findings)).not.toContain("REGISTRY_TOKEN");
-      expect(prepared.composeArgs.join("\0")).not.toContain(sentinel);
-      const baseFile = prepared.baseFile;
-      if (!baseFile) {
-        throw new Error("expected generated base file");
-      }
-      expect(await readFile(baseFile, "utf8")).not.toContain(sentinel);
-      expect(await readFile(prepared.overrideFile, "utf8")).not.toContain(
-        sentinel,
-      );
-
-      const carryingSecret = docker.calls.filter(
-        (call) => call.options?.env?.["REGISTRY_TOKEN"] === sentinel,
-      );
-      expect(carryingSecret.length).toBeGreaterThanOrEqual(3);
-      expect(
-        carryingSecret.every(
-          (call) => call.args.includes("config") || call.args.includes("up"),
-        ),
-      ).toBe(true);
-      for (const call of docker.calls.filter(
-        (call) => !(call.args.includes("config") || call.args.includes("up")),
-      )) {
-        expect(Object.hasOwn(call.options?.env ?? {}, "REGISTRY_TOKEN")).toBe(
-          false,
-        );
-      }
-      expect(docker.spawnCalls).toHaveLength(1);
-      expect(
-        Object.hasOwn(
-          docker.spawnCalls[0]?.options?.env ?? {},
-          "REGISTRY_TOKEN",
-        ),
-      ).toBe(false);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-
-  test("replaces secret-bearing Compose config and up diagnostics with fixed errors", async () => {
-    const root = await mkdtemp(join(tmpdir(), "container-lab-secret-error-"));
-    const sentinel = "sentinel-error-token-290ea1";
-    try {
-      const config = parseLabConfig(
-        "image: { name: node:24, service: dev }\nsecret_environment: [REGISTRY_TOKEN]\n",
-        join(root, "source"),
-      );
-      const environment = { PATH: "/usr/bin:/bin", REGISTRY_TOKEN: sentinel };
-      const configFailure = new SecretRecordingDocker(sentinel);
-      configFailure.failConfig = true;
-      let configError: unknown;
-      try {
-        await prepareLabRuntime(
-          labAt(root),
-          config,
-          configFailure,
-          environment,
-        );
-      } catch (error) {
-        configError = error;
-      }
-      expect(configError).toBeInstanceOf(Error);
-      expect((configError as Error).message).toBe(
-        "Docker Compose configuration failed; secret-bearing diagnostics redacted",
-      );
-      expect((configError as Error).message).not.toContain(sentinel);
-
-      const upFailure = new SecretRecordingDocker(sentinel);
-      const prepared = await prepareLabRuntime(
-        labAt(root),
-        config,
-        upFailure,
-        environment,
-      );
-      upFailure.failUp = true;
-      let upError: unknown;
-      try {
-        await provisionLabStack(prepared, undefined, upFailure, environment);
-      } catch (error) {
-        upError = error;
-      }
-      expect(upError).toBeInstanceOf(Error);
-      expect((upError as Error).message).toBe(
-        "Docker Compose up failed; secret-bearing diagnostics redacted",
-      );
-      expect((upError as Error).message).not.toContain(sentinel);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
-});
 
 describe("exact Docker cleanup", () => {
   test("uses managed + exact owner + exact lab filters and Compose ownership filters", async () => {
@@ -534,9 +349,23 @@ function runtime(): LabRuntime {
       runtime: { workspace: "/workspace", shell: ["/bin/sh", "-lc"] },
       ports: [],
       forwardEnvironment: [],
+      composeEnvironment: [],
       secretEnvironment: [],
     },
-    composeArgs: ["compose", "--project-name", "ccl-project"],
+    composeArgs: [
+      "compose",
+      "--env-file",
+      "/dev/null",
+      "--project-directory",
+      "/tmp/source",
+      "--project-name",
+      "ccl-project",
+      "-f",
+      "/tmp/runtime/source.compose.json",
+      "-f",
+      "/tmp/runtime/override.compose.yaml",
+    ],
+    sourceFile: "/tmp/runtime/source.compose.json",
     overrideFile: "/tmp/runtime/override.compose.yaml",
     findings: [],
   };
@@ -571,18 +400,8 @@ function lab(): LabMetadata {
     updatedAt: new Date(0).toISOString(),
     endpoints: [],
     findings: [],
+    composeEnvironment: [],
     secretEnvironment: [],
-  };
-}
-
-function labAt(root: string): LabMetadata {
-  const runtimeRoot = join(root, "runtime");
-  return {
-    ...lab(),
-    sourceRoot: join(root, "source"),
-    runtimeRoot,
-    workspace: join(runtimeRoot, "workspace"),
-    manifestPath: join(root, "source", ".codex-container-lab.yaml"),
   };
 }
 

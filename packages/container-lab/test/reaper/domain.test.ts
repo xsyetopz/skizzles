@@ -360,6 +360,7 @@ async function createLabFixture(
     updatedAt: new Date(0).toISOString(),
     endpoints: [],
     findings: [],
+    composeEnvironment: [],
     secretEnvironment,
   };
   await writeLab(rootsValue, lab);

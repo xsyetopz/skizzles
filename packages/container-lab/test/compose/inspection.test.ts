@@ -1,9 +1,8 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, test } from "bun:test";
-import type { ComposeModel } from "../../src/compose/contract.ts";
 import {
   inspectComposeModel,
-  validateSecretEnvironmentModel,
+  validateComposeEnvironmentModel,
 } from "../../src/compose/inspection.ts";
 
 function composeVariable(expression: string): string {
@@ -85,14 +84,15 @@ describe("inspectComposeModel", () => {
   });
 });
 
-describe("validateSecretEnvironmentModel", () => {
+describe("validateComposeEnvironmentModel", () => {
   test("accepts an allowlisted present top-level environment secret source", () => {
     expect(() =>
-      validateSecretEnvironmentModel(
+      validateComposeEnvironmentModel(
         {
           services: { api: {} },
           secrets: { token: { environment: "REGISTRY_TOKEN" } },
         },
+        [],
         ["REGISTRY_TOKEN"],
         { REGISTRY_TOKEN: "sentinel-value" },
       ),
@@ -101,131 +101,139 @@ describe("validateSecretEnvironmentModel", () => {
 
   test("rejects undeclared and unavailable environment secret sources using names only", () => {
     expect(() =>
-      validateSecretEnvironmentModel(
+      validateComposeEnvironmentModel(
         {
           secrets: { token: { environment: "UNDECLARED_TOKEN" } },
         },
+        [],
         [],
         { UNDECLARED_TOKEN: "sentinel-value" },
       ),
     ).toThrow("not declared: UNDECLARED_TOKEN");
     expect(() =>
-      validateSecretEnvironmentModel(
+      validateComposeEnvironmentModel(
         {
           secrets: { token: { environment: "MISSING_TOKEN" } },
         },
+        [],
         ["MISSING_TOKEN"],
         {},
       ),
     ).toThrow("unavailable: MISSING_TOKEN");
   });
 
-  test("validates secret definitions before plaintext service references", () => {
+  test("rejects unused secret capabilities and plaintext secret variable names", () => {
     expect(() =>
-      validateSecretEnvironmentModel(
-        {
-          services: { api: { environment: { REGISTRY_TOKEN: "value" } } },
-          secrets: { token: { environment: "UNDECLARED_TOKEN" } },
-        },
+      validateComposeEnvironmentModel(
+        { services: { api: {} } },
+        [],
         ["REGISTRY_TOKEN"],
         { REGISTRY_TOKEN: "sentinel-value" },
       ),
-    ).toThrow(
-      "Compose secret environment source is not declared: UNDECLARED_TOKEN",
+    ).toThrow("not used by a top-level secret: REGISTRY_TOKEN");
+
+    expect(() =>
+      validateComposeEnvironmentModel(
+        {
+          services: { api: { environment: { REGISTRY_TOKEN: "value" } } },
+          secrets: { token: { environment: "REGISTRY_TOKEN" } },
+        },
+        [],
+        ["REGISTRY_TOKEN"],
+        { REGISTRY_TOKEN: "sentinel-value" },
+      ),
+    ).toThrow("api:REGISTRY_TOKEN");
+  });
+
+  test("recognizes braced, unbraced, nested, default, and escaped interpolation", () => {
+    const model = {
+      services: {
+        api: {
+          command: [
+            "$DIRECT",
+            composeVariable("OUTER:-${INNER:?required}"),
+            "$$LITERAL",
+            "$$$$ALSO_LITERAL",
+          ],
+        },
+      },
+    };
+    expect(() =>
+      validateComposeEnvironmentModel(
+        model,
+        ["DIRECT", "OUTER", "INNER"],
+        [],
+        {},
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validateComposeEnvironmentModel(model, ["DIRECT", "OUTER"], [], {}),
+    ).toThrow("interpolation reads undeclared environment: INNER");
+    expect(() =>
+      validateComposeEnvironmentModel(
+        { services: { api: { command: composeVariable("HOME") } } },
+        [],
+        [],
+        { HOME: "/ambient/client-home" },
+      ),
+    ).toThrow("interpolation reads undeclared environment: HOME");
+    expect(() =>
+      validateComposeEnvironmentModel(
+        { services: { api: { labels: { $LITERAL_KEY: "value" } } } },
+        [],
+        [],
+        {},
+      ),
+    ).not.toThrow();
+  });
+
+  test("requires source authorization for null service environment and build arguments", () => {
+    const model = {
+      services: {
+        api: {
+          environment: { SERVICE_VALUE: null },
+          build: { args: { BUILD_VALUE: null } },
+        },
+      },
+    };
+    expect(() =>
+      validateComposeEnvironmentModel(
+        model,
+        ["SERVICE_VALUE", "BUILD_VALUE"],
+        [],
+        {},
+      ),
+    ).not.toThrow();
+    expect(() => validateComposeEnvironmentModel(model, [], [], {})).toThrow(
+      /reads undeclared environment/,
     );
   });
 
-  test("rejects name references from plaintext service environment without value matching", () => {
-    for (const environment of [
-      { REGISTRY_TOKEN: "literal-does-not-matter" },
-      { OTHER: composeVariable("REGISTRY_TOKEN") },
-      ["OTHER=$REGISTRY_TOKEN"],
-    ]) {
-      expect(() =>
-        validateSecretEnvironmentModel(
-          { services: { api: { environment } } },
-          ["REGISTRY_TOKEN"],
-          { REGISTRY_TOKEN: "sentinel-value" },
-        ),
-      ).toThrow("api:REGISTRY_TOKEN");
-    }
+  test("rejects environment-backed configs", () => {
     expect(() =>
-      validateSecretEnvironmentModel(
-        {
-          services: { api: { environment: { OTHER: "common-value" } } },
-        },
-        ["REGISTRY_TOKEN"],
-        { REGISTRY_TOKEN: "common-value" },
+      validateComposeEnvironmentModel(
+        { configs: { source: { environment: "CONFIG_VALUE" } } },
+        [],
+        [],
+        { CONFIG_VALUE: "value" },
       ),
-    ).not.toThrow();
+    ).toThrow("configs.environment is not supported");
   });
 
-  test("rejects declared secret references throughout the normalized model", () => {
-    const models: ComposeModel[] = [
-      {
-        services: {
-          api: { command: ["/bin/sh", "-lc", "echo $REGISTRY_TOKEN"] },
-        },
-      },
-      {
-        services: {
-          api: {
-            build: { args: { TOKEN: composeVariable("REGISTRY_TOKEN") } },
-          },
-        },
-      },
-      {
-        services: {
-          api: {
-            labels: {
-              "example.leak": `token=${composeVariable(
-                "REGISTRY_TOKEN:-missing",
-              )}`,
-            },
-          },
-        },
-      },
-      {
-        services: {
-          api: {
-            healthcheck: {
-              test: ["CMD-SHELL", `test -n "\${REGISTRY_TOKEN/untrusted}"`],
-            },
-          },
-        },
-      },
-    ];
-    for (const model of models) {
-      expect(() =>
-        validateSecretEnvironmentModel(model, ["REGISTRY_TOKEN"], {
-          REGISTRY_TOKEN: "sentinel-value",
-        }),
-      ).toThrow(
-        "Compose model references declared secret environment source: REGISTRY_TOKEN",
-      );
-    }
-  });
-
-  test("accepts normal secret source declarations and service attachments", () => {
+  test("rejects unresolved service environment files", () => {
     expect(() =>
-      validateSecretEnvironmentModel(
+      validateComposeEnvironmentModel(
         {
           services: {
-            api: {
-              secrets: [
-                "REGISTRY_TOKEN",
-                {
-                  source: "REGISTRY_TOKEN",
-                  target: "registry-token",
-                },
-              ],
+            dev: {
+              env_file: [{ path: "/trusted/project/values.env" }],
             },
           },
-          secrets: { REGISTRY_TOKEN: { environment: "REGISTRY_TOKEN" } },
         },
+        [],
         ["REGISTRY_TOKEN"],
-        { REGISTRY_TOKEN: "sentinel-value" },
+        { REGISTRY_TOKEN: "sentinel" },
       ),
-    ).not.toThrow();
+    ).toThrow("Compose service env_file is not supported");
   });
 });

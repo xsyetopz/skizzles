@@ -1,21 +1,21 @@
-import process from "node:process";
 import { internalImageTag } from "../compose/generation.ts";
 import type { DockerRunner, LabRuntime } from "../docker.ts";
 import type { CommandResult } from "../process.ts";
 import type { LabMetadata } from "../state/lab/contract.ts";
-import { isRecord, scrubSecretEnvironment } from "./environment.ts";
+import { dockerClientEnvironment, isRecord } from "./environment.ts";
 
 const IMMUTABLE_IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
 
 export async function destroyLabStackInDocker(
   runtime: LabRuntime,
   runner: DockerRunner,
+  environment: NodeJS.ProcessEnv,
 ): Promise<void> {
   await cleanupLabLabelsInDocker(
     runtime.metadata,
     runtime.config.mode.kind === "dockerfile",
     runner,
-    process.env,
+    environment,
   );
 }
 
@@ -25,11 +25,7 @@ export async function cleanupLabLabelsInDocker(
   runner: DockerRunner,
   environment: NodeJS.ProcessEnv,
 ): Promise<void> {
-  const scrubbedRunner = scrubDockerRunnerEnvironment(
-    runner,
-    metadata.secretEnvironment,
-    environment,
-  );
+  const dockerEnvironment = dockerClientEnvironment(environment);
   const exactFilters = [
     "--filter",
     "label=io.openai.codex-container-lab.managed=true",
@@ -81,7 +77,12 @@ export async function cleanupLabLabelsInDocker(
     },
   ];
   for (const resource of resources) {
-    const ids = await listBounded(resource.kind, resource.list, scrubbedRunner);
+    const ids = await listBounded(
+      resource.kind,
+      resource.list,
+      runner,
+      dockerEnvironment,
+    );
     if (resource.ownership && resource.kind !== "container") {
       for (const id of ids) {
         await verifyComposeResource(
@@ -89,15 +90,17 @@ export async function cleanupLabLabelsInDocker(
           resource.kind,
           id,
           resource.ownership,
-          scrubbedRunner,
+          runner,
+          dockerEnvironment,
         );
       }
     }
     if (ids.length > 0) {
-      const removed = await scrubbedRunner.run([...resource.remove, ...ids], {
+      const removed = await runner.run([...resource.remove, ...ids], {
         allowFailure: true,
         timeoutMs: 30_000,
         maxOutputBytes: 1024 * 1024,
+        env: dockerEnvironment,
       });
       if (removed.code !== 0) {
         throw new Error(`failed to remove managed lab ${resource.kind}s`);
@@ -106,20 +109,22 @@ export async function cleanupLabLabelsInDocker(
     const remaining = await listBounded(
       resource.kind,
       resource.list,
-      scrubbedRunner,
+      runner,
+      dockerEnvironment,
     );
     if (remaining.length > 0) {
       throw new Error(`managed lab ${resource.kind}s remain after cleanup`);
     }
   }
   if (removeInternalImage) {
-    await removeManagedInternalImage(metadata, scrubbedRunner);
+    await removeManagedInternalImage(metadata, runner, dockerEnvironment);
   }
 }
 
 async function removeManagedInternalImage(
   metadata: LabMetadata,
   runner: DockerRunner,
+  environment: NodeJS.ProcessEnv,
 ): Promise<void> {
   const tag = internalImageTag(metadata.ownerKey, metadata.id);
   const inspected = await runner.run(
@@ -130,7 +135,12 @@ async function removeManagedInternalImage(
       '{"id":{{json .Id}},"labels":{{json .Config.Labels}}}',
       tag,
     ],
-    { allowFailure: true, timeoutMs: 10_000, maxOutputBytes: 64 * 1024 },
+    {
+      allowFailure: true,
+      timeoutMs: 10_000,
+      maxOutputBytes: 64 * 1024,
+      env: environment,
+    },
   );
   if (inspected.code !== 0) {
     if (isExactMissingImage(inspected, tag)) {
@@ -167,6 +177,7 @@ async function removeManagedInternalImage(
     allowFailure: true,
     timeoutMs: 30_000,
     maxOutputBytes: 1024 * 1024,
+    env: environment,
   });
   if (removed.code !== 0) {
     throw new Error("failed to remove managed Dockerfile image");
@@ -188,11 +199,13 @@ async function listBounded(
   kind: string,
   args: string[],
   runner: DockerRunner,
+  environment: NodeJS.ProcessEnv,
 ): Promise<string[]> {
   const listed = await runner.run(args, {
     allowFailure: true,
     timeoutMs: 15_000,
     maxOutputBytes: 1024 * 1024,
+    env: environment,
   });
   if (listed.code !== 0) {
     throw new Error(`failed to list managed lab ${kind}s`);
@@ -210,6 +223,7 @@ async function verifyComposeResource(
   id: string,
   ownershipLabel: string,
   runner: DockerRunner,
+  environment: NodeJS.ProcessEnv,
 ): Promise<void> {
   const inspected = await runner.run(
     [kind, "inspect", id, "--format", "{{json .Labels}}"],
@@ -217,6 +231,7 @@ async function verifyComposeResource(
       allowFailure: true,
       timeoutMs: 10_000,
       maxOutputBytes: 64 * 1024,
+      env: environment,
     },
   );
   if (inspected.code !== 0) {
@@ -242,26 +257,4 @@ async function verifyComposeResource(
       `refusing to remove ${kind} without exact ownership labels`,
     );
   }
-}
-
-function scrubDockerRunnerEnvironment(
-  runner: DockerRunner,
-  names: readonly string[],
-  environment: NodeJS.ProcessEnv,
-): DockerRunner {
-  if (names.length === 0) {
-    return runner;
-  }
-  return {
-    run: async (args, options = {}) =>
-      await runner.run(args, {
-        ...options,
-        env: scrubSecretEnvironment(names, options.env ?? environment),
-      }),
-    spawn: (args, options = {}) =>
-      runner.spawn(args, {
-        ...options,
-        env: scrubSecretEnvironment(names, options.env ?? environment),
-      }),
-  };
 }

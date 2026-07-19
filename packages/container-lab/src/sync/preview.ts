@@ -1,34 +1,38 @@
 import { randomBytes } from "node:crypto";
 import path from "node:path";
+import process from "node:process";
 import { canonicalRoot, sha256 } from "../files.ts";
 import { serializePublicJson } from "../public/json.ts";
 import { compareManifests } from "./comparison.ts";
 import type {
   ApplySyncOptions,
   BaselineFile,
+  InitializeSyncOptions,
   PreviewSyncOptions,
   StoredPreview,
   SyncDirection,
-  SyncIdentity,
   SyncPreview,
 } from "./contract.ts";
-import { writeDurableJson } from "./durability.ts";
-import { buildGitManifest, manifestDigest } from "./git-manifest.ts";
 import {
   captureDeleteParentDirectories,
   planCreatedDirectories,
-} from "./staging.ts";
+} from "./directories.ts";
+import { writeDurableJson } from "./durability.ts";
+import { buildGitManifest, manifestDigest } from "./git-manifest.ts";
 import { readRequiredUnknownJson, syncStatePaths } from "./state.ts";
 import { parseBaselineFile } from "./validation/preview.ts";
 
 const DEFAULT_TTL_MS = 5 * 60 * 1_000;
 
 export async function initializeSyncBaseline(
-  identity: SyncIdentity,
+  identity: InitializeSyncOptions,
   root: string,
 ): Promise<void> {
   const state = await syncStatePaths(identity);
-  const manifest = await buildGitManifest(root);
+  const manifest = await buildGitManifest(
+    root,
+    identity.environment ?? process.env,
+  );
   await writeDurableJson(state.baseline, {
     version: 1,
     files: manifest.files,
@@ -39,9 +43,10 @@ export async function previewSync(
   options: PreviewSyncOptions,
 ): Promise<SyncPreview> {
   const state = await syncStatePaths(options);
+  const environment = options.environment ?? process.env;
   const [source, target, baselineValue] = await Promise.all([
-    buildGitManifest(options.sourceRoot),
-    buildGitManifest(options.targetRoot),
+    buildGitManifest(options.sourceRoot, environment),
+    buildGitManifest(options.targetRoot, environment),
     readRequiredUnknownJson(
       state.baseline,
       "Synchronization baseline is missing; initialize it when the lab is created",
@@ -143,6 +148,24 @@ export async function canonicalPreviewRoots(
     canonicalRoot(options.targetRoot),
   ]);
   return { sourceRoot, targetRoot };
+}
+
+export async function verifyFreshPreview(
+  preview: StoredPreview,
+  sourceRoot: string,
+  targetRoot: string,
+  environment: NodeJS.ProcessEnv,
+): Promise<void> {
+  const [freshSource, freshTarget] = await Promise.all([
+    buildGitManifest(sourceRoot, environment),
+    buildGitManifest(targetRoot, environment),
+  ]);
+  if (
+    freshSource.digest !== preview.sourceDigest ||
+    freshTarget.digest !== preview.targetDigest
+  ) {
+    throw new Error("Synchronization preview became stale before mutation");
+  }
 }
 
 export function assertPreviewBinding(

@@ -161,6 +161,7 @@ async function stopAttachedCommand(
       identity,
       first,
       context.docker,
+      context.environment,
     );
     if (result.confirmed) {
       break;
@@ -180,9 +181,10 @@ async function stopAttachedCommand(
       identity,
       "KILL",
       context.docker,
+      context.environment,
     );
     if (!final.confirmed) {
-      await destroyLabStack(runtime, context.docker);
+      await destroyLabStack(runtime, context.docker, context.environment);
       await withFileLock(
         labLockPath(context.roots.stateRoot, context.owner, id),
         async () => {

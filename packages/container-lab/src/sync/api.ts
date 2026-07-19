@@ -3,12 +3,14 @@ export { applySync } from "./apply.ts";
 export { compareManifests } from "./comparison.ts";
 export type {
   ApplySyncOptions,
+  InitializeSyncOptions,
   PreviewSyncOptions,
   RecoverSyncOptions,
   SyncChange,
   SyncComparison,
   SyncConflict,
   SyncDirection,
+  SyncGitOptions,
   SyncIdentity,
   SyncPreview,
 } from "./contract.ts";

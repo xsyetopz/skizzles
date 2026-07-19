@@ -22,6 +22,45 @@ describe("runCommand result contracts", () => {
     expect(result.stdout.toString()).toBe("1234");
   });
 
+  it("rejects stdout overflow when complete output is required", async () => {
+    const fixture = await fixtures.start(
+      stubbornGroupScript("printf 123456789; wait"),
+      {
+        maxOutputBytes: 4,
+        rejectOnOutputLimit: true,
+      },
+    );
+    const identity = await fixtures.captureGroup(fixture.marker);
+    await writeFile(fixture.release, "release", { mode: 0o600 });
+    await expect(fixture.completion).rejects.toThrow(
+      "/bin/sh stdout exceeded 4 byte output limit",
+    );
+    expect(await observeGroupAbsence(identity)).toEqual([true, true, true]);
+  });
+
+  it("rejects stderr overflow even when command failure is allowed", async () => {
+    await expect(
+      runCommand("/bin/sh", ["-c", "printf 123456789 >&2; sleep 30"], {
+        allowFailure: true,
+        maxOutputBytes: 4,
+        rejectOnOutputLimit: true,
+      }),
+    ).rejects.toThrow("/bin/sh stderr exceeded 4 byte output limit");
+  });
+
+  it("applies the complete-output cap independently to stdout and stderr", async () => {
+    await expect(
+      runCommand("/bin/sh", ["-c", "printf 1234; printf 5678 >&2"], {
+        maxOutputBytes: 4,
+        rejectOnOutputLimit: true,
+      }),
+    ).resolves.toEqual({
+      code: 0,
+      stdout: Buffer.from("1234"),
+      stderr: Buffer.from("5678"),
+    });
+  });
+
   it("reports failures", async () => {
     const fixture = await fixtures.start(
       stubbornGroupScript("echo nope >&2; exit 7"),

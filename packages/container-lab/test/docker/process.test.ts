@@ -24,10 +24,18 @@ test("attached process transport preserves workdir, argv, and explicit environme
   );
 
   const invocation = docker.spawnCalls[0];
-  expect(invocation?.args.slice(0, 13)).toEqual([
+  expect(invocation?.args.slice(0, 21)).toEqual([
     "compose",
+    "--env-file",
+    "/dev/null",
+    "--project-directory",
+    "/tmp/source",
     "--project-name",
     "ccl-project",
+    "-f",
+    "/tmp/runtime/source.compose.json",
+    "-f",
+    "/tmp/runtime/override.compose.yaml",
     "exec",
     "-T",
     "--workdir",

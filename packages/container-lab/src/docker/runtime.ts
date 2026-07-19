@@ -1,29 +1,29 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import process from "node:process";
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
-import { parse as parseYaml } from "yaml";
 import type { ComposeModel } from "../compose/contract.ts";
 import {
   composeCommandArgs,
+  emptyComposeEnvironmentFile,
   generateBaseCompose,
   generateOverrideCompose,
 } from "../compose/generation.ts";
 import {
   inspectComposeModel,
-  validateSecretEnvironmentModel,
+  validateComposeEnvironmentModel,
 } from "../compose/inspection.ts";
-import type { LabConfig } from "../config.ts";
+import { assertComposeInputPolicy, type LabConfig } from "../config.ts";
 import type { DockerRunner, LabRuntime } from "../docker.ts";
 import type { CommandResult } from "../process.ts";
 import { redactPublicText } from "../public/output.ts";
 import type { Endpoint, LabMetadata } from "../state/lab/contract.ts";
 import {
+  composeInvocationEnvironment,
+  composeUpEnvironment,
+  dockerClientEnvironment,
   isRecord,
-  scrubSecretEnvironment,
-  secretComposeEnvironment,
   shellQuote,
 } from "./environment.ts";
+import { immutableComposeArguments } from "./source.ts";
 
 const LOOPBACK_PORT = /^127\.0\.0\.1:(\d+)$/;
 const LEADING_REPLACEMENT_CHARACTER = /^�/;
@@ -39,7 +39,6 @@ type ServiceSummary = {
 
 export async function dockerAvailableInRuntime(
   runner: DockerRunner,
-  secretEnvironment: readonly string[],
   environment: NodeJS.ProcessEnv,
 ): Promise<boolean> {
   return (
@@ -47,7 +46,7 @@ export async function dockerAvailableInRuntime(
       await runner.run(["info", "--format", "{{.ServerVersion}}"], {
         allowFailure: true,
         timeoutMs: 10_000,
-        env: scrubSecretEnvironment(secretEnvironment, environment),
+        env: dockerClientEnvironment(environment),
       })
     ).code === 0
   );
@@ -58,38 +57,46 @@ export async function prepareLabRuntimeInDocker(
   config: LabConfig,
   runner: DockerRunner,
   environment: NodeJS.ProcessEnv,
-): Promise<LabRuntime> {
+): Promise<LabRuntime & { sourceFile: string }> {
+  await assertComposeInputPolicy(config);
   await mkdir(metadata.runtimeRoot, { recursive: true, mode: 0o700 });
   const base = generateBaseCompose(config);
-  const baseFile =
+  const generatedBaseFile =
     base === undefined
       ? undefined
       : join(metadata.runtimeRoot, "base.compose.yaml");
-  if (baseFile && base !== undefined) {
-    await writeFile(baseFile, base, { mode: 0o600 });
+  if (generatedBaseFile && base !== undefined) {
+    await writeFile(generatedBaseFile, base, { mode: 0o600 });
   }
+  const sourceFile = join(metadata.runtimeRoot, "source.compose.json");
   const overrideFile = join(metadata.runtimeRoot, "override.compose.yaml");
-  await writeFile(overrideFile, "{}\n", { mode: 0o600 });
-  const composeArgs = composeCommandArgs(config, {
+  const sourceComposeArgs = composeCommandArgs(config, {
     projectName: metadata.composeProject,
-    overrideFile,
-    ...(baseFile === undefined ? {} : { baseFile }),
+    environmentFile: emptyComposeEnvironmentFile,
+    ...(generatedBaseFile === undefined ? {} : { baseFile: generatedBaseFile }),
   });
-  const composeEnvironment = secretComposeEnvironment(
-    config.secretEnvironment,
+  const composeEnvironment = composeInvocationEnvironment(
+    config.composeEnvironment,
+    config.forwardEnvironment,
     environment,
   );
-  const sourceModel = await normalizedModel(
-    composeArgs,
+  const sourceDocument = await rawSourceDocument(
+    sourceComposeArgs,
     runner,
     composeEnvironment,
   );
-  validateSecretEnvironmentModel(
+  const sourceModel = sourceDocument.model;
+  validateComposeEnvironmentModel(
     sourceModel,
+    config.composeEnvironment,
     config.secretEnvironment,
-    composeEnvironment,
+    environment,
   );
   const findings = inspectComposeModel(sourceModel);
+  await writeFile(sourceFile, sourceDocument.bytes, { mode: 0o600 });
+  if (generatedBaseFile !== undefined) {
+    await rm(generatedBaseFile);
+  }
   const override = generateOverrideCompose(config, sourceModel, {
     workspaceHostPath: metadata.workspace,
     owner: metadata.owner,
@@ -97,24 +104,48 @@ export async function prepareLabRuntimeInDocker(
     labId: metadata.id,
   });
   await writeFile(overrideFile, override, { mode: 0o600 });
+  const composeArgs = composeCommandArgs(config, {
+    projectName: metadata.composeProject,
+    overrideFile,
+    sourceFiles: [sourceFile],
+    environmentFile: emptyComposeEnvironmentFile,
+  });
   const finalModel = await normalizedModel(
     composeArgs,
     runner,
     composeEnvironment,
   );
-  validateSecretEnvironmentModel(
-    finalModel,
-    config.secretEnvironment,
-    composeEnvironment,
-  );
+  if (!Object.hasOwn(finalModel.services ?? {}, config.mode.commandService)) {
+    throw composeConfigurationFailure();
+  }
   return {
     metadata,
     config,
     composeArgs,
-    ...(baseFile === undefined ? {} : { baseFile }),
+    sourceFile,
     overrideFile,
     findings,
   };
+}
+
+async function rawSourceDocument(
+  composeArgs: string[],
+  runner: DockerRunner,
+  environment: NodeJS.ProcessEnv,
+): Promise<{ model: ComposeModel; bytes: Buffer }> {
+  return await readComposeDocument(
+    [
+      ...composeArgs,
+      "config",
+      "--no-interpolate",
+      "--no-normalize",
+      "--no-env-resolution",
+      "--format",
+      "json",
+    ],
+    runner,
+    environment,
+  );
 }
 
 async function normalizedModel(
@@ -122,31 +153,23 @@ async function normalizedModel(
   runner: DockerRunner,
   environment: NodeJS.ProcessEnv,
 ): Promise<ComposeModel> {
+  return (
+    await readComposeDocument(
+      [...composeArgs, "config", "--no-env-resolution", "--format", "json"],
+      runner,
+      environment,
+    )
+  ).model;
+}
+
+async function readComposeDocument(
+  args: string[],
+  runner: DockerRunner,
+  environment: NodeJS.ProcessEnv,
+): Promise<{ model: ComposeModel; bytes: Buffer }> {
   let result: CommandResult;
   try {
-    result = await runner.run(
-      [...composeArgs, "config", "--no-interpolate", "--format", "json"],
-      {
-        timeoutMs: 30_000,
-        maxOutputBytes: 16 * 1024 * 1024,
-        allowFailure: true,
-        env: environment,
-      },
-    );
-  } catch {
-    throw composeConfigurationFailure();
-  }
-  if (result.code === 0) {
-    const jsonModel = parseNormalizedModel(() =>
-      JSON.parse(result.stdout.toString()),
-    );
-    if (jsonModel !== undefined) {
-      return jsonModel;
-    }
-  }
-  let yaml: CommandResult;
-  try {
-    yaml = await runner.run([...composeArgs, "config", "--no-interpolate"], {
+    result = await runner.run(args, {
       timeoutMs: 30_000,
       maxOutputBytes: 16 * 1024 * 1024,
       allowFailure: true,
@@ -155,16 +178,15 @@ async function normalizedModel(
   } catch {
     throw composeConfigurationFailure();
   }
-  if (yaml.code !== 0) {
+  if (result.code !== 0) {
     throw composeConfigurationFailure();
   }
-  const yamlModel = parseNormalizedModel(() =>
-    parseYaml(yaml.stdout.toString()),
-  );
-  if (yamlModel === undefined) {
+  const bytes = Buffer.from(result.stdout);
+  const model = parseNormalizedModel(() => JSON.parse(bytes.toString()));
+  if (model === undefined) {
     throw composeConfigurationFailure();
   }
-  return yamlModel;
+  return { model, bytes };
 }
 
 function parseNormalizedModel(parse: () => unknown): ComposeModel | undefined {
@@ -220,8 +242,9 @@ export async function runComposeCommand(
     signal?: AbortSignal;
   },
   runner: DockerRunner,
+  environment: NodeJS.ProcessEnv,
 ): Promise<CommandResult> {
-  return await runner.run([...runtime.composeArgs, ...args], {
+  return await runner.run([...immutableComposeArguments(runtime), ...args], {
     ...(options.timeoutMs === undefined
       ? {}
       : { timeoutMs: options.timeoutMs }),
@@ -230,7 +253,11 @@ export async function runComposeCommand(
       : { allowFailure: options.allowFailure }),
     maxOutputBytes: 4 * 1024 * 1024,
     ...(options.signal === undefined ? {} : { signal: options.signal }),
-    env: scrubSecretEnvironment(runtime.config.secretEnvironment, process.env),
+    env: composeInvocationEnvironment(
+      runtime.config.composeEnvironment,
+      runtime.config.forwardEnvironment,
+      environment,
+    ),
   });
 }
 
@@ -243,13 +270,22 @@ export async function provisionLabStackInDocker(
   let provisioned: CommandResult;
   try {
     provisioned = await runner.run(
-      [...runtime.composeArgs, "up", "-d", "--wait", "--wait-timeout", "180"],
+      [
+        ...immutableComposeArguments(runtime),
+        "up",
+        "-d",
+        "--wait",
+        "--wait-timeout",
+        "180",
+      ],
       {
         timeoutMs: 30 * 60_000,
         ...(signal === undefined ? {} : { signal }),
         allowFailure: true,
         maxOutputBytes: 4 * 1024 * 1024,
-        env: secretComposeEnvironment(
+        env: composeUpEnvironment(
+          runtime.config.composeEnvironment,
+          runtime.config.forwardEnvironment,
           runtime.config.secretEnvironment,
           environment,
         ),
@@ -287,6 +323,7 @@ export async function provisionLabStackInDocker(
       ...(signal === undefined ? {} : { signal }),
     },
     runner,
+    environment,
   );
   if (verified.code !== 0) {
     throw new Error(
@@ -300,6 +337,7 @@ export async function provisionLabStackInDocker(
       ["port", port.service, String(port.target)],
       { timeoutMs: 20_000 },
       runner,
+      environment,
     );
     const loopback = result.stdout
       .toString()
@@ -331,6 +369,7 @@ export async function provisionLabStackInDocker(
 export async function readStackStatus(
   runtime: LabRuntime,
   runner: DockerRunner,
+  environment: NodeJS.ProcessEnv,
 ): Promise<unknown> {
   const result = await runComposeCommand(
     runtime,
@@ -340,6 +379,7 @@ export async function readStackStatus(
       timeoutMs: 20_000,
     },
     runner,
+    environment,
   );
   if (result.code !== 0) {
     return { available: false, error: compactError(result.stderr.toString()) };
@@ -379,14 +419,19 @@ export async function readStackLogs(
   service: string,
   tailLines: number,
   runner: DockerRunner,
+  environment: NodeJS.ProcessEnv,
 ): Promise<{ text: string; truncated: boolean }> {
   if (tailLines < 1 || tailLines > 500) {
     throw new Error("tail-lines must be 1..500");
   }
   const model = await normalizedModel(
-    runtime.composeArgs,
+    immutableComposeArguments(runtime),
     runner,
-    scrubSecretEnvironment(runtime.config.secretEnvironment, process.env),
+    composeInvocationEnvironment(
+      runtime.config.composeEnvironment,
+      runtime.config.forwardEnvironment,
+      environment,
+    ),
   );
   if (!Object.hasOwn(model.services ?? {}, service)) {
     throw new Error(`unknown Compose service: ${service}`);
@@ -399,6 +444,7 @@ export async function readStackLogs(
       timeoutMs: 20_000,
     },
     runner,
+    environment,
   );
   return boundedLogTail(
     `${result.stdout}${result.stderr}`,

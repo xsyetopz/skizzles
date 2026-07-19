@@ -2,27 +2,20 @@ import {
   chmod,
   copyFile,
   lstat,
-  mkdir,
   readlink,
   rename,
   rm,
-  rmdir,
   symlink,
 } from "node:fs/promises";
 import path from "node:path";
 import {
-  canonicalRoot,
   describeSyncFile,
   guardedPath,
   type SyncFile,
   sha256,
 } from "../files.ts";
 import { sameSyncFile } from "./comparison.ts";
-import type {
-  BackupRecord,
-  DirectoryIdentity,
-  SyncChange,
-} from "./contract.ts";
+import type { BackupRecord, SyncChange } from "./contract.ts";
 import { syncDirectory, syncFile } from "./durability.ts";
 
 export async function backupTargets(
@@ -92,146 +85,6 @@ export async function planBackupRecords(
     });
   }
   return records;
-}
-
-export async function planCreatedDirectories(
-  targetRoot: string,
-  changes: SyncChange[],
-): Promise<string[]> {
-  const canonical = await canonicalRoot(targetRoot);
-  const missing = new Set<string>();
-  for (const change of changes) {
-    for (const relative of await missingParentsForChange(canonical, change)) {
-      missing.add(relative);
-    }
-  }
-  return [...missing].sort();
-}
-
-export async function captureDeleteParentDirectories(
-  targetRoot: string,
-  changes: SyncChange[],
-): Promise<DirectoryIdentity[]> {
-  const canonical = await canonicalRoot(targetRoot);
-  const parents = new Set<string>();
-  for (const change of changes) {
-    if (change.action !== "delete") {
-      continue;
-    }
-    const parts = change.path.split("/").slice(0, -1);
-    for (let index = 1; index <= parts.length; index++) {
-      parents.add(parts.slice(0, index).join("/"));
-    }
-  }
-  const identities: DirectoryIdentity[] = [];
-  for (const relative of [...parents].sort()) {
-    identities.push(await directoryIdentity(canonical, relative));
-  }
-  return identities;
-}
-
-export async function assertDirectoryIdentities(
-  targetRoot: string,
-  identities: DirectoryIdentity[],
-  message: (relative: string) => string,
-): Promise<void> {
-  for (const expected of identities) {
-    let actual: DirectoryIdentity;
-    try {
-      actual = await directoryIdentity(targetRoot, expected.path);
-    } catch {
-      throw new Error(message(expected.path));
-    }
-    if (actual.device !== expected.device || actual.inode !== expected.inode) {
-      throw new Error(message(expected.path));
-    }
-  }
-}
-
-async function missingParentsForChange(
-  canonicalTarget: string,
-  change: SyncChange,
-): Promise<string[]> {
-  const missing: string[] = [];
-  const parts = change.path.split("/").slice(0, -1);
-  for (let index = 1; index <= parts.length; index++) {
-    const relative = parts.slice(0, index).join("/");
-    try {
-      const stat = await lstat(
-        path.join(canonicalTarget, ...parts.slice(0, index)),
-      );
-      if (stat.isSymbolicLink() || !stat.isDirectory()) {
-        throw new Error(`Unsafe synchronization parent for ${change.path}`);
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw error;
-      }
-      missing.push(relative);
-    }
-  }
-  return missing;
-}
-
-export async function createPlannedDirectories(
-  targetRoot: string,
-  directories: string[],
-  onCreated: (identity: DirectoryIdentity) => void | Promise<void> = () =>
-    undefined,
-  beforeCreate: (relative: string) => void | Promise<void> = () => undefined,
-  afterCreated: (relative: string) => void | Promise<void> = () => undefined,
-): Promise<void> {
-  for (const relative of directories) {
-    await beforeCreate(relative);
-    const directory = await guardedPath(targetRoot, relative);
-    await mkdir(directory);
-    await syncDirectory(path.dirname(directory));
-    await afterCreated(relative);
-    await onCreated(await directoryIdentity(targetRoot, relative));
-  }
-}
-
-export async function cleanupCreatedDirectories(
-  targetRoot: string,
-  directories: DirectoryIdentity[],
-): Promise<void> {
-  for (const identity of [...directories].reverse()) {
-    await assertDirectoryIdentities(
-      targetRoot,
-      [identity],
-      (relative) =>
-        `recovery conflict at ${relative}; divergent target directory preserved`,
-    );
-    const directory = await guardedPath(targetRoot, identity.path);
-    try {
-      await rmdir(directory);
-      await syncDirectory(path.dirname(directory));
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOTEMPTY" || code === "EEXIST") {
-        throw new Error(
-          `recovery conflict at ${identity.path}; divergent target directory preserved`,
-        );
-      }
-      throw error;
-    }
-  }
-}
-
-async function directoryIdentity(
-  root: string,
-  relative: string,
-): Promise<DirectoryIdentity> {
-  const directory = await guardedPath(root, relative);
-  const stat = await lstat(directory, { bigint: true });
-  if (stat.isSymbolicLink() || !stat.isDirectory()) {
-    throw new Error(`Unsafe synchronization directory: ${relative}`);
-  }
-  return {
-    path: relative,
-    device: stat.dev.toString(),
-    inode: stat.ino.toString(),
-  };
 }
 
 export async function stageSources(

@@ -37,6 +37,13 @@
     "runMustBeOutermost": true,
     "ownerEnvironment": "CODEX_THREAD_ID"
   },
+  "environmentBoundary": {
+    "dockerClient": "fixed-allowlist-v1",
+    "composeSource": "immutable-raw-model-v1",
+    "composeEnvironment": "manifest-compose-environment-v1",
+    "composeSecrets": "up-only-v1",
+    "localGit": "no-ambient-or-executable-config-v1"
+  },
   "reaper": {
     "outputMaxBytes": 1536,
     "lifecycleOwner": "skizzles-explicit-host-wiring",

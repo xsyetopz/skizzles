@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { readdir, realpath, stat } from "node:fs/promises";
 import { join } from "node:path";
-import process from "node:process";
 import {
   cleanupLabLabels,
   type DockerRunner,
@@ -10,7 +9,7 @@ import {
 } from "../docker.ts";
 import { removeIfPresent } from "../files.ts";
 import { withFileLock } from "../locks.ts";
-import { runCommand } from "../process.ts";
+import { runLocalGit } from "../process/git.ts";
 import type { LabMetadata } from "../state/lab/contract.ts";
 import {
   listLabs,
@@ -91,7 +90,7 @@ export async function destroyManagedLab(
             context.roots,
             lab,
           );
-          await recoverLabSync(context.roots, lab);
+          await recoverLabSync(context.roots, lab, context.environment);
           await cleanupDockerResources(context, lab);
           if (runtimePresent) {
             if (
@@ -157,6 +156,7 @@ export async function reconcileOwnerLabs(
 export async function recoverLabSync(
   roots: StateRoots,
   lab: LabMetadata,
+  environment: NodeJS.ProcessEnv,
 ): Promise<void> {
   if (
     lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) ||
@@ -187,7 +187,7 @@ export async function recoverLabSync(
   if (journals.length === 0) {
     return;
   }
-  await assertSourceRepositoryIdentity(lab);
+  await assertSourceRepositoryIdentity(lab, environment);
   await recoverSyncTransactions({
     stateRoot: lab.runtimeRoot,
     labId: lab.id,
@@ -197,10 +197,10 @@ export async function recoverLabSync(
 
 export async function assertSourceRepositoryIdentity(
   lab: LabMetadata,
+  environment: NodeJS.ProcessEnv,
 ): Promise<void> {
   const commonGit = (
-    await runCommand(
-      "git",
+    await runLocalGit(
       [
         "-C",
         lab.sourceRoot,
@@ -209,6 +209,7 @@ export async function assertSourceRepositoryIdentity(
         "--git-common-dir",
       ],
       { timeoutMs: 10_000 },
+      environment,
     )
   ).stdout
     .toString()
@@ -227,7 +228,7 @@ export async function assertSourceRepositoryIdentity(
 export async function cleanupManagedLabDockerResources(
   lab: LabMetadata,
   docker: DockerRunner,
-  environment: NodeJS.ProcessEnv = process.env,
+  environment: NodeJS.ProcessEnv,
 ): Promise<void> {
   await cleanupLabLabels(
     lab,
@@ -242,7 +243,11 @@ async function cleanupDockerResources(
   lab: LabMetadata,
 ): Promise<void> {
   if (lab.runtime) {
-    await destroyLabStack(runtimeFromLab(lab), context.docker);
+    await destroyLabStack(
+      runtimeFromLab(lab),
+      context.docker,
+      context.environment,
+    );
     return;
   }
   await cleanupManagedLabDockerResources(

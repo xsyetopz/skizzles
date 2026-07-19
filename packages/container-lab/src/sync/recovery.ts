@@ -13,12 +13,15 @@ import type {
   StoredPreview,
   SyncJournal,
 } from "./contract.ts";
+import {
+  assertRecoveryDirectoryIdentities,
+  type CreatedDirectoryRetirementHooks,
+  retireCreatedDirectories,
+} from "./directories.ts";
 import { writeDurableJson } from "./durability.ts";
 import { manifestDigest } from "./git-manifest.ts";
 import { previewBinding } from "./preview.ts";
 import {
-  assertDirectoryIdentities,
-  cleanupCreatedDirectories,
   cleanupPublications,
   restoreBackups,
   validateBackupArtifacts,
@@ -34,9 +37,18 @@ import { parseBaselineFile, parseStoredPreview } from "./validation/preview.ts";
 const JOURNAL_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-/** Recover interrupted applies. Prepared journals roll back; fully applied journals publish their baseline. */
+interface RecoveryHooks {
+  readonly directoryRetirement?: CreatedDirectoryRetirementHooks;
+  readonly afterCreatedDirectoriesRetired?: () => void | Promise<void>;
+}
+
+/** Recover interrupted applies. Prepared journals roll back; applied journals publish their baseline. */
+export function recoverSyncTransactions(
+  options: RecoverSyncOptions,
+): Promise<number>;
 export async function recoverSyncTransactions(
   options: RecoverSyncOptions,
+  hooks: RecoveryHooks = {},
 ): Promise<number> {
   const state = await syncStatePaths(options);
   const allowedTargets = new Set(
@@ -48,7 +60,7 @@ export async function recoverSyncTransactions(
     cwd: state.journals,
     onlyFiles: true,
   })) {
-    await recoverJournal(state, name, allowedTargets, options.labId);
+    await recoverJournal(state, name, allowedTargets, options.labId, hooks);
     recovered++;
   }
   return recovered;
@@ -59,6 +71,7 @@ async function recoverJournal(
   name: string,
   allowedTargets: Set<string>,
   labId: string,
+  hooks: RecoveryHooks,
 ): Promise<void> {
   const journalId = path.basename(name, ".json");
   if (!JOURNAL_ID.test(journalId)) {
@@ -79,7 +92,14 @@ async function recoverJournal(
     labId,
   );
   const backupDir = path.join(state.backups, journalId);
-  await recoverJournalState(state, journal, journalPath, backupDir, provenance);
+  await recoverJournalState(
+    state,
+    journal,
+    journalPath,
+    backupDir,
+    provenance,
+    hooks,
+  );
   await rm(backupDir, { recursive: true, force: true });
   await rm(journalPath, { force: true });
 }
@@ -90,6 +110,7 @@ async function recoverJournalState(
   journalPath: string,
   backupDir: string,
   provenance: { targetRoot: string; baselinePublished: boolean },
+  hooks: RecoveryHooks,
 ): Promise<void> {
   const { targetRoot } = provenance;
   if (
@@ -112,7 +133,12 @@ async function recoverJournalState(
         journal.mutatedPaths.includes(backup.path),
       ),
     );
-    await cleanupCreatedDirectories(targetRoot, journal.createdDirectories);
+    await retireCreatedDirectories(
+      targetRoot,
+      journal.createdDirectories,
+      hooks.directoryRetirement,
+    );
+    await hooks.afterCreatedDirectoriesRetired?.();
   }
   if (journal.state === "prepared") {
     journal.createdDirectories = [];
@@ -399,22 +425,4 @@ export async function rollbackJournalSafely(
     }
   }
   await restoreBackups(targetRoot, restorations);
-}
-
-async function assertRecoveryDirectoryIdentities(
-  targetRoot: string,
-  journal: SyncJournal,
-): Promise<void> {
-  const conflict = (relative: string) =>
-    `recovery conflict at ${relative}; divergent target directory preserved`;
-  await assertDirectoryIdentities(
-    targetRoot,
-    journal.createdDirectories,
-    conflict,
-  );
-  await assertDirectoryIdentities(
-    targetRoot,
-    journal.deleteParentDirectories,
-    conflict,
-  );
 }

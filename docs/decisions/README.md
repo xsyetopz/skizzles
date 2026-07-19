@@ -13,6 +13,7 @@ rewriting its rationale.
 | [0003](0003-agent-trust-and-evaluation.md) | Accepted | Keep agent judgment bounded by typed trust context, capability controls, and independent evaluation. |
 | [0004](0004-measurement-gated-rust.md) | Accepted | Admit Rust only through a measured, reversible parity gate. |
 | [0005](0005-ephemeral-repository-security-tools.md) | Accepted | Verify Actions and credential hygiene with ephemeral checksum-pinned tools. |
+| [0006](0006-container-process-environment.md) | Accepted | Isolate Docker Compose and local Git process environments behind explicit capabilities. |
 
 ## Record contract
 

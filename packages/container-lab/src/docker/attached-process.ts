@@ -7,8 +7,9 @@ import type {
   LabRuntime,
 } from "../docker.ts";
 import type { CommandResult } from "../process.ts";
-import { scrubSecretEnvironment, shellQuote } from "./environment.ts";
+import { composeInvocationEnvironment, shellQuote } from "./environment.ts";
 import { runComposeCommand } from "./runtime.ts";
+import { immutableComposeArguments } from "./source.ts";
 
 export function launchAttachedDockerProcess(
   runtime: LabRuntime,
@@ -38,7 +39,7 @@ export function launchAttachedDockerProcess(
     'exit "$code"',
   ].join("; ");
   const args = [
-    ...runtime.composeArgs,
+    ...immutableComposeArguments(runtime),
     "exec",
     "-T",
     "--workdir",
@@ -54,7 +55,11 @@ export function launchAttachedDockerProcess(
     ...invocation.argv,
   ];
   return runner.spawn(args, {
-    env: scrubSecretEnvironment(runtime.config.secretEnvironment, environment),
+    env: composeInvocationEnvironment(
+      runtime.config.composeEnvironment,
+      runtime.config.forwardEnvironment,
+      environment,
+    ),
   });
 }
 
@@ -63,6 +68,7 @@ export async function terminateAttachedDockerProcess(
   identity: Pick<DockerRunIdentity, "runId">,
   signal: "INT" | "TERM" | "KILL",
   runner: DockerRunner,
+  environment: NodeJS.ProcessEnv,
 ): Promise<DockerRunTerminationResult> {
   const pidFile = `/tmp/.codex-container-lab-run-${identity.runId}.pid`;
   const expectedIdentity = `CODEX_CONTAINER_LAB_RUN_ID=${identity.runId}`;
@@ -108,6 +114,7 @@ export async function terminateAttachedDockerProcess(
       ],
       { allowFailure: true, timeoutMs: 10_000 },
       runner,
+      environment,
     );
   } catch {
     return { confirmed: false, status: "docker-failure" };

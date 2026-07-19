@@ -4,14 +4,13 @@ import { join } from "node:path";
 import { internalImageTag } from "../compose/generation.ts";
 import { loadLabConfig } from "../config.ts";
 import {
-  cleanupLabLabels,
   type DockerRunner,
   destroyLabStack,
   prepareLabRuntime,
   provisionLabStack,
 } from "../docker.ts";
 import { withFileLock } from "../locks.ts";
-import { runCommand } from "../process.ts";
+import { runLocalGit } from "../process/git.ts";
 import type { LabMetadata } from "../state/lab/contract.ts";
 import { listLabs, readLab, writeLab } from "../state/lab/store.ts";
 import {
@@ -65,19 +64,18 @@ export async function createProvisionedLab(
         throw new Error("an owner may have at most 8 labs");
       }
       const sourceRoot = (
-        await runCommand(
-          "git",
+        await runLocalGit(
           ["-C", source, "rev-parse", "--show-toplevel"],
           {
             timeoutMs: 10_000,
           },
+          context.environment,
         )
       ).stdout
         .toString()
         .trim();
       const commonGit = (
-        await runCommand(
-          "git",
+        await runLocalGit(
           [
             "-C",
             sourceRoot,
@@ -86,6 +84,7 @@ export async function createProvisionedLab(
             "--git-common-dir",
           ],
           { timeoutMs: 10_000 },
+          context.environment,
         )
       ).stdout
         .toString()
@@ -118,6 +117,7 @@ export async function createProvisionedLab(
         updatedAt: new Date().toISOString(),
         endpoints: [],
         findings: [],
+        composeEnvironment: [],
         secretEnvironment: [],
       };
       await withFileLock(
@@ -138,18 +138,18 @@ async function provisionLab(
 ): Promise<void> {
   let lab = await readLab(context.roots, context.owner, id);
   let runtime: Awaited<ReturnType<typeof prepareLabRuntime>> | undefined;
-  let dockerMaterializationStarted = false;
-  let provisioningEnvironment: NodeJS.ProcessEnv | undefined;
   let secretEnvironmentNames: string[] = [];
   let failure: unknown;
   try {
     await assertProvisioning(context, id, signal);
     await mkdir(lab.runtimeRoot, { recursive: true, mode: 0o700 });
     const config = await loadLabConfig(lab.sourceRoot);
+    const composeEnvironmentNames = [...config.composeEnvironment];
     secretEnvironmentNames = [...config.secretEnvironment];
     lab.manifestPath = config.manifestPath;
     lab.commandService = config.mode.commandService;
     lab.modeKind = config.mode.kind;
+    lab.composeEnvironment = composeEnvironmentNames;
     lab.secretEnvironment = secretEnvironmentNames;
     if (config.mode.kind === "dockerfile") {
       lab.managedImage = internalImageTag(lab.ownerKey, lab.id);
@@ -158,6 +158,7 @@ async function provisionLab(
       current.manifestPath = lab.manifestPath;
       current.commandService = lab.commandService;
       current.modeKind = config.mode.kind;
+      current.composeEnvironment = [...lab.composeEnvironment];
       current.secretEnvironment = [...lab.secretEnvironment];
       if (lab.managedImage === undefined) {
         delete current.managedImage;
@@ -165,23 +166,27 @@ async function provisionLab(
         current.managedImage = lab.managedImage;
       }
     });
-    provisioningEnvironment = resolveProvisioningEnvironment(
+    assertSecretEnvironmentAvailable(
       secretEnvironmentNames,
       context.environment,
     );
     await assertProvisioning(context, id, signal);
     const head = (
-      await runCommand("git", ["-C", lab.sourceRoot, "rev-parse", "HEAD"], {
-        timeoutMs: 10_000,
-        ...(signal === undefined ? {} : { signal }),
-      })
+      await runLocalGit(
+        ["-C", lab.sourceRoot, "rev-parse", "HEAD"],
+        {
+          timeoutMs: 10_000,
+          ...(signal === undefined ? {} : { signal }),
+        },
+        context.environment,
+      )
     ).stdout
       .toString()
       .trim();
-    await runCommand(
-      "git",
+    await runLocalGit(
       [
         "clone",
+        "--local",
         "--no-checkout",
         "--no-tags",
         "--no-hardlinks",
@@ -192,31 +197,36 @@ async function provisionLab(
         timeoutMs: 120_000,
         ...(signal === undefined ? {} : { signal }),
       },
+      context.environment,
     );
-    await runCommand(
-      "git",
+    await runLocalGit(
       ["-C", lab.workspace, "remote", "remove", "origin"],
       {
         timeoutMs: 10_000,
         ...(signal === undefined ? {} : { signal }),
       },
+      context.environment,
     );
-    await runCommand(
-      "git",
+    await runLocalGit(
       ["-C", lab.workspace, "checkout", "--detach", head],
       {
         timeoutMs: 120_000,
         ...(signal === undefined ? {} : { signal }),
       },
+      context.environment,
     );
     await assertProvisioning(context, id, signal);
     const identity = { stateRoot: lab.runtimeRoot, labId: lab.id };
-    await initializeSyncBaseline(identity, lab.workspace);
+    await initializeSyncBaseline(
+      { ...identity, environment: context.environment },
+      lab.workspace,
+    );
     const seed = await previewSync({
       ...identity,
       direction: "push",
       sourceRoot: lab.sourceRoot,
       targetRoot: lab.workspace,
+      environment: context.environment,
     });
     if (seed.conflicts.length > 0) {
       throw new Error(
@@ -230,24 +240,25 @@ async function provisionLab(
       sourceRoot: lab.sourceRoot,
       targetRoot: lab.workspace,
       idleGuard: () => true,
+      environment: context.environment,
     });
     await recoverSyncTransactions({
       ...identity,
       allowedTargetRoots: [lab.sourceRoot, lab.workspace],
     });
     await assertProvisioning(context, id, signal);
-    dockerMaterializationStarted = true;
     runtime = await prepareLabRuntime(
       lab,
       config,
       context.docker,
-      provisioningEnvironment,
+      context.environment,
     );
     lab.findings = runtime.findings;
     const persistedRuntime = {
       config: runtime.config,
       composeArgs: runtime.composeArgs,
       ...(runtime.baseFile === undefined ? {} : { baseFile: runtime.baseFile }),
+      sourceFile: runtime.sourceFile,
       overrideFile: runtime.overrideFile,
       findings: runtime.findings,
     };
@@ -261,20 +272,15 @@ async function provisionLab(
       runtime,
       signal,
       context.docker,
-      provisioningEnvironment,
+      context.environment,
     );
     await assertProvisioning(context, id, signal);
   } catch (error) {
     failure = error;
     if (runtime) {
-      await destroyLabStack(runtime, context.docker).catch(() => undefined);
-    } else if (dockerMaterializationStarted) {
-      await cleanupLabLabels(
-        lab,
-        lab.modeKind === "dockerfile",
-        context.docker,
-        provisioningEnvironment,
-      ).catch(() => undefined);
+      await destroyLabStack(runtime, context.docker, context.environment).catch(
+        () => undefined,
+      );
     }
   }
   await withFileLock(
@@ -349,20 +355,16 @@ function compactError(error: unknown): string {
     .slice(-4000);
 }
 
-function resolveProvisioningEnvironment(
+function assertSecretEnvironmentAvailable(
   names: readonly string[],
   environment: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv {
-  const resolved = { ...environment };
+): void {
   for (const name of names) {
-    delete resolved[name];
     if (
       !Object.hasOwn(environment, name) ||
       typeof environment[name] !== "string"
     ) {
       throw new Error(`secret environment variable is unavailable: ${name}`);
     }
-    resolved[name] = environment[name];
   }
-  return resolved;
 }

@@ -29,6 +29,13 @@ it("exports the stable installer integration descriptor", () => {
       adminProtocol: "single-json-v1",
       adminMaxBytes: 16_384,
     },
+    environmentBoundary: {
+      dockerClient: "fixed-allowlist-v1",
+      composeSource: "immutable-raw-model-v1",
+      composeEnvironment: "manifest-compose-environment-v1",
+      composeSecrets: "up-only-v1",
+      localGit: "no-ambient-or-executable-config-v1",
+    },
   });
   expect(descriptor.configuredRuntime).toBe("0.1.0");
   expect(descriptor.bundled.documentation).not.toHaveLength(0);

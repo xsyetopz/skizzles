@@ -30,6 +30,7 @@ class CommandExecution {
   private readonly cap: number;
   private stdoutBytes = 0;
   private stderrBytes = 0;
+  private outputLimitExceeded: "stderr" | "stdout" | undefined;
   private child: SpawnedCommand | undefined;
   private timeout: ReturnType<typeof setTimeout> | undefined;
   private pipeRelease: ReturnType<typeof setTimeout> | undefined;
@@ -118,11 +119,21 @@ class CommandExecution {
   };
 
   private readonly onStdout = (chunk: Buffer): void => {
-    this.stdoutBytes = this.collect(this.stdout, chunk, this.stdoutBytes);
+    this.stdoutBytes = this.collect(
+      "stdout",
+      this.stdout,
+      chunk,
+      this.stdoutBytes,
+    );
   };
 
   private readonly onStderr = (chunk: Buffer): void => {
-    this.stderrBytes = this.collect(this.stderr, chunk, this.stderrBytes);
+    this.stderrBytes = this.collect(
+      "stderr",
+      this.stderr,
+      chunk,
+      this.stderrBytes,
+    );
   };
 
   private readonly onStreamError = (error: Error): void => {
@@ -155,12 +166,26 @@ class CommandExecution {
     this.finish();
   };
 
-  private collect(chunks: Buffer[], chunk: Buffer, current: number): number {
+  private collect(
+    stream: "stderr" | "stdout",
+    chunks: Buffer[],
+    chunk: Buffer,
+    current: number,
+  ): number {
     const remaining = this.cap - current;
     if (remaining > 0) {
       chunks.push(chunk.subarray(0, remaining));
     }
-    return current + chunk.byteLength;
+    const next = current + chunk.byteLength;
+    if (
+      next > this.cap &&
+      this.options.rejectOnOutputLimit === true &&
+      this.outputLimitExceeded === undefined
+    ) {
+      this.outputLimitExceeded = stream;
+      this.confirmCleanup();
+    }
+    return next;
   }
 
   private confirmCleanup(): void {
@@ -235,6 +260,11 @@ class CommandExecution {
     }
     if (this.state.abortRequested || this.options.signal?.aborted) {
       return new Error(`${this.command} aborted`);
+    }
+    if (this.outputLimitExceeded !== undefined) {
+      return new Error(
+        `${this.command} ${this.outputLimitExceeded} exceeded ${this.cap} byte output limit`,
+      );
     }
     if (result.code === 0 || this.options.allowFailure) {
       return;

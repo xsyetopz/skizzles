@@ -39,6 +39,7 @@ export async function reaperMain(
           ? {}
           : { runtimeRoot: parsed.runtimeRoot }),
       }),
+      environment: process.env,
     });
     const output = reaperOutput(result);
     if (output) {

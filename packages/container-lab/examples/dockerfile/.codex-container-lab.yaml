@@ -7,4 +7,5 @@ runtime:
   shell: [/bin/bash, -lc]
 ports: {}
 environment: []
+compose_environment: []
 secret_environment: []

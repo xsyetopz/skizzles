@@ -9,6 +9,7 @@ import {
 } from "node:path";
 import {
   composeCommandArgs,
+  emptyComposeEnvironmentFile,
   internalImageTag,
 } from "../../compose/generation.ts";
 import {
@@ -17,6 +18,7 @@ import {
   manifestName,
 } from "../../config.ts";
 import { safeStateName } from "../../files.ts";
+import { isDockerClientEnvironmentName } from "../../lab/environment.ts";
 import {
   expectedLabRuntimeRoot,
   ownerKey,
@@ -63,7 +65,7 @@ export function assertLabMetadata(
     ) {
       throw new Error("identity mismatch");
     }
-    normalizeSecretEnvironment(value);
+    normalizeEnvironmentMetadata(value);
     if (typeof value["name"] !== "string" || !LAB_NAME.test(value["name"])) {
       throw new Error("invalid name");
     }
@@ -126,6 +128,18 @@ export function assertLabMetadata(
     if (!isEnvironmentNames(value["secretEnvironment"])) {
       throw new Error("invalid secret environment metadata");
     }
+    if (value["secretEnvironment"].some(isDockerClientEnvironmentName)) {
+      throw new Error("secret environment overlaps Docker client metadata");
+    }
+    if (!isEnvironmentNames(value["composeEnvironment"])) {
+      throw new Error("invalid Compose environment metadata");
+    }
+    const composeEnvironment = new Set(value["composeEnvironment"]);
+    if (
+      value["secretEnvironment"].some((name) => composeEnvironment.has(name))
+    ) {
+      throw new Error("overlapping environment metadata");
+    }
     if (
       value["modeKind"] !== undefined &&
       value["modeKind"] !== "compose" &&
@@ -172,6 +186,7 @@ function validatePersistedRuntime(
       "config",
       "composeArgs",
       "baseFile",
+      "sourceFile",
       "overrideFile",
       "findings",
     ]) ||
@@ -192,30 +207,42 @@ function validatePersistedRuntime(
     throw new Error("invalid runtime identity");
   }
   if (
+    JSON.stringify(config.composeEnvironment) !==
+      JSON.stringify(lab["composeEnvironment"]) ||
     JSON.stringify(config.secretEnvironment) !==
-    JSON.stringify(lab["secretEnvironment"])
+      JSON.stringify(lab["secretEnvironment"])
   ) {
-    throw new Error("secret environment metadata mismatch");
+    throw new Error("environment metadata mismatch");
   }
   const expectedOverride = join(runtimeRoot, "override.compose.yaml");
+  const expectedSource = join(runtimeRoot, "source.compose.json");
+  const hasImmutableSource = runtime["sourceFile"] !== undefined;
   const expectedBase =
-    mode.kind === "compose"
+    hasImmutableSource || mode.kind === "compose"
       ? undefined
       : join(runtimeRoot, "base.compose.yaml");
   if (
     runtime["overrideFile"] !== expectedOverride ||
     runtime["baseFile"] !== expectedBase ||
+    (hasImmutableSource && runtime["sourceFile"] !== expectedSource) ||
     !Array.isArray(runtime["findings"]) ||
     !runtime["findings"].every(isFinding) ||
     JSON.stringify(runtime["findings"]) !== JSON.stringify(lab["findings"])
   ) {
     throw new Error("invalid runtime files or findings");
   }
-  const expectedArgs = composeCommandArgs(config, {
-    projectName: composeProject,
-    overrideFile: expectedOverride,
-    ...(expectedBase === undefined ? {} : { baseFile: expectedBase }),
-  });
+  const expectedArgs = hasImmutableSource
+    ? composeCommandArgs(config, {
+        projectName: composeProject,
+        overrideFile: expectedOverride,
+        sourceFiles: [expectedSource],
+        environmentFile: emptyComposeEnvironmentFile,
+      })
+    : composeCommandArgs(config, {
+        projectName: composeProject,
+        overrideFile: expectedOverride,
+        ...(expectedBase === undefined ? {} : { baseFile: expectedBase }),
+      });
   if (
     !Array.isArray(runtime["composeArgs"]) ||
     runtime["composeArgs"].length !== expectedArgs.length ||
@@ -242,6 +269,7 @@ function validatedPersistedConfig(
       "runtime",
       "ports",
       "forwardEnvironment",
+      "composeEnvironment",
       "secretEnvironment",
     ]) ||
     !isRecord(config["mode"]) ||
@@ -272,9 +300,16 @@ function validatedPersistedConfig(
     throw new Error("invalid forwarded environment");
   }
   const forwardedEnvironment = new Set(config["forwardEnvironment"]);
+  if (!isEnvironmentNames(config["composeEnvironment"])) {
+    throw new Error("invalid Compose environment");
+  }
+  const composeEnvironment = new Set(config["composeEnvironment"]);
   if (
     !isEnvironmentNames(config["secretEnvironment"]) ||
-    config["secretEnvironment"].some((key) => forwardedEnvironment.has(key))
+    config["secretEnvironment"].some(isDockerClientEnvironmentName) ||
+    config["secretEnvironment"].some(
+      (key) => forwardedEnvironment.has(key) || composeEnvironment.has(key),
+    )
   ) {
     throw new Error("invalid secret environment");
   }
@@ -288,6 +323,7 @@ function validatedPersistedConfig(
     },
     ports: config["ports"].map((port) => ({ ...port })),
     forwardEnvironment: [...config["forwardEnvironment"]],
+    composeEnvironment: [...config["composeEnvironment"]],
     secretEnvironment: [...config["secretEnvironment"]],
   };
 }
@@ -359,17 +395,27 @@ function validatedPersistedMode(
   throw new Error("invalid runtime mode");
 }
 
-function normalizeSecretEnvironment(lab: Record<string, unknown>): void {
-  let runtimeNames: unknown;
+function normalizeEnvironmentMetadata(lab: Record<string, unknown>): void {
+  let runtimeComposeNames: unknown;
+  let runtimeSecretNames: unknown;
   if (isRecord(lab["runtime"]) && isRecord(lab["runtime"]["config"])) {
+    if (lab["runtime"]["config"]["composeEnvironment"] === undefined) {
+      lab["runtime"]["config"]["composeEnvironment"] = [];
+    }
     if (lab["runtime"]["config"]["secretEnvironment"] === undefined) {
       lab["runtime"]["config"]["secretEnvironment"] = [];
     }
-    runtimeNames = lab["runtime"]["config"]["secretEnvironment"];
+    runtimeComposeNames = lab["runtime"]["config"]["composeEnvironment"];
+    runtimeSecretNames = lab["runtime"]["config"]["secretEnvironment"];
+  }
+  if (lab["composeEnvironment"] === undefined) {
+    lab["composeEnvironment"] = Array.isArray(runtimeComposeNames)
+      ? [...runtimeComposeNames]
+      : [];
   }
   if (lab["secretEnvironment"] === undefined) {
-    lab["secretEnvironment"] = Array.isArray(runtimeNames)
-      ? [...runtimeNames]
+    lab["secretEnvironment"] = Array.isArray(runtimeSecretNames)
+      ? [...runtimeSecretNames]
       : [];
   }
 }
@@ -379,7 +425,10 @@ function isEnvironmentNames(value: unknown): value is string[] {
     Array.isArray(value) &&
     value.length <= 64 &&
     value.every(
-      (key) => typeof key === "string" && ENVIRONMENT_NAME.test(key),
+      (key) =>
+        typeof key === "string" &&
+        ENVIRONMENT_NAME.test(key) &&
+        !key.startsWith("COMPOSE_"),
     ) &&
     new Set(value).size === value.length
   );
