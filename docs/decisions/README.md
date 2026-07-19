@@ -16,6 +16,7 @@ rewriting its rationale.
 | [0006](0006-container-process-environment.md) | Accepted | Isolate Docker Compose and local Git process environments behind explicit capabilities. |
 | [0007](0007-repository-identity.md) | Accepted | Bind durable source identity to the common Git filesystem object and dissociate clone object stores. |
 | [0008](0008-typescript-source-parser.md) | Accepted | Parse static TypeScript dependency forms with one lifecycle-bounded compiler AST snapshot. |
+| [0009](0009-owned-run-workspaces.md) | Accepted | Own disposable run roots, child shutdown, preservation, signals, and stale cleanup in one capability package. |
 
 ## Record contract
 

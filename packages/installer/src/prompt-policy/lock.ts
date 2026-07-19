@@ -604,11 +604,10 @@ function removeParentIfEmpty(parent: string): void {
   }
 }
 
-function defaultLockParent(): string {
+export function defaultLockParent(temporaryDirectory = tmpdir()): string {
   const uid =
     typeof process.getuid === "function" ? process.getuid() : process.pid;
-  const systemTemp =
-    process.platform === "win32" ? tmpdir() : realpathSync("/tmp");
+  const systemTemp = realpathSync(temporaryDirectory);
   return join(systemTemp, `skizzles-prompt-policy-locks-${uid}`);
 }
 
