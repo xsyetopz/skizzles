@@ -222,10 +222,13 @@ describe("exact Docker cleanup", () => {
     expect(wrapper).toContain("exec 3<&0");
     expect(wrapper).toContain('setsid "$@" <&3 3<&- & child=$!');
     expect(wrapper).toContain("exec 3<&-");
+    expect(wrapper).toContain('temporary_directory=$(dirname "$(mktemp -u)")');
     expect(wrapper).toContain(`printf '%s %s\\n' '${identity.runId}'`);
     expect(wrapper).toContain(
-      `rm -f '/tmp/.codex-container-lab-run-${identity.runId}.pid'`,
+      `pid_file="$temporary_directory/.codex-container-lab-run-${identity.runId}.pid"`,
     );
+    expect(wrapper).toContain('rm -f "$pid_file"');
+    expect(wrapper).not.toContain("/tmp");
     expect(wrapper).toContain('kill -TERM -- -"$child"');
     expect(wrapper).toContain('kill -KILL -- -"$child"');
     expect(wrapper.indexOf("kill -KILL")).toBeLessThan(
@@ -245,6 +248,10 @@ describe("exact Docker cleanup", () => {
       throw new Error("expected termination script");
     }
     expect(killScript).toContain("/proc/$pid/environ");
+    expect(killScript).toContain(
+      'temporary_directory=$(dirname "$(mktemp -u)")',
+    );
+    expect(killScript).not.toContain("/tmp");
     expect(killScript).toContain(
       `CODEX_CONTAINER_LAB_RUN_ID=${identity.runId}`,
     );

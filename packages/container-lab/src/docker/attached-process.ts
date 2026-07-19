@@ -11,6 +11,14 @@ import { composeInvocationEnvironment, shellQuote } from "./environment.ts";
 import { runComposeCommand } from "./runtime.ts";
 import { immutableComposeArguments } from "./source.ts";
 
+function containerTemporaryDirectory(): string {
+  return 'temporary_directory=$(dirname "$(mktemp -u)")';
+}
+
+function containerPidFile(runId: string): string {
+  return `pid_file="$temporary_directory/.codex-container-lab-run-${runId}.pid"`;
+}
+
 export function launchAttachedDockerProcess(
   runtime: LabRuntime,
   invocation: DockerRunIdentity,
@@ -21,21 +29,20 @@ export function launchAttachedDockerProcess(
     invocation.cwd === "."
       ? runtime.config.runtime.workspace
       : posix.join(runtime.config.runtime.workspace, invocation.cwd);
-  const pidFile = `/tmp/.codex-container-lab-run-${invocation.runId}.pid`;
   const processIdentity = `CODEX_CONTAINER_LAB_RUN_ID=${invocation.runId}`;
   const wrapper = [
-    "command -v setsid >/dev/null 2>&1 || { echo 'configured command service requires setsid' >&2; exit 127; }",
+    "command -v setsid >/dev/null 2>&1 && command -v mktemp >/dev/null 2>&1 && command -v dirname >/dev/null 2>&1 || { echo 'configured command service requires setsid, mktemp, and dirname' >&2; exit 127; }",
+    containerTemporaryDirectory(),
+    containerPidFile(invocation.runId),
     "exec 3<&0",
     `${processIdentity} setsid "$@" <&3 3<&- & child=$!`,
     "exec 3<&-",
-    `printf '%s %s\\n' ${shellQuote(invocation.runId)} "$child" > ${shellQuote(
-      pidFile,
-    )}`,
+    `printf '%s %s\\n' ${shellQuote(invocation.runId)} "$child" > "$pid_file"`,
     'wait "$child"; code=$?',
     'kill -TERM -- -"$child" 2>/dev/null || :',
     'attempt=0; while kill -0 -- -"$child" 2>/dev/null && [ "$attempt" -lt 20 ]; do sleep 0.1; attempt=$((attempt + 1)); done',
     'kill -KILL -- -"$child" 2>/dev/null || :',
-    `rm -f ${shellQuote(pidFile)}`,
+    'rm -f "$pid_file"',
     'exit "$code"',
   ].join("; ");
   const args = [
@@ -70,35 +77,27 @@ export async function terminateAttachedDockerProcess(
   runner: DockerRunner,
   environment: NodeJS.ProcessEnv,
 ): Promise<DockerRunTerminationResult> {
-  const pidFile = `/tmp/.codex-container-lab-run-${identity.runId}.pid`;
   const expectedIdentity = `CODEX_CONTAINER_LAB_RUN_ID=${identity.runId}`;
   const marker = "codex-container-lab-termination:";
   const killScript = [
-    `termination_result() { printf '%s\\n' ${shellQuote(
-      marker,
-    )}"$1"; exit 0; }`,
-    `recorded_token=; pid=; extra=; read -r recorded_token pid extra < ${shellQuote(
-      pidFile,
-    )} 2>/dev/null || termination_result unavailable`,
+    "command -v mktemp >/dev/null 2>&1 && command -v dirname >/dev/null 2>&1 || exit 127",
+    containerTemporaryDirectory(),
+    containerPidFile(identity.runId),
+    `termination_result() { printf '%s\\n' ${shellQuote(marker)}"$1"; exit 0; }`,
+    'recorded_token=; pid=; extra=; read -r recorded_token pid extra < "$pid_file" 2>/dev/null || termination_result unavailable',
     `case "$pid" in ''|*[!0-9]*) termination_result identity-mismatch;; esac`,
     `[ -z "$extra" ] || termination_result identity-mismatch`,
     `[ "$recorded_token" = ${shellQuote(
       identity.runId,
     )} ] || termination_result identity-mismatch`,
-    `kill -0 -- -"$pid" 2>/dev/null || { rm -f ${shellQuote(
-      pidFile,
-    )}; termination_result absent; }`,
+    'kill -0 -- -"$pid" 2>/dev/null || { rm -f "$pid_file"; termination_result absent; }',
     `[ -r "/proc/$pid/environ" ] || termination_result unavailable`,
     "command -v tr >/dev/null 2>&1 && command -v grep >/dev/null 2>&1 || termination_result unavailable",
     `tr '\\000' '\\n' < "/proc/$pid/environ" | grep -Fqx -- ${shellQuote(
       expectedIdentity,
     )} || termination_result identity-mismatch`,
-    `kill -${signal} -- -"$pid" 2>/dev/null && { [ "${signal}" != KILL ] || rm -f ${shellQuote(
-      pidFile,
-    )}; termination_result signaled; }`,
-    `kill -0 -- -"$pid" 2>/dev/null || { rm -f ${shellQuote(
-      pidFile,
-    )}; termination_result absent; }`,
+    `kill -${signal} -- -"$pid" 2>/dev/null && { [ "${signal}" != KILL ] || rm -f "$pid_file"; termination_result signaled; }`,
+    'kill -0 -- -"$pid" 2>/dev/null || { rm -f "$pid_file"; termination_result absent; }',
     "termination_result unavailable",
   ].join("; ");
   let result: CommandResult;
