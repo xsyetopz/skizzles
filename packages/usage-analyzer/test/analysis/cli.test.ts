@@ -1,15 +1,19 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
-import { expect, it } from "bun:test";
+import { afterEach, expect, it } from "bun:test";
 import { join } from "node:path";
 import {
   commandOutput,
-  fixtureHome,
+  createFixtureHomeFactory,
   rootId,
   runAnalyzer,
   snapshot,
   timestamp,
   writeJsonl,
 } from "./harness.ts";
+
+const { cleanupFixtureHomes, fixtureHome } = createFixtureHomeFactory();
+
+afterEach(cleanupFixtureHomes);
 
 it("prints portable help without touching a Codex home", async () => {
   const home = await fixtureHome();

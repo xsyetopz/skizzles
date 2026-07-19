@@ -1,9 +1,9 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   ContainerLabService,
+  createLabServiceFixtureScope,
   DestructiveDocker,
-  durableFixture,
   join,
   labManifestPath,
   labsDirectory,
@@ -19,6 +19,10 @@ import {
   writeFileSync,
   writeLab,
 } from "./support.ts";
+
+const fixtures = createLabServiceFixtureScope();
+const { durableFixture } = fixtures;
+afterEach(fixtures.cleanup);
 
 describe("lab cleanup and state trust", () => {
   test("destroy removes exact containers first, then waits for attached activity before filesystem cleanup", async () => {

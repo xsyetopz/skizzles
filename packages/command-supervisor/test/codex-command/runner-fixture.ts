@@ -1,5 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { afterEach } from "bun:test";
 import {
   existsSync,
   mkdirSync,
@@ -25,7 +23,6 @@ import { emptyCaptureState } from "../../src/codex-command/stream-capture.ts";
 
 export const packageRoot = resolve(import.meta.dir, "../..");
 export const runner = join(packageRoot, "src/codex-command.ts");
-const temporaryDirectories: string[] = [];
 export const artifactPathPattern = /\[codex-command\] artifact: ([^\n]+)/;
 export const artifactCountPattern = /\[codex-command\] artifact:/g;
 export const progressPattern = /\| \d+s \| \d+B \| \d+B \|/;
@@ -41,10 +38,26 @@ const fixtureSettings: RunSettings = {
   signalGraceMilliseconds: 750,
 };
 
-export function temporaryDirectory(): string {
-  const directory = mkdtempSync(join(tmpdir(), "codex-command-test-"));
-  temporaryDirectories.push(directory);
-  return directory;
+export interface RunnerFixture {
+  cleanupTemporaryDirectories: () => void;
+  temporaryDirectory: () => string;
+}
+
+export function createRunnerFixture(): RunnerFixture {
+  const temporaryDirectories = new Set<string>();
+  return {
+    cleanupTemporaryDirectories(): void {
+      for (const directory of temporaryDirectories) {
+        rmSync(directory, { recursive: true, force: true });
+      }
+      temporaryDirectories.clear();
+    },
+    temporaryDirectory(): string {
+      const directory = mkdtempSync(join(tmpdir(), "codex-command-test-"));
+      temporaryDirectories.add(directory);
+      return directory;
+    },
+  };
 }
 
 export function invoke(
@@ -215,9 +228,3 @@ export async function queryStatus(root: string, id: string) {
   const exitCode = await child.exited;
   return { exitCode, stdout: await stdout, stderr: await stderr };
 }
-
-afterEach(() => {
-  for (const directory of temporaryDirectories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});

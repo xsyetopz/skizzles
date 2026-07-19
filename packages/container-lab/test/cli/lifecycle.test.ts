@@ -1,17 +1,24 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
-  attachedFixture,
+  createCliFixtureScope,
   drain,
   join,
   ownerKey,
+  process,
+  processExists,
+  readdir,
   readFile,
   runCommand,
-  spawnRun,
   waitForProcessExit,
   waitForPublishedPid,
   withFileLock,
+  writeFile,
 } from "./support.ts";
+
+const fixtures = createCliFixtureScope();
+const { attachedFixture, spawnRun, trackTemporaryPath } = fixtures;
+afterEach(fixtures.cleanup);
 
 describe("CLI attached process lifecycle", () => {
   test("run streams before exit and propagates the attached exit code without a JSON footer", async () => {
@@ -70,6 +77,57 @@ describe("CLI attached process lifecycle", () => {
     await drain(reader);
     expect(await waitForProcessExit(pid)).toBe(true);
     expect(await waitForProcessExit(descendant)).toBe(true);
+  });
+
+  test("fixture cleanup rejects a current-process PID marker without signaling it or deleting evidence", async () => {
+    const isolated = createCliFixtureScope();
+    const fixture = await isolated.attachedFixture();
+    trackTemporaryPath(fixture.root);
+    await writeFile(fixture.pidPath, String(process.pid));
+    await writeFile(
+      fixture.leaderIdentityPath,
+      JSON.stringify({
+        version: 1,
+        pid: process.pid,
+        processGroup: process.pid,
+        token: fixture.testToken,
+      }),
+    );
+
+    await expect(isolated.cleanup()).rejects.toThrow(
+      "Stale or reused attached process identity",
+    );
+    expect(processExists(process.pid)).toBe(true);
+    expect(await readdir(fixture.root)).toContain("run.pid");
+    expect(await Bun.file(fixture.leaderIdentityPath).exists()).toBe(true);
+  });
+
+  test("fixture cleanup reaps its exact fake process group after a caught assertion path", async () => {
+    const isolated = createCliFixtureScope();
+    const fixture = await isolated.attachedFixture();
+    trackTemporaryPath(fixture.root);
+    const child = isolated.spawnRun(fixture);
+    const reader = child.stdout.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toContain(
+      "early-output",
+    );
+    const pid = await waitForPublishedPid(fixture.pidPath);
+    const descendant = await waitForPublishedPid(fixture.descendantPath);
+    let assertionObserved = false;
+    try {
+      expect("intentional assertion path").toBe("unreachable");
+    } catch {
+      assertionObserved = true;
+    } finally {
+      await isolated.cleanup();
+    }
+
+    expect(assertionObserved).toBe(true);
+    expect(processExists(pid)).toBe(false);
+    expect(processExists(descendant)).toBe(false);
+    await expect(readdir(fixture.root)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   });
 
   test("SIGINT cancels promptly while waiting for another attached activity", async () => {

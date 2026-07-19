@@ -1,12 +1,12 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { Database } from "bun:sqlite";
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
-import { expect, it } from "bun:test";
+import { afterEach, expect, it } from "bun:test";
 import { join } from "node:path";
 import {
   childId,
   commandOutput,
-  fixtureHome,
+  createFixtureHomeFactory,
   guardianId,
   rootId,
   runAnalyzer,
@@ -14,6 +14,10 @@ import {
   timestamp,
   writeJsonl,
 } from "./harness.ts";
+
+const { cleanupFixtureHomes, fixtureHome } = createFixtureHomeFactory();
+
+afterEach(cleanupFixtureHomes);
 
 it("returns an empty report when sessions and state files are absent", async () => {
   const home = await fixtureHome();

@@ -1,5 +1,4 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { afterEach } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -28,41 +27,80 @@ import {
 import type { StoredPreview, SyncJournal } from "../../src/sync/contract.ts";
 import { previewBinding } from "../../src/sync/preview.ts";
 
-export const temporary: string[] = [];
-afterEach(async () =>
-  Promise.all(
-    temporary.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
-  ),
-);
+export function createSyncFixtureScope() {
+  const temporary = new Set<string>();
+
+  function trackTemporaryPath(root: string): string {
+    temporary.add(root);
+    return root;
+  }
+
+  async function cleanup(): Promise<void> {
+    const roots = [...temporary];
+    temporary.clear();
+    await Promise.all(
+      roots.map((root) => rm(root, { recursive: true, force: true })),
+    );
+  }
+
+  async function repo(prefix: string): Promise<string> {
+    const root = trackTemporaryPath(
+      await mkdtemp(path.join(os.tmpdir(), prefix)),
+    );
+    execFileSync("git", ["init", "-q", root]);
+    return root;
+  }
+
+  async function fixture() {
+    const source = await repo("container-lab-source-");
+    const target = await repo("container-lab-target-");
+    const stateRoot = trackTemporaryPath(
+      await mkdtemp(path.join(os.tmpdir(), "container-lab-state-")),
+    );
+    for (const root of [source, target]) {
+      await writeFile(path.join(root, "file.txt"), "base\n");
+      execFileSync("git", ["-C", root, "add", "file.txt"]);
+    }
+    const identity = { stateRoot, labId: "lab-1" };
+    await initializeSyncBaseline(identity, target);
+    return { source, target, ...identity };
+  }
+
+  async function replaceNestedParent(
+    state: SyncFixture,
+    replacement: ParentReplacement,
+  ): Promise<string> {
+    const parent = path.join(state.target, "nested");
+    await rm(parent, { recursive: true });
+    if (replacement === "recreated") {
+      await mkdir(parent);
+    }
+    if (replacement === "symlink") {
+      const outside = trackTemporaryPath(
+        await mkdtemp(path.join(os.tmpdir(), "sync-outside-")),
+      );
+      await writeFile(path.join(outside, "sentinel.txt"), "keep\n");
+      await symlink(outside, parent);
+    }
+    return parent;
+  }
+
+  return {
+    cleanup,
+    fixture,
+    replaceNestedParent,
+    repo,
+    trackTemporaryPath,
+  };
+}
 
 export function file(pathname: string, hash: string): SyncFile {
   return { path: pathname, kind: "file", sha256: hash, size: 1, mode: 0o644 };
 }
 
-export async function repo(prefix: string): Promise<string> {
-  const root = await mkdtemp(path.join(os.tmpdir(), prefix));
-  temporary.push(root);
-  execFileSync("git", ["init", "-q", root]);
-  return root;
-}
-
-export async function fixture() {
-  const source = await repo("container-lab-source-");
-  const target = await repo("container-lab-target-");
-  const stateRoot = await mkdtemp(
-    path.join(os.tmpdir(), "container-lab-state-"),
-  );
-  temporary.push(stateRoot);
-  for (const root of [source, target]) {
-    await writeFile(path.join(root, "file.txt"), "base\n");
-    execFileSync("git", ["-C", root, "add", "file.txt"]);
-  }
-  const identity = { stateRoot, labId: "lab-1" };
-  await initializeSyncBaseline(identity, target);
-  return { source, target, ...identity };
-}
-
-export type SyncFixture = Awaited<ReturnType<typeof fixture>>;
+export type SyncFixture = Awaited<
+  ReturnType<ReturnType<typeof createSyncFixtureScope>["fixture"]>
+>;
 export type CrashPoint =
   | "after-directory-created"
   | "before-publish"
@@ -151,24 +189,6 @@ export async function crashApply(
 }
 
 export type ParentReplacement = "removed" | "recreated" | "symlink";
-
-export async function replaceNestedParent(
-  state: SyncFixture,
-  replacement: ParentReplacement,
-): Promise<string> {
-  const parent = path.join(state.target, "nested");
-  await rm(parent, { recursive: true });
-  if (replacement === "recreated") {
-    await mkdir(parent);
-  }
-  if (replacement === "symlink") {
-    const outside = await mkdtemp(path.join(os.tmpdir(), "sync-outside-"));
-    temporary.push(outside);
-    await writeFile(path.join(outside, "sentinel.txt"), "keep\n");
-    await symlink(outside, parent);
-  }
-  return parent;
-}
 
 export type { StoredPreview, SyncFile, SyncJournal };
 export {

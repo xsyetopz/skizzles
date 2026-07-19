@@ -1,7 +1,6 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { afterEach } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   chmod,
   mkdir,
@@ -26,15 +25,7 @@ import { labManifestPath, ownerKey } from "../../src/state/layout.ts";
 import { ensureOwner } from "../../src/state/owner-store.ts";
 import { initializeSyncBaseline } from "../../src/sync/api.ts";
 
-export const temporary: string[] = [];
 export const canonicalPositivePid = /^[1-9][0-9]*$/;
-afterEach(async () => {
-  await Promise.all(
-    temporary
-      .splice(0)
-      .map((path) => rm(path, { recursive: true, force: true })),
-  );
-});
 
 export function fixtureLab(root: string, owner: string): LabMetadata {
   const key = ownerKey(owner);
@@ -62,9 +53,12 @@ export function fixtureLab(root: string, owner: string): LabMetadata {
   };
 }
 
-export async function oversizedPreviewFixture() {
-  const root = await mkdtemp(join(tmpdir(), "container-lab-sync-preview-cli-"));
-  temporary.push(root);
+async function oversizedPreviewFixture(
+  trackTemporaryPath: (root: string) => string,
+) {
+  const root = trackTemporaryPath(
+    await mkdtemp(join(tmpdir(), "container-lab-sync-preview-cli-")),
+  );
   const owner = "thread-sync-preview";
   const stateRoot = join(root, "state");
   const runtimeRoot = join(root, "runtime");
@@ -137,9 +131,10 @@ export async function oversizedPreviewFixture() {
   return { owner, stateRoot, runtimeRoot, lab };
 }
 
-export async function attachedFixture() {
-  const root = await mkdtemp(join(tmpdir(), "container-lab-run-cli-"));
-  temporary.push(root);
+async function attachedFixture(trackTemporaryPath: (root: string) => string) {
+  const root = trackTemporaryPath(
+    await mkdtemp(join(tmpdir(), "container-lab-run-cli-")),
+  );
   const owner = "thread-attached-run";
   const stateRoot = join(root, "state");
   const runtimeRoot = join(root, "runtime");
@@ -185,15 +180,29 @@ export async function attachedFixture() {
   const dockerPath = join(bin, "docker");
   const pidPath = join(root, "run.pid");
   const descendantPath = join(root, "descendant.pid");
+  const testToken = `codex-container-lab-test:${randomUUID()}`;
+  const leaderIdentityPath = `${pidPath}.identity.json`;
+  const descendantIdentityPath = `${descendantPath}.identity.json`;
   await writeFile(
     dockerPath,
-    `#!${process.execPath}\nconst args = process.argv.slice(2);\nconst joined = args.join(" ");\nconst pidPath = process.env.FAKE_PID_FILE;\nif (joined.includes("termination_result()")) {\n  let pid; try { const text = await Bun.file(pidPath).text(); if (!/^[1-9][0-9]*$/.test(text)) throw new Error("invalid PID"); pid = Number(text); if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("invalid PID"); } catch { console.log("codex-container-lab-termination:unavailable"); process.exit(0); }\n  const signal = joined.includes("kill -INT") ? "SIGINT" : joined.includes("kill -TERM") ? "SIGTERM" : "SIGKILL";\n  try { process.kill(-pid, signal); console.log("codex-container-lab-termination:signaled"); } catch { console.log("codex-container-lab-termination:absent"); }\n  process.exit(0);\n}\nconsole.log("early-output"); console.error("early-error");\nif (process.env.FAKE_EXIT) process.exit(Number(process.env.FAKE_EXIT));\nconst running = Bun.spawn(["/bin/sh", "-c", "trap 'exit 130' INT; trap 'exit 143' TERM; (trap '' INT TERM; while :; do sleep 1; done) & printf %s $! > $FAKE_DESC_FILE; while :; do sleep 1; done"], { detached: true, stdin: "ignore", stdout: "inherit", stderr: "inherit" });\nawait Bun.write(pidPath, String(running.pid));\nconst code = await running.exited;\ntry { process.kill(-running.pid, "SIGTERM"); } catch {}\nawait Bun.sleep(100);\ntry { process.kill(-running.pid, 0); process.kill(-running.pid, "SIGKILL"); } catch {}\nfor (let i=0;i<100;i++) { try { process.kill(-running.pid, 0); await Bun.sleep(10); } catch { break; } }\nprocess.exit(code);\n`,
+    `#!${process.execPath}\nconst args = process.argv.slice(2);\nconst joined = args.join(" ");\nconst pidPath = process.env.FAKE_PID_FILE;\nconst descendantPath = process.env.FAKE_DESC_FILE;\nconst token = process.env.FAKE_TEST_TOKEN;\nconst identity = (pid) => {\n  const result = Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(pid)]);\n  const processGroup = Number(result.stdout.toString().trim());\n  if (!Number.isSafeInteger(processGroup) || processGroup <= 0) throw new Error("invalid process group");\n  return JSON.stringify({ version: 1, pid, processGroup, token });\n};\nif (joined.includes("termination_result()")) {\n  let pid; try { const text = await Bun.file(pidPath).text(); if (!/^[1-9][0-9]*$/.test(text)) throw new Error("invalid PID"); pid = Number(text); if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("invalid PID"); } catch { console.log("codex-container-lab-termination:unavailable"); process.exit(0); }\n  const signal = joined.includes("kill -INT") ? "SIGINT" : joined.includes("kill -TERM") ? "SIGTERM" : "SIGKILL";\n  try { process.kill(-pid, signal); console.log("codex-container-lab-termination:signaled"); } catch { console.log("codex-container-lab-termination:absent"); }\n  process.exit(0);\n}\nconsole.log("early-output"); console.error("early-error");\nif (process.env.FAKE_EXIT) process.exit(Number(process.env.FAKE_EXIT));\nconst running = Bun.spawn(["/bin/sh", "-c", "trap 'exit 130' INT; trap 'exit 143' TERM; (trap '' INT TERM; while :; do sleep 1; done) & printf '%s\\n' $!; while :; do sleep 1; done", token], { detached: true, stdin: "ignore", stdout: "pipe", stderr: "inherit" });\nconst reader = running.stdout.getReader();\nconst published = await reader.read();\nconst descendant = Number(new TextDecoder().decode(published.value).trim());\nif (!Number.isSafeInteger(descendant) || descendant <= 0) throw new Error("invalid descendant PID");\nawait Bun.write(${JSON.stringify(leaderIdentityPath)}, identity(running.pid));\nawait Bun.write(${JSON.stringify(descendantIdentityPath)}, identity(descendant));\nawait Bun.write(pidPath, String(running.pid));\nawait Bun.write(descendantPath, String(descendant));\nconst code = await running.exited;\ntry { process.kill(-running.pid, "SIGTERM"); } catch {}\nfor (let i = 0; i < 100; i++) {\n  try { process.kill(-running.pid, 0); } catch { break; }\n  await Promise.resolve();\n}\ntry { process.kill(-running.pid, 0); process.kill(-running.pid, "SIGKILL"); } catch {}\nprocess.exit(code);\n`,
   );
   await chmod(dockerPath, 0o755);
-  return { root, owner, stateRoot, runtimeRoot, pidPath, descendantPath, bin };
+  return {
+    root,
+    owner,
+    stateRoot,
+    runtimeRoot,
+    pidPath,
+    descendantPath,
+    leaderIdentityPath,
+    descendantIdentityPath,
+    testToken,
+    bin,
+  };
 }
 
-export function spawnRun(
+function spawnRun(
   fixture: Awaited<ReturnType<typeof attachedFixture>>,
   extra: Record<string, string> = {},
   timeoutSeconds?: number,
@@ -228,9 +237,291 @@ export function spawnRun(
         PATH: `${fixture.bin}:${process.env["PATH"] ?? ""}`,
         FAKE_PID_FILE: fixture.pidPath,
         FAKE_DESC_FILE: fixture.descendantPath,
+        FAKE_TEST_TOKEN: fixture.testToken,
       },
     },
   );
+}
+
+type AttachedFixture = Awaited<ReturnType<typeof attachedFixture>>;
+type RunProcess = ReturnType<typeof spawnRun>;
+
+interface PublishedProcessIdentity {
+  readonly version: 1;
+  readonly pid: number;
+  readonly processGroup: number;
+  readonly token: string;
+}
+
+interface ObservedProcessIdentity {
+  readonly pid: number;
+  readonly processGroup: number;
+  readonly command: string;
+}
+
+async function terminateProcess(child: RunProcess): Promise<void> {
+  if (child.exitCode !== null) {
+    return;
+  }
+  child.kill("SIGTERM");
+  const deadline = Promise.withResolvers<boolean>();
+  const timer = setTimeout(() => deadline.resolve(false), 500);
+  const exited = await Promise.race([
+    child.exited.then(() => true),
+    deadline.promise,
+  ]);
+  clearTimeout(timer);
+  if (!exited) {
+    child.kill("SIGKILL");
+    await child.exited;
+  }
+}
+
+function parseProcessIdentity(
+  source: string,
+  identityPath: string,
+): PublishedProcessIdentity {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch (error) {
+    throw new Error(`Malformed attached process identity ${identityPath}`, {
+      cause: error,
+    });
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Malformed attached process identity ${identityPath}`);
+  }
+  const record = parsed as Record<string, unknown>;
+  if (
+    Object.keys(record).sort().join(",") !== "pid,processGroup,token,version" ||
+    record["version"] !== 1 ||
+    !Number.isSafeInteger(record["pid"]) ||
+    (record["pid"] as number) <= 0 ||
+    !Number.isSafeInteger(record["processGroup"]) ||
+    (record["processGroup"] as number) <= 0 ||
+    typeof record["token"] !== "string" ||
+    record["token"].length < 32
+  ) {
+    throw new Error(`Malformed attached process identity ${identityPath}`);
+  }
+  return {
+    version: 1,
+    pid: record["pid"] as number,
+    processGroup: record["processGroup"] as number,
+    token: record["token"],
+  };
+}
+
+function observeProcess(pid: number): ObservedProcessIdentity | undefined {
+  let output: string;
+  try {
+    output = execFileSync(
+      "ps",
+      ["-o", "pid=", "-o", "pgid=", "-o", "command=", "-p", String(pid)],
+      { encoding: "utf8" },
+    ).trim();
+  } catch {
+    return undefined;
+  }
+  const match = /^(\d+)\s+(\d+)\s+(.+)$/.exec(output);
+  if (!match) {
+    throw new Error(`Could not parse observed identity for PID ${pid}`);
+  }
+  const pidText = match[1];
+  const processGroupText = match[2];
+  const command = match[3];
+  if (
+    pidText === undefined ||
+    processGroupText === undefined ||
+    command === undefined
+  ) {
+    throw new Error(`Could not parse observed identity for PID ${pid}`);
+  }
+  return {
+    pid: Number(pidText),
+    processGroup: Number(processGroupText),
+    command,
+  };
+}
+
+async function validatePublishedProcess(
+  pidPath: string,
+  identityPath: string,
+  token: string,
+): Promise<
+  | {
+      readonly published: PublishedProcessIdentity;
+      readonly observed: ObservedProcessIdentity | undefined;
+    }
+  | undefined
+> {
+  const [pidExists, identityExists] = await Promise.all([
+    Bun.file(pidPath).exists(),
+    Bun.file(identityPath).exists(),
+  ]);
+  if (!pidExists && !identityExists) {
+    return undefined;
+  }
+  if (!pidExists || !identityExists) {
+    throw new Error(`Incomplete attached process identity for ${pidPath}`);
+  }
+  const pid = parsePublishedPid(await readFile(pidPath, "utf8"));
+  if (pid === undefined) {
+    throw new Error(`Malformed attached PID marker ${pidPath}`);
+  }
+  const published = parseProcessIdentity(
+    await readFile(identityPath, "utf8"),
+    identityPath,
+  );
+  if (published.pid !== pid || published.token !== token) {
+    throw new Error(`Mismatched attached process identity for ${pidPath}`);
+  }
+  const observed = observeProcess(pid);
+  if (
+    observed !== undefined &&
+    (observed.pid !== published.pid ||
+      observed.processGroup !== published.processGroup ||
+      !observed.command.endsWith(token))
+  ) {
+    throw new Error(`Stale or reused attached process identity for ${pidPath}`);
+  }
+  return { published, observed };
+}
+
+function processGroupExists(processGroup: number): boolean {
+  try {
+    process.kill(-processGroup, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForProcessGroupExit(processGroup: number): Promise<boolean> {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    if (!processGroupExists(processGroup)) {
+      return true;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  return !processGroupExists(processGroup);
+}
+
+async function validateAttachedGroup(
+  fixture: AttachedFixture,
+): Promise<number | undefined> {
+  const [leader, descendant] = await Promise.all([
+    validatePublishedProcess(
+      fixture.pidPath,
+      fixture.leaderIdentityPath,
+      fixture.testToken,
+    ),
+    validatePublishedProcess(
+      fixture.descendantPath,
+      fixture.descendantIdentityPath,
+      fixture.testToken,
+    ),
+  ]);
+  if (leader === undefined && descendant === undefined) {
+    return undefined;
+  }
+  if (leader === undefined || descendant === undefined) {
+    throw new Error(`Incomplete attached process group for ${fixture.root}`);
+  }
+  if (
+    leader.published.pid !== leader.published.processGroup ||
+    descendant.published.processGroup !== leader.published.processGroup
+  ) {
+    throw new Error(`Mismatched attached process group for ${fixture.root}`);
+  }
+  if (leader.observed === undefined && descendant.observed === undefined) {
+    if (processGroupExists(leader.published.processGroup)) {
+      throw new Error(
+        `Attached process group ${leader.published.processGroup} remains without an exact known identity`,
+      );
+    }
+    return;
+  }
+  return leader.published.processGroup;
+}
+
+async function terminateAttachedGroup(fixture: AttachedFixture): Promise<void> {
+  const processGroup = await validateAttachedGroup(fixture);
+  if (processGroup === undefined) {
+    return;
+  }
+  process.kill(-processGroup, "SIGTERM");
+  if (await waitForProcessGroupExit(processGroup)) {
+    return;
+  }
+  const revalidatedGroup = await validateAttachedGroup(fixture);
+  if (revalidatedGroup === undefined) {
+    if (processGroupExists(processGroup)) {
+      throw new Error(
+        `Attached process group ${processGroup} changed identity before SIGKILL`,
+      );
+    }
+    return;
+  }
+  if (revalidatedGroup !== processGroup) {
+    throw new Error(`Attached process group identity changed before SIGKILL`);
+  }
+  process.kill(-processGroup, "SIGKILL");
+  if (!(await waitForProcessGroupExit(processGroup))) {
+    throw new Error(`Attached process group ${processGroup} survived SIGKILL`);
+  }
+}
+
+export function createCliFixtureScope() {
+  const temporary = new Set<string>();
+  const attachedFixtures = new Set<AttachedFixture>();
+  const processes = new Set<RunProcess>();
+
+  function trackTemporaryPath(root: string): string {
+    temporary.add(root);
+    return root;
+  }
+
+  async function createAttachedFixture(): Promise<AttachedFixture> {
+    const fixture = await attachedFixture(trackTemporaryPath);
+    attachedFixtures.add(fixture);
+    return fixture;
+  }
+
+  function createRunProcess(
+    fixture: AttachedFixture,
+    extra: Record<string, string> = {},
+    timeoutSeconds?: number,
+  ): RunProcess {
+    const child = spawnRun(fixture, extra, timeoutSeconds);
+    processes.add(child);
+    return child;
+  }
+
+  async function cleanup(): Promise<void> {
+    for (const child of processes) {
+      await terminateProcess(child);
+      processes.delete(child);
+    }
+    for (const fixture of attachedFixtures) {
+      await terminateAttachedGroup(fixture);
+      attachedFixtures.delete(fixture);
+    }
+    for (const root of temporary) {
+      await rm(root, { recursive: true, force: true });
+      temporary.delete(root);
+    }
+  }
+
+  return {
+    attachedFixture: createAttachedFixture,
+    cleanup,
+    oversizedPreviewFixture: () => oversizedPreviewFixture(trackTemporaryPath),
+    spawnRun: createRunProcess,
+    trackTemporaryPath,
+  };
 }
 
 export async function drain(

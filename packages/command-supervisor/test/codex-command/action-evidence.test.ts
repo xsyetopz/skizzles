@@ -1,5 +1,5 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   mkdirSync,
@@ -11,13 +11,17 @@ import {
 import { join } from "node:path";
 import {
   artifactPath,
+  createRunnerFixture,
   encode,
   exactStatus,
   invoke,
   runner,
-  temporaryDirectory,
   text,
 } from "./runner-fixture.ts";
+
+const { cleanupTemporaryDirectories, temporaryDirectory } =
+  createRunnerFixture();
+afterEach(cleanupTemporaryDirectories);
 
 const actionLabelPattern = /^[a-z][a-z -]{0,63}$/u;
 const maximumBytesEnvironment = "CODEX_COMMAND_MAX_BYTES";

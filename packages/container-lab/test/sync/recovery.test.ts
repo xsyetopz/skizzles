@@ -1,11 +1,11 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { SyncJournal } from "./support.ts";
 import {
   crashApply,
+  createSyncFixtureScope,
   execFileSync,
   firstBackup,
-  fixture,
   initializeSyncBaseline,
   lstat,
   mkdir,
@@ -15,14 +15,15 @@ import {
   readdir,
   readFile,
   recoverSyncTransactions,
-  replaceNestedParent,
-  repo,
   required,
   rm,
   symlink,
-  temporary,
   writeFile,
 } from "./support.ts";
+
+const fixtures = createSyncFixtureScope();
+const { fixture, replaceNestedParent, repo, trackTemporaryPath } = fixtures;
+afterEach(fixtures.cleanup);
 
 describe("transaction recovery", () => {
   test("rolls back a published deletion from its durable backup", async () => {
@@ -426,7 +427,7 @@ describe("transaction recovery", () => {
     const external = await mkdtemp(
       path.join(os.tmpdir(), "container-lab-external-backup-"),
     );
-    temporary.push(external);
+    trackTemporaryPath(external);
     await rm(backupDirectory, { recursive: true });
     await symlink(external, backupDirectory);
 

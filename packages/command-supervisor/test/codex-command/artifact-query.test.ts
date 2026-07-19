@@ -1,5 +1,5 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import {
   mkdirSync,
   readdirSync,
@@ -11,16 +11,20 @@ import {
 import { join } from "node:path";
 import {
   artifactPath,
+  createRunnerFixture,
   encode,
   exactStatus,
   invoke,
   queryStatus,
   runner,
   spawnRunner,
-  temporaryDirectory,
   text,
   waitForRunDirectory,
 } from "./runner-fixture.ts";
+
+const { cleanupTemporaryDirectories, temporaryDirectory } =
+  createRunnerFixture();
+afterEach(cleanupTemporaryDirectories);
 
 describe("artifact query and validation", () => {
   it("serves exact status, tail, errors, and search queries from retained artifacts", () => {

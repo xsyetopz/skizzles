@@ -1,14 +1,18 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   crashServiceApply,
+  createLabServiceFixtureScope,
   join,
   labLockPath,
-  provisionedSyncFixture,
   syncJournals,
   withFileLock,
   writeFile,
 } from "./support.ts";
+
+const fixtures = createLabServiceFixtureScope();
+const { provisionedSyncFixture } = fixtures;
+afterEach(fixtures.cleanup);
 
 describe("service synchronization recovery", () => {
   test("recovers a crash journal before issuing a new service preview", async () => {

@@ -1,17 +1,21 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { describe, expect, it } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   artifactCountPattern,
   artifactPath,
   completionPattern,
+  createRunnerFixture,
   encode,
   invoke,
   runner,
-  temporaryDirectory,
   text,
 } from "./runner-fixture.ts";
+
+const { cleanupTemporaryDirectories, temporaryDirectory } =
+  createRunnerFixture();
+afterEach(cleanupTemporaryDirectories);
 
 describe("shell selection and operator presentation", () => {
   it("uses the invoking zsh and supports process substitution", () => {

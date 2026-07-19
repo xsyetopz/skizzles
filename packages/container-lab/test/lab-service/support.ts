@@ -1,5 +1,4 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { afterEach } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -31,15 +30,6 @@ import {
   ownerKey,
 } from "../../src/state/layout.ts";
 import { ensureOwner } from "../../src/state/owner-store.ts";
-
-export const temporary: string[] = [];
-afterEach(async () => {
-  await Promise.all(
-    temporary
-      .splice(0)
-      .map((path) => rm(path, { recursive: true, force: true })),
-  );
-});
 
 export class RecordingDocker implements DockerRunner {
   calls: string[][] = [];
@@ -190,9 +180,13 @@ export class TerminatingDocker extends RecordingDocker {
     return await super.run(args, options);
   }
 }
-export async function provisionedSyncFixture(owner: string) {
-  const root = await mkdtemp(join(tmpdir(), "container-lab-sync-service-"));
-  temporary.push(root);
+async function provisionedSyncFixture(
+  trackTemporaryPath: (root: string) => string,
+  owner: string,
+) {
+  const root = trackTemporaryPath(
+    await mkdtemp(join(tmpdir(), "container-lab-sync-service-")),
+  );
   const source = join(root, "source");
   await runCommand("git", ["init", source]);
   await writeFile(
@@ -263,13 +257,15 @@ export async function syncJournals(lab: LabMetadata): Promise<string[]> {
   return await readdir(join(lab.runtimeRoot, "sync", lab.id, "journals"));
 }
 
-export async function durableFixture(
+async function durableFixture(
+  trackTemporaryPath: (root: string) => string,
   owner: string,
   state: LabMetadata["state"],
   createRuntime = false,
 ) {
-  const root = await mkdtemp(join(tmpdir(), "container-lab-durable-"));
-  temporary.push(root);
+  const root = trackTemporaryPath(
+    await mkdtemp(join(tmpdir(), "container-lab-durable-")),
+  );
   const roots = {
     stateRoot: join(root, "state"),
     runtimeRoot: join(root, "runtime"),
@@ -331,6 +327,35 @@ export async function replaceLabWithSymlink(
   const outside = join(fixture.root, `${fixture.lab.id}-outside.json`);
   await rename(path, outside);
   await symlink(outside, path, "file");
+}
+
+export function createLabServiceFixtureScope() {
+  const temporary = new Set<string>();
+
+  function trackTemporaryPath(root: string): string {
+    temporary.add(root);
+    return root;
+  }
+
+  async function cleanup(): Promise<void> {
+    const roots = [...temporary];
+    temporary.clear();
+    await Promise.all(
+      roots.map((root) => rm(root, { recursive: true, force: true })),
+    );
+  }
+
+  return {
+    cleanup,
+    durableFixture: (
+      owner: string,
+      state: LabMetadata["state"],
+      createRuntime = false,
+    ) => durableFixture(trackTemporaryPath, owner, state, createRuntime),
+    provisionedSyncFixture: (owner: string) =>
+      provisionedSyncFixture(trackTemporaryPath, owner),
+    trackTemporaryPath,
+  };
 }
 
 export function readyRuntime(

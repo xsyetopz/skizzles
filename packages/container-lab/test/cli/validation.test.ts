@@ -1,16 +1,20 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
+  createCliFixtureScope,
   join,
   mkdtemp,
   parsePublishedPid,
   process,
   serializePublicJson,
-  temporary,
   tmpdir,
   waitForPublishedPid,
   writeFile,
 } from "./support.ts";
+
+const fixtures = createCliFixtureScope();
+const { trackTemporaryPath } = fixtures;
+afterEach(fixtures.cleanup);
 
 describe("CLI argument and serialization validation", () => {
   test("reports the package version without requiring an owner", async () => {
@@ -41,7 +45,7 @@ describe("CLI argument and serialization validation", () => {
     const root = await mkdtemp(
       join(tmpdir(), "container-lab-pid-publication-"),
     );
-    temporary.push(root);
+    trackTemporaryPath(root);
     const pidPath = join(root, "run.pid");
     await writeFile(pidPath, "");
 

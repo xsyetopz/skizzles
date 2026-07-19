@@ -1,16 +1,20 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
-import { expect, it } from "bun:test";
+import { afterEach, expect, it } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   childId,
   commandOutput,
-  fixtureHome,
+  createFixtureHomeFactory,
   rootId,
   runAnalyzer,
   timestamp,
   writeJsonl,
 } from "../analysis/harness.ts";
+
+const { cleanupFixtureHomes, fixtureHome } = createFixtureHomeFactory();
+
+afterEach(cleanupFixtureHomes);
 
 it("preserves role and legacy tier attribution for historical task names", async () => {
   const home = await fixtureHome();

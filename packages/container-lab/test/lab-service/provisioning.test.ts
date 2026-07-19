@@ -1,8 +1,8 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   ContainerLabService,
-  durableFixture,
+  createLabServiceFixtureScope,
   InterruptingDocker,
   join,
   labManifestPath,
@@ -13,17 +13,20 @@ import {
   readLab,
   runCommand,
   SecretDiagnosticDocker,
-  temporary,
   tmpdir,
   writeFile,
   writeFileSync,
   writeLab,
 } from "./support.ts";
 
+const fixtures = createLabServiceFixtureScope();
+const { durableFixture, trackTemporaryPath } = fixtures;
+afterEach(fixtures.cleanup);
+
 describe("service provisioning", () => {
   test("create provisions synchronously and returns only lab identity and terminal state", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-create-"));
-    temporary.push(root);
+    trackTemporaryPath(root);
     const source = join(root, "source");
     await runCommand("git", ["init", source]);
     await writeFile(
@@ -60,7 +63,7 @@ describe("service provisioning", () => {
 
   test("persists only secret names and never exposes the provisioning value", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-secret-create-"));
-    temporary.push(root);
+    trackTemporaryPath(root);
     const source = join(root, "source");
     const sentinel = "sentinel-service-token-c89fd0";
     await runCommand("git", ["init", source]);
@@ -127,7 +130,7 @@ describe("service provisioning", () => {
 
   test("fails before Docker when a declared secret environment value is missing", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-secret-missing-"));
-    temporary.push(root);
+    trackTemporaryPath(root);
     const source = join(root, "source");
     await runCommand("git", ["init", source]);
     await writeFile(
@@ -170,7 +173,7 @@ describe("service provisioning", () => {
 
   test("persists a fixed redacted error when Compose echoes a secret value", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-secret-failure-"));
-    temporary.push(root);
+    trackTemporaryPath(root);
     const source = join(root, "source");
     const sentinel = "sentinel-persisted-error-d3c116";
     await runCommand("git", ["init", source]);
@@ -292,7 +295,7 @@ describe("service provisioning", () => {
     const root = await mkdtemp(
       join(tmpdir(), "container-lab-interrupted-create-"),
     );
-    temporary.push(root);
+    trackTemporaryPath(root);
     const source = join(root, "source");
     await runCommand("git", ["init", source]);
     await writeFile(

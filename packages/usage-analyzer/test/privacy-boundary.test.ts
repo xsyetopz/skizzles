@@ -1,17 +1,21 @@
 // biome-ignore-all lint/style/useNamingConvention: Rollout fixtures preserve the external snake_case wire schema.
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
-import { expect, it } from "bun:test";
+import { afterEach, expect, it } from "bun:test";
 import { join } from "node:path";
 import {
   childId,
   commandOutput,
-  fixtureHome,
+  createFixtureHomeFactory,
   guardianId,
   rootId,
   runAnalyzer,
   timestamp,
   writeJsonl,
 } from "./analysis/harness.ts";
+
+const { cleanupFixtureHomes, fixtureHome } = createFixtureHomeFactory();
+
+afterEach(cleanupFixtureHomes);
 
 const canaries = {
   user: "PRIVACY_USER_CANARY_7f2c9a",

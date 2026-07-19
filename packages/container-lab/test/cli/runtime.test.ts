@@ -1,25 +1,28 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
+  createCliFixtureScope,
   ensureOwner,
   fixtureLab,
   join,
   labManifestPath,
   mkdtemp,
-  oversizedPreviewFixture,
   process,
   readdir,
   rename,
   symlink,
-  temporary,
   tmpdir,
   writeLab,
 } from "./support.ts";
 
+const fixtures = createCliFixtureScope();
+const { oversizedPreviewFixture, trackTemporaryPath } = fixtures;
+afterEach(fixtures.cleanup);
+
 describe("CLI state and synchronization runtime", () => {
   test("reads durable lab state from a fresh Bun process and emits one JSON value", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-cli-"));
-    temporary.push(root);
+    trackTemporaryPath(root);
     const stateRoot = join(root, "state");
     const runtimeRoot = join(root, "runtime");
     const owner = "thread-process";
@@ -59,7 +62,7 @@ describe("CLI state and synchronization runtime", () => {
 
   test("health rejects an environment-selected symlinked lab state file", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-cli-trust-"));
-    temporary.push(root);
+    trackTemporaryPath(root);
     const stateRoot = join(root, "state");
     const runtimeRoot = join(root, "runtime");
     const owner = "thread-cli-trust";
@@ -99,7 +102,7 @@ describe("CLI state and synchronization runtime", () => {
 
   test("status serializes a compact redacted DTO under the public byte ceiling", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-status-"));
-    temporary.push(root);
+    trackTemporaryPath(root);
     const owner = "thread-status";
     const stateRoot = join(root, "state");
     const runtimeRoot = join(root, "runtime");

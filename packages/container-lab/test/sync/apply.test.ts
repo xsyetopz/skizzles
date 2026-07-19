@@ -1,11 +1,11 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import type { StoredPreview } from "./support.ts";
 import {
   applySync,
   chmod,
+  createSyncFixtureScope,
   execFileSync,
-  fixture,
   initializeSyncBaseline,
   lstat,
   mkdir,
@@ -20,9 +20,12 @@ import {
   required,
   rm,
   symlink,
-  temporary,
   writeFile,
 } from "./support.ts";
+
+const fixtures = createSyncFixtureScope();
+const { fixture, trackTemporaryPath } = fixtures;
+afterEach(fixtures.cleanup);
 
 describe("guarded preview and apply", () => {
   test("applies content and mode, persists details, calls the idle guard, and consumes the token", async () => {
@@ -194,7 +197,7 @@ describe("guarded preview and apply", () => {
     const outside = await mkdtemp(
       path.join(os.tmpdir(), "container-lab-outside-"),
     );
-    temporary.push(outside);
+    trackTemporaryPath(outside);
     await rm(path.join(state.target, "nested"), { recursive: true });
     await symlink(outside, path.join(state.target, "nested"));
     await expect(
