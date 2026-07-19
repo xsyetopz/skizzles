@@ -17,7 +17,7 @@ import {
   checkPlugin,
   PackagingError,
   stagePlugin,
-} from "../src/plugin-package.ts";
+} from "../src/plugin/api.ts";
 import {
   CLI_SMOKE_OUTPUT_LIMIT_BYTES,
   CLI_SMOKE_TIMEOUT_MS,
@@ -27,7 +27,7 @@ import {
   MODEL_CATALOG_USAGE,
   write,
   YAML_LAB_ID,
-} from "./plugin-package-fixture.ts";
+} from "./plugin/fixture.ts";
 
 const { cleanup, fixture, temporaryRoots } = createTestWorkspace();
 afterEach(cleanup);

@@ -1,8 +1,8 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import { join } from "node:path";
-import { stagePlugin } from "../src/plugin-package.ts";
-import { createTestWorkspace, write } from "./plugin-package-fixture.ts";
+import { stagePlugin } from "../src/plugin/api.ts";
+import { createTestWorkspace, write } from "./plugin/fixture.ts";
 
 const { cleanup, fixture } = createTestWorkspace();
 afterEach(cleanup);

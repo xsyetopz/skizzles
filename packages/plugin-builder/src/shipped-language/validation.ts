@@ -11,7 +11,7 @@ import {
 import {
   CONTAINER_LAB_SOURCE_PATH,
   CONTAINER_LAB_STATIC_INPUTS,
-} from "../container-lab-package.ts";
+} from "../container-lab/composition.ts";
 import {
   BUNDLED_ENTRYPOINTS,
   CANONICAL_FILE_INPUTS,

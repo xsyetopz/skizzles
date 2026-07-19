@@ -63,23 +63,23 @@
   "repositoryNarrowing": "Codex 0.144.5 runtime accepts short_description through 1024 characters, plugin-shared parent icon paths, and arbitrary dependency identity strings, and generally ignores unknown metadata fields. This repository deliberately requires quoted strings, exact known fields, 25-64 character short descriptions, skill-local assets paths, unique products, and closed approved bare MCP, network MCP, local-command MCP, or CLI identities for deterministic authoring and supply-chain safety.",
   "fixtures": [
     {
-      "file": "official-valid-SKILL.md",
+      "file": "official/valid/SKILL.md",
       "sha256": "5e113d5e58f0eb36d43ac39dd4f50daf840eaddcff9c3b1cc1a016f30f1e5579"
     },
     {
-      "file": "official-invalid-description-SKILL.md",
+      "file": "official/invalid-description/SKILL.md",
       "sha256": "9f4d44352df38433e7fc1d022d8dc76a2228778159189605c932b1978f48720b"
     },
     {
-      "file": "official-valid-openai.yaml",
+      "file": "official/valid/openai.yaml",
       "sha256": "9f06af1a8469f02f6595de2aac361cd8a0770e31f6bcf2808b096ce0db5cdcbc"
     },
     {
-      "file": "runtime-valid-openai.yaml",
+      "file": "runtime/valid/openai.yaml",
       "sha256": "8ecbe663e6167177f5b84fe489f38daf26888a0e3d0a065022e6732334a4aed0"
     },
     {
-      "file": "runtime-invalid-openai.yaml",
+      "file": "runtime/invalid/openai.yaml",
       "sha256": "990e8f47f7528eaec082a099f841ba70c9f3f2a94ff2dc9e4505eddb2ee051b9"
     }
   ]

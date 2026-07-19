@@ -3,11 +3,11 @@ import {
   ContainerLabPackageError,
   validateContainerLabDescriptor,
   validateContainerLabRuntime,
-} from "../container-lab-package.ts";
+} from "../container-lab/composition.ts";
 import {
   PromptPolicyPackageError,
   validatePackagedPromptPolicy,
-} from "../prompt-policy-package.ts";
+} from "../prompt-policy/composition.ts";
 import { PackagingError, PLUGIN_NAME } from "./contract.ts";
 import {
   exists,

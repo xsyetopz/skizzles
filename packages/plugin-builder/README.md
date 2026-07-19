@@ -12,21 +12,28 @@ provides the repository CLI.
 
 ## Internal ownership
 
-- `src/plugin-package.ts` is the stable public API and executable composition
-  root.
+- `src/plugin/api.ts` is the stable public API; `src/cli.ts` is the executable
+  composition root.
 - `src/plugin/` owns canonical input declarations, deterministic staging,
   bundle creation, distribution validation, and tree comparison.
-- `src/prompt-policy-package.ts` is the package-internal prompt-policy staging
-  facade; `src/prompt-policy/` owns its contract parsing, containment, layout,
-  and packaged-surface validation.
-- `src/container-lab-package.ts` owns the Container Lab distribution contract.
+- `src/plugin/destination/` is one private crash-recovery state machine. Its
+  claim, journal, retirement, recovery, cleanup, and promotion modules remain
+  colocated because they share exact filesystem identities, protocol states,
+  and fail-closed ordering; re-review the boundary if a module becomes usable
+  without that transaction protocol.
+- `src/prompt-policy/composition.ts` is the package-internal prompt-policy
+  staging facade; its owner also contains contract parsing, containment,
+  layout, and packaged-surface validation.
+- `src/container-lab/composition.ts` owns the Container Lab distribution
+  contract.
 - `src/agent-contract/` pins exact published Fourth Wall and Completion
   Contract schema bytes, strictly parses/evaluates contract instances, executes
   every materialized public incident regression, rejects symlinked asset paths,
   rejects multi-link contract files, and proves staged copies are byte-identical
   to their canonical skill owners.
-- `test/` follows those capabilities; `plugin-package-fixture.ts` is the single
-  canonical isolated-workspace fixture builder.
+- `test/` follows those capabilities; `test/plugin/fixture.ts` is the single
+  canonical isolated-workspace fixture builder and prompt-policy mutation
+  support stays with `test/prompt-policy/`.
 
 The manifest declares every workspace package whose canonical entrypoint is
 composed into the distribution. Internal implementation modules are not
@@ -57,6 +64,27 @@ there is no lossy numeric fallback.
 Agent contract assets are capped at 1 MiB before allocation. Their JSON is
 lexically validated before parsing, including decoded duplicate-key rejection,
 so escaped and literal spellings cannot collapse into one trusted member.
+
+## Reviewed cohesive files
+
+Three implementations remain above the 450-line review threshold but below
+the 650-line extraction threshold:
+
+- `src/shipped-language/markdown-content.ts` owns one ordered Markdown/HTML
+  security parser. Its token, tree, entity, and rendered-surface checks share
+  traversal state and diagnostic ordering.
+- `src/agent-contract/acceptance/evaluation.ts` owns causal acceptance-gate
+  evaluation. Evidence parsing and identity validation are already separate;
+  the remaining state machine keeps gate order, trusted facts, review, retry,
+  and rejection precedence together.
+- `src/agent-contract/evaluation/contract.ts` owns the evaluator protocol's
+  strict parsing, digest, time, version, identity, and rejection primitives.
+  They share the `EvaluationOptions` trust boundary and stable rejection
+  vocabulary used by every evaluator.
+
+Re-review these owners if they exceed 650 lines, acquire an independently
+testable state machine or trust boundary, or require unrelated diagnostics to
+change together.
 
 Executable package sources are bundled to the four stable plugin entrypoints
 plus the installer CLI. The generated bundles are dependency-self-contained

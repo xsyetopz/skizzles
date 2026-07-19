@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/plugin-package.ts"
+    ".": "./src/plugin/api.ts"
   },
   "bin": {
-    "skizzles-plugin-builder": "./src/plugin-package.ts"
+    "skizzles-plugin-builder": "./src/cli.ts"
   },
   "scripts": {
-    "build": "bun build src/plugin-package.ts --target=bun --outfile=dist/plugin-builder.js",
+    "build": "bun build src/cli.ts --target=bun --outfile=dist/plugin-builder.js",
     "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
     "test": "bun test test",
     "typecheck": "tsc -p tsconfig.json --noEmit"

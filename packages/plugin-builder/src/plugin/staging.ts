@@ -11,12 +11,12 @@ import {
 import {
   ContainerLabPackageError,
   stageContainerLabRuntime,
-} from "../container-lab-package.ts";
+} from "../container-lab/composition.ts";
 import {
   PromptPolicyPackageError,
   stagePromptPolicyPackage,
   validatePromptPolicySource,
-} from "../prompt-policy-package.ts";
+} from "../prompt-policy/composition.ts";
 import {
   validateCanonicalShippedLanguage,
   validateStagedShippedLanguage,
@@ -25,7 +25,7 @@ import { SkillMetadataError } from "../skill-metadata/contract.ts";
 import {
   validateCanonicalSkillMetadata,
   validateStagedSkillMetadata,
-} from "../skill-metadata/validation.ts";
+} from "../skill-metadata/validation/metadata.ts";
 import {
   CANONICAL_FILE_INPUTS,
   CANONICAL_TREE_INPUTS,
@@ -35,7 +35,7 @@ import {
   PLUGIN_NAME,
   TEMPLATE_PATH,
 } from "./contract.ts";
-import { replaceDirectoryTransaction } from "./destination-transaction.ts";
+import { replaceDirectoryTransaction } from "./destination/transaction.ts";
 import {
   copyCanonicalFile,
   copyCanonicalTree,

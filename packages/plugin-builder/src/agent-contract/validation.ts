@@ -1,11 +1,11 @@
-import { readContainedJsonAsset } from "./asset-boundary.ts";
 import {
   AGENT_CONTRACT_ASSETS,
   AgentContractPackageError,
 } from "./contract.ts";
-import { validateIncidentCorpus } from "./incident-corpus.ts";
-import type { JsonValue } from "./json-value.ts";
-import { validatePinnedSchema } from "./pinned-schema.ts";
+import { readContainedJsonAsset } from "./filesystem/asset.ts";
+import { validateIncidentCorpus } from "./incident/corpus.ts";
+import type { JsonValue } from "./json/value.ts";
+import { validatePinnedSchema } from "./schema/pinned.ts";
 
 interface LoadedAsset {
   bytes: Buffer;
