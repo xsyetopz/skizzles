@@ -1,5 +1,6 @@
 // biome-ignore-all lint/correctness/noUnresolvedImports: Biome does not resolve TypeScript 7 unstable package exports.
 import { readFile } from "node:fs/promises";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   isExportDeclaration,
   isExternalModuleReference,
@@ -188,6 +189,17 @@ async function parseSourceDependencies(
 
 function scanStaticDependencies(sourceFile: SourceFile): string[] {
   const specifiers = new Set<string>();
+  for (const reference of sourceFile.referencedFiles) {
+    specifiers.add(
+      normalizePathReference(sourceFile.fileName, reference.fileName),
+    );
+  }
+  for (const reference of sourceFile.typeReferenceDirectives) {
+    specifiers.add(reference.fileName);
+  }
+  // `lib` directives select compiler-owned standard library declarations;
+  // unlike path and types directives, they do not create workspace or package
+  // dependency edges and are intentionally excluded.
   const visit = (node: Node): void => {
     const specifier = staticModuleSpecifier(node);
     if (specifier !== undefined) {
@@ -197,6 +209,21 @@ function scanStaticDependencies(sourceFile: SourceFile): string[] {
   };
   visit(sourceFile);
   return [...specifiers].sort((left, right) => left.localeCompare(right));
+}
+
+function normalizePathReference(
+  sourcePath: string,
+  targetPath: string,
+): string {
+  const absoluteTarget = isAbsolute(targetPath)
+    ? targetPath
+    : resolve(dirname(sourcePath), targetPath);
+  const relativeTarget = relative(dirname(sourcePath), absoluteTarget)
+    .split(sep)
+    .join("/");
+  return relativeTarget.startsWith(".")
+    ? relativeTarget
+    : `./${relativeTarget}`;
 }
 
 function staticModuleSpecifier(node: Node): string | undefined {

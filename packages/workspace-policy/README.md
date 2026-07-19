@@ -58,7 +58,12 @@ Static filesystem reach-through is intentionally limited to literal
 classified reliably without executing package code; cross-package imports,
 including private subpaths, merge Bun's parsed runtime/dynamic import scan with a
 TypeScript 7 asynchronous AST pass for static imports, re-exports, import type nodes,
-and external import-equals declarations. One API and snapshot open all eligible files
+external import-equals declarations, and triple-slash path and types directives.
+Path directives are normalized to relative filesystem edges; types directives retain
+their TypeScript package specifier and pass through the same direct-dependency and
+export checks as imports. Triple-slash lib directives select compiler-owned standard
+libraries rather than workspace or package dependencies, so they are intentionally
+excluded. One API and snapshot open all eligible files
 per workspace validation; syntactic diagnostics and backend or cleanup failures fail
 closed as `source-parse-error`. The snapshot is disposed before the API is closed.
 Discovery first retains each file's exact bytes as A. TypeScript independently reopens

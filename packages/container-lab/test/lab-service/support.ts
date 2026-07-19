@@ -219,7 +219,14 @@ async function provisionedSyncFixture(
 export async function crashServiceApply(
   lab: LabMetadata,
   token: string,
+  direction: "push" | "pull" = "push",
 ): Promise<void> {
+  let sourceRoot = lab.sourceRoot;
+  let targetRoot = lab.workspace;
+  if (direction === "pull") {
+    sourceRoot = lab.workspace;
+    targetRoot = lab.sourceRoot;
+  }
   const modulePath = join(import.meta.dir, "../../src/sync/apply.ts");
   const script = `
     const { applySyncWithHooks } = await import(${JSON.stringify(modulePath)});
@@ -235,9 +242,9 @@ export async function crashServiceApply(
       SYNC_CRASH_OPTIONS: JSON.stringify({
         stateRoot: lab.runtimeRoot,
         labId: lab.id,
-        direction: "push",
-        sourceRoot: lab.sourceRoot,
-        targetRoot: lab.workspace,
+        direction,
+        sourceRoot,
+        targetRoot,
         token,
       }),
     },

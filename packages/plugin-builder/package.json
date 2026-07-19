@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/plugin/api.ts"
+    ".": "./src/plugin/api.ts",
+    "./agent-contract": "./src/agent-contract/api.ts"
   },
   "bin": {
     "skizzles-plugin-builder": "./src/cli.ts"

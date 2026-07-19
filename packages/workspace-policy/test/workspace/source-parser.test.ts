@@ -23,6 +23,30 @@ afterEach(async () => {
 });
 
 describe("source parser lifecycle", () => {
+  it("extracts path and types directives while excluding compiler libraries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skizzles-directive-imports-"));
+    roots.push(root);
+    const path = join(root, "index.ts");
+    const source = [
+      '/// <reference path="types.ts" />',
+      '/// <reference path="../shared.ts" />',
+      '/// <reference types="undeclared-transitive" />',
+      '/// <reference lib="dom" />',
+      "export {};",
+      "",
+    ].join("\n");
+    await writeFile(path, source);
+
+    expect(
+      await parseSourceDependencies([sourceDocument(path, source)]),
+    ).toEqual([
+      {
+        path,
+        specifiers: ["../shared.ts", "./types.ts", "undeclared-transitive"],
+      },
+    ]);
+  });
+
   it("preserves dynamic imports after every hashbang line terminator", async () => {
     const root = await mkdtemp(join(tmpdir(), "skizzles-hashbang-imports-"));
     roots.push(root);

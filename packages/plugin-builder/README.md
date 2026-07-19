@@ -39,6 +39,19 @@ The manifest declares every workspace package whose canonical entrypoint is
 composed into the distribution. Internal implementation modules are not
 package exports.
 
+## Public package APIs
+
+The root `@skizzles/plugin-builder` export remains the staging facade only.
+Independent contract consumers use the intentional
+`@skizzles/plugin-builder/agent-contract` subpath. Its runtime export budget is
+exactly `evaluateAgentContract` and `ContractRejection`; only the contract kind,
+JSON value, and rejection-code types accompany them. The evaluator accepts
+JSON-shaped evaluation options and parses their strict internal contract at the
+production boundary, preventing callers from bypassing exact-key, identity,
+chronology, and evidence checks.
+Schema walkers, filesystem readers, corpus composition, staging validators, and
+individual contract evaluators remain package-private.
+
 The schema-byte digests in `src/agent-contract/contract.ts` are the plugin
 composition authority and must change atomically with a deliberate published
 schema revision. Plugin-builder does not claim to be a general JSON Schema

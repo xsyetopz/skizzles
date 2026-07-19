@@ -14,6 +14,89 @@ afterEach(async () => {
 });
 
 describe("TypeScript source dependency fitness", () => {
+  it("enforces triple-slash package and ownership edges", async () => {
+    const root = await fixture();
+    await addPackage(root, "two", "@skizzles/two");
+    const manifest = packageManifest("@skizzles/example");
+    manifest.dependencies["@skizzles/two"] = "workspace:*";
+    await writeManifest(root, "example", manifest);
+    await mkdir(join(root, "packages/example/src/generated"), {
+      recursive: true,
+    });
+    await writeFile(
+      join(root, "packages/example/src/generated/schema.ts"),
+      "export type Schema = string;\n",
+    );
+    await writeFile(
+      join(root, "packages/example/test/helper.ts"),
+      "export type Helper = string;\n",
+    );
+    await writeFile(
+      join(root, "packages/example/src/index.ts"),
+      [
+        '/// <reference types="undeclared-transitive" />',
+        '/// <reference types="@skizzles/two/internal" />',
+        '/// <reference path="../../two/src/index.ts" />',
+        '/// <reference path="../test/helper.ts" />',
+        '/// <reference path="./generated/schema.ts" />',
+        '/// <reference lib="dom" />',
+        "export type Value = number;",
+        "",
+      ].join("\n"),
+    );
+
+    const findings = await validateWorkspace(root);
+    expect(findings).toContainEqual({
+      code: "undeclared-dependency",
+      path: "packages/example/src/index.ts",
+      message:
+        "undeclared-transitive is not a direct runtime, optional, or peer dependency",
+    });
+    expect(findings).toContainEqual({
+      code: "private-package-import",
+      path: "packages/example/src/index.ts",
+      message:
+        "@skizzles/two/internal is not an exported surface of @skizzles/two",
+    });
+    expect(findings).toContainEqual({
+      code: "cross-package-relative-import",
+      path: "packages/example/src/index.ts",
+      message: "../../two/src/index.ts escapes its package",
+    });
+    expect(findings).toContainEqual({
+      code: "production-to-test-import",
+      path: "packages/example/src/index.ts",
+      message: "../test/helper.ts points production code at test ownership",
+    });
+    expect(findings).toContainEqual({
+      code: "production-to-generated-import",
+      path: "packages/example/src/index.ts",
+      message:
+        "./generated/schema.ts points production code at generated ownership",
+    });
+    expect(findings.some(({ message }) => message.startsWith("dom "))).toBe(
+      false,
+    );
+  });
+
+  it("includes triple-slash path directives in source SCCs", async () => {
+    const root = await fixture();
+    await writeFile(
+      join(root, "packages/example/src/index.ts"),
+      '/// <reference path="other.ts" />\nexport type Value = number;\n',
+    );
+    await writeFile(
+      join(root, "packages/example/src/other.ts"),
+      '/// <reference path="index.ts" />\nexport type Other = number;\n',
+    );
+
+    expect(await validateWorkspace(root)).toContainEqual({
+      code: "source-module-cycle",
+      path: "packages/example/src/index.ts",
+      message: "source dependency SCC: src/index.ts <-> src/other.ts",
+    });
+  });
+
   it("rejects a local SCC formed only by type-only declarations", async () => {
     const root = await fixture();
     await writeFile(

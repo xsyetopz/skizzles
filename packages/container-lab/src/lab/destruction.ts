@@ -163,16 +163,6 @@ export async function recoverLabSync(
   ) {
     throw new Error("lab runtime containment is invalid");
   }
-  try {
-    if (!(await stat(lab.workspace)).isDirectory()) {
-      return;
-    }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return;
-    }
-    throw error;
-  }
   const journalDirectory = join(lab.runtimeRoot, "sync", lab.id, "journals");
   let journals: string[];
   try {
@@ -187,11 +177,36 @@ export async function recoverLabSync(
     return;
   }
   await assertSourceRepositoryIdentity(lab, environment);
+  const workspacePresent = await directoryExists(lab.workspace);
+  const allowedTargetRoots = [lab.sourceRoot];
+  if (workspacePresent) {
+    allowedTargetRoots.push(lab.workspace);
+  }
   await recoverSyncTransactions({
     stateRoot: lab.runtimeRoot,
     labId: lab.id,
-    allowedTargetRoots: [lab.sourceRoot, lab.workspace],
+    allowedTargetRoots,
   });
+}
+
+async function directoryExists(path: string): Promise<boolean> {
+  try {
+    return (await stat(path)).isDirectory();
+  } catch (error) {
+    if (isMissingDirectory(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function isMissingDirectory(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
 }
 
 export async function assertSourceRepositoryIdentity(

@@ -70,17 +70,38 @@ async function assertNoGitAlternates(
     repositoryRoot,
     environment,
   );
-  try {
-    await lstat(join(commonGitDirectory, "objects", "info", "alternates"));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return;
-    }
-    throw new Error("could not verify Git alternate object-store isolation", {
-      cause: error,
-    });
+  const names = ["alternates", "http-alternates"] as const;
+  const present = await Promise.all(
+    names.map(async (name) => {
+      try {
+        await lstat(join(commonGitDirectory, "objects", "info", name));
+        return name;
+      } catch (error) {
+        if (isMissingAlternate(error)) {
+          return;
+        }
+        throw new Error(
+          "could not verify Git alternate object-store isolation",
+          { cause: error },
+        );
+      }
+    }),
+  );
+  const retained = present.find((name) => name !== undefined);
+  if (retained !== undefined) {
+    throw new Error(
+      `Git alternate object-store isolation was not established: objects/info/${retained} exists`,
+    );
   }
-  throw new Error("Git alternate object-store isolation was not established");
+}
+
+function isMissingAlternate(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "ENOENT"
+  );
 }
 
 async function canonicalCommonGitDirectory(
