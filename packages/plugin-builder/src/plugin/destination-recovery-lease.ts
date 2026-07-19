@@ -9,17 +9,19 @@ import {
   removeClaim,
   sameOwner,
 } from "./destination-claim.ts";
-import {
-  ownerForProcess,
-  ownerRemainsActive,
-  UUID_PATTERN,
-} from "./destination-journal.ts";
+import { ownerForProcess, UUID_PATTERN } from "./destination-journal.ts";
 import { isNodeError, lockedDestinationError } from "./destination-parent.ts";
 import type { TransactionTarget } from "./destination-path.ts";
 import { sameIdentity, transactionClaimPath } from "./destination-path.ts";
+import {
+  claimRetirementConfirmed,
+  hasValidRetirementMarker,
+  RETIREMENT_HELPER_SOURCE,
+  removeRetirementArtifacts,
+  sendRetirementBinding,
+} from "./destination-retirement.ts";
 
 const LEASE_MODE = 0o600;
-const HELPER_SOURCE = "await Bun.stdin.text();";
 const GENERATION_PATTERN = /^[1-9][0-9]*$/u;
 
 interface RecoveryLease extends ClaimSnapshot {
@@ -38,27 +40,35 @@ async function acquireRecoveryLease(
   await recoverRecoveryLeaseTemps(target);
   const leases = await inspectRecoveryLeases(target);
   const latest = leases.at(-1);
-  if (latest !== undefined && (await ownerRemainsActive(latest.owner))) {
-    throw lockedDestinationError();
+  if (latest !== undefined) {
+    if (!(await claimRetirementConfirmed(latest))) {
+      throw lockedDestinationError();
+    }
   }
   const generation = (latest?.generation ?? 0) + 1;
-  const helper = Bun.spawn([process.execPath, "-e", HELPER_SOURCE], {
+  const helper = Bun.spawn([process.execPath, "-e", RETIREMENT_HELPER_SOURCE], {
     stderr: "ignore",
     stdin: "pipe",
     stdout: "ignore",
   });
-  await Promise.resolve(checkpoint?.("recovery-helper-ready"));
   let stopped = false;
   const stopHelper = async () => {
     if (stopped) return;
     stopped = true;
-    helper.stdin.end();
+    try {
+      helper.stdin.end();
+    } catch {}
     await helper.exited;
   };
-  const owner = ownerForProcess(helper.pid);
-  const leasePath = recoveryLeasePath(target, generation);
-  const temporary = `${leasePath}.${owner.token}.tmp`;
+  let retained = false;
+  let temporary: string | undefined;
   try {
+    await Promise.resolve(
+      checkpoint?.("recovery-helper-ready", String(helper.pid)),
+    );
+    const owner = ownerForProcess(helper.pid);
+    const leasePath = recoveryLeasePath(target, generation);
+    temporary = `${leasePath}.${owner.token}.tmp`;
     const handle = await open(temporary, "wx", LEASE_MODE);
     try {
       await handle.writeFile(`${JSON.stringify(owner)}\n`);
@@ -81,17 +91,28 @@ async function acquireRecoveryLease(
     if (lease === undefined || lease.owner.token !== owner.token) {
       throw new PackagingError("Plugin staging recovery lease changed.");
     }
+    try {
+      await sendRetirementBinding(helper.stdin, lease);
+    } catch (error) {
+      await removeClaim(lease).catch(() => undefined);
+      throw error;
+    }
     for (const previous of leases) {
-      await removeClaim(previous).catch(() => undefined);
+      try {
+        await removeClaim(previous);
+        await removeRetirementArtifacts(previous);
+      } catch {}
     }
     await Promise.resolve(checkpoint?.("recovery-lease-published", leasePath));
+    retained = true;
     return { ...lease, generation, stopHelper };
-  } catch (error) {
-    await stopHelper();
-    throw error;
   } finally {
-    await rm(temporary, { force: true });
-    await syncDirectory(target.parent);
+    try {
+      if (temporary !== undefined) await rm(temporary, { force: true });
+      await syncDirectory(target.parent);
+    } finally {
+      if (!retained) await stopHelper();
+    }
   }
 }
 
@@ -104,7 +125,10 @@ async function retireRecoveryLease(
   try {
     if (completed) {
       for (const existing of await inspectRecoveryLeases(target)) {
-        await removeClaim(existing).catch(() => undefined);
+        try {
+          await removeClaim(existing);
+          await removeRetirementArtifacts(existing);
+        } catch {}
       }
       await Promise.resolve(checkpoint?.("recovery-claim-released"));
     }
@@ -119,8 +143,11 @@ async function cleanupOrphanedRecoveryLeases(
 ): Promise<void> {
   await recoverRecoveryLeaseTemps(target);
   for (const lease of await inspectRecoveryLeases(target)) {
-    if (!(await ownerRemainsActive(lease.owner))) {
-      await removeClaim(lease).catch(() => undefined);
+    if (await claimRetirementConfirmed(lease)) {
+      try {
+        await removeClaim(lease);
+        await removeRetirementArtifacts(lease);
+      } catch {}
     }
   }
 }
@@ -132,6 +159,16 @@ async function recoverRecoveryLeaseTemps(
   for (const name of (await readdir(target.parent)).sort()) {
     if (!(name.startsWith(prefix) && name.endsWith(".tmp"))) continue;
     const suffix = name.slice(prefix.length, -4);
+    const markerTemp = parseRetirementMarkerTemp(suffix);
+    if (markerTemp !== undefined) {
+      const lease = await readClaim(
+        recoveryLeasePath(target, markerTemp.generation),
+      );
+      if (lease === undefined || lease.owner.token !== markerTemp.token) {
+        throw lockedDestinationError();
+      }
+      continue;
+    }
     const separator = suffix.indexOf(".");
     const generation = suffix.slice(0, separator);
     const token = suffix.slice(separator + 1);
@@ -146,7 +183,10 @@ async function recoverRecoveryLeaseTemps(
     if (claim === undefined || claim.owner.token !== token) {
       throw lockedDestinationError();
     }
-    if (!(await ownerRemainsActive(claim.owner))) await removeClaim(claim);
+    if (await claimRetirementConfirmed(claim)) {
+      await removeClaim(claim);
+      await removeRetirementArtifacts(claim);
+    }
   }
 }
 
@@ -169,6 +209,7 @@ async function withRecoveryLease(
     }
     await recover();
     await removeClaim(claim);
+    await removeRetirementArtifacts(claim);
     completed = true;
   } finally {
     await retireRecoveryLease(target, lease, completed, checkpoint);
@@ -183,6 +224,16 @@ async function inspectRecoveryLeases(
   for (const name of (await readdir(target.parent)).sort()) {
     if (!name.startsWith(prefix) || name.endsWith(".tmp")) continue;
     const generationText = name.slice(prefix.length);
+    const markerGeneration = parseRetirementMarker(generationText);
+    if (markerGeneration !== undefined) {
+      const lease = await readClaim(
+        recoveryLeasePath(target, markerGeneration),
+      );
+      if (lease === undefined || !(await hasValidRetirementMarker(lease))) {
+        throw lockedDestinationError();
+      }
+      continue;
+    }
     if (!GENERATION_PATTERN.test(generationText)) {
       throw lockedDestinationError();
     }
@@ -194,6 +245,29 @@ async function inspectRecoveryLeases(
   }
   leases.sort((left, right) => left.generation - right.generation);
   return leases;
+}
+
+function parseRetirementMarker(value: string): number | undefined {
+  const suffix = ".retired";
+  if (!value.endsWith(suffix)) return;
+  const generation = value.slice(0, -suffix.length);
+  if (!GENERATION_PATTERN.test(generation)) return;
+  const parsed = Number(generation);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
+}
+
+function parseRetirementMarkerTemp(
+  value: string,
+): { generation: number; token: string } | undefined {
+  const separator = value.indexOf(".retired.");
+  if (separator < 1) return;
+  const generation = value.slice(0, separator);
+  const token = value.slice(separator + ".retired.".length);
+  if (!GENERATION_PATTERN.test(generation) || !UUID_PATTERN.test(token)) return;
+  const parsed = Number(generation);
+  return Number.isSafeInteger(parsed)
+    ? { generation: parsed, token }
+    : undefined;
 }
 
 function recoveryLeasePath(

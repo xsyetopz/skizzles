@@ -23,7 +23,6 @@ import {
   JOURNAL_FILE,
   matches,
   OWNER_FILE,
-  ownerRemainsActive,
   parseJournal,
   parseOwner,
   temporaryName,
@@ -46,6 +45,7 @@ import {
   cleanupOrphanedRecoveryLeases,
   withRecoveryLease,
 } from "./destination-recovery-lease.ts";
+import { claimRetirementConfirmed } from "./destination-retirement.ts";
 
 export const PROMOTED_DIRECTORY_MODE = 0o755;
 
@@ -60,7 +60,7 @@ export async function recoverStaleTransaction(
     if (await hasUnclaimedLockNamespace(target)) throw lockedDestinationError();
     return;
   }
-  if (await ownerRemainsActive(claim.owner)) throw lockedDestinationError();
+  if (!(await claimRetirementConfirmed(claim))) throw lockedDestinationError();
   await withRecoveryLease(target, claim, checkpoint, async () => {
     await recoverDeferredCleanup(target, claim.owner);
     await recoverClaimLock(target, claim.owner);

@@ -45,7 +45,7 @@ describe("plugin destination lock disposal", () => {
     await mkdir(cleanup, { mode: 0o700 });
     await writeFile(
       join(cleanup, "owner.json"),
-      `${JSON.stringify({ version: 1, pid: 999_999_999, processStartIdentity: "dead", token: TOKEN_Y })}\n`,
+      `${JSON.stringify({ version: 2, controllerPid: 999_999_999, controllerStartIdentity: "dead", pid: 999_999_999, processStartIdentity: "dead", token: TOKEN_Y })}\n`,
     );
     await writeFile(join(cleanup, "unrelated"), "preserved\n");
 
@@ -141,11 +141,14 @@ describe("plugin destination lock disposal", () => {
       replaceDirectoryTransaction(destination, () => Promise.resolve()),
     ).rejects.toThrow("could not clean up its private lock");
     const artifacts = await transactionArtifacts(parent);
-    expect(artifacts).toHaveLength(3);
+    expect(artifacts).toHaveLength(5);
     expect(artifacts.some((name) => name.endsWith(".claim"))).toBe(true);
     expect(artifacts.some((name) => name.endsWith(".lock.dispose"))).toBe(true);
     expect(artifacts.some((name) => name.includes(".claim.recovery-"))).toBe(
       true,
+    );
+    expect(artifacts.filter((name) => name.endsWith(".retired"))).toHaveLength(
+      2,
     );
   });
 

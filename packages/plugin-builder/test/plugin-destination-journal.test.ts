@@ -27,7 +27,7 @@ describe("plugin destination journal identities", () => {
       parseJournal({
         original: { identity: { dev: "01", ino: "2" }, present: true },
         state: "active",
-        version: 1,
+        version: 2,
       }),
     ).toThrow("invalid identity");
   });

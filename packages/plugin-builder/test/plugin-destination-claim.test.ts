@@ -24,6 +24,156 @@ afterEach(async () => {
 });
 
 describe("plugin destination atomic claims", () => {
+  it("does not recover when only the live controller's helper is killed", async () => {
+    const parent = await temporaryRoot("skizzles-claim-helper-killed-");
+    const destination = await seededDestination(parent);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let competingConstructionRan = false;
+    const active = replaceDirectoryTransaction(destination, async (stage) => {
+      await writeFile(join(stage, "first"), "first\n");
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+    const claim = await currentClaim(parent);
+    process.kill(claim.pid, "SIGKILL");
+
+    await expect(
+      replaceDirectoryTransaction(destination, () => {
+        competingConstructionRan = true;
+        return Promise.resolve();
+      }),
+    ).rejects.toThrow("locked by another operation");
+    expect(competingConstructionRan).toBe(false);
+
+    release.resolve();
+    await active;
+    expect(await claimArtifacts(parent)).toEqual([]);
+  });
+
+  it("rejects a spoofed retirement marker for a live controller", async () => {
+    const parent = await temporaryRoot("skizzles-claim-marker-spoof-");
+    const destination = await seededDestination(parent);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const active = replaceDirectoryTransaction(destination, async () => {
+      entered.resolve();
+      await release.promise;
+    });
+    await entered.promise;
+    const claim = await currentClaim(parent);
+    await writeFile(
+      `${claim.path}.retired`,
+      `${JSON.stringify({ dev: "0", ino: "0", token: claim.token })}\n`,
+      { mode: 0o600 },
+    );
+    process.kill(claim.pid, "SIGKILL");
+
+    await expect(
+      replaceDirectoryTransaction(destination, () => Promise.resolve()),
+    ).rejects.toThrow("locked by another operation");
+    expect(await Bun.file(`${claim.path}.retired`).exists()).toBe(true);
+
+    release.resolve();
+    await active;
+  });
+
+  it("rejects an orphaned recovery retirement sidecar", async () => {
+    const parent = await temporaryRoot("skizzles-lease-marker-spoof-");
+    const destination = await seededDestination(parent);
+    expect(crashAt(destination, "owner-ready")).toBe(73);
+    const claim = await currentClaim(parent);
+    const marker = `${claim.path}.recovery-1.retired`;
+    await writeFile(
+      marker,
+      `${JSON.stringify({ dev: "0", ino: "0", token: claim.token })}\n`,
+      { mode: 0o600 },
+    );
+    let constructed = false;
+
+    await expect(
+      replaceDirectoryTransaction(destination, () => {
+        constructed = true;
+        return Promise.resolve();
+      }),
+    ).rejects.toThrow("locked by another operation");
+    expect(constructed).toBe(false);
+    expect(await Bun.file(marker).exists()).toBe(true);
+  });
+
+  it("reaps claim and recovery helpers when owner identification fails", async () => {
+    const parent = await temporaryRoot("skizzles-claim-helper-setup-");
+    const destination = await seededDestination(parent);
+    let helperPid = 0;
+    await expect(
+      replaceDirectoryTransaction(destination, () => Promise.resolve(), {
+        checkpoint: (point, path) => {
+          if (point !== "claim-helper-ready" || path === undefined) return;
+          helperPid = Number(path);
+          process.kill(helperPid, "SIGKILL");
+        },
+      }),
+    ).rejects.toThrow("could not identify lock owner");
+    await expectProcessGone(helperPid);
+
+    expect(crashAt(destination, "owner-ready")).toBe(73);
+    helperPid = 0;
+    await expect(
+      replaceDirectoryTransaction(destination, () => Promise.resolve(), {
+        checkpoint: (point, path) => {
+          if (point !== "recovery-helper-ready" || path === undefined) return;
+          helperPid = Number(path);
+          process.kill(helperPid, "SIGKILL");
+        },
+      }),
+    ).rejects.toThrow("could not identify lock owner");
+    await expectProcessGone(helperPid);
+
+    await expect(
+      replaceDirectoryTransaction(destination, () =>
+        Promise.reject(new Error("recovered after owner failure")),
+      ),
+    ).rejects.toThrow("recovered after owner failure");
+    expect(await claimArtifacts(parent)).toEqual([]);
+  });
+
+  it("reaps claim and recovery helpers when setup checkpoints fail", async () => {
+    const parent = await temporaryRoot("skizzles-claim-helper-checkpoint-");
+    const destination = await seededDestination(parent);
+    let claimHelperPid = 0;
+    await expect(
+      replaceDirectoryTransaction(destination, () => Promise.resolve(), {
+        checkpoint: (point, path) => {
+          if (point !== "claim-helper-ready" || path === undefined) return;
+          claimHelperPid = Number(path);
+          throw new Error("claim checkpoint failed");
+        },
+      }),
+    ).rejects.toThrow("claim checkpoint failed");
+    await expectProcessGone(claimHelperPid);
+
+    expect(crashAt(destination, "owner-ready")).toBe(73);
+    let recoveryHelperPid = 0;
+    await expect(
+      replaceDirectoryTransaction(destination, () => Promise.resolve(), {
+        checkpoint: (point, path) => {
+          if (point !== "recovery-helper-ready" || path === undefined) return;
+          recoveryHelperPid = Number(path);
+          throw new Error("recovery checkpoint failed");
+        },
+      }),
+    ).rejects.toThrow("recovery checkpoint failed");
+    await expectProcessGone(recoveryHelperPid);
+
+    await expect(
+      replaceDirectoryTransaction(destination, () =>
+        Promise.reject(new Error("recovered")),
+      ),
+    ).rejects.toThrow("recovered");
+    expect(await claimArtifacts(parent)).toEqual([]);
+  });
+
   it("publishes ownership before creating a cross-process lock directory", async () => {
     const parent = await temporaryRoot("skizzles-claim-process-");
     const destination = await seededDestination(parent);
@@ -244,4 +394,38 @@ async function claimArtifacts(parent: string): Promise<string[]> {
   return (await readdir(parent)).filter((name) =>
     name.startsWith(".skizzles-package-"),
   );
+}
+
+async function currentClaim(
+  parent: string,
+): Promise<{ path: string; pid: number; token: string }> {
+  const name = (await readdir(parent)).find((entry) =>
+    entry.endsWith(".claim"),
+  );
+  if (name === undefined) throw new Error("transaction claim not found");
+  const path = join(parent, name);
+  const value: unknown = JSON.parse(await readFile(path, "utf8"));
+  if (typeof value !== "object" || value === null) {
+    throw new Error("invalid transaction claim fixture");
+  }
+  const record = Object.fromEntries(Object.entries(value));
+  if (
+    typeof record["pid"] !== "number" ||
+    typeof record["token"] !== "string"
+  ) {
+    throw new Error("invalid transaction claim fixture");
+  }
+  return { path, pid: record["pid"], token: record["token"] };
+}
+
+async function expectProcessGone(pid: number): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await Bun.sleep(5);
+  }
+  throw new Error(`helper process ${pid} was not reaped`);
 }

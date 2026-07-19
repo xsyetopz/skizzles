@@ -7,6 +7,8 @@ type Checkpoint =
   | "initial-journal-ready"
   | "stage-created"
   | "stage-journal-ready"
+  | "stage-disposal-renamed"
+  | "stage-disposal-remove"
   | "backup-journal-ready"
   | "backup-ready"
   | "backup-validated"

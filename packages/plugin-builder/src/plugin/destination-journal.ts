@@ -4,7 +4,7 @@ import { PackagingError } from "./contract.ts";
 
 const OWNER_FILE = "owner.json";
 const JOURNAL_FILE = "journal.json";
-const PROTOCOL_VERSION = 1;
+const PROTOCOL_VERSION = 2;
 const PRIVATE_JSON_LIMIT = 16_384;
 const PRIVATE_JSON_DEPTH_LIMIT = 32;
 const DECIMAL_IDENTITY_PATTERN = /^(?:0|[1-9][0-9]*)$/u;
@@ -12,6 +12,8 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 interface LockOwner {
+  controllerPid: number;
+  controllerStartIdentity: string;
   pid: number;
   processStartIdentity: string;
   token: string;
@@ -59,8 +61,10 @@ function parsePrivateJson(text: string): unknown {
 function parseOwner(value: unknown): LockOwner {
   const record = requiredRecord(value);
   if (
-    Object.keys(record).length !== 4 ||
+    Object.keys(record).length !== 6 ||
     record["version"] !== PROTOCOL_VERSION ||
+    !Number.isSafeInteger(record["controllerPid"]) ||
+    typeof record["controllerStartIdentity"] !== "string" ||
     !Number.isSafeInteger(record["pid"]) ||
     typeof record["processStartIdentity"] !== "string" ||
     typeof record["token"] !== "string" ||
@@ -69,6 +73,8 @@ function parseOwner(value: unknown): LockOwner {
     throw new Error("invalid owner");
   }
   return {
+    controllerPid: Number(record["controllerPid"]),
+    controllerStartIdentity: String(record["controllerStartIdentity"]),
     version: PROTOCOL_VERSION,
     pid: Number(record["pid"]),
     processStartIdentity: record["processStartIdentity"],
@@ -196,8 +202,11 @@ function ownerIsActive(owner: LockOwner): boolean {
   );
 }
 
-async function ownerRemainsActive(owner: LockOwner): Promise<boolean> {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
+async function ownerRemainsActive(
+  owner: LockOwner,
+  attempts = 10,
+): Promise<boolean> {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (!ownerIsActive(owner)) return false;
     await Bun.sleep(10);
   }
@@ -206,15 +215,27 @@ async function ownerRemainsActive(owner: LockOwner): Promise<boolean> {
 
 function ownerForProcess(pid: number): LockOwner {
   const identity = processIdentity(pid);
-  if (identity.state !== "alive") {
+  const controller = processIdentity(process.pid);
+  if (identity.state !== "alive" || controller.state !== "alive") {
     throw new PackagingError("Plugin staging could not identify lock owner.");
   }
   return {
+    controllerPid: process.pid,
+    controllerStartIdentity: controller.value,
     version: PROTOCOL_VERSION,
     pid,
     processStartIdentity: identity.value,
     token: randomUUID(),
   };
+}
+
+function ownerControllerIsDead(owner: LockOwner): boolean {
+  const identity = processIdentity(owner.controllerPid);
+  return (
+    identity.state === "dead" ||
+    (identity.state === "alive" &&
+      identity.value !== owner.controllerStartIdentity)
+  );
 }
 
 function temporaryName(name: string, token: string): string {
@@ -227,6 +248,7 @@ export {
   JOURNAL_FILE,
   matches,
   OWNER_FILE,
+  ownerControllerIsDead,
   ownerForProcess,
   ownerIsActive,
   ownerRemainsActive,

@@ -110,7 +110,12 @@ async function replaceDirectoryTransaction(
     } catch (error) {
       if (error instanceof IncompleteRollbackError) throw error;
       const owner = claim.owner;
-      const stageCleanup = await cleanupOwned(stage, error);
+      const stageCleanup = await cleanupOwned(stage, error, {
+        afterRename: (path) =>
+          hooks.checkpoint?.("stage-disposal-renamed", path),
+        beforeRemove: (path) =>
+          hooks.checkpoint?.("stage-disposal-remove", path),
+      });
       const artifactsRemain = await transactionArtifactsRemain(
         target,
         owner.token,

@@ -214,8 +214,10 @@ async function removeOwnedDirectory(
       hooks.beforeRename,
     );
     await hooks.afterRename?.(owned.path);
+    await assertOwnedDirectory(owned, "private artifact");
   }
   await hooks.beforeRemove?.(owned.path);
+  await assertOwnedDirectory(owned, "private artifact");
   await rm(owned.path, { recursive: true });
   owned.present = false;
 }
@@ -294,6 +296,5 @@ export {
   quarantineTransactionLock,
   readOwnedJson,
   removeOwnedDirectory,
-  temporaryName,
   writeOwnedJson,
 };

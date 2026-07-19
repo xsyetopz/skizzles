@@ -226,6 +226,82 @@ describe("plugin destination transactions", () => {
     expect(await transactionArtifacts(parent)).toEqual([]);
   });
 
+  it("preserves a replacement swapped into backup disposal", async () => {
+    const parent = await temporaryRoot("skizzles-backup-disposal-swap-");
+    const destination = join(parent, "plugin");
+    const displaced = join(parent, "displaced-backup");
+    await write(parent, "plugin/old", "old\n");
+    let replacement = "";
+
+    await expect(
+      replaceDirectoryTransaction(
+        destination,
+        (stage) => writeFile(join(stage, "new"), "new\n"),
+        {
+          checkpoint: async (point, path) => {
+            if (point !== "backup-disposal-renamed" || path === undefined) {
+              return;
+            }
+            replacement = path;
+            await rename(path, displaced);
+            await mkdir(path, { mode: PRIVATE_MODE });
+            await writeFile(join(path, "attacker"), "preserve\n");
+          },
+        },
+      ),
+    ).resolves.toBeUndefined();
+    expect(await readFile(join(replacement, "attacker"), "utf8")).toBe(
+      "preserve\n",
+    );
+    let competingConstructionRan = false;
+    await expect(
+      replaceDirectoryTransaction(destination, () => {
+        competingConstructionRan = true;
+        return Promise.resolve();
+      }),
+    ).rejects.toThrow();
+    expect(competingConstructionRan).toBe(false);
+  });
+
+  it("preserves a replacement swapped into stage disposal", async () => {
+    const parent = await temporaryRoot("skizzles-stage-disposal-swap-");
+    const destination = join(parent, "plugin");
+    const displaced = join(parent, "displaced-stage");
+    let replacement = "";
+
+    await expect(
+      replaceDirectoryTransaction(
+        destination,
+        async (stage) => {
+          await writeFile(join(stage, "partial"), "partial\n");
+          throw new Error("construction failed");
+        },
+        {
+          checkpoint: async (point, path) => {
+            if (point !== "stage-disposal-remove" || path === undefined) {
+              return;
+            }
+            replacement = path;
+            await rename(path, displaced);
+            await mkdir(path, { mode: PRIVATE_MODE });
+            await writeFile(join(path, "attacker"), "preserve\n");
+          },
+        },
+      ),
+    ).rejects.toThrow("construction failed");
+    expect(await readFile(join(replacement, "attacker"), "utf8")).toBe(
+      "preserve\n",
+    );
+    let competingConstructionRan = false;
+    await expect(
+      replaceDirectoryTransaction(destination, () => {
+        competingConstructionRan = true;
+        return Promise.resolve();
+      }),
+    ).rejects.toThrow();
+    expect(competingConstructionRan).toBe(false);
+  });
+
   it("recovers every promotion crash point and rejects an unclaimed lock", async () => {
     for (const [point, expected, exitCode] of [
       ["construction", "old", 72],

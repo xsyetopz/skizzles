@@ -119,11 +119,11 @@ describe("plugin destination transaction adversarial recovery", () => {
     await mkdir(lock, { mode: 0o700 });
     await writeFile(
       join(lock, "owner.json"),
-      '{"version":1,"pid":999999999,"processStartIdentity":"dead","token":"../../outside-marker","\\u0074oken":"00000000-0000-4000-8000-000000000000"}\n',
+      '{"version":2,"controllerPid":999999999,"controllerStartIdentity":"dead","pid":999999999,"processStartIdentity":"dead","token":"../../outside-marker","\\u0074oken":"00000000-0000-4000-8000-000000000000"}\n',
     );
     await writeFile(
       join(lock, ".owner.json.00000000-0000-4000-8000-000000000000.tmp"),
-      '{"version":1,"pid":999999999,"processStartIdentity":"dead","token":"00000000-0000-4000-8000-000000000000"}\n',
+      '{"version":2,"controllerPid":999999999,"controllerStartIdentity":"dead","pid":999999999,"processStartIdentity":"dead","token":"00000000-0000-4000-8000-000000000000"}\n',
     );
 
     await expect(
@@ -135,11 +135,11 @@ describe("plugin destination transaction adversarial recovery", () => {
     await mkdir(lock, { mode: 0o700 });
     await writeFile(
       join(lock, "owner.json"),
-      '{"version":1,"pid":999999999,"processStartIdentity":"dead","token":"00000000-0000-4000-8000-000000000000"}\n',
+      '{"version":2,"controllerPid":999999999,"controllerStartIdentity":"dead","pid":999999999,"processStartIdentity":"dead","token":"00000000-0000-4000-8000-000000000000"}\n',
     );
     await writeFile(
       join(lock, "journal.json"),
-      '{"version":1,"state":"committed","\\u0073tate":"active","original":{"present":false}}\n',
+      '{"version":2,"state":"committed","\\u0073tate":"active","original":{"present":false}}\n',
     );
     await expect(
       replaceDirectoryTransaction(destination, () => Promise.resolve()),

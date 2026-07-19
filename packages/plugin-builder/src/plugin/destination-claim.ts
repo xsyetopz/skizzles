@@ -11,7 +11,6 @@ import {
 import type { LockOwner } from "./destination-journal.ts";
 import {
   ownerForProcess,
-  ownerRemainsActive,
   parseOwner,
   parsePrivateJson,
   UUID_PATTERN,
@@ -26,9 +25,14 @@ import {
   transactionClaimPath,
   transactionLockPath,
 } from "./destination-path.ts";
+import {
+  claimRetirementConfirmed,
+  RETIREMENT_HELPER_SOURCE,
+  removeRetirementArtifacts,
+  sendRetirementBinding,
+} from "./destination-retirement.ts";
 
 const CLAIM_MODE = 0o600;
-const HELPER_SOURCE = "await Bun.stdin.text();";
 
 // The claim temp and canonical path share a parent: POSIX hard-link creation
 // supplies atomic no-replace publication, and pipe EOF retires isolate owners.
@@ -66,7 +70,7 @@ async function acquireClaim(
   checkpoint?: ClaimCheckpoint,
 ): Promise<OwnedClaim> {
   await revalidateAncestors(target.ancestors);
-  const helper = Bun.spawn([process.execPath, "-e", HELPER_SOURCE], {
+  const helper = Bun.spawn([process.execPath, "-e", RETIREMENT_HELPER_SOURCE], {
     stderr: "ignore",
     stdin: "pipe",
     stdout: "ignore",
@@ -75,17 +79,21 @@ async function acquireClaim(
   const stopHelper = async () => {
     if (helperStopped) return;
     helperStopped = true;
-    helper.stdin.end();
+    try {
+      helper.stdin.end();
+    } catch {}
     await helper.exited;
   };
-  await checkpoint?.("claim-helper-ready");
-  const owner = ownerForProcess(helper.pid);
-  const canonical = transactionClaimPath(target);
-  const temporary = join(
-    target.parent,
-    `.skizzles-package-${target.key}-claim-${owner.token}.tmp`,
-  );
+  let retained = false;
+  let temporary: string | undefined;
   try {
+    await checkpoint?.("claim-helper-ready", String(helper.pid));
+    const owner = ownerForProcess(helper.pid);
+    const canonical = transactionClaimPath(target);
+    temporary = join(
+      target.parent,
+      `.skizzles-package-${target.key}-claim-${owner.token}.tmp`,
+    );
     const handle = await open(temporary, "wx", CLAIM_MODE);
     try {
       await handle.writeFile(`${JSON.stringify(owner)}\n`);
@@ -108,14 +116,22 @@ async function acquireClaim(
     if (claim === undefined || claim.owner.token !== owner.token) {
       throw new PackagingError("Plugin staging claim changed unexpectedly.");
     }
+    try {
+      await sendRetirementBinding(helper.stdin, claim);
+    } catch (error) {
+      await removeClaim(claim).catch(() => undefined);
+      throw error;
+    }
     await checkpoint?.("claim-published", canonical);
+    retained = true;
     return { ...claim, stopHelper };
-  } catch (error) {
-    await stopHelper();
-    throw error;
   } finally {
-    await rm(temporary, { force: true });
-    await syncDirectory(target.parent);
+    try {
+      if (temporary !== undefined) await rm(temporary, { force: true });
+      await syncDirectory(target.parent);
+    } finally {
+      if (!retained) await stopHelper();
+    }
   }
 }
 
@@ -169,6 +185,7 @@ async function retireClaim(
     await checkpoint?.("claim-release-ready", claim.path);
     if (remove) {
       await removeClaim(claim);
+      await removeRetirementArtifacts(claim);
       await checkpoint?.("claim-released", claim.path);
     }
   } finally {
@@ -189,7 +206,10 @@ async function recoverClaimTemps(target: TransactionTarget): Promise<void> {
     if (claim === undefined || claim.owner.token !== token) {
       throw lockedDestinationError();
     }
-    if (!(await ownerRemainsActive(claim.owner))) await removeClaim(claim);
+    if (await claimRetirementConfirmed(claim)) {
+      await removeClaim(claim);
+      await removeRetirementArtifacts(claim);
+    }
   }
 }
 
@@ -232,6 +252,8 @@ async function recoverUnknownClaimLock(lock: OwnedDirectory): Promise<void> {
 function sameOwner(left: LockOwner, right: LockOwner): boolean {
   return (
     left.version === right.version &&
+    left.controllerPid === right.controllerPid &&
+    left.controllerStartIdentity === right.controllerStartIdentity &&
     left.pid === right.pid &&
     left.processStartIdentity === right.processStartIdentity &&
     left.token === right.token
