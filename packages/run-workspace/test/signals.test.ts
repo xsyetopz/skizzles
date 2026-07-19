@@ -13,30 +13,37 @@ async function exists(path: string): Promise<boolean> {
 }
 
 describe("signal coordination", () => {
-  it("aborts and cleans the active workspace on a real Unix signal", async () => {
+  it("preserves signal identity and cleans on every handled Unix signal", async () => {
     if (process.platform === "win32") return;
-    const source = [
-      'import { create } from "./src/api.ts";',
-      "const workspace = await create({ handleSignals: true, gracefulStopMs: 20, forceStopMs: 20 });",
-      "console.log(workspace.path());",
-      "workspace.signal.addEventListener('abort', async () => {",
-      "  const report = await workspace.close();",
-      "  process.exit(report.state === 'deleted' ? 143 : 2);",
-      "}, { once: true });",
-      "setInterval(() => undefined, 1000);",
-    ].join("\n");
-    const child = Bun.spawn([process.execPath, "-e", source], {
-      cwd: new URL("..", import.meta.url).pathname,
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    const reader = child.stdout.getReader();
-    const first = await reader.read();
-    const root = new TextDecoder().decode(first.value).trim();
-    expect(root).not.toBe("");
-    process.kill(child.pid, "SIGTERM");
-    expect(await child.exited).toBe(143);
-    expect(await exists(root)).toBeFalse();
+    for (const [signal, status] of [
+      ["SIGHUP", 129],
+      ["SIGINT", 130],
+      ["SIGTERM", 143],
+    ] as const) {
+      const source = [
+        'import { create } from "./src/api.ts";',
+        "const workspace = await create({ handleSignals: true, gracefulStopMs: 20, forceStopMs: 20 });",
+        "console.log(workspace.path());",
+        "workspace.signal.addEventListener('abort', async () => {",
+        "  const reason = workspace.signal.reason;",
+        "  const report = await workspace.close();",
+        `  process.exit(report.state === 'deleted' && reason?.signal === '${signal}' ? ${status} : 2);`,
+        "}, { once: true });",
+        "setInterval(() => undefined, 1000);",
+      ].join("\n");
+      const child = Bun.spawn([process.execPath, "-e", source], {
+        cwd: new URL("..", import.meta.url).pathname,
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const reader = child.stdout.getReader();
+      const first = await reader.read();
+      const root = new TextDecoder().decode(first.value).trim();
+      expect(root).not.toBe("");
+      process.kill(child.pid, signal);
+      expect(await child.exited).toBe(status);
+      expect(await exists(root)).toBeFalse();
+    }
   }, 10_000);
 
   it("escalates registered children on a repeated Unix signal", async () => {

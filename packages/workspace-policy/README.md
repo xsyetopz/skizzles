@@ -98,12 +98,18 @@ and Gitleaks release provenance and Linux x64/macOS arm64 archive contracts. A
 code-owned immutable authority independently binds every version, license, command,
 pattern, release URL, archive digest, executable member, and GitHub API identity
 field; mutually consistent manifest drift still fails.
-Unsupported platforms fail deterministically. Archives are downloaded with byte
-and time bounds into an owner-only temporary directory. Every redirect hop is
+Unsupported platforms fail deterministically. Each gate invocation first runs the
+bounded stale-workspace janitor, then creates exactly one marked
+`@skizzles/run-workspace` root. Archives, extracted tools, causal probes, and reports
+all remain beneath that root until whole-root cleanup. Archives are downloaded with byte
+and time bounds. Every redirect hop is
 manually host/protocol checked; GitHub release API asset identity, byte count, and
 digest are pinned; bytes are verified before selective tar extraction, checked for
-contained regular executable members, version-tested, and removed on success or
-failure. No package manifest carries these tools and no persistent tool cache is used.
+contained regular executable members, and version-tested. Every tool and Git process
+registers its complete detached process-group scope before it is awaited; cancellation,
+timeouts, output overflow, exceptions, and normal completion stop or confirm children
+before the marked root is deleted. Cleanup failures retain the root and fail the gate.
+No package manifest carries these tools and no persistent tool cache is used.
 
 The gate passes every real `.github/workflows/*.{yml,yaml}` file to actionlint
 with an explicit pinned ShellCheck executable, parses actionlint JSON output, and
@@ -114,7 +120,7 @@ merge-derived, tagged, quoted/escaped, continued, duplicate, and ambiguous actio
 values are rejected rather than matched by reference text elsewhere in the file.
 External actions require exact untagged plain source bytes; unrelated `run` block
 scalars remain supported. Gitleaks scans the current tree and complete Git
-history with 100% redaction and ephemeral owner-only JSON reports. Only exit zero
+history with 100% redaction and owner-only JSON reports held inside the run root. Only exit zero
 plus an exact empty report and clean diagnostics is clean; only exit 10 plus a
 nonempty fully redacted report is findings. Other statuses, warning/error/skip
 diagnostics outside the pinned stderr grammar, or mismatched reports fail

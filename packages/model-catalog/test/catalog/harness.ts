@@ -1,18 +1,15 @@
-import {
-  chmodSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  rmSync,
-} from "node:fs";
+import { chmodSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
+import {
+  create,
+  type OwnedChild,
+  type RunWorkspace,
+} from "@skizzles/run-workspace";
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
-const CHILD_CLEANUP_GRACE_MS = 100;
-const CHILD_CLEANUP_TIMEOUT_MS = 1_000;
 const READINESS_POLL_MS = 10;
-const roots: string[] = [];
+const fixtures: RunWorkspace[] = [];
 
 export type FakeCodexCommand = "bundled" | "preflight" | "version";
 
@@ -20,6 +17,7 @@ export interface FakeChildRecord {
   command: FakeCodexCommand;
   pid: number;
   processGroup: number;
+  runRoot: string;
   token: string;
 }
 
@@ -43,17 +41,19 @@ function parseFakeChildRecord(value: unknown): FakeChildRecord | undefined {
   const command = "command" in value ? value.command : undefined;
   const pid = "pid" in value ? value.pid : undefined;
   const processGroup = "processGroup" in value ? value.processGroup : undefined;
+  const runRoot = "runRoot" in value ? value.runRoot : undefined;
   const token = "token" in value ? value.token : undefined;
   if (
     !isFakeCodexCommand(command) ||
     !isPositiveSafeInteger(pid) ||
     !isPositiveSafeInteger(processGroup) ||
+    typeof runRoot !== "string" ||
     typeof token !== "string" ||
     !/^skizzles-model-catalog-descendant-[0-9a-f-]{36}$/.test(token)
   ) {
     return undefined;
   }
-  return { command, pid, processGroup, token };
+  return { command, pid, processGroup, runRoot, token };
 }
 
 export function fakeChildRecords(root: string): FakeChildRecord[] {
@@ -132,31 +132,20 @@ function signalRegisteredGroup(
 
 async function waitForRegisteredChildExit(
   record: FakeChildRecord,
-  timeoutMs: number,
-): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
+): Promise<void> {
   while (isRegisteredChild(record)) {
-    if (Date.now() >= deadline) {
-      return false;
-    }
-    await Bun.sleep(
-      Math.min(READINESS_POLL_MS, Math.max(1, deadline - Date.now())),
-    );
+    await Bun.sleep(READINESS_POLL_MS);
   }
-  return true;
 }
 
-async function terminateRegisteredChild(
-  record: FakeChildRecord,
-): Promise<void> {
-  signalRegisteredGroup(record, "SIGTERM");
-  if (await waitForRegisteredChildExit(record, CHILD_CLEANUP_GRACE_MS)) {
-    return;
-  }
-  signalRegisteredGroup(record, "SIGKILL");
-  if (!(await waitForRegisteredChildExit(record, CHILD_CLEANUP_TIMEOUT_MS))) {
-    throw new Error(`fake Codex descendant ${record.pid} survived cleanup`);
-  }
+function registeredChild(record: FakeChildRecord): OwnedChild {
+  return {
+    label: `fake-codex-${record.command}-${record.pid}`,
+    pid: record.pid,
+    requestStop: () => signalRegisteredGroup(record, "SIGTERM"),
+    forceStop: () => signalRegisteredGroup(record, "SIGKILL"),
+    waitForExit: () => waitForRegisteredChildExit(record),
+  };
 }
 
 export async function awaitFakeChildReadiness(
@@ -181,12 +170,17 @@ export async function awaitFakeChildReadiness(
 
 export async function cleanupCatalogRoots(): Promise<void> {
   const failures: unknown[] = [];
-  for (const root of roots.splice(0)) {
+  for (const fixture of fixtures.splice(0)) {
     try {
-      for (const record of fakeChildRecords(root)) {
-        await terminateRegisteredChild(record);
+      for (const record of fakeChildRecords(fixture.path())) {
+        fixture.registerChild(registeredChild(record));
       }
-      rmSync(root, { recursive: true, force: true });
+      const report = await fixture.close();
+      if (report.state !== "deleted") {
+        failures.push(
+          new Error(`model catalog fixture cleanup failed: ${report.error}`),
+        );
+      }
     } catch (error) {
       failures.push(error);
     }
@@ -252,16 +246,10 @@ export function source(version: "v1" | "v2" = "v1"): {
   };
 }
 
-export function createCatalogRoot(): string {
-  const path = join(
-    // biome-ignore lint/complexity/useLiteralKeys: Node's ProcessEnv is an index-signature boundary under strict TypeScript.
-    realpathSync(process.env["TMPDIR"] ?? "/tmp"),
-    `skizzles-model-catalog-${crypto.randomUUID()}`,
-  );
-  roots.push(path);
-  mkdirSync(path, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
-  chmodSync(path, PRIVATE_DIRECTORY_MODE);
-  return path;
+export async function createCatalogRoot(): Promise<string> {
+  const fixture = await create({ gracefulStopMs: 100, forceStopMs: 100 });
+  fixtures.push(fixture);
+  return fixture.path();
 }
 
 export async function createFakeCodex(
@@ -270,6 +258,7 @@ export async function createFakeCodex(
   behavior:
     | "descendant"
     | "descendant-hang"
+    | "cleanup-failure"
     | "hang"
     | "initialization-hang"
     | "noisy"
@@ -278,8 +267,27 @@ export async function createFakeCodex(
   version = "0.145.0-alpha.18",
 ): Promise<string> {
   const codex = join(path, "codex");
+  const descendantScript = `
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
+let recorded = false;
+process.on("SIGTERM", () => {
+  if (recorded) return;
+  recorded = true;
+  const root = process.env.SKIZZLES_RUN_ROOT;
+  const lifecycle = process.env.SKIZZLES_LIFECYCLE_PATH;
+  const token = process.env.SKIZZLES_CHILD_TOKEN;
+  if (root && lifecycle && token && existsSync(root)) {
+    appendFileSync(lifecycle, token + "\\n");
+  }
+});
+writeFileSync(process.env.SKIZZLES_CHILD_READY, "ready\\n");
+await Bun.sleep(10_000);
+`;
   const script = `#!/usr/bin/env bun
+import { unlink } from "node:fs/promises";
+import { dirname } from "node:path";
 const args = Bun.argv.slice(2);
+const isolatedRoot = dirname(process.env.HOME);
 if (${JSON.stringify(behavior)} === "initialization-hang") {
   await Bun.sleep(10_000);
   process.exit(0);
@@ -294,27 +302,53 @@ if (${JSON.stringify(behavior)}.startsWith("descendant")) {
       ? "bundled"
       : "preflight";
   const token = "skizzles-model-catalog-descendant-" + crypto.randomUUID();
+  const runRoot = dirname(process.env.HOME);
+  const ready = ${JSON.stringify(path)} + "/child-ready-" + token;
   const descendant = Bun.spawn([
-    "/bin/sh",
-    "-c",
-    "trap '' TERM; while :; do sleep 1; done",
+    process.execPath,
+    "-e",
+    ${JSON.stringify(descendantScript)},
     token,
-  ], { stdin: "ignore", stdout: "inherit", stderr: "inherit" });
+  ], {
+    stdin: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
+    env: {
+      ...process.env,
+      SKIZZLES_CHILD_TOKEN: token,
+      SKIZZLES_CHILD_READY: ready,
+      SKIZZLES_LIFECYCLE_PATH: ${JSON.stringify(join(path, "child-lifecycle"))},
+      SKIZZLES_RUN_ROOT: runRoot,
+    },
+  });
+  for (let attempt = 0; attempt < 100 && !(await Bun.file(ready).exists()); attempt += 1) {
+    await Bun.sleep(10);
+  }
+  if (!(await Bun.file(ready).exists())) {
+    throw new Error("fake descendant did not initialize");
+  }
   const record = {
     command,
     pid: descendant.pid,
     processGroup: process.pid,
+    runRoot,
     token,
   };
   await Bun.write(marker, previous + JSON.stringify(record) + "\\n");
 }
 if (${JSON.stringify(behavior)} === "probe") {
   const home = process.env.HOME;
+  const runRoot = dirname(home);
+  const marker = JSON.parse(await Bun.file(runRoot + "/.skizzles-run-workspace.json").text());
   const observationPath = ${JSON.stringify(join(path, "child-observations.ndjson"))};
   const observationFile = Bun.file(observationPath);
   const previous = await observationFile.exists() ? await observationFile.text() : "";
   const observation = {
     home,
+    runRoot,
+    runId: marker.runId,
+    markerRoot: marker.root,
+    markerState: marker.state,
     codexHome: process.env.CODEX_HOME,
     tmpdir: process.env.TMPDIR,
     sentinel: process.env.SKIZZLES_CHILD_SENTINEL ?? null,
@@ -355,6 +389,10 @@ if (process.env.HOME !== process.env.CODEX_HOME) {
 if (!candidate.models.every((entry) => typeof entry.display_name === "string")) {
   console.error("missing field display_name");
   process.exit(1);
+}
+if (${JSON.stringify(behavior)} === "cleanup-failure") {
+  await Bun.write(${JSON.stringify(join(path, "failed-run-root"))}, isolatedRoot);
+  await unlink(isolatedRoot + "/.skizzles-run-workspace.json");
 }
 console.log(JSON.stringify(candidate));
 process.exit(0);

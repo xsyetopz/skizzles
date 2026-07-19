@@ -75,8 +75,10 @@ Process-start identity binds Linux boot ID plus `/proc/<pid>/stat` field 22, mac
 identity plus normalized `ps -o lstart=`, and Windows process creation time from an
 absolute system PowerShell executable. Provider failure and access denial are
 `unknown`, never stale. Signal handling is installed only for opted-in active
-workspaces, aborts work before cleanup, coordinates concurrent roots, and unregisters
-when unused. `SIGKILL` and crashes remain janitor responsibility.
+workspaces, aborts work before cleanup with a structured handled-signal identity,
+coordinates concurrent roots, and unregisters when unused. Executable composition
+roots map that identity to conventional terminal status. `SIGKILL` and crashes remain
+janitor responsibility.
 
 ## Separate lifecycle classes
 

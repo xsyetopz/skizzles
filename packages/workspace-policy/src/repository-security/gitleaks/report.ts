@@ -1,12 +1,6 @@
-import {
-  chmod,
-  lstat,
-  mkdtemp,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { chmod, lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { RunWorkspace } from "@skizzles/run-workspace";
 import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "../process.ts";
 
 const FINDINGS_EXIT_CODE = 10;
@@ -84,41 +78,48 @@ interface GitleaksOutcome {
 
 type GitleaksScanner = (
   invocation: GitleaksInvocation,
+  workspace: RunWorkspace,
 ) => Promise<GitleaksRawResult>;
 
 async function invokeGitleaks(
   invocation: GitleaksInvocation,
+  workspace: RunWorkspace,
 ): Promise<GitleaksRawResult> {
-  const reportDirectory = await mkdtemp(join(invocation.reportRoot, "scan-"));
+  const reportDirectory = join(
+    invocation.reportRoot,
+    `scan-${crypto.randomUUID()}`,
+  );
   const reportPath = join(reportDirectory, "findings.json");
-  try {
-    await chmod(reportDirectory, PRIVATE_DIRECTORY_MODE);
-    await writeFile(reportPath, "", { flag: "wx", mode: PRIVATE_FILE_MODE });
-    await chmod(reportPath, PRIVATE_FILE_MODE);
-    const args = buildGitleaksArguments(invocation, reportPath);
-    const result = await runBoundedCommand(invocation.executable, args, {
+  await mkdir(reportDirectory, { mode: PRIVATE_DIRECTORY_MODE });
+  await chmod(reportDirectory, PRIVATE_DIRECTORY_MODE);
+  await writeFile(reportPath, "", { flag: "wx", mode: PRIVATE_FILE_MODE });
+  await chmod(reportPath, PRIVATE_FILE_MODE);
+  const args = buildGitleaksArguments(invocation, reportPath);
+  const result = await runBoundedCommand(
+    workspace,
+    invocation.executable,
+    args,
+    {
       label: `gitleaks ${invocation.mode}`,
       timeoutMs: GITLEAKS_TIMEOUT_MS,
       outputLimitBytes: MAXIMUM_REPORT_BYTES,
       env: REPOSITORY_TOOL_ENV,
       fileCreationMask: PRIVATE_FILE_CREATION_MASK,
-    });
-    const metadata = await lstat(reportPath);
-    if (
-      !metadata.isFile() ||
-      metadata.isSymbolicLink() ||
-      metadata.nlink !== 1 ||
-      (metadata.mode & 0o777) !== PRIVATE_FILE_MODE
-    ) {
-      throw new Error("gitleaks report is not one owner-only regular file");
-    }
-    if (metadata.size > MAXIMUM_REPORT_BYTES) {
-      throw new Error("gitleaks report exceeded its byte limit");
-    }
-    return { ...result, report: await readFile(reportPath, "utf8") };
-  } finally {
-    await rm(reportDirectory, { force: true, recursive: true });
+    },
+  );
+  const metadata = await lstat(reportPath);
+  if (
+    !metadata.isFile() ||
+    metadata.isSymbolicLink() ||
+    metadata.nlink !== 1 ||
+    (metadata.mode & 0o777) !== PRIVATE_FILE_MODE
+  ) {
+    throw new Error("gitleaks report is not one owner-only regular file");
   }
+  if (metadata.size > MAXIMUM_REPORT_BYTES) {
+    throw new Error("gitleaks report exceeded its byte limit");
+  }
+  return { ...result, report: await readFile(reportPath, "utf8") };
 }
 
 function buildGitleaksArguments(
@@ -214,7 +215,7 @@ function parseDiagnostics(
   if (
     body.some(
       (line) =>
-        !SCANNED_LINE_PATTERN.test(line) && !COMMITS_LINE_PATTERN.test(line),
+        !(SCANNED_LINE_PATTERN.test(line) || COMMITS_LINE_PATTERN.test(line)),
     ) ||
     body.filter((line) => COMMITS_LINE_PATTERN.test(line)).length > 1
   ) {

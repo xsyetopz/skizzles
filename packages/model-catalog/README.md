@@ -17,3 +17,16 @@ LaunchAgent template is `assets/com.openai.skizzles-model-catalog.plist`; see
 `docs/installation.md` for explicit host wiring. Plugin packaging bundles the
 facade into the stable generated `runtime/model-catalog.ts` executable;
 canonical internal modules are not copied into the plugin.
+
+## Runtime lifecycle
+
+Refresh probes currently require Unix detached process-group ownership. Windows
+refresh fails before stale cleanup, filesystem mutation, or child spawn until a
+Job Object-backed whole-tree adapter is implemented; direct-PID termination is
+not treated as process-group ownership.
+
+Durable output promotion is the cancellation commit point. Cancellation checked
+immediately before that atomic rename leaves the previous output and status
+unchanged. Once output promotion succeeds, refresh finishes the matching bounded
+status document even if cancellation arrives afterward, so consumers never
+observe a cancellation-induced output/status half-commit.

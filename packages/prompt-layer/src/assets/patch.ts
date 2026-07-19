@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import process from "node:process";
 import { validateText } from "../content-integrity.ts";
 import { PromptLayerError } from "../lifecycle/contract.ts";
+import type { PromptWorkspace } from "../lifecycle/workspace.ts";
 import {
   readRequiredFile,
   validateSafeRelativePath,
@@ -223,62 +223,60 @@ export async function applyPatchStrict(
   baseline: Buffer,
   patch: Buffer,
   upstreamPath: string,
+  workspace: PromptWorkspace,
 ): Promise<Buffer> {
   const reconstructed = validatePatch(patch, upstreamPath, baseline);
-  const root = await mkdtemp(join(tmpdir(), "skizzles-prompt-apply-"));
-  try {
-    const target = join(root, upstreamPath);
-    const patchPath = join(root, "prompt.patch");
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, baseline);
-    await writeFile(patchPath, patch);
-    git(root, ["init", "-q"]);
-    git(root, ["apply", "--check", "--whitespace=error-all", patchPath]);
-    git(root, ["apply", "--whitespace=error-all", patchPath]);
-    const output = await readRequiredFile(target, "strictly applied prompt");
-    validateText(output, "strictly applied prompt");
-    if (!output.equals(reconstructed)) {
-      throw new PromptLayerError(
-        "git apply output differs from exact-position patch reconstruction.",
-      );
-    }
-    return output;
-  } finally {
-    await rm(root, { force: true, recursive: true });
+  const root = await workspace.directory("apply");
+  const target = join(root, upstreamPath);
+  const patchPath = join(root, "prompt.patch");
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, baseline);
+  await writeFile(patchPath, patch);
+  workspace.throwIfAborted();
+  git(root, ["init", "-q"]);
+  git(root, ["apply", "--check", "--whitespace=error-all", patchPath]);
+  git(root, ["apply", "--whitespace=error-all", patchPath]);
+  const output = await readRequiredFile(target, "strictly applied prompt");
+  validateText(output, "strictly applied prompt");
+  if (!output.equals(reconstructed)) {
+    throw new PromptLayerError(
+      "git apply output differs from exact-position patch reconstruction.",
+    );
   }
+  workspace.throwIfAborted();
+  return output;
 }
 
 export async function createPatch(
   baseline: Buffer,
   candidate: Buffer,
   upstreamPath: string,
+  workspace: PromptWorkspace,
 ): Promise<Buffer> {
-  const root = await mkdtemp(join(tmpdir(), "skizzles-prompt-author-"));
-  try {
-    const target = join(root, upstreamPath);
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, baseline);
-    git(root, ["init", "-q"]);
-    git(root, ["add", "--", upstreamPath]);
-    await writeFile(target, candidate);
-    const patch = git(root, [
-      "diff",
-      "--no-ext-diff",
-      "--no-color",
-      "--no-renames",
-      "--full-index",
-      "--",
-      upstreamPath,
-    ]);
-    if (patch.byteLength === 0) {
-      throw new PromptLayerError(
-        "Reviewed candidate must modify the pinned baseline.",
-      );
-    }
-    return patch;
-  } finally {
-    await rm(root, { force: true, recursive: true });
+  const root = await workspace.directory("author");
+  const target = join(root, upstreamPath);
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, baseline);
+  workspace.throwIfAborted();
+  git(root, ["init", "-q"]);
+  git(root, ["add", "--", upstreamPath]);
+  await writeFile(target, candidate);
+  const patch = git(root, [
+    "diff",
+    "--no-ext-diff",
+    "--no-color",
+    "--no-renames",
+    "--full-index",
+    "--",
+    upstreamPath,
+  ]);
+  if (patch.byteLength === 0) {
+    throw new PromptLayerError(
+      "Reviewed candidate must modify the pinned baseline.",
+    );
   }
+  workspace.throwIfAborted();
+  return patch;
 }
 
 function git(cwd: string, args: string[]): Buffer {

@@ -1,26 +1,21 @@
-import {
-  lstat,
-  mkdir,
-  mkdtemp,
-  realpath,
-  rm,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import process from "node:process";
+import type { RunWorkspace } from "@skizzles/run-workspace";
 import {
   assertCompleteCatalog,
   type JsonObject,
   LUNA_MODEL,
   parseJson,
 } from "./catalog/schema.ts";
+import { codexProcessGroup } from "./codex-group.ts";
 
 const SEMANTIC_VERSION =
   /(?<![0-9A-Za-z-])((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)(?=\s|$)/;
 
-type ChildFailure =
+export type ChildFailure =
   | "bundled-exit"
+  | "cancelled"
   | "invalid-bundled-json"
   | "invalid-preflight-json"
   | "lifecycle"
@@ -30,12 +25,14 @@ type ChildFailure =
   | "stdout-limit"
   | "stream"
   | "timeout"
+  | "unsupported-platform"
   | "unsafe-binary"
   | "version-exit"
   | "version-format";
 
 const CHILD_FAILURE_MESSAGES: Record<ChildFailure, string> = {
   "bundled-exit": "codex bundled catalog command failed",
+  cancelled: "codex command was cancelled",
   "invalid-bundled-json": "codex bundled catalog returned invalid JSON",
   "invalid-preflight-json": "catalog preflight returned invalid JSON",
   lifecycle: "codex command cleanup failed",
@@ -45,6 +42,8 @@ const CHILD_FAILURE_MESSAGES: Record<ChildFailure, string> = {
   "stdout-limit": "codex stdout exceeds its byte limit",
   stream: "codex command stream failed",
   timeout: "codex command timed out",
+  "unsupported-platform":
+    "Codex child process groups are unsupported on Windows until Job Object ownership is implemented",
   "unsafe-binary": "codex binary must be a physical absolute regular file",
   "version-exit": "codex version command failed",
   "version-format":
@@ -73,9 +72,35 @@ interface CommandResult {
   exitCode: number;
 }
 
+type CodexSubprocess = Bun.Subprocess<"ignore", "pipe", "pipe">;
+
+interface CodexSpawnOptions {
+  readonly stdin: "ignore";
+  readonly stdout: "pipe";
+  readonly stderr: "pipe";
+  readonly env: Record<string, string>;
+  readonly detached: true;
+}
+
+export interface CodexRuntime {
+  readonly platform: NodeJS.Platform;
+  spawn: (command: string[], options: CodexSpawnOptions) => CodexSubprocess;
+}
+
+export const systemCodexRuntime: CodexRuntime = {
+  platform: process.platform,
+  spawn: (command, options) => Bun.spawn(command, options),
+};
+
 type ArgumentsFactory =
   | string[]
   | ((isolatedHome: string) => Promise<string[]>);
+
+export function requireOwnedProcessScope(platform: NodeJS.Platform): void {
+  if (platform === "win32") {
+    throw new CodexChildError("unsupported-platform");
+  }
+}
 
 function commandEnvironment(home: string): Record<string, string> {
   return {
@@ -92,9 +117,9 @@ function commandEnvironment(home: string): Record<string, string> {
   };
 }
 
-async function isolatedHome(): Promise<string> {
-  const physicalTemp = await realpath(tmpdir());
-  const home = await mkdtemp(join(physicalTemp, "skizzles-model-catalog-"));
+async function isolatedHome(workspace: RunWorkspace): Promise<string> {
+  const home = workspace.path(`codex-home-${crypto.randomUUID()}`);
+  await mkdir(home, { mode: 0o700 });
   for (const directory of ["tmp", "xdg-cache", "xdg-config", "xdg-data"]) {
     await mkdir(join(home, directory), { mode: 0o700 });
   }
@@ -116,38 +141,6 @@ async function validateCodexBinary(path: string): Promise<void> {
     }
     throw new CodexChildError("unsafe-binary");
   }
-}
-
-function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
-  try {
-    if (process.platform === "win32") {
-      process.kill(pid, signal);
-    } else {
-      process.kill(-pid, signal);
-    }
-    return true;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ESRCH") {
-      return false;
-    }
-    throw new CodexChildError("lifecycle");
-  }
-}
-
-async function terminateGroup(pid: number, graceMs: number): Promise<boolean> {
-  if (!signalGroup(pid, "SIGTERM")) {
-    return false;
-  }
-  const deadline = Date.now() + graceMs;
-  while (Date.now() < deadline) {
-    await Bun.sleep(Math.min(10, Math.max(1, deadline - Date.now())));
-    if (!signalGroup(pid, 0)) {
-      return true;
-    }
-  }
-  signalGroup(pid, "SIGKILL");
-  await Bun.sleep(10);
-  return true;
 }
 
 function concatenate(chunks: Uint8Array[], length: number): Uint8Array {
@@ -200,18 +193,21 @@ async function collectBounded(
 }
 
 async function runIsolatedCodex(
+  workspace: RunWorkspace,
   codexBinary: string,
   argsFactory: ArgumentsFactory,
   limits: CommandLimits,
+  runtime: CodexRuntime,
 ): Promise<CommandResult> {
+  requireOwnedProcessScope(runtime.platform);
   await validateCodexBinary(codexBinary);
-  const home = await isolatedHome();
+  const home = await isolatedHome(workspace);
   try {
     const args =
       typeof argsFactory === "function" ? await argsFactory(home) : argsFactory;
-    let child: Bun.Subprocess<"ignore", "pipe", "pipe">;
+    let child: CodexSubprocess;
     try {
-      child = Bun.spawn([codexBinary, ...args], {
+      child = runtime.spawn([codexBinary, ...args], {
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
@@ -221,18 +217,23 @@ async function runIsolatedCodex(
     } catch {
       throw new CodexChildError("spawn");
     }
+    const group = codexProcessGroup(child.pid, `codex-${child.pid}`);
+    try {
+      workspace.registerChild(group);
+    } catch {
+      await group.stopWithin(limits.terminationGraceMs).catch(() => undefined);
+      await child.exited.catch(() => undefined);
+      throw new CodexChildError("lifecycle");
+    }
 
     const controller = new AbortController();
     let failure: ChildFailure | undefined;
     let cleanupFailed = false;
-    let cleanup: Promise<boolean> | undefined;
-    const cleanGroup = (): Promise<boolean> => {
-      cleanup ??= terminateGroup(child.pid, limits.terminationGraceMs).catch(
-        () => {
-          cleanupFailed = true;
-          return false;
-        },
-      );
+    let cleanup: Promise<void> | undefined;
+    const cleanGroup = (): Promise<void> => {
+      cleanup ??= group.stopWithin(limits.terminationGraceMs).catch(() => {
+        cleanupFailed = true;
+      });
       return cleanup;
     };
     const stop = (reason: ChildFailure): void => {
@@ -240,12 +241,16 @@ async function runIsolatedCodex(
       controller.abort();
       cleanGroup().catch(() => undefined);
     };
+    const cancel = (): void => stop("cancelled");
+    workspace.signal.addEventListener("abort", cancel, { once: true });
+    if (workspace.signal.aborted) {
+      cancel();
+    }
     const timer = setTimeout(() => stop("timeout"), limits.timeoutMs);
     try {
       const exited = child.exited.then(async (exitCode) => {
-        if (await cleanGroup()) {
-          controller.abort();
-        }
+        await cleanGroup();
+        controller.abort();
         return exitCode;
       });
       const [stdout, , exitCode] = await Promise.all([
@@ -275,6 +280,7 @@ async function runIsolatedCodex(
       return { stdout, exitCode };
     } finally {
       clearTimeout(timer);
+      workspace.signal.removeEventListener("abort", cancel);
       controller.abort();
       await cleanGroup();
       await child.exited.catch(() => undefined);
@@ -284,10 +290,6 @@ async function runIsolatedCodex(
       throw error;
     }
     throw new CodexChildError("lifecycle");
-  } finally {
-    await rm(home, { recursive: true, force: true }).catch(() => {
-      throw new CodexChildError("lifecycle");
-    });
   }
 }
 
@@ -303,13 +305,21 @@ function parseJsonOutput(
 }
 
 export async function clientVersion(
+  workspace: RunWorkspace,
   codexBinary: string,
   limits: CommandLimits,
+  runtime: CodexRuntime = systemCodexRuntime,
 ): Promise<string> {
-  const result = await runIsolatedCodex(codexBinary, ["--version"], {
-    ...limits,
-    maxStdoutBytes: Math.min(limits.maxStdoutBytes, 1024),
-  });
+  const result = await runIsolatedCodex(
+    workspace,
+    codexBinary,
+    ["--version"],
+    {
+      ...limits,
+      maxStdoutBytes: Math.min(limits.maxStdoutBytes, 1024),
+    },
+    runtime,
+  );
   if (result.exitCode !== 0) {
     throw new CodexChildError("version-exit");
   }
@@ -322,13 +332,17 @@ export async function clientVersion(
 }
 
 export async function bundledCatalog(
+  workspace: RunWorkspace,
   codexBinary: string,
   limits: CommandLimits,
+  runtime: CodexRuntime = systemCodexRuntime,
 ): Promise<JsonObject> {
   const result = await runIsolatedCodex(
+    workspace,
     codexBinary,
     ["debug", "models", "--bundled"],
     limits,
+    runtime,
   );
   if (result.exitCode !== 0) {
     throw new CodexChildError("bundled-exit");
@@ -339,11 +353,14 @@ export async function bundledCatalog(
 }
 
 export async function preflightCatalog(
+  workspace: RunWorkspace,
   codexBinary: string,
   contents: string,
   limits: CommandLimits,
+  runtime: CodexRuntime = systemCodexRuntime,
 ): Promise<void> {
   const result = await runIsolatedCodex(
+    workspace,
     codexBinary,
     async (home) => {
       const candidate = join(home, "candidate.json");
@@ -356,6 +373,7 @@ export async function preflightCatalog(
       ];
     },
     limits,
+    runtime,
   );
   if (result.exitCode !== 0) {
     throw new CodexChildError("preflight-exit");

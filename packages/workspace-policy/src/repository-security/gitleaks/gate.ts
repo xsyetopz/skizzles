@@ -1,5 +1,6 @@
-import { chmod, mkdir, readdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { RunWorkspace } from "@skizzles/run-workspace";
 import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "../process.ts";
 import {
   classifyGitleaksResult,
@@ -20,8 +21,25 @@ const DIGIT_CODE_POINT = 48;
 const UPPER_CODE_POINT_OFFSET = 55;
 const LOWER_CODE_POINT_OFFSET = 61;
 const GIT_EXECUTABLE = "/usr/bin/git";
+const UNREADABLE_WARNING_PATTERN = /\bWRN skipping file: permission denied\b/iu;
+
+interface GitleaksGateContext {
+  readonly workspace: RunWorkspace;
+  readonly probeRoot: string;
+  readonly reportRoot: string;
+  readonly gitleaks: string;
+  readonly config: string;
+  readonly scanner: GitleaksScanner;
+}
+
+interface GitleaksScanTarget {
+  readonly mode: "dir" | "git";
+  readonly root: string;
+  readonly logOptions?: readonly string[];
+}
 
 async function runGitleaksGate(
+  runWorkspace: RunWorkspace,
   workspaceRoot: string,
   probeRoot: string,
   gitleaks: string,
@@ -31,47 +49,34 @@ async function runGitleaksGate(
   const reportRoot = join(probeRoot, "reports");
   await mkdir(reportRoot, { mode: PRIVATE_DIRECTORY_MODE });
   await chmod(reportRoot, PRIVATE_DIRECTORY_MODE);
-  await requireCompleteHistory(workspaceRoot);
-  expectClean(
-    await scanner({
-      executable: gitleaks,
-      mode: "dir",
-      config,
-      root: workspaceRoot,
-      reportRoot,
-    }),
-    "repository tree",
-  );
-  expectClean(
-    await scanner({
-      executable: gitleaks,
-      mode: "git",
-      config,
-      root: workspaceRoot,
-      reportRoot,
-      logOptions: ["--all"],
-    }),
-    "repository history",
-  );
-  await runGitleaksCausalProbes(
+  const context: GitleaksGateContext = {
+    workspace: runWorkspace,
     probeRoot,
     reportRoot,
     gitleaks,
     config,
     scanner,
+  };
+  await requireCompleteHistory(runWorkspace, workspaceRoot);
+  expectClean(
+    await scan(context, { mode: "dir", root: workspaceRoot }),
+    "repository tree",
   );
-  if ((await readdir(reportRoot)).length > 0) {
-    throw new Error("gitleaks retained an ephemeral report artifact");
-  }
+  expectClean(
+    await scan(context, {
+      mode: "git",
+      root: workspaceRoot,
+      logOptions: ["--all"],
+    }),
+    "repository history",
+  );
+  await runGitleaksCausalProbes(context);
 }
 
 async function runGitleaksCausalProbes(
-  probeRoot: string,
-  reportRoot: string,
-  gitleaks: string,
-  config: string,
-  scanner: GitleaksScanner,
+  context: GitleaksGateContext,
 ): Promise<void> {
+  const { probeRoot } = context;
   const directoryProbe = join(probeRoot, "gitleaks-directory");
   await mkdir(directoryProbe, {
     recursive: true,
@@ -84,13 +89,7 @@ async function runGitleaksCausalProbes(
     mode: PRIVATE_FILE_MODE,
   });
   expectLeak(
-    await scanner({
-      executable: gitleaks,
-      mode: "dir",
-      config,
-      root: directoryProbe,
-      reportRoot,
-    }),
+    await scan(context, { mode: "dir", root: directoryProbe }),
     providerToken,
     "provider-like token",
   );
@@ -100,13 +99,7 @@ async function runGitleaksCausalProbes(
     mode: PRIVATE_FILE_MODE,
   });
   expectLeak(
-    await scanner({
-      executable: gitleaks,
-      mode: "dir",
-      config,
-      root: directoryProbe,
-      reportRoot,
-    }),
+    await scan(context, { mode: "dir", root: directoryProbe }),
     genericToken,
     "generic assignment token",
   );
@@ -114,13 +107,7 @@ async function runGitleaksCausalProbes(
   const allowedCanary = ["sk-privacy-canary-", "4f9e2d7c"].join("");
   await writeFile(probeFile, `${allowedCanary}\n`, { mode: PRIVATE_FILE_MODE });
   expectClean(
-    await scanner({
-      executable: gitleaks,
-      mode: "dir",
-      config,
-      root: directoryProbe,
-      reportRoot,
-    }),
+    await scan(context, { mode: "dir", root: directoryProbe }),
     "exact privacy canary",
   );
 
@@ -129,13 +116,7 @@ async function runGitleaksCausalProbes(
     mode: PRIVATE_FILE_MODE,
   });
   expectLeak(
-    await scanner({
-      executable: gitleaks,
-      mode: "dir",
-      config,
-      root: directoryProbe,
-      reportRoot,
-    }),
+    await scan(context, { mode: "dir", root: directoryProbe }),
     adjacentCanary,
     "adjacent privacy token",
   );
@@ -143,40 +124,60 @@ async function runGitleaksCausalProbes(
   const historyProbe = join(probeRoot, "gitleaks-history");
   await mkdir(historyProbe, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
   await chmod(historyProbe, PRIVATE_DIRECTORY_MODE);
-  await git(historyProbe, ["init", "--quiet"]);
-  await git(historyProbe, [
+  await git(context.workspace, historyProbe, ["init", "--quiet"]);
+  await git(context.workspace, historyProbe, [
     "config",
     "user.email",
     "security-probe@example.invalid",
   ]);
-  await git(historyProbe, ["config", "user.name", "Security Probe"]);
+  await git(context.workspace, historyProbe, [
+    "config",
+    "user.name",
+    "Security Probe",
+  ]);
   const historyFile = join(historyProbe, "removed.txt");
   await writeFile(historyFile, `${providerToken}\n`, {
     mode: PRIVATE_FILE_MODE,
   });
-  await git(historyProbe, ["add", "removed.txt"]);
-  await git(historyProbe, ["commit", "--quiet", "-m", "add probe"]);
+  await git(context.workspace, historyProbe, ["add", "removed.txt"]);
+  await git(context.workspace, historyProbe, [
+    "commit",
+    "--quiet",
+    "-m",
+    "add probe",
+  ]);
   await writeFile(historyFile, "removed\n", { mode: PRIVATE_FILE_MODE });
-  await git(historyProbe, ["add", "removed.txt"]);
-  await git(historyProbe, ["commit", "--quiet", "-m", "remove probe"]);
+  await git(context.workspace, historyProbe, ["add", "removed.txt"]);
+  await git(context.workspace, historyProbe, [
+    "commit",
+    "--quiet",
+    "-m",
+    "remove probe",
+  ]);
   expectLeak(
-    await scanner({
-      executable: gitleaks,
+    await scan(context, {
       mode: "git",
-      config,
       root: historyProbe,
-      reportRoot,
       logOptions: ["--all"],
     }),
     providerToken,
     "removed history token",
   );
-  await verifyUnreadableFileFailure(
-    probeRoot,
-    reportRoot,
-    gitleaks,
-    config,
-    scanner,
+  await verifyUnreadableFileFailure(context);
+}
+
+function scan(
+  context: GitleaksGateContext,
+  target: GitleaksScanTarget,
+): Promise<GitleaksRawResult> {
+  return context.scanner(
+    {
+      executable: context.gitleaks,
+      config: context.config,
+      reportRoot: context.reportRoot,
+      ...target,
+    },
+    context.workspace,
   );
 }
 
@@ -208,13 +209,9 @@ function expectLeak(
 }
 
 async function verifyUnreadableFileFailure(
-  probeRoot: string,
-  reportRoot: string,
-  gitleaks: string,
-  config: string,
-  scanner: GitleaksScanner,
+  context: GitleaksGateContext,
 ): Promise<void> {
-  const root = join(probeRoot, "gitleaks-unreadable");
+  const root = join(context.probeRoot, "gitleaks-unreadable");
   await mkdir(root, { mode: PRIVATE_DIRECTORY_MODE });
   await chmod(root, PRIVATE_DIRECTORY_MODE);
   const unreadable = join(root, "unreadable.txt");
@@ -224,17 +221,11 @@ async function verifyUnreadableFileFailure(
   await chmod(unreadable, UNREADABLE_FILE_MODE);
   let result: GitleaksRawResult;
   try {
-    result = await scanner({
-      executable: gitleaks,
-      mode: "dir",
-      config,
-      root,
-      reportRoot,
-    });
+    result = await scan(context, { mode: "dir", root });
   } finally {
     await chmod(unreadable, PRIVATE_FILE_MODE);
   }
-  if (!/\bWRN skipping file: permission denied\b/iu.test(result.stderr)) {
+  if (!UNREADABLE_WARNING_PATTERN.test(result.stderr)) {
     throw new Error(
       "gitleaks unreadable-file probe did not emit a skip warning",
     );
@@ -253,8 +244,12 @@ async function verifyUnreadableFileFailure(
   throw new Error("gitleaks accepted an unreadable-file skip as a clean scan");
 }
 
-async function git(root: string, args: readonly string[]): Promise<void> {
-  const result = await runBoundedCommand(GIT_EXECUTABLE, args, {
+async function git(
+  runWorkspace: RunWorkspace,
+  root: string,
+  args: readonly string[],
+): Promise<void> {
+  const result = await runBoundedCommand(runWorkspace, GIT_EXECUTABLE, args, {
     cwd: root,
     label: "gitleaks history probe Git setup",
     timeoutMs: 10_000,
@@ -266,8 +261,12 @@ async function git(root: string, args: readonly string[]): Promise<void> {
   }
 }
 
-async function requireCompleteHistory(root: string): Promise<void> {
+async function requireCompleteHistory(
+  runWorkspace: RunWorkspace,
+  root: string,
+): Promise<void> {
   const result = await runBoundedCommand(
+    runWorkspace,
     GIT_EXECUTABLE,
     ["rev-parse", "--is-shallow-repository"],
     {

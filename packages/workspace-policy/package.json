@@ -16,6 +16,7 @@
     "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test package.json tsconfig.json"
   },
   "dependencies": {
+    "@skizzles/run-workspace": "workspace:*",
     "typescript": "7.0.2",
     "yaml": "^2.9.0"
   },

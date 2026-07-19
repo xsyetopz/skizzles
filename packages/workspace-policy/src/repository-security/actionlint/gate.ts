@@ -1,5 +1,6 @@
 import { readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { RunWorkspace } from "@skizzles/run-workspace";
 import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "../process.ts";
 import { validateWorkflowActionPins } from "../workflow/pins.ts";
 
@@ -22,6 +23,7 @@ interface ActionlintFinding {
 }
 
 async function runActionlintGate(
+  runWorkspace: RunWorkspace,
   workspaceRoot: string,
   probeRoot: string,
   actionlint: string,
@@ -29,7 +31,12 @@ async function runActionlintGate(
 ): Promise<void> {
   const workflows = await discoverWorkflows(workspaceRoot);
   await validateWorkflowActionPins(workflows);
-  const current = await invokeActionlint(actionlint, shellcheck, workflows);
+  const current = await invokeActionlint(
+    runWorkspace,
+    actionlint,
+    shellcheck,
+    workflows,
+  );
   if (current.exitCode !== 0 || current.findings.length > 0) {
     throw new Error(formatCurrentWorkflowFailure(current.findings));
   }
@@ -43,9 +50,7 @@ async function runActionlintGate(
     },
     {
       name: "invalid-expression.yml",
-      source: workflowWithStep(
-        'echo "' + "$" + '{{ github.not_a_real_property }}"',
-      ),
+      source: workflowWithStep('echo "${{ github.not_a_real_property }}"'),
       expected: INVALID_EXPRESSION_PATTERN,
       label: "invalid expression",
     },
@@ -66,7 +71,12 @@ async function runActionlintGate(
   for (const invalid of invalidCases) {
     const path = join(probeRoot, invalid.name);
     await writeFile(path, invalid.source, { mode: 0o600 });
-    const result = await invokeActionlint(actionlint, shellcheck, [path]);
+    const result = await invokeActionlint(
+      runWorkspace,
+      actionlint,
+      shellcheck,
+      [path],
+    );
     if (
       result.exitCode === 0 ||
       result.findings.length === 0 ||
@@ -80,9 +90,12 @@ async function runActionlintGate(
 
   const corrected = join(probeRoot, "corrected.yml");
   await writeFile(corrected, correctedWorkflow(), { mode: 0o600 });
-  const correctedResult = await invokeActionlint(actionlint, shellcheck, [
-    corrected,
-  ]);
+  const correctedResult = await invokeActionlint(
+    runWorkspace,
+    actionlint,
+    shellcheck,
+    [corrected],
+  );
   if (correctedResult.exitCode !== 0 || correctedResult.findings.length > 0) {
     throw new Error("actionlint rejected the corrected workflow probe");
   }
@@ -105,11 +118,13 @@ async function discoverWorkflows(workspaceRoot: string): Promise<string[]> {
 }
 
 async function invokeActionlint(
+  runWorkspace: RunWorkspace,
   actionlint: string,
   shellcheck: string,
   workflows: readonly string[],
 ): Promise<{ exitCode: number; findings: ActionlintFinding[] }> {
   const result = await runBoundedCommand(
+    runWorkspace,
     actionlint,
     [
       "-no-color",
@@ -217,7 +232,7 @@ function workflowWithInvalidNeeds(): string {
 }
 
 function correctedWorkflow(): string {
-  const expression = "$" + "{{ github.ref }}";
+  const expression = "${{ github.ref }}";
   return `name: Corrected\non: workflow_dispatch\njobs:\n  prepare:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo "$QUOTED"\n        env:\n          QUOTED: safe\n  check:\n    needs: prepare\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo "${expression}"\n`;
 }
 

@@ -1,26 +1,20 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   parseActionlintFindings,
   runActionlintGate,
 } from "../../src/repository-security/actionlint/gate.ts";
 import { validateWorkflowActionPins } from "../../src/repository-security/workflow/pins.ts";
+import { createSecurityFixtureScope } from "./support.ts";
 
 const FULL_COMMIT_PATTERN = /@[a-f0-9]{40}/u;
 // biome-ignore lint/security/noSecrets: Public upstream action commit pin.
 const CHECKOUT_COMMIT = "34e114876b0b11c390a56381ad16ebd13914f8d5";
-const temporaryRoots: string[] = [];
+const fixtures = createSecurityFixtureScope();
 
-afterEach(async () => {
-  await Promise.all(
-    temporaryRoots
-      .splice(0)
-      .map((root) => rm(root, { force: true, recursive: true })),
-  );
-});
+afterEach(fixtures.cleanup);
 
 describe("repository action validation contracts", () => {
   it("parses actionlint JSON arrays and JSON Lines findings", () => {
@@ -99,6 +93,7 @@ describe("repository action validation contracts", () => {
       await writeFile(workflow, source, { mode: 0o600 });
       await expect(
         runActionlintGate(
+          await fixtures.workspace(),
           root,
           probes,
           "/unused/actionlint",
@@ -232,7 +227,5 @@ function rootMergeAction(): string {
 }
 
 async function temporaryRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "skizzles-security-test-"));
-  temporaryRoots.push(root);
-  return root;
+  return await fixtures.directory("actions");
 }

@@ -2,22 +2,24 @@ import { createHash } from "node:crypto";
 import {
   cp,
   mkdir,
-  mkdtemp,
   readdir,
   readFile,
-  rm,
   stat,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
+import {
+  cleanupStale,
+  create,
+  type RunWorkspace,
+} from "@skizzles/run-workspace";
 import {
   authorPromptPatch,
   type ProcessIdentityProvider,
 } from "../../src/cli.ts";
 
-const roots: string[] = [];
+const workspaces: RunWorkspace[] = [];
 
 export const MACHINE_PATH =
   /\/Users\/[A-Za-z0-9._-]+|\/home\/[A-Za-z0-9._-]+|[A-Za-z]:\\Users\\[A-Za-z0-9._-]+/i;
@@ -40,13 +42,12 @@ export const UNVERIFIABLE_PROCESS_IDENTITY_ERROR =
 export const LIVE_ORPHAN_ERROR = /has a live owner/i;
 
 export async function cleanupFixtures(): Promise<void> {
-  await Promise.all(
-    roots.splice(0).map((path) => rm(path, { force: true, recursive: true })),
+  const reports = await Promise.all(
+    workspaces.splice(0).map((workspace) => workspace.close()),
   );
-}
-
-export function trackFixtureRoot(path: string): void {
-  roots.push(path);
+  if (reports.some((report) => report.state === "cleanup-failed")) {
+    throw new Error("Prompt-layer fixture workspace cleanup failed.");
+  }
 }
 
 export interface ManifestFixture {
@@ -96,16 +97,22 @@ export function gitBlobId(bytes: Buffer): string {
 
 export async function fixture(): Promise<string> {
   const source = resolve(import.meta.dir, "../../../..");
-  const root = await mkdtemp(join(tmpdir(), "skizzles-prompt-layer-test-"));
-  roots.push(root);
+  const root = await fixtureDirectory("repository");
   await cp(
     join(source, "packages/prompt-layer/assets"),
     join(root, "packages/prompt-layer/assets"),
-    {
-      recursive: true,
-    },
+    { recursive: true },
   );
   return root;
+}
+
+export async function fixtureDirectory(name: string): Promise<string> {
+  await cleanupStale();
+  const workspace = await create();
+  workspaces.push(workspace);
+  const path = workspace.path(name);
+  await mkdir(path, { recursive: false, mode: 0o700 });
+  return path;
 }
 
 export async function changedCandidate(

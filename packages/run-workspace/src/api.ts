@@ -1,4 +1,7 @@
-export { RunWorkspaceAbortedError } from "./aborted.ts";
+export {
+  RunWorkspaceAbortedError,
+  type RunWorkspaceHandledSignal,
+} from "./aborted.ts";
 export type {
   ChildCleanup,
   CleanupFailure,

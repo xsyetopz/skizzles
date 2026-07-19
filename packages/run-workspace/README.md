@@ -44,7 +44,10 @@ and finite codes rather than absolute machine paths or raw host errors.
 `create({ handleSignals: true })` opts into scoped `SIGINT`, `SIGTERM`, and, on Unix, `SIGHUP`
 coordination. There are no module-import signal side effects. The package aborts `workspace.signal`,
 starts cleanup, and escalates children on a repeated signal. It removes its handlers after successful
-cleanup. Because library signal listeners suppress the runtime's default exit behavior, an executable
+cleanup. For handled process signals, `workspace.signal.reason` is a
+`RunWorkspaceAbortedError` whose structured `signal` field identifies `SIGHUP`, `SIGINT`, or
+`SIGTERM`; external `AbortSignal` cancellation leaves that field undefined. Because library signal
+listeners suppress the runtime's default exit behavior, an executable
 composition root remains responsible for mapping the aborted operation to its conventional status
 (`130`, `143`, or `129`). Blind signal re-emission would deliver the signal twice to unrelated existing
 listeners and is intentionally rejected. `SIGKILL`, crashes, and power loss are janitor recovery cases.

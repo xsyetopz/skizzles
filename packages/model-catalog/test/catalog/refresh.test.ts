@@ -28,7 +28,7 @@ afterEach(cleanupCatalogRoots);
 
 describe("model catalog refresh", () => {
   test("uses a fresh version-matched complete cache and repairs status and permissions", async () => {
-    const path = createCatalogRoot();
+    const path = await createCatalogRoot();
     const codex = await createFakeCodex(path);
     await Bun.write(
       join(path, "models_cache.json"),
@@ -82,7 +82,7 @@ describe("model catalog refresh", () => {
         serializeCache(source().models, new Date(now.getTime() + 1_000)),
       ],
     ] as const) {
-      const path = createCatalogRoot();
+      const path = await createCatalogRoot();
       const codex = await createFakeCodex(path);
       await Bun.write(join(path, "models_cache.json"), contents);
       expect(
@@ -98,7 +98,7 @@ describe("model catalog refresh", () => {
       ["0.145.0-alpha.18+build.7", "0.145.0-alpha.18", "bundled"],
       ["0.145.0-alpha.18", "0.145.0-alpha.19", "bundled"],
     ] as const) {
-      const path = createCatalogRoot();
+      const path = await createCatalogRoot();
       const codex = await createFakeCodex(
         path,
         source(),
@@ -114,7 +114,7 @@ describe("model catalog refresh", () => {
       ).toMatchObject({ source: expectedSource });
     }
 
-    const path = createCatalogRoot();
+    const path = await createCatalogRoot();
     const invalid = await createFakeCodex(path, source(), "normal", "01.145.0");
     await expect(
       refreshCatalog({ codexHome: path, codexBinary: invalid }),
@@ -122,7 +122,7 @@ describe("model catalog refresh", () => {
   });
 
   test("isolates and removes every Codex child home without ambient credentials", async () => {
-    const path = createCatalogRoot();
+    const path = await createCatalogRoot();
     writeFileSync(join(path, "auth.json"), "ambient-credential", {
       mode: 0o600,
     });
@@ -147,14 +147,24 @@ describe("model catalog refresh", () => {
       .map((line) => JSON.parse(line));
     expect(observations).toHaveLength(3);
     expect(new Set(observations.map((entry) => entry.home)).size).toBe(3);
+    expect(new Set(observations.map((entry) => entry.runRoot)).size).toBe(1);
+    expect(new Set(observations.map((entry) => entry.runId)).size).toBe(1);
+    const runRoot = observations[0]?.runRoot;
+    if (typeof runRoot !== "string") {
+      throw new Error("missing observed run root");
+    }
     for (const observation of observations) {
       expect(observation).toMatchObject({
         sentinel: null,
         ambientHome: false,
         realHome: false,
         authPresent: false,
+        markerRoot: runRoot,
+        markerState: "open",
       });
+      expect(observation.runRoot).toBe(runRoot);
       expect(observation.home).toBe(observation.codexHome);
+      expect(observation.home).toStartWith(`${runRoot}/`);
       expect(observation.tmpdir).toStartWith(`${observation.home}/`);
       expect(observation.environmentKeys).toEqual([
         "CODEX_HOME",
@@ -170,10 +180,21 @@ describe("model catalog refresh", () => {
       ]);
       expect(() => statSync(observation.home)).toThrow();
     }
+    for (const persistent of [
+      join(path, "skizzles/model-catalog.json"),
+      join(path, "skizzles/model-catalog-status.json"),
+    ]) {
+      expect(persistent.startsWith(`${runRoot}/`)).toBeFalse();
+      expect(() => statSync(persistent)).not.toThrow();
+    }
+    expect(
+      join(path, "models_cache.json").startsWith(`${runRoot}/`),
+    ).toBeFalse();
+    expect(() => statSync(runRoot)).toThrow();
   });
 
   test("falls back without replacing last-good output when cache schema preflight fails", async () => {
-    const path = createCatalogRoot();
+    const path = await createCatalogRoot();
     const bundled = source();
     const codex = await createFakeCodex(path, bundled);
     const malformed = source();
@@ -197,7 +218,7 @@ describe("model catalog refresh", () => {
   });
 
   test("preserves last-good output when bundled catalog validation fails", async () => {
-    const path = createCatalogRoot();
+    const path = await createCatalogRoot();
     const output = join(path, "skizzles/model-catalog.json");
     mkdirSync(join(path, "skizzles"), { recursive: true, mode: 0o700 });
     chmodSync(join(path, "skizzles"), 0o700);
@@ -212,7 +233,7 @@ describe("model catalog refresh", () => {
   });
 
   test("rejects path aliasing and symlink output without changing its target", async () => {
-    const path = createCatalogRoot();
+    const path = await createCatalogRoot();
     const codex = await createFakeCodex(path);
     const shared = join(path, "shared.json");
     await expect(
@@ -235,8 +256,8 @@ describe("model catalog refresh", () => {
   });
 
   test("rejects physical aliases and symlink ancestors without writing outside", async () => {
-    const path = createCatalogRoot();
-    const outside = createCatalogRoot();
+    const path = await createCatalogRoot();
+    const outside = await createCatalogRoot();
     const codex = await createFakeCodex(path);
     const output = join(path, "catalog.json");
     const status = join(path, "status.json");
@@ -267,7 +288,7 @@ describe("model catalog refresh", () => {
 
   test("rejects external hard links for every managed catalog path without mutating the victim", async () => {
     for (const role of ["output", "status", "cache"] as const) {
-      const path = createCatalogRoot();
+      const path = await createCatalogRoot();
       const codex = await createFakeCodex(path);
       const victim = join(path, `${role}-victim.json`);
       const managed = {
@@ -292,7 +313,7 @@ describe("model catalog refresh", () => {
 
   test("terminates noisy and hanging Codex subprocesses", async () => {
     for (const behavior of ["noisy", "hang"] as const) {
-      const path = createCatalogRoot();
+      const path = await createCatalogRoot();
       const codex = await createFakeCodex(path, source(), behavior);
       const started = Date.now();
       await expect(
@@ -308,7 +329,7 @@ describe("model catalog refresh", () => {
   });
 
   test("times out before fake command initialization without requiring descendant readiness", async () => {
-    const path = createCatalogRoot();
+    const path = await createCatalogRoot();
     const codex = await createFakeCodex(path, source(), "initialization-hang");
     const started = Date.now();
     await expect(
@@ -324,7 +345,7 @@ describe("model catalog refresh", () => {
 
   test("bounds and reaps descendant-held pipes on success and timeout", async () => {
     for (const behavior of ["descendant", "descendant-hang"] as const) {
-      const path = createCatalogRoot();
+      const path = await createCatalogRoot();
       const codex = await createFakeCodex(path, source(), behavior);
       const started = Date.now();
       const operation = refreshCatalog({
@@ -338,11 +359,19 @@ describe("model catalog refresh", () => {
         await awaitFakeChildReadiness(path, "bundled", 1_000);
         await expect(operation).rejects.toThrow("timed out");
       }
-      expect(Date.now() - started).toBeLessThan(2_500);
+      expect(Date.now() - started).toBeLessThan(4_000);
       const records = fakeChildRecords(path);
       expect(records.length).toBe(behavior === "descendant" ? 3 : 2);
+      expect(new Set(records.map((record) => record.runRoot)).size).toBe(1);
+      const lifecycle = readFileSync(join(path, "child-lifecycle"), "utf8")
+        .trim()
+        .split("\n");
+      expect(new Set(lifecycle)).toEqual(
+        new Set(records.map((record) => record.token)),
+      );
       for (const record of records) {
         expect(() => process.kill(record.pid, 0)).toThrow();
+        expect(() => statSync(record.runRoot)).toThrow();
       }
       if (behavior === "descendant-hang") {
         const failedHome = readFileSync(
@@ -354,8 +383,49 @@ describe("model catalog refresh", () => {
     }
   });
 
+  test("closes the shared workspace and descendants on cancellation", async () => {
+    const path = await createCatalogRoot();
+    const codex = await createFakeCodex(path, source(), "descendant-hang");
+    const controller = new AbortController();
+    const operation = refreshCatalog({
+      codexHome: path,
+      codexBinary: codex,
+      commandTimeoutMs: 5_000,
+      signal: controller.signal,
+    });
+    await awaitFakeChildReadiness(path, "bundled", 1_000);
+    controller.abort();
+    await expect(operation).rejects.toThrow("codex command was cancelled");
+    const records = fakeChildRecords(path);
+    expect(records).toHaveLength(2);
+    for (const record of records) {
+      expect(() => process.kill(record.pid, 0)).toThrow();
+      expect(() => statSync(record.runRoot)).toThrow();
+    }
+  });
+
+  test("reports workspace cleanup failure and leaves deterministic evidence", async () => {
+    const path = await createCatalogRoot();
+    const codex = await createFakeCodex(path, source(), "cleanup-failure");
+    await expect(
+      refreshCatalog({ codexHome: path, codexBinary: codex }),
+    ).rejects.toThrow("codex command cleanup failed");
+    const runRoot = readFileSync(join(path, "failed-run-root"), "utf8");
+    try {
+      expect(() => statSync(runRoot)).not.toThrow();
+      expect(
+        join(path, "skizzles/model-catalog.json").startsWith(`${runRoot}/`),
+      ).toBeFalse();
+      expect(() =>
+        statSync(join(path, "skizzles/model-catalog.json")),
+      ).not.toThrow();
+    } finally {
+      rmSync(runRoot, { recursive: true, force: true });
+    }
+  });
+
   test("fail-safe cleanup reaps registered fake descendants before removing fixtures", async () => {
-    const path = createCatalogRoot();
+    const path = await createCatalogRoot();
     const codex = await createFakeCodex(path, source(), "descendant");
     const invocation = Bun.spawn([codex, "--version"], {
       detached: true,

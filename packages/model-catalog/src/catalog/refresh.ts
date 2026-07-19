@@ -1,9 +1,18 @@
 import { join, resolve } from "node:path";
 import {
+  cleanupStale,
+  create,
+  type RunWorkspace,
+} from "@skizzles/run-workspace";
+import {
   bundledCatalog,
+  CodexChildError,
+  type CodexRuntime,
   type CommandLimits,
   clientVersion,
   preflightCatalog,
+  requireOwnedProcessScope,
+  systemCodexRuntime,
 } from "../codex-child.ts";
 import { applyLunaV2Overlay, type LunaOverlay } from "./schema.ts";
 import {
@@ -18,6 +27,7 @@ const DEFAULT_MAX_CATALOG_BYTES = 8 * 1024 * 1024;
 const DEFAULT_MAX_STDERR_BYTES = 16 * 1024;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_TERMINATION_GRACE_MS = 100;
+const WORKSPACE_FORCE_STOP_MS = 2_500;
 
 export type CatalogSource = "cache" | "bundled";
 
@@ -31,6 +41,7 @@ export interface CatalogRefreshOptions {
   commandTimeoutMs?: number;
   maxCatalogBytes?: number;
   maxStderrBytes?: number;
+  signal?: AbortSignal;
 }
 
 export interface CatalogRefreshResult {
@@ -50,6 +61,20 @@ export interface CatalogPaths {
   status: string;
   cache: string;
 }
+
+export interface CatalogRefreshCommitHooks {
+  beforeOutputPromote?: () => Promise<void>;
+  afterOutputCommit?: () => Promise<void>;
+}
+
+export interface CatalogRefreshRuntime {
+  readonly codex: CodexRuntime;
+  readonly commitHooks?: CatalogRefreshCommitHooks;
+}
+
+const systemCatalogRefreshRuntime: CatalogRefreshRuntime = {
+  codex: systemCodexRuntime,
+};
 
 export function resolveCatalogPaths(
   options: CatalogRefreshOptions,
@@ -92,15 +117,22 @@ function commandLimits(options: CatalogRefreshOptions): CommandLimits {
 }
 
 async function preparedCatalog(
+  workspace: RunWorkspace,
   paths: CatalogPaths,
   limits: CommandLimits,
   now: Date,
+  runtime: CodexRuntime,
 ): Promise<{
   source: CatalogSource;
   contents: string;
   overlay: LunaOverlay;
 }> {
-  const version = await clientVersion(paths.codexBinary, limits);
+  const version = await clientVersion(
+    workspace,
+    paths.codexBinary,
+    limits,
+    runtime,
+  );
   const cached = await cachedCatalog(
     paths.cache,
     version,
@@ -109,20 +141,38 @@ async function preparedCatalog(
   );
   let source: CatalogSource = cached ? "cache" : "bundled";
   let sourceCatalog =
-    cached ?? (await bundledCatalog(paths.codexBinary, limits));
+    cached ??
+    (await bundledCatalog(workspace, paths.codexBinary, limits, runtime));
   let overlaid = applyLunaV2Overlay(sourceCatalog);
   let contents = `${JSON.stringify(overlaid.catalog, null, 2)}\n`;
   try {
-    await preflightCatalog(paths.codexBinary, contents, limits);
+    await preflightCatalog(
+      workspace,
+      paths.codexBinary,
+      contents,
+      limits,
+      runtime,
+    );
   } catch (error) {
     if (source !== "cache") {
       throw error;
     }
     source = "bundled";
-    sourceCatalog = await bundledCatalog(paths.codexBinary, limits);
+    sourceCatalog = await bundledCatalog(
+      workspace,
+      paths.codexBinary,
+      limits,
+      runtime,
+    );
     overlaid = applyLunaV2Overlay(sourceCatalog);
     contents = `${JSON.stringify(overlaid.catalog, null, 2)}\n`;
-    await preflightCatalog(paths.codexBinary, contents, limits);
+    await preflightCatalog(
+      workspace,
+      paths.codexBinary,
+      contents,
+      limits,
+      runtime,
+    );
   }
   return { source, contents, overlay: overlaid.overlay };
 }
@@ -130,37 +180,95 @@ async function preparedCatalog(
 export async function refreshCatalog(
   options: CatalogRefreshOptions,
 ): Promise<CatalogRefreshResult> {
+  return await refreshCatalogWithRuntime(options, systemCatalogRefreshRuntime);
+}
+
+export async function refreshCatalogWithRuntime(
+  options: CatalogRefreshOptions,
+  runtime: CatalogRefreshRuntime,
+): Promise<CatalogRefreshResult> {
   const paths = resolveCatalogPaths(options);
-  await prepareCatalogStorePaths(paths);
   const limits = commandLimits(options);
-  const prepared = await preparedCatalog(
-    paths,
-    limits,
-    options.now ?? new Date(),
-  );
-  await validateCatalogStorePaths(paths);
-  const revalidatePaths = async (): Promise<void> =>
-    validateCatalogStorePaths(paths);
-  const updated = await writePrivateAtomic(paths.output, prepared.contents, {
-    beforePromote: revalidatePaths,
-  });
-  const result: CatalogRefreshResult = {
-    ok: true,
-    source: prepared.source,
-    updated,
-    lunaOverlay: prepared.overlay,
-    catalogChanged: updated,
-    generation: digest(prepared.contents),
-    output: paths.output,
-  };
-  await writePrivateAtomic(
-    paths.status,
-    `${JSON.stringify(
-      { ...result, checkedAt: new Date().toISOString() },
-      null,
-      2,
-    )}\n`,
-    { beforePromote: revalidatePaths },
-  );
-  return result;
+  requireOwnedProcessScope(runtime.codex.platform);
+  let workspace: RunWorkspace;
+  try {
+    const stale = await cleanupStale();
+    if (stale.failed.length > 0) {
+      throw new CodexChildError("lifecycle");
+    }
+    const workspaceOptions = {
+      gracefulStopMs: limits.terminationGraceMs,
+      forceStopMs: WORKSPACE_FORCE_STOP_MS,
+    };
+    workspace =
+      options.signal === undefined
+        ? await create(workspaceOptions)
+        : await create({ ...workspaceOptions, signal: options.signal });
+  } catch {
+    throw new CodexChildError("lifecycle");
+  }
+  let outcome:
+    | { readonly ok: true; readonly result: CatalogRefreshResult }
+    | { readonly ok: false; readonly error: unknown };
+  try {
+    await prepareCatalogStorePaths(paths);
+    const prepared = await preparedCatalog(
+      workspace,
+      paths,
+      limits,
+      options.now ?? new Date(),
+      runtime.codex,
+    );
+    await validateCatalogStorePaths(paths);
+    const revalidatePaths = async (): Promise<void> =>
+      validateCatalogStorePaths(paths);
+    const requireActive = (): void => {
+      if (workspace.signal.aborted) {
+        throw new CodexChildError("cancelled");
+      }
+    };
+    requireActive();
+    const updated = await writePrivateAtomic(paths.output, prepared.contents, {
+      beforePromote: async () => {
+        await revalidatePaths();
+        await runtime.commitHooks?.beforeOutputPromote?.();
+        requireActive();
+      },
+    });
+    const result: CatalogRefreshResult = {
+      ok: true,
+      source: prepared.source,
+      updated,
+      lunaOverlay: prepared.overlay,
+      catalogChanged: updated,
+      generation: digest(prepared.contents),
+      output: paths.output,
+    };
+    await runtime.commitHooks?.afterOutputCommit?.();
+    await writePrivateAtomic(
+      paths.status,
+      `${JSON.stringify(
+        { ...result, checkedAt: new Date().toISOString() },
+        null,
+        2,
+      )}\n`,
+      { beforePromote: revalidatePaths },
+    );
+    outcome = { ok: true, result };
+  } catch (error) {
+    outcome = { ok: false, error };
+  }
+  let cleanupSucceeded = false;
+  try {
+    cleanupSucceeded = (await workspace.close()).state === "deleted";
+  } catch {
+    // A deterministic lifecycle error below replaces any operation outcome.
+  }
+  if (!cleanupSucceeded) {
+    throw new CodexChildError("lifecycle");
+  }
+  if (!outcome.ok) {
+    throw outcome.error;
+  }
+  return outcome.result;
 }

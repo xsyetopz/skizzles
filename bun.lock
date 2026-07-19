@@ -56,6 +56,9 @@
     "packages/model-catalog": {
       "name": "@skizzles/model-catalog",
       "version": "0.1.0",
+      "dependencies": {
+        "@skizzles/run-workspace": "workspace:*",
+      },
       "devDependencies": {
         "@types/bun": "^1.3.14",
         "@types/node": "^26.1.1",
@@ -87,6 +90,9 @@
     "packages/prompt-layer": {
       "name": "@skizzles/prompt-layer",
       "version": "0.1.0",
+      "dependencies": {
+        "@skizzles/run-workspace": "workspace:*",
+      },
       "devDependencies": {
         "@types/bun": "^1.3.14",
         "@types/node": "^26.1.1",
@@ -118,6 +124,7 @@
         "skizzles-workspace-policy": "./src/cli.ts",
       },
       "dependencies": {
+        "@skizzles/run-workspace": "workspace:*",
         "typescript": "7.0.2",
         "yaml": "^2.9.0",
       },

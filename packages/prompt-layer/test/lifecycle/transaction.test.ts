@@ -1,14 +1,6 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, test } from "bun:test";
-import {
-  cp,
-  mkdtemp,
-  readFile,
-  rm,
-  symlink,
-  writeFile,
-} from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { cp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   authorPromptPatch,
@@ -20,13 +12,13 @@ import {
   changedCandidate,
   cleanupFixtures,
   fixture,
+  fixtureDirectory,
   leaveCrashedAuthorTransaction,
   MACHINE_PATH,
   SYMLINK_ERROR,
   snapshot,
   type TransactionEntryFixture,
   type TransactionJournalFixture,
-  trackFixtureRoot,
 } from "./fixture.ts";
 
 afterEach(cleanupFixtures);
@@ -171,8 +163,7 @@ describe("durable prompt transaction contracts", () => {
       "packages/prompt-layer/assets",
     ]) {
       const root = await fixture();
-      const external = await mkdtemp(join(tmpdir(), "skizzles-prompt-escape-"));
-      trackFixtureRoot(external);
+      const external = await fixtureDirectory("outside");
       const externalTarget = join(external, "target");
       await cp(join(root, target), externalTarget, { recursive: true });
       await writeFile(join(externalTarget, "sentinel.txt"), "outside\n");

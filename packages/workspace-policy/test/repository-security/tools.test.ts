@@ -2,8 +2,7 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateArchiveMemberPath } from "../../src/repository-security/tool/contract.ts";
@@ -16,6 +15,7 @@ import {
   downloadVerifiedArchive,
   validateArchiveEntries,
 } from "../../src/repository-security/tool/runtime.ts";
+import { createSecurityFixtureScope } from "./support.ts";
 
 const WORKSPACE_ROOT = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -27,15 +27,9 @@ const ACTIONLINT_LINUX_SHA256 =
 // Independent v1 acceptance evidence reviewed against ADR 0005 and the pinned GitHub release API records.
 const REPOSITORY_SECURITY_MANIFEST_V1_SHA256 =
   "7bf3c403b36cc9cd83bc1340a8ec6ce438888c30abc162eec0232aa6484dc1fe";
-const temporaryRoots: string[] = [];
+const fixtures = createSecurityFixtureScope();
 
-afterEach(async () => {
-  await Promise.all(
-    temporaryRoots
-      .splice(0)
-      .map((root) => rm(root, { force: true, recursive: true })),
-  );
-});
+afterEach(fixtures.cleanup);
 
 describe("repository security tool manifest", () => {
   it("parses the exact pinned platform and provenance contract", async () => {
@@ -184,6 +178,73 @@ describe("repository security tool manifest", () => {
     await expect(stat(destination)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("cancels an active archive download through the run signal", async () => {
+    const manifest = await loadRepositorySecurityToolManifest(WORKSPACE_ROOT);
+    const asset = manifest.tools.actionlint.assets["darwin-arm64"];
+    const root = await temporaryRoot();
+    const destination = join(root, "cancelled.tar.gz");
+    const cancellation = new AbortController();
+    const waitingFetch = (
+      _input: string,
+      init: RequestInit,
+    ): Promise<Response> =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener(
+          "abort",
+          () => reject(new Error("download aborted")),
+          { once: true },
+        );
+      });
+
+    const download = downloadVerifiedArchive(
+      asset,
+      destination,
+      waitingFetch,
+      cancellation.signal,
+    );
+    cancellation.abort();
+    await expect(download).rejects.toThrow("download aborted");
+    await expect(stat(destination)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("keeps cancellation authoritative after the final response bytes", async () => {
+    const manifest = await loadRepositorySecurityToolManifest(WORKSPACE_ROOT);
+    const original = manifest.tools.actionlint.assets["darwin-arm64"];
+    const bytes = new TextEncoder().encode("complete archive bytes");
+    const cancellation = new AbortController();
+    const reason = new Error("workspace interrupted after final bytes");
+    const asset = {
+      ...original,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      githubReleaseAsset: {
+        ...original.githubReleaseAsset,
+        bytes: bytes.byteLength,
+      },
+    };
+    const finalBoundaryFetch = async (): Promise<Response> =>
+      new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(bytes);
+            controller.close();
+            cancellation.abort(reason);
+          },
+        }),
+        { status: 200 },
+      );
+    const destination = join(await temporaryRoot(), "cancelled-final.tar.gz");
+
+    await expect(
+      downloadVerifiedArchive(
+        asset,
+        destination,
+        finalBoundaryFetch,
+        cancellation.signal,
+      ),
+    ).rejects.toBe(reason);
+    await expect(stat(destination)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("rejects unsafe, missing, looping, and excessive redirect chains", async () => {
     const manifest = await loadRepositorySecurityToolManifest(WORKSPACE_ROOT);
     const asset = manifest.tools.actionlint.assets["darwin-arm64"];
@@ -266,9 +327,7 @@ describe("repository security tool manifest", () => {
 });
 
 async function temporaryRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "skizzles-security-test-"));
-  temporaryRoots.push(root);
-  return root;
+  return await fixtures.directory("tools");
 }
 
 async function manifestSource(): Promise<string> {

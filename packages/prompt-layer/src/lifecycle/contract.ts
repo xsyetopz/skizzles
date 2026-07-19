@@ -148,6 +148,7 @@ export interface MutationOptions {
   lockHooks?: MutationLockHooks;
   processIdentityProvider?: ProcessIdentityProvider;
   incompleteLockGraceMs?: number;
+  signal?: AbortSignal;
 }
 
 export class PromptLayerError extends Error {}

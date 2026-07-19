@@ -1,11 +1,14 @@
 import process from "node:process";
-import { RunWorkspaceAbortedError } from "./aborted.ts";
+import {
+  RunWorkspaceAbortedError,
+  type RunWorkspaceHandledSignal,
+} from "./aborted.ts";
 
 interface SignalTarget {
   abort: (error: RunWorkspaceAbortedError) => void;
 }
 
-type HandledSignal = "SIGHUP" | "SIGINT" | "SIGTERM";
+type HandledSignal = RunWorkspaceHandledSignal;
 
 const targets = new Set<SignalTarget>();
 const listeners = new Map<HandledSignal, () => void>();
@@ -21,6 +24,7 @@ function install(): void {
     const listener = (): void => {
       const error = new RunWorkspaceAbortedError(
         `Run workspace interrupted by ${signal}`,
+        signal,
       );
       for (const target of [...targets]) target.abort(error);
     };

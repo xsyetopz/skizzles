@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { chmod, lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import type { RunWorkspace } from "@skizzles/run-workspace";
 import { REPOSITORY_TOOL_ENV, runBoundedCommand } from "../process.ts";
 import {
   type RepositorySecurityToolManifest,
@@ -37,24 +38,28 @@ interface InstalledSecurityTools {
 }
 
 async function installRepositorySecurityTools(
+  workspace: RunWorkspace,
   manifest: RepositorySecurityToolManifest,
   target: SecurityToolTarget,
   temporaryRoot: string,
   fetchArchive: FetchArchive = fetch,
 ): Promise<InstalledSecurityTools> {
   const actionlint = await installSecurityTool(
+    workspace,
     manifest.tools.actionlint,
     manifest.tools.actionlint.assets[target],
     temporaryRoot,
     fetchArchive,
   );
   const shellcheck = await installSecurityTool(
+    workspace,
     manifest.tools.shellcheck,
     manifest.tools.shellcheck.assets[target],
     temporaryRoot,
     fetchArchive,
   );
   const gitleaks = await installSecurityTool(
+    workspace,
     manifest.tools.gitleaks,
     manifest.tools.gitleaks.assets[target],
     temporaryRoot,
@@ -71,9 +76,13 @@ async function downloadVerifiedArchive(
   asset: SecurityToolAsset,
   destination: string,
   fetchArchive: FetchArchive = fetch,
+  cancellation?: AbortSignal,
 ): Promise<void> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
+  const abort = (): void => controller.abort(cancellation?.reason);
+  cancellation?.addEventListener("abort", abort, { once: true });
+  if (cancellation?.aborted === true) abort();
   let bytes: Uint8Array;
   try {
     const response = await fetchArchiveResponse(
@@ -105,20 +114,37 @@ async function downloadVerifiedArchive(
     });
   } finally {
     clearTimeout(timer);
+    cancellation?.removeEventListener("abort", abort);
   }
+  throwIfCancelled(cancellation);
   if (bytes.byteLength !== asset.githubReleaseAsset.bytes) {
     throw new Error(
       `security tool archive byte length mismatch: expected ${asset.githubReleaseAsset.bytes}, received ${bytes.byteLength}`,
     );
   }
   const actual = createHash("sha256").update(bytes).digest("hex");
+  throwIfCancelled(cancellation);
   if (actual !== asset.sha256) {
     throw new Error(
       `security tool archive checksum mismatch: expected ${asset.sha256}, received ${actual}`,
     );
   }
   await writeFile(destination, bytes, { flag: "wx", mode: 0o600 });
+  throwIfCancelled(cancellation);
   await chmod(destination, PRIVATE_FILE_MODE);
+  throwIfCancelled(cancellation);
+}
+
+function throwIfCancelled(cancellation: AbortSignal | undefined): void {
+  if (cancellation?.aborted !== true) {
+    return;
+  }
+  if (cancellation.reason instanceof Error) {
+    throw cancellation.reason;
+  }
+  throw new Error("security tool archive download was aborted", {
+    cause: cancellation.reason,
+  });
 }
 
 async function fetchArchiveResponse(
@@ -198,6 +224,7 @@ function validateArchiveEntries(listing: string, executablePath: string): void {
 }
 
 async function installSecurityTool(
+  workspace: RunWorkspace,
   spec: SecurityToolSpec,
   asset: SecurityToolAsset,
   temporaryRoot: string,
@@ -214,18 +241,24 @@ async function installSecurityTool(
     chmod(toolRoot, PRIVATE_DIRECTORY_MODE),
     chmod(extractionRoot, PRIVATE_DIRECTORY_MODE),
   ]);
-  await downloadVerifiedArchive(asset, archive, fetchArchive);
+  await downloadVerifiedArchive(asset, archive, fetchArchive, workspace.signal);
 
-  const listing = await runBoundedCommand(TAR_EXECUTABLE, ["-tzf", archive], {
-    label: `${spec.name} archive listing`,
-    timeoutMs: ARCHIVE_COMMAND_TIMEOUT_MS,
-    env: REPOSITORY_TOOL_ENV,
-  });
+  const listing = await runBoundedCommand(
+    workspace,
+    TAR_EXECUTABLE,
+    ["-tzf", archive],
+    {
+      label: `${spec.name} archive listing`,
+      timeoutMs: ARCHIVE_COMMAND_TIMEOUT_MS,
+      env: REPOSITORY_TOOL_ENV,
+    },
+  );
   if (listing.exitCode !== 0 || listing.stderr !== "") {
     throw new Error(`${spec.name} archive listing failed`);
   }
   validateArchiveEntries(listing.stdout, asset.executablePath);
   const detail = await runBoundedCommand(
+    workspace,
     TAR_EXECUTABLE,
     ["-tvzf", archive, asset.executablePath],
     {
@@ -247,6 +280,7 @@ async function installSecurityTool(
     );
   }
   const extraction = await runBoundedCommand(
+    workspace,
     TAR_EXECUTABLE,
     ["-xzf", archive, "-C", extractionRoot, "--", asset.executablePath],
     {
@@ -272,12 +306,17 @@ async function installSecurityTool(
   await chmod(executable, PRIVATE_DIRECTORY_MODE);
   ensureContained(await realpath(extractionRoot), await realpath(executable));
 
-  const version = await runBoundedCommand(executable, spec.versionCommand, {
-    label: `${spec.name} version verification`,
-    timeoutMs: VERSION_COMMAND_TIMEOUT_MS,
-    outputLimitBytes: VERSION_OUTPUT_LIMIT_BYTES,
-    env: REPOSITORY_TOOL_ENV,
-  });
+  const version = await runBoundedCommand(
+    workspace,
+    executable,
+    spec.versionCommand,
+    {
+      label: `${spec.name} version verification`,
+      timeoutMs: VERSION_COMMAND_TIMEOUT_MS,
+      outputLimitBytes: VERSION_OUTPUT_LIMIT_BYTES,
+      env: REPOSITORY_TOOL_ENV,
+    },
+  );
   if (
     version.exitCode !== 0 ||
     !new RegExp(spec.versionOutputPattern, "u").test(

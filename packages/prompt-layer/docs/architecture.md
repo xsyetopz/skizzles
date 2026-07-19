@@ -115,6 +115,7 @@ generic upstream baseline.
 | `packages/prompt-layer/src/content-integrity.ts` | Shared trust-boundary rules for SHA-256 facts and non-empty LF-only text. |
 | `packages/prompt-layer/src/repository-boundary.ts` | Default repository-root topology, canonical containment, filesystem identity checks, and durable file operations. |
 | `packages/prompt-layer/src/lifecycle/operations.ts` | Build, check, patch-authoring, and immutable-rebase orchestration over inward-owned contracts. |
+| `packages/prompt-layer/src/lifecycle/workspace.ts` | One operation-scoped `@skizzles/run-workspace` composition boundary that reclaims stale runs and allocates named scratch directories for patch helpers. |
 | `packages/prompt-layer/src/assets/manifest.ts` | Strict manifest decoding, checksum facts, provenance construction, and generated-output comparison. |
 | `packages/prompt-layer/src/assets/patch.ts` | Exact-position patch validation, Git blob identity checks, patch creation, and strict application. |
 | `packages/prompt-layer/src/assets/upstream.ts` | The sole network adapter for immutable official OpenAI prompt, license, and notice fetches. |
@@ -142,6 +143,7 @@ monolith:
 | `packages/prompt-layer/test/lifecycle/mutation-lock.test.ts` | Exclusive ownership, stale reclaim, replacement preservation, clock skew, and quarantine recovery. |
 | `packages/prompt-layer/test/lifecycle/process-identity.test.ts` | PID reuse, Darwin identity normalization, locale/timezone stability, and fail-closed identity behavior. |
 | `packages/prompt-layer/test/lifecycle/transaction.test.ts` | Promotion-fault rollback, hostile journal rejection, crash recovery preflight, and symlink containment. |
+| `packages/prompt-layer/test/lifecycle/workspace.test.ts` | One-root patch composition, success/error/cancellation cleanup, and outside-sentinel preservation. |
 | `packages/prompt-layer/test/cli.test.ts` | CLI argument rejection, LF enforcement, and machine-path hygiene. |
 | `packages/prompt-layer/test/shipped-language/policy.test.ts` | Corpus shape and byte binding, ordered taxonomy coverage, allowed/prohibited fixtures, and lexical context behavior. |
 | `packages/prompt-layer/test/lifecycle/fixture.ts` | Narrow package-owned fixture construction and cleanup shared by those contract suites; never imported by production code. |
@@ -313,6 +315,10 @@ The implementation validates more than whether `git apply` happens to succeed:
 - The implementation reconstructs each hunk at its declared position, then runs
   `git apply --check --whitespace=error-all` and `git apply`. Both results must
   reproduce the same exact output.
+- Each top-level operation reclaims stale disposable runs, creates one private
+  marked run root, and injects named author/apply directories into patch helpers.
+  Success, failure, and cancellation close that root as one unit; synchronous
+  Git invocations do not create fictitious child-process ownership adapters.
 - Mutating operations use an identity-bound exclusive lock. Lock ownership
   includes operation, process ID, process-start identity, unique token, and
   creation time. Live or unverifiable owners fail closed; stale recovery uses

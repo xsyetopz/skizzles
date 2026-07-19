@@ -26,6 +26,7 @@ const SKIZZLES_PACKAGE_NAMES = [
   "@skizzles/model-catalog",
   "@skizzles/plugin-builder",
   "@skizzles/prompt-layer",
+  "@skizzles/run-workspace",
   "@skizzles/usage-analyzer",
   "@skizzles/workspace-policy",
   "codex-fastmcp-template",

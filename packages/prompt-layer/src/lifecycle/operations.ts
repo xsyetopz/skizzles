@@ -34,9 +34,7 @@ import {
 } from "../transaction/commit.ts";
 import type {
   GeneratedPrompt,
-  MutationLockHooks,
   MutationOptions,
-  ProcessIdentityProvider,
   PromptFetcher,
   TransactionFault,
 } from "./contract.ts";
@@ -52,17 +50,38 @@ import {
   SHIPPED_LANGUAGE_POLICY_PATHS,
   UPSTREAM_PATH,
 } from "./contract.ts";
+import { type PromptWorkspace, withPromptWorkspace } from "./workspace.ts";
 
 const COMMIT = /^[0-9a-f]{40}$/;
+
+interface AuthorPromptOptions extends MutationOptions {
+  transactionFault?: TransactionFault;
+}
+
+interface RebasePromptOptions extends AuthorPromptOptions {
+  candidatePath?: string;
+  fetcher?: PromptFetcher;
+}
 
 export async function buildPrompt(
   repoRoot = defaultPromptRepoRoot(),
   options: MutationOptions = {},
 ): Promise<void> {
+  await withPromptWorkspace(options.signal, (workspace) =>
+    buildPromptWithWorkspace(repoRoot, options, workspace),
+  );
+}
+
+async function buildPromptWithWorkspace(
+  repoRoot: string,
+  options: MutationOptions,
+  workspace: PromptWorkspace,
+): Promise<void> {
   const root = await canonicalRepoRoot(repoRoot);
   await withMutationLock(root, "build", options, async () => {
     await recoverPendingTransaction(root);
-    const generated = await generatePrompt(root);
+    const generated = await generatePrompt(root, workspace);
+    workspace.throwIfAborted();
     await commitWriteSet(root, "build", [
       { path: OUTPUT_PATH, bytes: generated.output },
       { path: PROVENANCE_PATH, bytes: generated.provenance },
@@ -72,7 +91,17 @@ export async function buildPrompt(
 
 export async function checkPrompt(
   repoRoot = defaultPromptRepoRoot(),
-  options: Pick<MutationOptions, "processIdentityProvider"> = {},
+  options: Pick<MutationOptions, "processIdentityProvider" | "signal"> = {},
+): Promise<void> {
+  await withPromptWorkspace(options.signal, (workspace) =>
+    checkPromptWithWorkspace(repoRoot, options, workspace),
+  );
+}
+
+async function checkPromptWithWorkspace(
+  repoRoot: string,
+  options: Pick<MutationOptions, "processIdentityProvider" | "signal">,
+  workspace: PromptWorkspace,
 ): Promise<void> {
   const root = await canonicalRepoRoot(repoRoot);
   await assertCanonicalContainment(root);
@@ -81,17 +110,20 @@ export async function checkPrompt(
     options.processIdentityProvider ?? defaultProcessIdentityProvider,
   );
   await assertNoPendingTransaction(root);
-  await checkPromptContents(root);
+  await checkPromptContents(root, workspace);
 }
 
-async function checkPromptContents(root: string): Promise<void> {
+async function checkPromptContents(
+  root: string,
+  workspace: PromptWorkspace,
+): Promise<void> {
   parseShippedLanguagePolicy(
     await readRequiredFile(
       join(root, SHIPPED_LANGUAGE_POLICY_PATHS.canonicalWorkspacePath),
       "shipped-language policy",
     ),
   );
-  const generated = await generatePrompt(root);
+  const generated = await generatePrompt(root, workspace);
   await compareGenerated(
     join(root, OUTPUT_PATH),
     generated.output,
@@ -107,12 +139,18 @@ async function checkPromptContents(root: string): Promise<void> {
 export async function authorPromptPatch(
   repoRoot = defaultPromptRepoRoot(),
   candidatePath?: string,
-  options: {
-    transactionFault?: TransactionFault;
-    lockHooks?: MutationLockHooks;
-    processIdentityProvider?: ProcessIdentityProvider;
-    incompleteLockGraceMs?: number;
-  } = {},
+  options: AuthorPromptOptions = {},
+): Promise<void> {
+  await withPromptWorkspace(options.signal, (workspace) =>
+    authorPromptPatchWithWorkspace(repoRoot, candidatePath, options, workspace),
+  );
+}
+
+async function authorPromptPatchWithWorkspace(
+  repoRoot: string,
+  candidatePath: string | undefined,
+  options: AuthorPromptOptions,
+  workspace: PromptWorkspace,
 ): Promise<void> {
   const root = await canonicalRepoRoot(repoRoot);
   await withMutationLock(root, "author", options, async () => {
@@ -142,12 +180,14 @@ export async function authorPromptPatch(
       baseline,
       candidate,
       manifest.upstream.path,
+      workspace,
     );
     validatePatch(patch, manifest.upstream.path, baseline);
     const applied = await applyPatchStrict(
       baseline,
       patch,
       manifest.upstream.path,
+      workspace,
     );
     if (!applied.equals(candidate)) {
       throw new PromptLayerError(
@@ -159,6 +199,7 @@ export async function authorPromptPatch(
     updated.patch = fileFact(PATCH_PATH, patch);
     updated.output = fileFact(OUTPUT_PATH, candidate);
     const provenance = provenanceBytes(updated);
+    workspace.throwIfAborted();
     await commitWriteSet(
       root,
       "author",
@@ -171,7 +212,7 @@ export async function authorPromptPatch(
       options.transactionFault,
     );
 
-    const regenerated = await generatePrompt(root);
+    const regenerated = await generatePrompt(root, workspace);
     if (!regenerated.output.equals(candidate)) {
       throw new PromptLayerError(
         "Authored prompt failed exact replay verification.",
@@ -183,16 +224,20 @@ export async function authorPromptPatch(
 export async function rebasePrompt(
   repoRoot: string,
   commit: string,
-  options: {
-    candidatePath?: string;
-    fetcher?: PromptFetcher;
-    transactionFault?: TransactionFault;
-    lockHooks?: MutationLockHooks;
-    processIdentityProvider?: ProcessIdentityProvider;
-    incompleteLockGraceMs?: number;
-  } = {},
+  options: RebasePromptOptions = {},
 ): Promise<void> {
   parseImmutableCommit(commit);
+  await withPromptWorkspace(options.signal, (workspace) =>
+    rebasePromptWithWorkspace(repoRoot, commit, options, workspace),
+  );
+}
+
+async function rebasePromptWithWorkspace(
+  repoRoot: string,
+  commit: string,
+  options: RebasePromptOptions,
+  workspace: PromptWorkspace,
+): Promise<void> {
   const root = await canonicalRepoRoot(repoRoot);
   await withMutationLock(root, "rebase", options, async () => {
     await recoverPendingTransaction(root);
@@ -210,6 +255,7 @@ export async function rebasePrompt(
       currentBaseline,
       existingPatch,
       current.upstream.path,
+      workspace,
     );
 
     const fetcher = options.fetcher ?? networkFetcher;
@@ -229,6 +275,7 @@ export async function rebasePrompt(
           baseline,
           existingPatch,
           UPSTREAM_PATH,
+          workspace,
         );
         const digest = sha256(attempted);
         const relation =
@@ -249,9 +296,19 @@ export async function rebasePrompt(
     validateText(candidate, "reviewed rebase candidate");
     rejectMachinePaths(candidate, "reviewed rebase candidate");
     validateOutputProvenance(candidate, commit, UPSTREAM_PATH);
-    const patch = await createPatch(baseline, candidate, UPSTREAM_PATH);
+    const patch = await createPatch(
+      baseline,
+      candidate,
+      UPSTREAM_PATH,
+      workspace,
+    );
     validatePatch(patch, UPSTREAM_PATH, baseline);
-    const reapplied = await applyPatchStrict(baseline, patch, UPSTREAM_PATH);
+    const reapplied = await applyPatchStrict(
+      baseline,
+      patch,
+      UPSTREAM_PATH,
+      workspace,
+    );
     if (!reapplied.equals(candidate)) {
       throw new PromptLayerError(
         "Rebased patch does not reproduce the reviewed candidate exactly.",
@@ -266,6 +323,7 @@ export async function rebasePrompt(
     updated.patch = fileFact(PATCH_PATH, patch);
     updated.output = fileFact(OUTPUT_PATH, candidate);
 
+    workspace.throwIfAborted();
     await commitWriteSet(
       root,
       "rebase",
@@ -280,7 +338,7 @@ export async function rebasePrompt(
       ],
       options.transactionFault,
     );
-    await checkPromptContents(root);
+    await checkPromptContents(root, workspace);
   });
 }
 
@@ -293,7 +351,10 @@ export function parseImmutableCommit(value: string): string {
   return value;
 }
 
-async function generatePrompt(root: string): Promise<GeneratedPrompt> {
+async function generatePrompt(
+  root: string,
+  workspace: PromptWorkspace,
+): Promise<GeneratedPrompt> {
   const manifest = await readManifest(root);
   const baseline = await verifiedFile(
     root,
@@ -308,6 +369,7 @@ async function generatePrompt(root: string): Promise<GeneratedPrompt> {
     baseline,
     patch,
     manifest.upstream.path,
+    workspace,
   );
   verifyFact(output, manifest.output, "applied output");
   rejectMachinePaths(output, "applied output");
