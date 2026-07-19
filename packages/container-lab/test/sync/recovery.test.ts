@@ -25,6 +25,58 @@ const fixtures = createSyncFixtureScope();
 const { fixture, replaceNestedParent, repo, trackTemporaryPath } = fixtures;
 afterEach(fixtures.cleanup);
 
+const malformedJournalCases: ReadonlyArray<{
+  readonly name: string;
+  readonly tamper: (journal: SyncJournal, external: string) => void;
+}> = [
+  {
+    name: "unknown field",
+    tamper: (journal) => {
+      (journal as unknown as Record<string, unknown>)["unexpected"] = true;
+    },
+  },
+  {
+    name: "external backup",
+    tamper: (journal, external) => {
+      firstBackup(journal).backup = external;
+    },
+  },
+  {
+    name: "missing backup",
+    tamper: (journal) => {
+      journal.backups = [];
+    },
+  },
+  {
+    name: "duplicate backup",
+    tamper: (journal) => {
+      journal.backups.push(structuredClone(firstBackup(journal)));
+    },
+  },
+  {
+    name: "external publication",
+    tamper: (journal, external) => {
+      firstBackup(journal).publication = external;
+    },
+  },
+  {
+    name: "altered backup descriptor",
+    tamper: (journal) => {
+      required(
+        firstBackup(journal).original ?? undefined,
+        "backup original",
+      ).sha256 = "0".repeat(64);
+    },
+  },
+  {
+    name: "altered baseline provenance",
+    tamper: (journal) => {
+      required(journal.newBaseline.files["file.txt"], "baseline file").sha256 =
+        "0".repeat(64);
+    },
+  },
+];
+
 describe("transaction recovery", () => {
   test("rolls back a published deletion from its durable backup", async () => {
     const state = await fixture();
@@ -315,62 +367,8 @@ describe("transaction recovery", () => {
     expect(await readdir(path.join(syncRoot, "journals"))).toHaveLength(1);
   });
 
-  test("rejects malformed journal records and external backup injection before writes", async () => {
-    const cases: Array<{
-      name: string;
-      tamper: (journal: SyncJournal, external: string) => void;
-    }> = [
-      {
-        name: "unknown field",
-        tamper: (journal) => {
-          (journal as unknown as Record<string, unknown>)["unexpected"] = true;
-        },
-      },
-      {
-        name: "external backup",
-        tamper: (journal, external) => {
-          firstBackup(journal).backup = external;
-        },
-      },
-      {
-        name: "missing backup",
-        tamper: (journal) => {
-          journal.backups = [];
-        },
-      },
-      {
-        name: "duplicate backup",
-        tamper: (journal) => {
-          journal.backups.push(structuredClone(firstBackup(journal)));
-        },
-      },
-      {
-        name: "external publication",
-        tamper: (journal, external) => {
-          firstBackup(journal).publication = external;
-        },
-      },
-      {
-        name: "altered backup descriptor",
-        tamper: (journal) => {
-          required(
-            firstBackup(journal).original ?? undefined,
-            "backup original",
-          ).sha256 = "0".repeat(64);
-        },
-      },
-      {
-        name: "altered baseline provenance",
-        tamper: (journal) => {
-          required(
-            journal.newBaseline.files["file.txt"],
-            "baseline file",
-          ).sha256 = "0".repeat(64);
-        },
-      },
-    ];
-
-    for (const entry of cases) {
+  for (const entry of malformedJournalCases) {
+    test(`rejects malformed journal ${entry.name} before recovery writes`, async () => {
       const state = await fixture();
       await writeFile(path.join(state.source, "file.txt"), "plugin write\n");
       const crash = await crashApply(state);
@@ -390,8 +388,8 @@ describe("transaction recovery", () => {
       );
       expect(await readFile(external, "utf8")).toBe("sentinel\n");
       expect((await lstat(crash.journalPath)).isFile()).toBe(true);
-    }
-  });
+    });
+  }
 
   test("rejects swapped production backup records before recovery writes", async () => {
     const state = await fixture();
