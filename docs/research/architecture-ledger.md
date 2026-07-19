@@ -83,7 +83,7 @@ pages without immutable versions include the retrieval date.
   were unavailable; the extraction did not modify the source files.
 - The JSONL catalog was parsed record-by-record with Python's standard `json` module;
   no catalog tools were installed.
-- Official OpenAI/Codex lifecycle facts were not needed to establish these four ADRs.
+- Official OpenAI/Codex lifecycle facts were not needed to establish these five ADRs.
   If implementation depends on a current Codex lifecycle or API contract, retrieve the
   current official manual/docs at that decision point rather than treating a catalog or
   this dated ledger as authority.
