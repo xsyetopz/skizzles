@@ -1,7 +1,7 @@
 import { internalImageTag } from "../compose/generation.ts";
-import type { DockerRunner, LabRuntime } from "../docker.ts";
-import type { CommandResult } from "../process.ts";
+import type { CommandResult } from "../process/contract.ts";
 import type { LabMetadata } from "../state/lab/contract.ts";
+import type { DockerRunner, LabRuntime } from "./contract.ts";
 import { dockerClientEnvironment, isRecord } from "./environment.ts";
 
 const IMMUTABLE_IMAGE_ID = /^sha256:[0-9a-f]{64}$/;

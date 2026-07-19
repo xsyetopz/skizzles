@@ -3,7 +3,7 @@ import {
   composeCommandArgs,
   emptyComposeEnvironmentFile,
 } from "../compose/generation.ts";
-import type { LabRuntime } from "../docker.ts";
+import type { LabRuntime } from "./contract.ts";
 
 /** Return the exact validated materialized Compose arguments or fail closed. */
 export function immutableComposeArguments(runtime: LabRuntime): string[] {

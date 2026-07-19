@@ -8177,6 +8177,7 @@ function immutableComposeArguments(runtime) {
 var LOOPBACK_PORT = /^127\.0\.0\.1:(\d+)$/;
 var LEADING_REPLACEMENT_CHARACTER = /^\uFFFD/;
 var COMPOSE_CONFIGURATION_FAILURE = "Docker Compose configuration failed; secret-bearing diagnostics redacted";
+var COMPOSE_SOURCE_CHANGED = "Docker Compose source changed during inspection; retry lab creation";
 async function dockerAvailableInRuntime(runner, environment) {
   return (await runner.run(["info", "--format", "{{.ServerVersion}}"], {
     allowFailure: true,
@@ -8203,12 +8204,18 @@ async function prepareLabRuntimeInDocker(metadata, config, runner, environment) 
   const sourceDocument = await rawSourceDocument(sourceComposeArgs, runner, composeEnvironment);
   const sourceModel = sourceDocument.model;
   validateComposeEnvironmentModel(sourceModel, config.composeEnvironment, config.secretEnvironment, environment);
-  const findings = inspectComposeModel(sourceModel);
-  await writeFile(sourceFile, sourceDocument.bytes, { mode: 384 });
+  const normalizedSourceDocument = await normalizedDocument(sourceComposeArgs, runner, composeEnvironment);
+  const confirmedSourceDocument = await rawSourceDocument(sourceComposeArgs, runner, composeEnvironment);
+  if (!sourceDocument.bytes.equals(confirmedSourceDocument.bytes)) {
+    throw new Error(COMPOSE_SOURCE_CHANGED);
+  }
+  const normalizedSourceModel = normalizedSourceDocument.model;
+  const findings = inspectComposeModel(normalizedSourceModel);
+  await writeFile(sourceFile, normalizedSourceDocument.bytes, { mode: 384 });
   if (generatedBaseFile !== undefined) {
     await rm(generatedBaseFile);
   }
-  const override = generateOverrideCompose(config, sourceModel, {
+  const override = generateOverrideCompose(config, normalizedSourceModel, {
     workspaceHostPath: metadata.workspace,
     owner: metadata.owner,
     ownerKey: metadata.ownerKey,
@@ -8246,7 +8253,10 @@ async function rawSourceDocument(composeArgs, runner, environment) {
   ], runner, environment);
 }
 async function normalizedModel(composeArgs, runner, environment) {
-  return (await readComposeDocument([...composeArgs, "config", "--no-env-resolution", "--format", "json"], runner, environment)).model;
+  return (await normalizedDocument(composeArgs, runner, environment)).model;
+}
+async function normalizedDocument(composeArgs, runner, environment) {
+  return await readComposeDocument([...composeArgs, "config", "--no-env-resolution", "--format", "json"], runner, environment);
 }
 async function readComposeDocument(args, runner, environment) {
   let result;
@@ -10082,6 +10092,19 @@ function sameSyncFile(a, b) {
   }
   return a.kind === b.kind && a.sha256 === b.sha256 && a.size === b.size && a.mode === b.mode;
 }
+async function assertExpectedEntry(root, relative4, expected, side) {
+  let actual = null;
+  try {
+    actual = await describeSyncFile(root, relative4);
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+  if (!sameSyncFile(actual ?? undefined, expected ?? undefined)) {
+    throw new Error(`Synchronization ${side} changed after preview: ${relative4}`);
+  }
+}
 function compareManifests(baseline, source, target) {
   const changes = [];
   const conflicts = [];
@@ -11007,6 +11030,11 @@ import {
   symlink
 } from "fs/promises";
 import path6 from "path";
+class PublicationConflictError extends Error {
+  constructor(relative4, options) {
+    super(`Synchronization publication conflict at ${relative4}; target preserved`, options);
+  }
+}
 async function backupTargets(targetRoot, records) {
   for (const record of records) {
     await assertExpectedEntry(targetRoot, record.path, record.original, "target");
@@ -11088,9 +11116,38 @@ async function stageSymlink(source, target, expected) {
   }
   await symlink(link2, target);
 }
+async function parentIdentity(target, relative4) {
+  const stat2 = await lstat8(path6.dirname(target), { bigint: true });
+  if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
+    throw new PublicationConflictError(relative4);
+  }
+  return { device: stat2.dev.toString(), inode: stat2.ino.toString() };
+}
+async function capturePublicationBoundary(targetRoot, relative4) {
+  const target = await guardedPath(targetRoot, relative4);
+  return { parent: await parentIdentity(target, relative4), target };
+}
+async function assertPublicationBoundary(targetRoot, relative4, expected, expectedParent) {
+  try {
+    const target = await guardedPath(targetRoot, relative4);
+    const actualParent = await parentIdentity(target, relative4);
+    if (actualParent.device !== expectedParent.device || actualParent.inode !== expectedParent.inode) {
+      throw new PublicationConflictError(relative4);
+    }
+    await assertExpectedEntry(targetRoot, relative4, expected, "target");
+  } catch (error) {
+    if (error instanceof PublicationConflictError) {
+      throw error;
+    }
+    throw new PublicationConflictError(relative4, { cause: error });
+  }
+}
 async function applyChange(sourceRoot, targetRoot, change, record, beforeRename) {
-  const target = await guardedPath(targetRoot, change.path, true);
+  const boundary = await capturePublicationBoundary(targetRoot, change.path);
+  const { target } = boundary;
   if (change.action === "delete") {
+    await beforeRename?.();
+    await assertPublicationBoundary(targetRoot, change.path, record.original, boundary.parent);
     await rm6(target, { force: true, recursive: false });
     await syncDirectory(path6.dirname(target));
     return;
@@ -11112,6 +11169,7 @@ async function applyChange(sourceRoot, targetRoot, change, record, beforeRename)
       throw new Error(`Synchronization source changed type during apply: ${change.path}`);
     }
     await beforeRename?.();
+    await assertPublicationBoundary(targetRoot, change.path, record.original, boundary.parent);
     await rename3(record.publication, target);
     await syncDirectory(path6.dirname(target));
   } catch (error) {
@@ -11119,19 +11177,6 @@ async function applyChange(sourceRoot, targetRoot, change, record, beforeRename)
       return;
     });
     throw error;
-  }
-}
-async function assertExpectedEntry(root, relative4, expected, side) {
-  let actual = null;
-  try {
-    actual = await describeSyncFile(root, relative4);
-  } catch (error) {
-    if (error.code !== "ENOENT") {
-      throw error;
-    }
-  }
-  if (!sameSyncFile(actual ?? undefined, expected ?? undefined)) {
-    throw new Error(`Synchronization ${side} changed after preview: ${relative4}`);
   }
 }
 async function restoreBackups(targetRoot, backups) {

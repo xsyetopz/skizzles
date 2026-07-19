@@ -7,6 +7,11 @@ import {
 } from "./contract.ts";
 import { hasRuntimeDependency } from "./dependencies.ts";
 import { listFiles } from "./filesystem.ts";
+import { scanStaticModuleSpecifiers } from "./source/declarations.ts";
+import {
+  type SourceModule,
+  validateSourceModuleCycles,
+} from "./source/graph.ts";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const IMPORT_EXTENSIONS = new Set([...SOURCE_EXTENSIONS, ".json"]);
@@ -26,12 +31,13 @@ export async function validateWorkspaceImports(
     ).filter((path) =>
       SOURCE_EXTENSIONS.has(path.slice(path.lastIndexOf("."))),
     );
+    const sourceModules: SourceModule[] = [];
     for (const sourcePath of files) {
       const relativePath = toPortablePath(relative(item.root, sourcePath));
       if (isGeneratedOwnership(relativePath)) {
         continue;
       }
-      validateImports(
+      const specifiers = validateImports(
         item,
         sourcePath,
         relativePath,
@@ -39,7 +45,15 @@ export async function validateWorkspaceImports(
         packagesByName,
         findings,
       );
+      if (relativePath.startsWith("src/") && specifiers !== undefined) {
+        sourceModules.push({
+          path: sourcePath,
+          relativePath,
+          specifiers,
+        });
+      }
     }
+    validateSourceModuleCycles(item, sourceModules, findings);
   }
 }
 
@@ -50,7 +64,7 @@ function validateImports(
   sourceWithShebang: string,
   packagesByName: ReadonlyMap<string, WorkspacePackage>,
   findings: WorkspaceFinding[],
-): void {
+): readonly string[] | undefined {
   const source = stripShebang(sourceWithShebang);
   const loader = sourcePath.endsWith("x") ? "tsx" : "ts";
   let imports: Bun.Import[];
@@ -65,7 +79,11 @@ function validateImports(
     );
     return;
   }
-  for (const { path: specifier } of imports) {
+  const specifiers = new Set([
+    ...imports.map(({ path }) => path),
+    ...scanStaticModuleSpecifiers(source),
+  ]);
+  for (const specifier of specifiers) {
     validateImport(
       item,
       sourcePath,
@@ -75,6 +93,7 @@ function validateImports(
       findings,
     );
   }
+  return [...specifiers];
 }
 
 function validateImport(
@@ -129,7 +148,9 @@ function validateImport(
     return;
   }
   const inTest = relativePath.startsWith("test/");
-  const runtimeDependency = hasRuntimeDependency(item.manifest, dependency);
+  const runtimeDependency =
+    dependency === item.manifest.name ||
+    hasRuntimeDependency(item.manifest, dependency);
   if (
     !(
       runtimeDependency ||

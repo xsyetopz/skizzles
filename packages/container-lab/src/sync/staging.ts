@@ -14,9 +14,28 @@ import {
   type SyncFile,
   sha256,
 } from "../files.ts";
-import { sameSyncFile } from "./comparison.ts";
+import { assertExpectedEntry, sameSyncFile } from "./comparison.ts";
 import type { BackupRecord, SyncChange } from "./contract.ts";
 import { syncDirectory, syncFile } from "./durability.ts";
+
+interface ParentIdentity {
+  device: string;
+  inode: string;
+}
+
+interface PublicationBoundary {
+  parent: ParentIdentity;
+  target: string;
+}
+
+class PublicationConflictError extends Error {
+  constructor(relative: string, options?: ErrorOptions) {
+    super(
+      `Synchronization publication conflict at ${relative}; target preserved`,
+      options,
+    );
+  }
+}
 
 export async function backupTargets(
   targetRoot: string,
@@ -144,6 +163,49 @@ async function stageSymlink(
   await symlink(link, target);
 }
 
+async function parentIdentity(
+  target: string,
+  relative: string,
+): Promise<ParentIdentity> {
+  const stat = await lstat(path.dirname(target), { bigint: true });
+  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    throw new PublicationConflictError(relative);
+  }
+  return { device: stat.dev.toString(), inode: stat.ino.toString() };
+}
+
+async function capturePublicationBoundary(
+  targetRoot: string,
+  relative: string,
+): Promise<PublicationBoundary> {
+  const target = await guardedPath(targetRoot, relative);
+  return { parent: await parentIdentity(target, relative), target };
+}
+
+async function assertPublicationBoundary(
+  targetRoot: string,
+  relative: string,
+  expected: SyncFile | null,
+  expectedParent: ParentIdentity,
+): Promise<void> {
+  try {
+    const target = await guardedPath(targetRoot, relative);
+    const actualParent = await parentIdentity(target, relative);
+    if (
+      actualParent.device !== expectedParent.device ||
+      actualParent.inode !== expectedParent.inode
+    ) {
+      throw new PublicationConflictError(relative);
+    }
+    await assertExpectedEntry(targetRoot, relative, expected, "target");
+  } catch (error) {
+    if (error instanceof PublicationConflictError) {
+      throw error;
+    }
+    throw new PublicationConflictError(relative, { cause: error });
+  }
+}
+
 export async function applyChange(
   sourceRoot: string,
   targetRoot: string,
@@ -151,8 +213,16 @@ export async function applyChange(
   record: BackupRecord,
   beforeRename?: () => void | Promise<void>,
 ): Promise<void> {
-  const target = await guardedPath(targetRoot, change.path, true);
+  const boundary = await capturePublicationBoundary(targetRoot, change.path);
+  const { target } = boundary;
   if (change.action === "delete") {
+    await beforeRename?.();
+    await assertPublicationBoundary(
+      targetRoot,
+      change.path,
+      record.original,
+      boundary.parent,
+    );
     await rm(target, { force: true, recursive: false });
     await syncDirectory(path.dirname(target));
     return;
@@ -176,6 +246,12 @@ export async function applyChange(
       );
     }
     await beforeRename?.();
+    await assertPublicationBoundary(
+      targetRoot,
+      change.path,
+      record.original,
+      boundary.parent,
+    );
     await rename(record.publication, target);
     await syncDirectory(path.dirname(target));
   } catch (error) {
@@ -183,27 +259,6 @@ export async function applyChange(
       () => undefined,
     );
     throw error;
-  }
-}
-
-export async function assertExpectedEntry(
-  root: string,
-  relative: string,
-  expected: SyncFile | null,
-  side: string,
-): Promise<void> {
-  let actual: SyncFile | null = null;
-  try {
-    actual = await describeSyncFile(root, relative);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-  }
-  if (!sameSyncFile(actual ?? undefined, expected ?? undefined)) {
-    throw new Error(
-      `Synchronization ${side} changed after preview: ${relative}`,
-    );
   }
 }
 

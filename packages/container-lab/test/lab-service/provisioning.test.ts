@@ -139,7 +139,7 @@ describe("service provisioning", () => {
     expect(docker.calls.some((args) => args.includes("rm"))).toBe(false);
   });
 
-  test("materializes inspected Compose source before mutation and reuses it after ready", async () => {
+  test("rejects inspection drift and reuses a stable source after ready", async () => {
     const root = await mkdtemp(
       join(tmpdir(), "container-lab-compose-binding-"),
     );
@@ -173,50 +173,89 @@ describe("service provisioning", () => {
     };
     const dangerous =
       "services: { dev: { image: node:24, command: [sh, -lc, 'echo ${TMPDIR}'] } }\n";
+    const safeModel = {
+      services: { dev: { image: "node:24", command: ["echo", "safe"] } },
+    };
+    const dangerousModel = {
+      services: {
+        dev: {
+          image: "node:24",
+          command: ["sh", "-lc", "echo ${TMPDIR}"],
+        },
+      },
+    };
     class MutatingComposeDocker extends RecordingDocker {
-      private mutated = false;
+      private configCalls = 0;
       override async run(
         args: string[],
         options?: Parameters<RecordingDocker["run"]>[1],
       ) {
+        if (args.includes("config")) {
+          this.configCalls++;
+        }
         const result = await super.run(args, options);
-        if (!this.mutated && args.includes("--no-normalize")) {
-          this.mutated = true;
+        if (this.configCalls === 1 && args.includes("--no-normalize")) {
           await writeFile(composeFile, dangerous);
+          this.model = dangerousModel;
         }
         return result;
       }
     }
-    const docker = new MutatingComposeDocker();
-    docker.model = {
-      services: { dev: { image: "node:24", command: ["echo", "safe"] } },
-    };
-    const service = new ContainerLabService(
+    const driftingDocker = new MutatingComposeDocker();
+    driftingDocker.model = safeModel;
+    const driftingService = new ContainerLabService(
       "thread-compose-binding",
+      roots,
+      driftingDocker,
+      { PATH: process.env["PATH"], TMPDIR: "sentinel-client-temp" },
+    );
+
+    const rejected = await driftingService.createLab("compose-drift", source);
+    expect(rejected.state).toBe("failed");
+    const rejectedLab = await readLab(
+      roots,
+      "thread-compose-binding",
+      rejected.labId,
+    );
+    expect(rejectedLab.error).toBe(
+      "Docker Compose source changed during inspection; retry lab creation",
+    );
+    expect(driftingDocker.calls.some((args) => args.includes("up"))).toBe(
+      false,
+    );
+
+    await writeFile(
+      composeFile,
+      "services: { dev: { image: node:24, command: [echo, safe] } }\n",
+    );
+    const docker = new RecordingDocker();
+    docker.model = safeModel;
+    const service = new ContainerLabService(
+      "thread-compose-stable",
       roots,
       docker,
       { PATH: process.env["PATH"], TMPDIR: "sentinel-client-temp" },
     );
-
-    const created = await service.createLab("compose-binding", source);
+    const created = await service.createLab("compose-stable", source);
     expect(created.state).toBe("ready");
-    expect(readFileSync(composeFile, "utf8")).toBe(dangerous);
-    const lab = await readLab(roots, "thread-compose-binding", created.labId);
+    const lab = await readLab(roots, "thread-compose-stable", created.labId);
     const runtime = lab.runtime;
     if (!runtime?.sourceFile) {
       throw new Error("expected immutable Compose source");
     }
     expect(readFileSync(runtime.sourceFile, "utf8")).toBe(
-      JSON.stringify(docker.model),
+      JSON.stringify(safeModel),
     );
-    expect(readFileSync(runtime.sourceFile, "utf8")).not.toContain("TMPDIR");
 
     const upCall = docker.runCalls.find((call) => call.args.includes("up"));
     expect(upCall?.args).toContain(runtime.sourceFile);
     expect(upCall?.args).not.toContain(composeFile);
     expect(upCall?.args).toContain("/dev/null");
 
-    await writeFile(composeFile, `${dangerous}# post-ready mutation\n`);
+    await writeFile(
+      composeFile,
+      "services: { dev: { image: node:24, privileged: true } }\n",
+    );
     const beforeLifecycle = docker.runCalls.length;
     await service.labStatus(created.labId);
     await service.logs(created.labId, "dev", 10);

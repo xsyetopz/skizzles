@@ -1,5 +1,5 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +8,8 @@ import { validateWorkspace } from "../../src/workspace/policy.ts";
 
 const roots: string[] = [];
 const descendantPidMarkers: string[] = [];
+
+setDefaultTimeout(10_000);
 
 afterEach(async () => {
   try {
@@ -116,6 +118,19 @@ describe("workspace policy", () => {
     expect(codes).toContain("unsafe-export-import");
   });
 
+  test("accepts a clean export import beyond the former observation deadline", async () => {
+    const root = await fixture();
+    await writeFile(
+      join(root, "packages/example/src/index.ts"),
+      "await Bun.sleep(1_250);\nexport const value = 1;\n",
+    );
+
+    const findings = await validateWorkspace(root);
+    expect(findings.map(({ code }) => code)).not.toContain(
+      "unsafe-export-import",
+    );
+  });
+
   test.each([
     ["process exit", "process.exit(23);\n"],
     ["stdout output", 'console.log("import side effect");\n'],
@@ -144,7 +159,7 @@ describe("workspace policy", () => {
         "unsafe-export-import",
       );
       expect(unsafeExportImportMessage(findings)).toContain(
-        "did not exit and close stdout and stderr while stdin remained open",
+        "exceeded the configured 5000ms lifecycle observation deadline before process exit and both stdout/stderr closures were observed while stdin remained open",
       );
       const pid = await requiredPidMarker(marker);
       expect(await pidGone(pid)).toBeTrue();
@@ -323,7 +338,7 @@ async function validateWithin(
 ): Promise<Awaited<ReturnType<typeof validateWorkspace>>> {
   const validation = validateWorkspace(root);
   const timeout = Promise.withResolvers<"deadline">();
-  const timer = setTimeout(() => timeout.resolve("deadline"), 2_500);
+  const timer = setTimeout(() => timeout.resolve("deadline"), 7_500);
   const outcome = await Promise.race([
     validation.then((findings) => ({ findings })),
     timeout.promise,
@@ -337,7 +352,7 @@ async function validateWithin(
     killPid(pid);
   }
   await Promise.race([validation, Bun.sleep(1_000)]);
-  throw new Error("workspace validation exceeded the 2500ms test bound");
+  throw new Error("workspace validation exceeded the 7500ms test bound");
 }
 
 async function requiredPidMarker(marker: string): Promise<number> {

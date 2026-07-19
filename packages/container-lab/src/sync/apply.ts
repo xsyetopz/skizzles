@@ -3,7 +3,7 @@ import { lstat, mkdir, rename, rm } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { safeStateName } from "../files.ts";
-import { compareManifests } from "./comparison.ts";
+import { assertExpectedEntry, compareManifests } from "./comparison.ts";
 import type {
   ApplySyncOptions,
   BaselineFile,
@@ -32,7 +32,6 @@ import {
 import { rollbackJournalSafely } from "./recovery.ts";
 import {
   applyChange,
-  assertExpectedEntry,
   backupTargets,
   cleanupPublications,
   planBackupRecords,

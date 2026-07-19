@@ -42,7 +42,7 @@ their explicit package exports; it does not traverse sibling private filesystem 
 | `packages/usage-analyzer` | bundled `scripts/analyze.ts` |
 | `packages/installer` | bundled `packages/installer/src/cli.ts` and runtime manifest |
 | `packages/container-lab` | bundled `packages/container-lab/src/{cli,reaper-cli}.ts`, descriptor, docs, and LaunchAgent template |
-| `packages/prompt-layer` | `instructions/`, `integrations/prompt-policy.json`, and `third_party/openai-codex/` |
+| `packages/prompt-layer` | `instructions/`, `integrations/prompt-policy.json`, `evaluations/shipped-language-policy.v2.json`, and `third_party/openai-codex/` |
 | `skills/` | `skills/` |
 | `packages/plugin-builder/template` | plugin manifest and static template assets |
 

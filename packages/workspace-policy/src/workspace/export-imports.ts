@@ -11,7 +11,11 @@ import {
 } from "./contract.ts";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
-const EXPORT_IMPORT_TIMEOUT_MS = 1000;
+/**
+ * Allow real package graphs enough time to initialize while keeping the
+ * import-time lifecycle probe deterministically bounded.
+ */
+const EXPORT_IMPORT_TIMEOUT_MS = 5_000;
 const EXPORT_IMPORT_CLEANUP_TIMEOUT_MS = 1000;
 const EXPORT_IMPORT_GROUP_POLL_INTERVAL_MS = 10;
 const HAS_POSIX_PROCESS_GROUPS = process.platform !== "win32";
@@ -133,7 +137,7 @@ async function observeExportImport(
     () =>
       deadline.resolve(
         new ExportImportObservationError(
-          "did not exit and close stdout and stderr while stdin remained open",
+          `exceeded the configured ${EXPORT_IMPORT_TIMEOUT_MS}ms lifecycle observation deadline before process exit and both stdout/stderr closures were observed while stdin remained open`,
         ),
       ),
     EXPORT_IMPORT_TIMEOUT_MS,

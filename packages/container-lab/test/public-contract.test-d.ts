@@ -1,32 +1,35 @@
-import type {} from "../src/compose/contract.ts";
-import type {} from "../src/compose/generation.ts";
-import type {} from "../src/compose/inspection.ts";
-import type {} from "../src/config.ts";
+// biome-ignore lint/correctness/noUnresolvedImports: This type contract intentionally resolves the package's declared self-reference export.
+import type { ContainerLabService, RunOutput } from "@skizzles/container-lab";
 
-declare module "../src/compose/contract.ts" {
-  interface ComposeModel {
-    readonly publicApiCompatibilityMarker?: never;
-  }
-}
+type Assert<Condition extends true> = Condition;
+type Equal<Left, Right> =
+  (<Value>() => Value extends Left ? true : false) extends <
+    Value,
+  >() => Value extends Right ? true : false
+    ? true
+    : false;
 
-declare module "../src/compose/generation.ts" {
-  interface ComposeCommandOptions {
-    readonly publicApiCompatibilityMarker?: never;
-  }
+export type ContainerLabValueExports = Assert<
+  Equal<
+    keyof typeof import("@skizzles/container-lab"),
+    "ContainerLabService" | "recoverLabSync"
+  >
+>;
 
-  interface LabComposeContext {
-    readonly publicApiCompatibilityMarker?: never;
-  }
-}
+export type ContainerLabServiceHealth = Assert<
+  Equal<
+    Awaited<ReturnType<ContainerLabService["health"]>>,
+    { ok: true; dockerAvailable: boolean; labs: number }
+  >
+>;
 
-declare module "../src/compose/inspection.ts" {
-  interface ComposeInspectionFinding {
-    readonly publicApiCompatibilityMarker?: never;
-  }
-}
-
-declare module "../src/config.ts" {
-  interface RuntimeConfig {
-    readonly publicApiCompatibilityMarker?: never;
-  }
-}
+export type ContainerLabRunOutput = Assert<
+  Equal<
+    RunOutput,
+    {
+      stdout: (chunk: Buffer) => void;
+      stderr: (chunk: Buffer) => void;
+      stdin?: NodeJS.ReadableStream;
+    }
+  >
+>;

@@ -185,7 +185,7 @@ describe("raw Compose environment boundary", () => {
       },
     };
     const final = { services: { dev: {} } };
-    const docker = new ModelDocker(raw, final);
+    const docker = new ModelDocker(raw, final, raw, final);
     const config = parseLabConfig(
       "image: { name: node:24, service: dev }\ncompose_environment: [PROJECT_VALUE]\n",
       join(root, "source"),
@@ -198,7 +198,7 @@ describe("raw Compose environment boundary", () => {
     });
 
     expect(prepared.config.composeEnvironment).toEqual(["PROJECT_VALUE"]);
-    expect(docker.calls).toHaveLength(2);
+    expect(docker.calls).toHaveLength(4);
     for (const call of docker.calls) {
       expect(call.options.env).toEqual({
         PATH: "/usr/bin:/bin",

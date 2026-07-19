@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
-import type { CommandResult, RunOptions } from "../process.ts";
 import { runCommand } from "../process.ts";
+import type { CommandResult, RunOptions } from "./contract.ts";
 
 type GitRunOptions = Omit<RunOptions, "env">;
 

@@ -1,7 +1,7 @@
 import { type ChildProcessByStdio, spawn } from "node:child_process";
 import process from "node:process";
 import type { Readable } from "node:stream";
-import type { CommandResult, RunOptions } from "../process.ts";
+import type { CommandResult, RunOptions } from "./contract.ts";
 import { cleanupOwnedProcess } from "./group.ts";
 import { assertProcessPlatform } from "./platform.ts";
 

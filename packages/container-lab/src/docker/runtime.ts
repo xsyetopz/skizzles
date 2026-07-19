@@ -12,10 +12,10 @@ import {
   validateComposeEnvironmentModel,
 } from "../compose/inspection.ts";
 import { assertComposeInputPolicy, type LabConfig } from "../config.ts";
-import type { DockerRunner, LabRuntime } from "../docker.ts";
-import type { CommandResult } from "../process.ts";
+import type { CommandResult } from "../process/contract.ts";
 import { redactPublicText } from "../public/output.ts";
 import type { Endpoint, LabMetadata } from "../state/lab/contract.ts";
+import type { DockerRunner, LabRuntime } from "./contract.ts";
 import {
   composeInvocationEnvironment,
   composeUpEnvironment,
@@ -29,6 +29,8 @@ const LOOPBACK_PORT = /^127\.0\.0\.1:(\d+)$/;
 const LEADING_REPLACEMENT_CHARACTER = /^�/;
 const COMPOSE_CONFIGURATION_FAILURE =
   "Docker Compose configuration failed; secret-bearing diagnostics redacted";
+const COMPOSE_SOURCE_CHANGED =
+  "Docker Compose source changed during inspection; retry lab creation";
 
 type ServiceSummary = {
   service: string;
@@ -92,12 +94,26 @@ export async function prepareLabRuntimeInDocker(
     config.secretEnvironment,
     environment,
   );
-  const findings = inspectComposeModel(sourceModel);
-  await writeFile(sourceFile, sourceDocument.bytes, { mode: 0o600 });
+  const normalizedSourceDocument = await normalizedDocument(
+    sourceComposeArgs,
+    runner,
+    composeEnvironment,
+  );
+  const confirmedSourceDocument = await rawSourceDocument(
+    sourceComposeArgs,
+    runner,
+    composeEnvironment,
+  );
+  if (!sourceDocument.bytes.equals(confirmedSourceDocument.bytes)) {
+    throw new Error(COMPOSE_SOURCE_CHANGED);
+  }
+  const normalizedSourceModel = normalizedSourceDocument.model;
+  const findings = inspectComposeModel(normalizedSourceModel);
+  await writeFile(sourceFile, normalizedSourceDocument.bytes, { mode: 0o600 });
   if (generatedBaseFile !== undefined) {
     await rm(generatedBaseFile);
   }
-  const override = generateOverrideCompose(config, sourceModel, {
+  const override = generateOverrideCompose(config, normalizedSourceModel, {
     workspaceHostPath: metadata.workspace,
     owner: metadata.owner,
     ownerKey: metadata.ownerKey,
@@ -153,13 +169,19 @@ async function normalizedModel(
   runner: DockerRunner,
   environment: NodeJS.ProcessEnv,
 ): Promise<ComposeModel> {
-  return (
-    await readComposeDocument(
-      [...composeArgs, "config", "--no-env-resolution", "--format", "json"],
-      runner,
-      environment,
-    )
-  ).model;
+  return (await normalizedDocument(composeArgs, runner, environment)).model;
+}
+
+async function normalizedDocument(
+  composeArgs: string[],
+  runner: DockerRunner,
+  environment: NodeJS.ProcessEnv,
+): Promise<{ model: ComposeModel; bytes: Buffer }> {
+  return await readComposeDocument(
+    [...composeArgs, "config", "--no-env-resolution", "--format", "json"],
+    runner,
+    environment,
+  );
 }
 
 async function readComposeDocument(

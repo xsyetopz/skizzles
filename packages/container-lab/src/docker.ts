@@ -8,6 +8,13 @@ import {
   cleanupLabLabelsInDocker,
   destroyLabStackInDocker,
 } from "./docker/cleanup.ts";
+import type {
+  BoundLabRuntime,
+  DockerRunIdentity,
+  DockerRunner,
+  DockerRunTerminationResult,
+  LabRuntime,
+} from "./docker/contract.ts";
 import {
   dockerAvailableInRuntime,
   prepareLabRuntimeInDocker,
@@ -17,33 +24,8 @@ import {
   runComposeCommand,
   runtimeFromMetadata,
 } from "./docker/runtime.ts";
-import { type CommandResult, type RunOptions, runCommand } from "./process.ts";
-import type {
-  Endpoint,
-  LabMetadata,
-  PersistedLabRuntime,
-} from "./state/lab/contract.ts";
-
-export type LabRuntime = PersistedLabRuntime & { metadata: LabMetadata };
-export type BoundLabRuntime = LabRuntime & { sourceFile: string };
-
-export interface DockerRunner {
-  run(args: string[], options: DockerRunOptions): Promise<CommandResult>;
-  spawn(
-    args: string[],
-    options: DockerSpawnOptions,
-  ): ChildProcessWithoutNullStreams;
-}
-
-export type DockerRunOptions = RunOptions & { env: NodeJS.ProcessEnv };
-export type DockerSpawnOptions = { env: NodeJS.ProcessEnv };
-
-export type DockerRunTerminationResult =
-  | { confirmed: true; status: "signaled" | "absent" }
-  | {
-      confirmed: false;
-      status: "identity-mismatch" | "unavailable" | "docker-failure";
-    };
+import { type CommandResult, runCommand } from "./process.ts";
+import type { Endpoint, LabMetadata } from "./state/lab/contract.ts";
 
 export const defaultDockerRunner: DockerRunner = {
   run: async (args, options) => await runCommand("docker", args, options),
@@ -133,13 +115,6 @@ export async function cleanupLabLabels(
   );
 }
 
-export type DockerRunIdentity = {
-  runId: string;
-  cwd: string;
-  argv: string[];
-  environment: Record<string, string>;
-};
-
 export function launchDockerRun(
   runtime: LabRuntime,
   invocation: DockerRunIdentity,
@@ -168,3 +143,13 @@ export async function terminateDockerRun(
 export function runtimeFromLab(metadata: LabMetadata): LabRuntime {
   return runtimeFromMetadata(metadata);
 }
+
+export type {
+  BoundLabRuntime,
+  DockerRunIdentity,
+  DockerRunner,
+  DockerRunOptions,
+  DockerRunTerminationResult,
+  DockerSpawnOptions,
+  LabRuntime,
+} from "./docker/contract.ts";

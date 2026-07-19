@@ -1,12 +1,12 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { posix } from "node:path";
+import type { CommandResult } from "../process/contract.ts";
 import type {
   DockerRunIdentity,
   DockerRunner,
   DockerRunTerminationResult,
   LabRuntime,
-} from "../docker.ts";
-import type { CommandResult } from "../process.ts";
+} from "./contract.ts";
 import { composeInvocationEnvironment, shellQuote } from "./environment.ts";
 import { runComposeCommand } from "./runtime.ts";
 import { immutableComposeArguments } from "./source.ts";

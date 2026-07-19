@@ -7,8 +7,7 @@ import {
   parseLabManifest,
 } from "./lab/manifest.ts";
 
-export const manifestName = labManifestName;
-export interface RuntimeConfig extends ManifestRuntimeConfig {}
+export const manifestName: typeof labManifestName = labManifestName;
 
 /** Resolve a project-owned path and reject lexical traversal outside the repository. */
 export function resolveRepoPath(repoRoot: string, candidate: string): string {
@@ -60,7 +59,7 @@ export interface LabConfig {
   repoRoot: string;
   manifestPath: string;
   mode: LabMode;
-  runtime: RuntimeConfig;
+  runtime: ManifestRuntimeConfig;
   ports: DeclaredPort[];
   forwardEnvironment: string[];
   composeEnvironment: string[];

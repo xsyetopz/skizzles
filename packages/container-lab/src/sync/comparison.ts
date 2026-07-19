@@ -1,4 +1,4 @@
-import type { SyncFile } from "../files.ts";
+import { describeSyncFile, type SyncFile } from "../files.ts";
 import type { SyncChange, SyncComparison, SyncConflict } from "./contract.ts";
 
 export function sameSyncFile(a?: SyncFile, b?: SyncFile): boolean {
@@ -14,6 +14,27 @@ export function sameSyncFile(a?: SyncFile, b?: SyncFile): boolean {
     a.size === b.size &&
     a.mode === b.mode
   );
+}
+
+export async function assertExpectedEntry(
+  root: string,
+  relative: string,
+  expected: SyncFile | null,
+  side: string,
+): Promise<void> {
+  let actual: SyncFile | null = null;
+  try {
+    actual = await describeSyncFile(root, relative);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+  if (!sameSyncFile(actual ?? undefined, expected ?? undefined)) {
+    throw new Error(
+      `Synchronization ${side} changed after preview: ${relative}`,
+    );
+  }
 }
 
 export function compareManifests(
