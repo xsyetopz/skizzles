@@ -2,8 +2,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { validateWorkspaceArchitecture } from "../../src/workspace/policy.ts";
+import { join, resolve } from "node:path";
+import process from "node:process";
+import { validateWorkspace } from "../../src/workspace/policy.ts";
 
 const roots: string[] = [];
 const REVIEWED_BODY_LINES = 650;
@@ -17,7 +18,27 @@ afterEach(async () => {
   );
 });
 
-describe("workspace architecture fitness", () => {
+describe("mandatory workspace architecture fitness", () => {
+  it("rejects an architectural defect through the default CLI", async () => {
+    const root = await fixture();
+    await addPackage(root, "two", "@skizzles/two");
+    const first = packageManifest("@skizzles/example");
+    first.dependencies["@skizzles/two"] = "workspace:*";
+    const second = packageManifest("@skizzles/two");
+    second.dependencies["@skizzles/example"] = "workspace:*";
+    await writeManifest(root, "example", first);
+    await writeManifest(root, "two", second);
+
+    const result = Bun.spawnSync(
+      [process.execPath, resolve(import.meta.dir, "../../src/cli.ts"), root],
+      { stderr: "pipe", stdout: "pipe" },
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout.toString()).toBe("");
+    expect(result.stderr.toString()).toContain("package-dependency-cycle:");
+  });
+
   it("rejects general package cycles and private package imports", async () => {
     const root = await fixture();
     await addPackage(root, "two", "@skizzles/two");
@@ -32,9 +53,7 @@ describe("workspace architecture fitness", () => {
       'import "@skizzles/two/internal";\nexport const value = 1;\n',
     );
 
-    const codes = (await validateWorkspaceArchitecture(root)).map(
-      ({ code }) => code,
-    );
+    const codes = (await validateWorkspace(root)).map(({ code }) => code);
     expect(codes).toContain("package-dependency-cycle");
     expect(codes).toContain("private-package-import");
   });
@@ -49,9 +68,7 @@ describe("workspace architecture fitness", () => {
     await writeManifest(root, "example", first);
     await writeManifest(root, "two", second);
 
-    const codes = (await validateWorkspaceArchitecture(root)).map(
-      ({ code }) => code,
-    );
+    const codes = (await validateWorkspace(root)).map(({ code }) => code);
     expect(codes).toContain("package-dependency-cycle");
   });
 
@@ -61,7 +78,7 @@ describe("workspace architecture fitness", () => {
     manifest.devDependencies["@skizzles/two"] = "^0.1.0";
     await writeManifest(root, "example", manifest);
 
-    const findings = await validateWorkspaceArchitecture(root);
+    const findings = await validateWorkspace(root);
     expect(findings).toContainEqual({
       code: "workspace-range",
       path: "packages/example",
@@ -85,9 +102,7 @@ describe("workspace architecture fitness", () => {
     };
     await writeManifest(root, "example", manifest);
 
-    const codes = (await validateWorkspaceArchitecture(root)).map(
-      ({ code }) => code,
-    );
+    const codes = (await validateWorkspace(root)).map(({ code }) => code);
     expect(codes).toContain("public-export-budget");
     expect(codes).toContain("public-bin-budget");
   });
@@ -122,9 +137,7 @@ describe("workspace architecture fitness", () => {
       'import "./generated/value.ts";\n',
     );
 
-    const codes = (await validateWorkspaceArchitecture(root)).map(
-      ({ code }) => code,
-    );
+    const codes = (await validateWorkspace(root)).map(({ code }) => code);
     expect(codes).toContain("unowned-package-source");
     expect(codes).toContain("production-to-test-import");
     expect(codes).toContain("production-to-generated-import");
@@ -145,9 +158,7 @@ describe("workspace architecture fitness", () => {
       join(packageRoot, "generated/large.ts"),
       `${"// generated\n".repeat(GENERATED_BODY_LINES)}export {};\n`,
     );
-    let codes = (await validateWorkspaceArchitecture(root)).map(
-      ({ code }) => code,
-    );
+    let codes = (await validateWorkspace(root)).map(({ code }) => code);
     expect(codes).toContain("missing-file-size-review");
     expect(codes).not.toContain("authored-file-too-large");
 
@@ -163,14 +174,14 @@ describe("workspace architecture fitness", () => {
         },
       }),
     );
-    codes = (await validateWorkspaceArchitecture(root)).map(({ code }) => code);
+    codes = (await validateWorkspace(root)).map(({ code }) => code);
     expect(codes).not.toContain("missing-file-size-review");
 
     await writeFile(
       join(packageRoot, "src/reviewed.ts"),
       `${"// oversized\n".repeat(OVERSIZED_BODY_LINES)}export {};\n`,
     );
-    codes = (await validateWorkspaceArchitecture(root)).map(({ code }) => code);
+    codes = (await validateWorkspace(root)).map(({ code }) => code);
     expect(codes).toContain("authored-file-too-large");
   });
 
@@ -181,9 +192,7 @@ describe("workspace architecture fitness", () => {
       `#!/usr/bin/env bun\n${"// orchestration\n".repeat(THICK_ENTRYPOINT_BODY_LINES)}export {};\n`,
     );
 
-    const codes = (await validateWorkspaceArchitecture(root)).map(
-      ({ code }) => code,
-    );
+    const codes = (await validateWorkspace(root)).map(({ code }) => code);
     expect(codes).toContain("thick-executable-entrypoint");
   });
 
@@ -200,7 +209,7 @@ describe("workspace architecture fitness", () => {
         `export const path = ${JSON.stringify(path)};\n`,
       );
 
-      const findings = await validateWorkspaceArchitecture(root);
+      const findings = await validateWorkspace(root);
       expect(findings).toContainEqual({
         code: "hidden-package-filesystem-reach-through",
         path: "packages/example/src/index.ts",

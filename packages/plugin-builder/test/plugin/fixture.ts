@@ -104,28 +104,67 @@ async function fixture(temporaryRoots: string[]): Promise<string> {
     "packages/container-lab/src/cli.ts",
     "#!/usr/bin/env bun\nif (import.meta.main) console.log(JSON.stringify({ help: 'fixture cli' }));\n",
   );
-  for (const path of [
-    "codex-config.ts",
-    "config.ts",
-    "core.ts",
-    "doctor.ts",
-    "harness.ts",
-    "managed-files.ts",
-    "prompt-policy-lock.ts",
-    "prompt-policy.ts",
-  ]) {
-    await write(
-      root,
-      `packages/installer/src/${path}`,
-      path === "codex-config.ts"
-        ? 'export { fixture } from "./managed-files.ts";\n'
-        : `export const fixture = "${path}";\n`,
-    );
+  const installerModules = new Map<string, string>([
+    ["cli-arguments.ts", 'export const fixture = "cli-arguments";\n'],
+    [
+      "codex-config.ts",
+      'import "./codex-config/preview.ts";\nimport "./codex-config/private-files.ts";\nimport "./codex-config/rpc-contract.ts";\nimport "./codex-config/rpc.ts";\nimport "./codex-config/values.ts";\nexport const fixture = "codex-config";\n',
+    ],
+    [
+      "codex-config/preview.ts",
+      'import "../managed-files.ts";\nimport "./rpc.ts";\nimport "./rpc-contract.ts";\nimport "./values.ts";\nexport const fixture = "preview";\n',
+    ],
+    [
+      "codex-config/private-files.ts",
+      'import "../managed-files.ts";\nexport const fixture = "private-files";\n',
+    ],
+    [
+      "codex-config/rpc-contract.ts",
+      'export const fixture = "rpc-contract";\n',
+    ],
+    [
+      "codex-config/rpc.ts",
+      'import "./rpc-contract.ts";\nexport const fixture = "rpc";\n',
+    ],
+    ["codex-config/values.ts", 'export const fixture = "values";\n'],
+    [
+      "config.ts",
+      'import "./codex-config.ts";\nimport "./managed-files.ts";\nexport const fixture = "config";\n',
+    ],
+    [
+      "doctor.ts",
+      'import "./harness.ts";\nimport "./skills.ts";\nexport const fixture = "doctor";\n',
+    ],
+    [
+      "harness.ts",
+      'import "./managed-files.ts";\nimport "./skills.ts";\nexport const fixture = "harness";\n',
+    ],
+    ["managed-files.ts", 'export const fixture = "managed-files";\n'],
+    [
+      "prompt-policy.ts",
+      'import "./codex-config.ts";\nimport "./managed-files.ts";\nimport "./prompt-policy/lock.ts";\nimport "./prompt-policy/managed-state.ts";\nimport "./prompt-policy/source.ts";\nexport const fixture = "prompt-policy";\n',
+    ],
+    ["prompt-policy/lock.ts", 'export const fixture = "prompt-policy-lock";\n'],
+    [
+      "prompt-policy/managed-state.ts",
+      'import "../codex-config.ts";\nimport "../managed-files.ts";\nimport "./source.ts";\nexport const fixture = "managed-state";\n',
+    ],
+    [
+      "prompt-policy/source.ts",
+      'import "../codex-config.ts";\nimport "../managed-files.ts";\nexport const fixture = "prompt-policy-source";\n',
+    ],
+    [
+      "skills.ts",
+      'import "./managed-files.ts";\nexport const fixture = "skills";\n',
+    ],
+  ]);
+  for (const [path, source] of installerModules) {
+    await write(root, `packages/installer/src/${path}`, source);
   }
   await write(
     root,
     "packages/installer/src/cli.ts",
-    'import "./managed-files.ts";\nif (import.meta.main) {\n  console.error("usage: skizzles-installer <command>");\n  process.exit(2);\n}\n',
+    'import "./cli-arguments.ts";\nimport "./config.ts";\nimport "./doctor.ts";\nimport "./harness.ts";\nimport "./prompt-policy.ts";\nimport "./skills.ts";\nif (import.meta.main) {\n  console.error("usage: skizzles-installer <command>");\n  process.exit(2);\n}\n',
   );
   await write(
     root,
@@ -171,12 +210,37 @@ async function fixture(temporaryRoots: string[]): Promise<string> {
   await write(
     root,
     "packages/model-catalog/src/index.ts",
-    'import { marker } from "./catalog-schema.ts";\nconsole.log(marker);\n',
+    'import "./catalog/refresh.ts";\nimport { marker } from "./catalog/schema.ts";\nimport "./cli.ts";\nimport "./launch-agent.ts";\nconsole.log(marker);\n',
   );
   await write(
     root,
-    "packages/model-catalog/src/catalog-schema.ts",
+    "packages/model-catalog/src/catalog/schema.ts",
     'export const marker = "fixture model catalog";\n',
+  );
+  await write(
+    root,
+    "packages/model-catalog/src/catalog/refresh.ts",
+    'import "../codex-child.ts";\nimport "./schema.ts";\nimport "./store.ts";\nexport const fixture = "refresh";\n',
+  );
+  await write(
+    root,
+    "packages/model-catalog/src/catalog/store.ts",
+    'import "./schema.ts";\nexport const fixture = "store";\n',
+  );
+  await write(
+    root,
+    "packages/model-catalog/src/cli.ts",
+    'import "./catalog/refresh.ts";\nimport "./catalog/store.ts";\nimport "./codex-child.ts";\nimport "./launch-agent.ts";\nexport const fixture = "cli";\n',
+  );
+  await write(
+    root,
+    "packages/model-catalog/src/codex-child.ts",
+    'import "./catalog/schema.ts";\nexport const fixture = "codex-child";\n',
+  );
+  await write(
+    root,
+    "packages/model-catalog/src/launch-agent.ts",
+    'export const fixture = "launch-agent";\n',
   );
   await write(
     root,

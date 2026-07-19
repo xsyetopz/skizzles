@@ -28,16 +28,14 @@ for observable lifecycle failures but cannot make the POSIX descendant checks.
 
 The package exports `validateWorkspace` for tests and exposes the
 `skizzles-workspace-policy` executable. It does not modify the workspace.
-The default validator and executable invocation retain the aggregate repository
-gate while the oversized-owner migration is active. Run the strict fitness gate
-explicitly with `validateWorkspaceArchitecture` or:
+The default validator and executable invocation always run the complete
+workspace policy and architectural fitness gate:
 
 ```sh
-bun run packages/workspace-policy/src/cli.ts --architecture-fitness .
+bun run workspace:check
 ```
 
-Strict fitness has no debt baseline or suppressions. It joins the default gate
-only after the current repository passes it.
+Architectural fitness has no debt baseline or suppressions.
 
 Static filesystem reach-through is intentionally limited to literal
 `packages/<owner>/...` paths in production TypeScript. Dynamic paths cannot be

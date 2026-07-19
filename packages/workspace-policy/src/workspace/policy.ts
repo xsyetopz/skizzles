@@ -35,21 +35,6 @@ async function validateWorkspace(
   workspaceRoot: string,
   options: Contract.WorkspacePolicyOptions = {},
 ): Promise<Contract.WorkspaceFinding[]> {
-  return validateWorkspaceMode(workspaceRoot, options, false);
-}
-
-async function validateWorkspaceArchitecture(
-  workspaceRoot: string,
-  options: Contract.WorkspacePolicyOptions = {},
-): Promise<Contract.WorkspaceFinding[]> {
-  return validateWorkspaceMode(workspaceRoot, options, true);
-}
-
-async function validateWorkspaceMode(
-  workspaceRoot: string,
-  options: Contract.WorkspacePolicyOptions,
-  includeArchitectureFitness: boolean,
-): Promise<Contract.WorkspaceFinding[]> {
   const root = resolve(workspaceRoot);
   const findings: Contract.WorkspaceFinding[] = [];
   const rootManifest = await readWorkspaceManifest(root, findings);
@@ -91,9 +76,7 @@ async function validateWorkspaceMode(
   }
 
   await validateWorkspaceImports(packages, findings);
-  if (includeArchitectureFitness) {
-    await validateWorkspaceFitness(packages, findings);
-  }
+  await validateWorkspaceFitness(packages, findings);
   validateExpectedPackageNames(names, options.expectedPackageNames, findings);
   await validateLockfiles(root, findings);
   await validateRootSourceIsolation(root, packageRoots, findings);
@@ -108,8 +91,4 @@ export type {
   WorkspaceFinding,
   WorkspacePolicyOptions,
 } from "./contract.ts";
-export {
-  SKIZZLES_PACKAGE_NAMES,
-  validateWorkspace,
-  validateWorkspaceArchitecture,
-};
+export { SKIZZLES_PACKAGE_NAMES, validateWorkspace };

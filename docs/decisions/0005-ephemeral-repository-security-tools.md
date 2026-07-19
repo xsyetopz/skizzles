@@ -150,7 +150,7 @@ bunx @biomejs/biome@2.5.4 check --config-path biome.jsonc --vcs-root . \
   packages/workspace-policy/src/repository-security \
   packages/workspace-policy/src/security-cli.ts \
   packages/workspace-policy/test/repository-security/tools.test.ts
-bun run packages/workspace-policy/src/cli.ts --architecture-fitness .
+bun run workspace:check
 bun run security:check
 ```
 
