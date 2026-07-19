@@ -14,9 +14,11 @@ import { join } from "node:path";
 import process from "node:process";
 import { refreshCatalog } from "../../src/index.ts";
 import {
+  awaitFakeChildReadiness,
   cleanupCatalogRoots,
   createCatalogRoot,
   createFakeCodex,
+  fakeChildRecords,
   model,
   serializeCache,
   source,
@@ -67,20 +69,24 @@ describe("model catalog refresh", () => {
   });
 
   test("rejects stale, version-mismatched, and partial caches in favor of bundled models", async () => {
+    const now = new Date("2040-01-02T03:04:05.000Z");
     for (const [name, contents] of [
       [
         "stale",
-        serializeCache(source().models, new Date(Date.now() - 301_000)),
+        serializeCache(source().models, new Date(now.getTime() - 301_000)),
       ],
-      ["mismatch", serializeCache(source().models, new Date(), "0.144.0")],
-      ["partial", serializeCache([model("gpt-5.6-luna", "v1")])],
-      ["future", serializeCache(source().models, new Date(Date.now() + 1_000))],
+      ["mismatch", serializeCache(source().models, now, "0.144.0")],
+      ["partial", serializeCache([model("gpt-5.6-luna", "v1")], now)],
+      [
+        "future",
+        serializeCache(source().models, new Date(now.getTime() + 1_000)),
+      ],
     ] as const) {
       const path = createCatalogRoot();
       const codex = await createFakeCodex(path);
       await Bun.write(join(path, "models_cache.json"), contents);
       expect(
-        await refreshCatalog({ codexHome: path, codexBinary: codex }),
+        await refreshCatalog({ codexHome: path, codexBinary: codex, now }),
       ).toMatchObject({ source: "bundled" });
       expect(name.length).toBeGreaterThan(0);
     }
@@ -301,6 +307,21 @@ describe("model catalog refresh", () => {
     }
   });
 
+  test("times out before fake command initialization without requiring descendant readiness", async () => {
+    const path = createCatalogRoot();
+    const codex = await createFakeCodex(path, source(), "initialization-hang");
+    const started = Date.now();
+    await expect(
+      refreshCatalog({
+        codexHome: path,
+        codexBinary: codex,
+        commandTimeoutMs: 20,
+      }),
+    ).rejects.toThrow("timed out");
+    expect(Date.now() - started).toBeLessThan(1_000);
+    expect(fakeChildRecords(path)).toEqual([]);
+  });
+
   test("bounds and reaps descendant-held pipes on success and timeout", async () => {
     for (const behavior of ["descendant", "descendant-hang"] as const) {
       const path = createCatalogRoot();
@@ -309,21 +330,19 @@ describe("model catalog refresh", () => {
       const operation = refreshCatalog({
         codexHome: path,
         codexBinary: codex,
-        commandTimeoutMs: behavior === "descendant" ? 1_000 : 300,
+        commandTimeoutMs: behavior === "descendant" ? 1_000 : 1_500,
       });
       if (behavior === "descendant") {
         await operation;
       } else {
+        await awaitFakeChildReadiness(path, "bundled", 1_000);
         await expect(operation).rejects.toThrow("timed out");
       }
-      expect(Date.now() - started).toBeLessThan(1_500);
-      const pids = readFileSync(join(path, "descendant-pids"), "utf8")
-        .trim()
-        .split("\n")
-        .map(Number);
-      expect(pids.length).toBe(behavior === "descendant" ? 3 : 2);
-      for (const pid of pids) {
-        expect(() => process.kill(pid, 0)).toThrow();
+      expect(Date.now() - started).toBeLessThan(2_500);
+      const records = fakeChildRecords(path);
+      expect(records.length).toBe(behavior === "descendant" ? 3 : 2);
+      for (const record of records) {
+        expect(() => process.kill(record.pid, 0)).toThrow();
       }
       if (behavior === "descendant-hang") {
         const failedHome = readFileSync(
@@ -333,5 +352,24 @@ describe("model catalog refresh", () => {
         expect(() => statSync(failedHome)).toThrow();
       }
     }
+  });
+
+  test("fail-safe cleanup reaps registered fake descendants before removing fixtures", async () => {
+    const path = createCatalogRoot();
+    const codex = await createFakeCodex(path, source(), "descendant");
+    const invocation = Bun.spawn([codex, "--version"], {
+      detached: true,
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    expect(await invocation.exited).toBe(0);
+    const record = await awaitFakeChildReadiness(path, "version", 1_000);
+    expect(() => process.kill(record.pid, 0)).not.toThrow();
+
+    await cleanupCatalogRoots();
+
+    expect(() => process.kill(record.pid, 0)).toThrow();
+    expect(() => statSync(path)).toThrow();
   });
 });

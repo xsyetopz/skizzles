@@ -1,13 +1,198 @@
-import { chmodSync, mkdirSync, realpathSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
+const CHILD_CLEANUP_GRACE_MS = 100;
+const CHILD_CLEANUP_TIMEOUT_MS = 1_000;
+const READINESS_POLL_MS = 10;
 const roots: string[] = [];
 
-export function cleanupCatalogRoots(): void {
+export type FakeCodexCommand = "bundled" | "preflight" | "version";
+
+export interface FakeChildRecord {
+  command: FakeCodexCommand;
+  pid: number;
+  processGroup: number;
+  token: string;
+}
+
+interface ProcessSnapshot {
+  command: string;
+  processGroup: number;
+}
+
+function isPositiveSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && typeof value === "number" && value > 0;
+}
+
+function isFakeCodexCommand(value: unknown): value is FakeCodexCommand {
+  return value === "bundled" || value === "preflight" || value === "version";
+}
+
+function parseFakeChildRecord(value: unknown): FakeChildRecord | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const command = "command" in value ? value.command : undefined;
+  const pid = "pid" in value ? value.pid : undefined;
+  const processGroup = "processGroup" in value ? value.processGroup : undefined;
+  const token = "token" in value ? value.token : undefined;
+  if (
+    !isFakeCodexCommand(command) ||
+    !isPositiveSafeInteger(pid) ||
+    !isPositiveSafeInteger(processGroup) ||
+    typeof token !== "string" ||
+    !/^skizzles-model-catalog-descendant-[0-9a-f-]{36}$/.test(token)
+  ) {
+    return undefined;
+  }
+  return { command, pid, processGroup, token };
+}
+
+export function fakeChildRecords(root: string): FakeChildRecord[] {
+  let contents: string;
+  try {
+    contents = readFileSync(join(root, "descendant-pids"), "utf8");
+  } catch {
+    return [];
+  }
+  const records: FakeChildRecord[] = [];
+  for (const line of contents.split("\n")) {
+    if (line.length === 0) {
+      continue;
+    }
+    try {
+      const value: unknown = JSON.parse(line);
+      const record = parseFakeChildRecord(value);
+      if (record !== undefined) {
+        records.push(record);
+      }
+    } catch {
+      // A malformed or partial record cannot safely identify a process.
+    }
+  }
+  return records;
+}
+
+function processSnapshot(pid: number): ProcessSnapshot | undefined {
+  const result = Bun.spawnSync(
+    ["/bin/ps", "-o", "pgid=,command=", "-p", String(pid)],
+    { stdin: "ignore", stdout: "pipe", stderr: "ignore" },
+  );
+  if (result.exitCode !== 0) {
+    return undefined;
+  }
+  const match = new TextDecoder()
+    .decode(result.stdout)
+    .match(/^\s*([1-9][0-9]*)\s+([\s\S]+)$/);
+  if (match === null) {
+    return undefined;
+  }
+  const processGroup = Number(match[1]);
+  const command = match[2];
+  if (!isPositiveSafeInteger(processGroup) || command === undefined) {
+    return undefined;
+  }
+  return { command, processGroup };
+}
+
+function isRegisteredChild(record: FakeChildRecord): boolean {
+  const snapshot = processSnapshot(record.pid);
+  return (
+    snapshot !== undefined &&
+    snapshot.processGroup === record.processGroup &&
+    snapshot.command.includes(record.token)
+  );
+}
+
+function signalRegisteredGroup(
+  record: FakeChildRecord,
+  signal: NodeJS.Signals,
+): void {
+  if (!isRegisteredChild(record)) {
+    return;
+  }
+  try {
+    process.kill(-record.processGroup, signal);
+  } catch (error) {
+    if (
+      !(error instanceof Error && "code" in error && error.code === "ESRCH")
+    ) {
+      throw error;
+    }
+  }
+}
+
+async function waitForRegisteredChildExit(
+  record: FakeChildRecord,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (isRegisteredChild(record)) {
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await Bun.sleep(
+      Math.min(READINESS_POLL_MS, Math.max(1, deadline - Date.now())),
+    );
+  }
+  return true;
+}
+
+async function terminateRegisteredChild(
+  record: FakeChildRecord,
+): Promise<void> {
+  signalRegisteredGroup(record, "SIGTERM");
+  if (await waitForRegisteredChildExit(record, CHILD_CLEANUP_GRACE_MS)) {
+    return;
+  }
+  signalRegisteredGroup(record, "SIGKILL");
+  if (!(await waitForRegisteredChildExit(record, CHILD_CLEANUP_TIMEOUT_MS))) {
+    throw new Error(`fake Codex descendant ${record.pid} survived cleanup`);
+  }
+}
+
+export async function awaitFakeChildReadiness(
+  root: string,
+  command: FakeCodexCommand,
+  timeoutMs: number,
+): Promise<FakeChildRecord> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const record = fakeChildRecords(root).find(
+      (candidate) => candidate.command === command,
+    );
+    if (record !== undefined) {
+      return record;
+    }
+    await Bun.sleep(
+      Math.min(READINESS_POLL_MS, Math.max(1, deadline - Date.now())),
+    );
+  }
+  throw new Error(`fake Codex ${command} command did not publish readiness`);
+}
+
+export async function cleanupCatalogRoots(): Promise<void> {
+  const failures: unknown[] = [];
   for (const root of roots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
+    try {
+      for (const record of fakeChildRecords(root)) {
+        await terminateRegisteredChild(record);
+      }
+      rmSync(root, { recursive: true, force: true });
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(failures, "model catalog fixture cleanup failed");
   }
 }
 
@@ -86,6 +271,7 @@ export async function createFakeCodex(
     | "descendant"
     | "descendant-hang"
     | "hang"
+    | "initialization-hang"
     | "noisy"
     | "normal"
     | "probe" = "normal",
@@ -94,16 +280,33 @@ export async function createFakeCodex(
   const codex = join(path, "codex");
   const script = `#!/usr/bin/env bun
 const args = Bun.argv.slice(2);
+if (${JSON.stringify(behavior)} === "initialization-hang") {
+  await Bun.sleep(10_000);
+  process.exit(0);
+}
 if (${JSON.stringify(behavior)}.startsWith("descendant")) {
   const marker = ${JSON.stringify(join(path, "descendant-pids"))};
   const markerFile = Bun.file(marker);
   const previous = await markerFile.exists() ? await markerFile.text() : "";
+  const command = args.includes("--version")
+    ? "version"
+    : args.includes("--bundled")
+      ? "bundled"
+      : "preflight";
+  const token = "skizzles-model-catalog-descendant-" + crypto.randomUUID();
   const descendant = Bun.spawn([
     "/bin/sh",
     "-c",
     "trap '' TERM; while :; do sleep 1; done",
+    token,
   ], { stdin: "ignore", stdout: "inherit", stderr: "inherit" });
-  await Bun.write(marker, previous + descendant.pid + "\\n");
+  const record = {
+    command,
+    pid: descendant.pid,
+    processGroup: process.pid,
+    token,
+  };
+  await Bun.write(marker, previous + JSON.stringify(record) + "\\n");
 }
 if (${JSON.stringify(behavior)} === "probe") {
   const home = process.env.HOME;
