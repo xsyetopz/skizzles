@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import {
   addFinding,
@@ -6,143 +5,176 @@ import {
   type WorkspacePackage,
 } from "./contract.ts";
 import { hasRuntimeDependency } from "./dependencies.ts";
-import { listFiles } from "./filesystem.ts";
-import { scanStaticModuleSpecifiers } from "./source/declarations.ts";
+import {
+  discoverOwnedSources,
+  isGeneratedOwnership,
+} from "./source/documents.ts";
 import {
   type SourceModule,
   validateSourceModuleCycles,
 } from "./source/graph.ts";
+import { parseSourceDependencies } from "./source/parser.ts";
 
-const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
-const IMPORT_EXTENSIONS = new Set([...SOURCE_EXTENSIONS, ".json"]);
-const IMPORT_DISCOVERY_EXCLUSIONS = new Set(["dist", "node_modules", "vendor"]);
-const GENERATED_FILE_PATTERN = /(?:\.d|\.gen|\.generated)\.ts$/u;
+const IMPORT_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".json"]);
 
-export async function validateWorkspaceImports(
+interface ImportValidationContext {
+  item: WorkspacePackage;
+  sourcePath: string;
+  relativePath: string;
+  packagesByName: ReadonlyMap<string, WorkspacePackage>;
+  findings: WorkspaceFinding[];
+}
+
+async function validateWorkspaceImports(
   packages: readonly WorkspacePackage[],
   findings: WorkspaceFinding[],
 ): Promise<void> {
   const packagesByName = new Map(
     packages.map((item) => [item.manifest.name, item]),
   );
-  for (const item of packages) {
-    const files = (
-      await listFiles(item.root, IMPORT_DISCOVERY_EXCLUSIONS)
-    ).filter((path) =>
-      SOURCE_EXTENSIONS.has(path.slice(path.lastIndexOf("."))),
+  const sources = await discoverOwnedSources(packages);
+  const ownersByPath = new Map(
+    sources.map(({ document, item, relativePath }) => [
+      document.path,
+      { item, relativePath },
+    ]),
+  );
+  const modulesByPackage = new Map<WorkspacePackage, SourceModule[]>();
+  const parsedSources = await parseSourceDependencies(
+    sources.map(({ document }) => document),
+  );
+  for (const parsed of parsedSources) {
+    consumeParsedSource(
+      parsed,
+      ownersByPath,
+      packagesByName,
+      modulesByPackage,
+      findings,
     );
-    const sourceModules: SourceModule[] = [];
-    for (const sourcePath of files) {
-      const relativePath = toPortablePath(relative(item.root, sourcePath));
-      if (isGeneratedOwnership(relativePath)) {
-        continue;
-      }
-      const specifiers = validateImports(
-        item,
-        sourcePath,
-        relativePath,
-        await readFile(sourcePath, "utf8"),
-        packagesByName,
-        findings,
-      );
-      if (relativePath.startsWith("src/") && specifiers !== undefined) {
-        sourceModules.push({
-          path: sourcePath,
-          relativePath,
-          specifiers,
-        });
-      }
-    }
-    validateSourceModuleCycles(item, sourceModules, findings);
+  }
+  for (const item of packages) {
+    validateSourceModuleCycles(
+      item,
+      modulesByPackage.get(item) ?? [],
+      findings,
+    );
   }
 }
 
-function validateImports(
-  item: WorkspacePackage,
-  sourcePath: string,
-  relativePath: string,
-  sourceWithShebang: string,
+function consumeParsedSource(
+  parsed: Awaited<ReturnType<typeof parseSourceDependencies>>[number],
+  ownersByPath: ReadonlyMap<
+    string,
+    { item: WorkspacePackage; relativePath: string }
+  >,
   packagesByName: ReadonlyMap<string, WorkspacePackage>,
+  modulesByPackage: Map<WorkspacePackage, SourceModule[]>,
   findings: WorkspaceFinding[],
-): readonly string[] | undefined {
-  const source = stripShebang(sourceWithShebang);
-  const loader = sourcePath.endsWith("x") ? "tsx" : "ts";
-  let imports: Bun.Import[];
-  try {
-    imports = new Bun.Transpiler({ loader }).scanImports(source);
-  } catch (error) {
+): void {
+  const owner = ownersByPath.get(parsed.path);
+  if (owner === undefined) {
+    return;
+  }
+  const { item, relativePath } = owner;
+  if (parsed.error !== undefined) {
     addFinding(
       findings,
       "source-parse-error",
       `${item.relativeRoot}/${relativePath}`,
-      error instanceof Error ? error.message : String(error),
+      parsed.error,
     );
     return;
   }
-  const specifiers = new Set([
-    ...imports.map(({ path }) => path),
-    ...scanStaticModuleSpecifiers(source),
-  ]);
+  const specifiers = parsed.specifiers ?? [];
+  const context = {
+    item,
+    sourcePath: parsed.path,
+    relativePath,
+    packagesByName,
+    findings,
+  };
   for (const specifier of specifiers) {
-    validateImport(
-      item,
-      sourcePath,
-      relativePath,
-      specifier,
-      packagesByName,
-      findings,
-    );
+    validateImport(specifier, context);
   }
-  return [...specifiers];
+  if (relativePath.startsWith("src/")) {
+    const modules = modulesByPackage.get(item) ?? [];
+    modules.push({ path: parsed.path, relativePath, specifiers });
+    modulesByPackage.set(item, modules);
+  }
 }
 
 function validateImport(
-  item: WorkspacePackage,
-  sourcePath: string,
-  relativePath: string,
   specifier: string,
-  packagesByName: ReadonlyMap<string, WorkspacePackage>,
-  findings: WorkspaceFinding[],
+  context: ImportValidationContext,
 ): void {
-  const findingPath = `${item.relativeRoot}/${relativePath}`;
   if (specifier.startsWith(".")) {
-    const extension = specifier.slice(specifier.lastIndexOf("."));
-    if (!IMPORT_EXTENSIONS.has(extension)) {
-      addFinding(
-        findings,
-        "missing-import-extension",
-        findingPath,
-        `${specifier} must use a TypeScript extension`,
-      );
-    }
-    const target = resolve(dirname(sourcePath), specifier);
-    if (!inside(item.root, target)) {
-      addFinding(
-        findings,
-        "cross-package-relative-import",
-        findingPath,
-        `${specifier} escapes its package`,
-      );
-    } else if (relativePath.startsWith("src/")) {
-      const targetOwnership = toPortablePath(relative(item.root, target));
-      if (targetOwnership.startsWith("test/")) {
-        addFinding(
-          findings,
-          "production-to-test-import",
-          findingPath,
-          `${specifier} points production code at test ownership`,
-        );
-      } else if (isGeneratedOwnership(targetOwnership)) {
-        addFinding(
-          findings,
-          "production-to-generated-import",
-          findingPath,
-          `${specifier} points production code at generated ownership`,
-        );
-      }
-    }
+    validateRelativeImport(specifier, context);
     return;
   }
+  validatePackageImport(specifier, context);
+}
+
+function validateRelativeImport(
+  specifier: string,
+  context: ImportValidationContext,
+): void {
+  const { item, sourcePath, relativePath, findings } = context;
+  const findingPath = `${item.relativeRoot}/${relativePath}`;
+  const extension = specifier.slice(specifier.lastIndexOf("."));
+  if (!IMPORT_EXTENSIONS.has(extension)) {
+    addFinding(
+      findings,
+      "missing-import-extension",
+      findingPath,
+      `${specifier} must use a TypeScript extension`,
+    );
+  }
+  const target = resolve(dirname(sourcePath), specifier);
+  if (!inside(item.root, target)) {
+    addFinding(
+      findings,
+      "cross-package-relative-import",
+      findingPath,
+      `${specifier} escapes its package`,
+    );
+    return;
+  }
+  if (relativePath.startsWith("src/")) {
+    validateProductionTarget(item, target, findingPath, specifier, findings);
+  }
+}
+
+function validateProductionTarget(
+  item: WorkspacePackage,
+  target: string,
+  findingPath: string,
+  specifier: string,
+  findings: WorkspaceFinding[],
+): void {
+  const targetOwnership = toPortablePath(relative(item.root, target));
+  if (targetOwnership.startsWith("test/")) {
+    addFinding(
+      findings,
+      "production-to-test-import",
+      findingPath,
+      `${specifier} points production code at test ownership`,
+    );
+  } else if (isGeneratedOwnership(targetOwnership)) {
+    addFinding(
+      findings,
+      "production-to-generated-import",
+      findingPath,
+      `${specifier} points production code at generated ownership`,
+    );
+  }
+}
+
+function validatePackageImport(
+  specifier: string,
+  context: ImportValidationContext,
+): void {
+  const { item, relativePath, packagesByName, findings } = context;
+  const findingPath = `${item.relativeRoot}/${relativePath}`;
   const dependency = dependencyName(specifier);
   if (dependency === undefined) {
     return;
@@ -161,7 +193,7 @@ function validateImport(
       findings,
       "undeclared-dependency",
       findingPath,
-      `${dependency} is not a direct ${inTest ? "runtime, optional, peer, or development dependency" : "runtime, optional, or peer dependency"}`,
+      `${dependency} is not a direct ${allowedDependencyKinds(inTest)}`,
     );
     return;
   }
@@ -180,23 +212,20 @@ function validateImport(
   }
 }
 
+function allowedDependencyKinds(
+  inTest: boolean,
+):
+  | "runtime, optional, peer, or development dependency"
+  | "runtime, optional, or peer dependency" {
+  if (inTest) {
+    return "runtime, optional, peer, or development dependency";
+  }
+  return "runtime, optional, or peer dependency";
+}
+
 function packageSubpath(specifier: string, dependency: string): string {
   const suffix = specifier.slice(dependency.length);
   return suffix === "" ? "." : `.${suffix}`;
-}
-
-function isGeneratedOwnership(path: string): boolean {
-  return (
-    path.split("/").includes("generated") || GENERATED_FILE_PATTERN.test(path)
-  );
-}
-
-function stripShebang(source: string): string {
-  if (!source.startsWith("#!")) {
-    return source;
-  }
-  const newline = source.indexOf("\n");
-  return newline === -1 ? "" : source.slice(newline + 1);
 }
 
 function dependencyName(specifier: string): string | undefined {
@@ -217,3 +246,5 @@ function inside(root: string, path: string): boolean {
 function toPortablePath(path: string): string {
   return path.split(sep).join("/");
 }
+
+export { validateWorkspaceImports };

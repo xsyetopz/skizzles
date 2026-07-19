@@ -26,6 +26,7 @@ export type LabMetadata = {
   owner: string;
   ownerKey: string;
   repoHash: string;
+  sourceRepositoryIdentity?: string;
   composeProject: string;
   state: LabState;
   sourceRoot: string;

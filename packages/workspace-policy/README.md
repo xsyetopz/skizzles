@@ -56,13 +56,30 @@ Architectural fitness has no debt baseline or suppressions.
 Static filesystem reach-through is intentionally limited to literal
 `packages/<owner>/...` paths in production TypeScript. Dynamic paths cannot be
 classified reliably without executing package code; cross-package imports,
-including private subpaths, merge Bun's parsed runtime/dynamic import scan with
-a declaration-aware lexical scan of static TypeScript imports and re-exports.
-The supplemental scanner ignores comments, string/template contents, and regular
-expression bodies, decodes quoted module specifiers, and exists because Bun erases
-type-only declarations from `scanImports`. It is intentionally not a general
-TypeScript AST: Bun remains the syntax authority, while the supplemental pass only
-extracts module declarations and local production edges for SCC analysis.
+including private subpaths, merge Bun's parsed runtime/dynamic import scan with a
+TypeScript 7 asynchronous AST pass for static imports, re-exports, import type nodes,
+and external import-equals declarations. One API and snapshot open all eligible files
+per workspace validation; syntactic diagnostics and backend or cleanup failures fail
+closed as `source-parse-error`. The snapshot is disposed before the API is closed.
+Discovery first retains each file's exact bytes as A. TypeScript independently reopens
+the owned path, then, after snapshot disposal and API close, policy reads exact bytes B.
+Only A-equals-B files may contribute Bun or AST edges; a mismatch or reread failure is
+a deterministic `source-parse-error` and contributes no SCC or dependency evidence.
+This trusted-project stable-read bracket detects ordinary changes during parsing but
+cannot exclude a hostile same-user ABA rewrite that restores A after TypeScript saw a
+different generation.
+Literal specifiers are decoded by TypeScript, then the Bun and AST results are sorted
+and deduplicated before policy and local-SCC analysis. Comments, ordinary strings,
+templates, regular expressions, JSX text, and JSDoc are inert. The pass does not
+resolve identifiers, infer `tsconfig` aliases, classify nonliteral specifiers, or run
+semantic type checking.
+
+TypeScript 7.0.2 is an exact runtime dependency. Package builds externalize `typescript` and
+`typescript/*`, leaving the installed dependency responsible for its asynchronous API
+and native `tsgo` executable. macOS arm64 is the locally verified platform; a clean
+Linux checkout must repeat frozen install, build, and built-entrypoint runtime proof
+before release. TypeScript upgrades and supported-platform changes require explicit
+parser, lifecycle, optional-native-package, and runtime review.
 The plugin builder is the explicit canonical-to-generated artifact composition
 owner and is exempt from the static path-literal rule. A direct package
 dependency alone does not grant filesystem reach-through authority.

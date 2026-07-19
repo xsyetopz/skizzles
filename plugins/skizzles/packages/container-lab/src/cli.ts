@@ -9751,6 +9751,7 @@ import {
 var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
 var LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 var REPOSITORY_HASH = /^[a-f0-9]{12}$/;
+var SOURCE_REPOSITORY_IDENTITY = /^[a-f0-9]{64}$/;
 var COMPOSE_PROJECT = /^ccl-[a-z0-9][a-z0-9-]{0,62}$/;
 var SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 var ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -9780,6 +9781,9 @@ function assertLabMetadata(value, roots, owner, labId) {
     }
     if (typeof value["repoHash"] !== "string" || !REPOSITORY_HASH.test(value["repoHash"])) {
       throw new Error("invalid repository hash");
+    }
+    if (value["sourceRepositoryIdentity"] !== undefined && (typeof value["sourceRepositoryIdentity"] !== "string" || !SOURCE_REPOSITORY_IDENTITY.test(value["sourceRepositoryIdentity"]))) {
+      throw new Error("invalid source repository identity");
     }
     if (typeof value["composeProject"] !== "string" || !COMPOSE_PROJECT.test(value["composeProject"])) {
       throw new Error("invalid Compose project");
@@ -10386,7 +10390,9 @@ var isolatedGitConfiguration = [
   "-c",
   "core.hooksPath=/dev/null",
   "-c",
-  "core.fsmonitor=false"
+  "core.fsmonitor=false",
+  "-c",
+  "core.logAllRefUpdates=false"
 ];
 async function runLocalGit(args, options, environment) {
   assertLocalClone(args);
@@ -11926,12 +11932,70 @@ function onceClosed(child) {
 }
 
 // packages/container-lab/src/lab/destruction.ts
+import { readdir as readdir2, stat as stat3 } from "fs/promises";
+import { join as join8 } from "path";
+
+// packages/container-lab/src/process/repository.ts
 import { createHash as createHash3 } from "crypto";
-import { readdir as readdir2, realpath as realpath3, stat as stat2 } from "fs/promises";
-import { join as join7 } from "path";
+import { lstat as lstat11, realpath as realpath3, stat as stat2 } from "fs/promises";
+import { join as join6 } from "path";
+var SOURCE_REPOSITORY_IDENTITY_DOMAIN = "codex-container-lab-source-repository-v1";
+var REPOSITORY_HASH_LENGTH = 12;
+async function inspectSourceRepository(source, environment) {
+  const root = (await runLocalGit(["-C", source, "rev-parse", "--show-toplevel"], { timeoutMs: 1e4 }, environment)).stdout.toString().trim();
+  const commonGitDirectory = await canonicalCommonGitDirectory(root, environment);
+  return {
+    root,
+    repoHash: createHash3("sha256").update(commonGitDirectory).digest("hex").slice(0, REPOSITORY_HASH_LENGTH),
+    identity: await repositoryFilesystemIdentity(commonGitDirectory)
+  };
+}
+async function sourceRepositoryIdentity(repositoryRoot, environment) {
+  return await repositoryFilesystemIdentity(await canonicalCommonGitDirectory(repositoryRoot, environment));
+}
+async function assertRepositoryIdentity(repositoryRoot, expected, environment) {
+  const actual = await sourceRepositoryIdentity(repositoryRoot, environment);
+  if (actual !== expected) {
+    throw new Error("lab source repository identity no longer matches durable state");
+  }
+}
+async function assertNoGitAlternates(repositoryRoot, environment) {
+  const commonGitDirectory = await canonicalCommonGitDirectory(repositoryRoot, environment);
+  try {
+    await lstat11(join6(commonGitDirectory, "objects", "info", "alternates"));
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return;
+    }
+    throw new Error("could not verify Git alternate object-store isolation", {
+      cause: error
+    });
+  }
+  throw new Error("Git alternate object-store isolation was not established");
+}
+async function canonicalCommonGitDirectory(repositoryRoot, environment) {
+  const commonGitDirectory = (await runLocalGit([
+    "-C",
+    repositoryRoot,
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir"
+  ], { timeoutMs: 1e4 }, environment)).stdout.toString().trim();
+  return await realpath3(commonGitDirectory);
+}
+async function repositoryFilesystemIdentity(commonGitDirectory) {
+  const descriptor = await stat2(commonGitDirectory, { bigint: true });
+  if (!descriptor.isDirectory()) {
+    throw new Error("Git common directory is not a directory");
+  }
+  if (descriptor.dev < 0n || descriptor.ino <= 0n || descriptor.birthtimeNs <= 0n) {
+    throw new Error("Git common directory has no stable filesystem identity");
+  }
+  return createHash3("sha256").update(SOURCE_REPOSITORY_IDENTITY_DOMAIN).update("\x00").update(commonGitDirectory).update("\x00").update(descriptor.dev.toString()).update("\x00").update(descriptor.ino.toString()).update("\x00").update(descriptor.birthtimeNs.toString()).digest("hex");
+}
 
 // packages/container-lab/src/state/runtime-trust.ts
-import { join as join6, resolve as resolve5 } from "path";
+import { join as join7, resolve as resolve5 } from "path";
 async function exactDirectoryChain2(root, segments, label, options = {}) {
   return await exactDirectoryChain(root, segments, label, options);
 }
@@ -11944,7 +12008,7 @@ function assertTrustedLabRuntimeIdentity(roots, lab, options = {}) {
   const expectedOwner = options.expectedOwner ?? lab.owner;
   const expectedOwnerKey = options.expectedOwnerKey ?? ownerKey(expectedOwner);
   const expectedRuntime = expectedLabRuntimeRoot(roots, expectedOwner, lab.id);
-  if (lab.owner !== expectedOwner || lab.ownerKey !== expectedOwnerKey || resolve5(lab.runtimeRoot) !== expectedRuntime || resolve5(lab.workspace) !== join6(expectedRuntime, "workspace")) {
+  if (lab.owner !== expectedOwner || lab.ownerKey !== expectedOwnerKey || resolve5(lab.runtimeRoot) !== expectedRuntime || resolve5(lab.workspace) !== join7(expectedRuntime, "workspace")) {
     throw new Error(options.containmentMessage ?? "lab runtime containment is invalid");
   }
 }
@@ -11966,10 +12030,10 @@ async function assertReadyLabFilesystem(roots, lab) {
     throw new Error(`lab is not ready: ${lab.state}`);
   }
   const configuredRuntime = await realDirectory(roots.runtimeRoot, "configured runtime root");
-  const ownerRuntime = await realDirectory(join6(roots.runtimeRoot, lab.ownerKey), "owner runtime root");
+  const ownerRuntime = await realDirectory(join7(roots.runtimeRoot, lab.ownerKey), "owner runtime root");
   const runtime = await realDirectory(lab.runtimeRoot, "lab runtime root");
   const workspace = await realDirectory(lab.workspace, "lab workspace");
-  if (ownerRuntime !== join6(configuredRuntime, lab.ownerKey) || runtime !== join6(ownerRuntime, lab.id) || workspace !== join6(runtime, "workspace")) {
+  if (ownerRuntime !== join7(configuredRuntime, lab.ownerKey) || runtime !== join7(ownerRuntime, lab.id) || workspace !== join7(runtime, "workspace")) {
     throw new Error("runtime or workspace resolved outside the configured runtime root");
   }
   const source = await realDirectory(lab.sourceRoot, "lab source root");
@@ -12066,11 +12130,11 @@ async function reconcileOwnerLabs(roots, owner) {
   }
 }
 async function recoverLabSync(roots, lab, environment) {
-  if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join7(lab.runtimeRoot, "workspace")) {
+  if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join8(lab.runtimeRoot, "workspace")) {
     throw new Error("lab runtime containment is invalid");
   }
   try {
-    if (!(await stat2(lab.workspace)).isDirectory()) {
+    if (!(await stat3(lab.workspace)).isDirectory()) {
       return;
     }
   } catch (error) {
@@ -12079,7 +12143,7 @@ async function recoverLabSync(roots, lab, environment) {
     }
     throw error;
   }
-  const journalDirectory = join7(lab.runtimeRoot, "sync", lab.id, "journals");
+  const journalDirectory = join8(lab.runtimeRoot, "sync", lab.id, "journals");
   let journals;
   try {
     journals = await readdir2(journalDirectory);
@@ -12100,17 +12164,10 @@ async function recoverLabSync(roots, lab, environment) {
   });
 }
 async function assertSourceRepositoryIdentity(lab, environment) {
-  const commonGit = (await runLocalGit([
-    "-C",
-    lab.sourceRoot,
-    "rev-parse",
-    "--path-format=absolute",
-    "--git-common-dir"
-  ], { timeoutMs: 1e4 }, environment)).stdout.toString().trim();
-  const actual = createHash3("sha256").update(await realpath3(commonGit)).digest("hex").slice(0, 12);
-  if (actual !== lab.repoHash) {
-    throw new Error("lab source repository identity no longer matches durable state");
+  if (lab.sourceRepositoryIdentity === undefined) {
+    throw new Error("lab source repository identity is absent; synchronization or journal recovery cannot proceed");
   }
+  await assertRepositoryIdentity(lab.sourceRoot, lab.sourceRepositoryIdentity, environment);
 }
 async function cleanupManagedLabDockerResources(lab, docker, environment) {
   await cleanupLabLabels(lab, lab.modeKind === "dockerfile", docker, environment);
@@ -12165,12 +12222,12 @@ function activityLock(context, id) {
 
 // packages/container-lab/src/lab/provisioning.ts
 import { createHash as createHash4 } from "crypto";
-import { mkdir as mkdir9, realpath as realpath4 } from "fs/promises";
-import { join as join9 } from "path";
+import { mkdir as mkdir9 } from "fs/promises";
+import { join as join10 } from "path";
 
 // packages/container-lab/src/state/owner-store.ts
 import { mkdir as mkdir8 } from "fs/promises";
-import { basename, join as join8, resolve as resolve6 } from "path";
+import { basename, join as join9, resolve as resolve6 } from "path";
 async function readReapedOwner(stateRoot, owner) {
   let value;
   try {
@@ -12194,7 +12251,7 @@ async function readReapedOwner(stateRoot, owner) {
 async function ensureOwner(stateRoot, owner) {
   resolveOwner(owner, {});
   const directory = ownerDirectory(stateRoot, owner);
-  await mkdir8(join8(directory, "labs"), { recursive: true, mode: 448 });
+  await mkdir8(join9(directory, "labs"), { recursive: true, mode: 448 });
   const path9 = ownerManifestPath(stateRoot, owner);
   try {
     const existing = await readOwnerManifest(path9);
@@ -12270,20 +12327,12 @@ async function createProvisionedLab(context, name, source, signal) {
     if (existing.length >= 8) {
       throw new Error("an owner may have at most 8 labs");
     }
-    const sourceRoot = (await runLocalGit(["-C", source, "rev-parse", "--show-toplevel"], {
-      timeoutMs: 1e4
-    }, context.environment)).stdout.toString().trim();
-    const commonGit = (await runLocalGit([
-      "-C",
-      sourceRoot,
-      "rev-parse",
-      "--path-format=absolute",
-      "--git-common-dir"
-    ], { timeoutMs: 1e4 }, context.environment)).stdout.toString().trim();
-    const repoHash = createHash4("sha256").update(await realpath4(commonGit)).digest("hex").slice(0, 12);
+    const sourceRepository = await inspectSourceRepository(source, context.environment);
+    const sourceRoot = sourceRepository.root;
+    const repoHash = sourceRepository.repoHash;
     const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
     const id = `${requested}-${suffix}`;
-    const runtimeRoot = join9(ownerRuntimeDirectory(context.roots.runtimeRoot, context.owner), id);
+    const runtimeRoot = join10(ownerRuntimeDirectory(context.roots.runtimeRoot, context.owner), id);
     const lab = {
       version: 1,
       id,
@@ -12291,12 +12340,13 @@ async function createProvisionedLab(context, name, source, signal) {
       owner: context.owner,
       ownerKey: createHash4("sha256").update(context.owner).digest("hex"),
       repoHash,
+      sourceRepositoryIdentity: sourceRepository.identity,
       composeProject: `ccl-${repoHash.slice(0, 8)}-${suffix}`,
       state: "provisioning",
       sourceRoot,
       runtimeRoot,
-      workspace: join9(runtimeRoot, "workspace"),
-      manifestPath: join9(sourceRoot, ".codex-container-lab.yaml"),
+      workspace: join10(runtimeRoot, "workspace"),
+      manifestPath: join10(sourceRoot, ".codex-container-lab.yaml"),
       commandService: "pending",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -12354,6 +12404,7 @@ async function provisionLab(context, id, signal) {
       "--no-checkout",
       "--no-tags",
       "--no-hardlinks",
+      "--dissociate",
       lab.sourceRoot,
       lab.workspace
     ], {
@@ -12364,6 +12415,7 @@ async function provisionLab(context, id, signal) {
       timeoutMs: 1e4,
       ...signal === undefined ? {} : { signal }
     }, context.environment);
+    await assertNoGitAlternates(lab.workspace, context.environment);
     await runLocalGit(["-C", lab.workspace, "checkout", "--detach", head], {
       timeoutMs: 120000,
       ...signal === undefined ? {} : { signal }
@@ -12453,6 +12505,10 @@ async function assertProvisioning(context, id, signal) {
   if (current.state !== "provisioning") {
     throw new Error("lab provisioning was cancelled");
   }
+  if (current.sourceRepositoryIdentity === undefined) {
+    throw new Error("lab provisioning source repository identity is absent");
+  }
+  await assertRepositoryIdentity(current.sourceRoot, current.sourceRepositoryIdentity, context.environment);
 }
 async function updateProvisioning(context, id, mutate) {
   return await withFileLock(labLockPath(context.roots.stateRoot, context.owner, id), async () => {

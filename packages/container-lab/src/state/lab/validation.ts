@@ -30,6 +30,7 @@ import type { LabMetadata, PersistedLabRuntime } from "./contract.ts";
 const LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
 const LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const REPOSITORY_HASH = /^[a-f0-9]{12}$/;
+const SOURCE_REPOSITORY_IDENTITY = /^[a-f0-9]{64}$/;
 const COMPOSE_PROJECT = /^ccl-[a-z0-9][a-z0-9-]{0,62}$/;
 const SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -74,6 +75,13 @@ export function assertLabMetadata(
       !REPOSITORY_HASH.test(value["repoHash"])
     ) {
       throw new Error("invalid repository hash");
+    }
+    if (
+      value["sourceRepositoryIdentity"] !== undefined &&
+      (typeof value["sourceRepositoryIdentity"] !== "string" ||
+        !SOURCE_REPOSITORY_IDENTITY.test(value["sourceRepositoryIdentity"]))
+    ) {
+      throw new Error("invalid source repository identity");
     }
     if (
       typeof value["composeProject"] !== "string" ||

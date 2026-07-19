@@ -6972,7 +6972,7 @@ function truncateUtf8(value, maxBytes) {
 
 // packages/container-lab/src/reaper-domain.ts
 import { Database } from "bun:sqlite";
-import { lstat as lstat8, readdir as readdir3, rm as rm7 } from "fs/promises";
+import { lstat as lstat9, readdir as readdir3, rm as rm7 } from "fs/promises";
 import { join as join7 } from "path";
 
 // node_modules/.bun/yaml@2.9.0/node_modules/yaml/dist/index.js
@@ -7653,8 +7653,7 @@ async function cleanupLabLabels(metadata, removeInternalImage, runner, environme
 }
 
 // packages/container-lab/src/lab/destruction.ts
-import { createHash as createHash3 } from "crypto";
-import { readdir as readdir2, realpath as realpath2, stat } from "fs/promises";
+import { readdir as readdir2, stat as stat2 } from "fs/promises";
 import { join as join5 } from "path";
 
 // packages/container-lab/src/files.ts
@@ -8162,13 +8161,19 @@ function isRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// packages/container-lab/src/process/repository.ts
+import { createHash as createHash2 } from "crypto";
+import { lstat as lstat4, realpath as realpath2, stat } from "fs/promises";
+
 // packages/container-lab/src/process/git.ts
 import { isAbsolute as isAbsolute2 } from "path";
 var isolatedGitConfiguration = [
   "-c",
   "core.hooksPath=/dev/null",
   "-c",
-  "core.fsmonitor=false"
+  "core.fsmonitor=false",
+  "-c",
+  "core.logAllRefUpdates=false"
 ];
 async function runLocalGit(args, options, environment) {
   assertLocalClone(args);
@@ -8204,11 +8209,43 @@ function gitProcessEnvironment(environment) {
   return result;
 }
 
+// packages/container-lab/src/process/repository.ts
+var SOURCE_REPOSITORY_IDENTITY_DOMAIN = "codex-container-lab-source-repository-v1";
+async function sourceRepositoryIdentity(repositoryRoot, environment) {
+  return await repositoryFilesystemIdentity(await canonicalCommonGitDirectory(repositoryRoot, environment));
+}
+async function assertRepositoryIdentity(repositoryRoot, expected, environment) {
+  const actual = await sourceRepositoryIdentity(repositoryRoot, environment);
+  if (actual !== expected) {
+    throw new Error("lab source repository identity no longer matches durable state");
+  }
+}
+async function canonicalCommonGitDirectory(repositoryRoot, environment) {
+  const commonGitDirectory = (await runLocalGit([
+    "-C",
+    repositoryRoot,
+    "rev-parse",
+    "--path-format=absolute",
+    "--git-common-dir"
+  ], { timeoutMs: 1e4 }, environment)).stdout.toString().trim();
+  return await realpath2(commonGitDirectory);
+}
+async function repositoryFilesystemIdentity(commonGitDirectory) {
+  const descriptor = await stat(commonGitDirectory, { bigint: true });
+  if (!descriptor.isDirectory()) {
+    throw new Error("Git common directory is not a directory");
+  }
+  if (descriptor.dev < 0n || descriptor.ino <= 0n || descriptor.birthtimeNs <= 0n) {
+    throw new Error("Git common directory has no stable filesystem identity");
+  }
+  return createHash2("sha256").update(SOURCE_REPOSITORY_IDENTITY_DOMAIN).update("\x00").update(commonGitDirectory).update("\x00").update(descriptor.dev.toString()).update("\x00").update(descriptor.ino.toString()).update("\x00").update(descriptor.birthtimeNs.toString()).digest("hex");
+}
+
 // packages/container-lab/src/state/lab/store.ts
 import { rm as rm3 } from "fs/promises";
 
 // packages/container-lab/src/state/layout.ts
-import { createHash as createHash2 } from "crypto";
+import { createHash as createHash3 } from "crypto";
 import { homedir, tmpdir } from "os";
 import { join as join2, resolve as resolve2 } from "path";
 import process5 from "process";
@@ -8238,7 +8275,7 @@ function resolveOwner(explicit, environment = process5.env) {
   return owner;
 }
 function ownerKey(owner) {
-  return createHash2("sha256").update(owner).digest("hex");
+  return createHash3("sha256").update(owner).digest("hex");
 }
 function ownerDirectory(stateRoot, owner) {
   return join2(stateRoot, "owners", ownerKey(owner));
@@ -8282,6 +8319,7 @@ import {
 var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
 var LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 var REPOSITORY_HASH = /^[a-f0-9]{12}$/;
+var SOURCE_REPOSITORY_IDENTITY = /^[a-f0-9]{64}$/;
 var COMPOSE_PROJECT = /^ccl-[a-z0-9][a-z0-9-]{0,62}$/;
 var SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 var ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -8311,6 +8349,9 @@ function assertLabMetadata(value, roots, owner, labId) {
     }
     if (typeof value["repoHash"] !== "string" || !REPOSITORY_HASH.test(value["repoHash"])) {
       throw new Error("invalid repository hash");
+    }
+    if (value["sourceRepositoryIdentity"] !== undefined && (typeof value["sourceRepositoryIdentity"] !== "string" || !SOURCE_REPOSITORY_IDENTITY.test(value["sourceRepositoryIdentity"]))) {
+      throw new Error("invalid source repository identity");
     }
     if (typeof value["composeProject"] !== "string" || !COMPOSE_PROJECT.test(value["composeProject"])) {
       throw new Error("invalid Compose project");
@@ -8651,7 +8692,7 @@ function sameSyncFile(a, b) {
 }
 
 // packages/container-lab/src/sync/directories.ts
-import { lstat as lstat4, mkdir as mkdir4, rmdir } from "fs/promises";
+import { lstat as lstat5, mkdir as mkdir4, rmdir } from "fs/promises";
 import path3 from "path";
 
 // packages/container-lab/src/sync/durability.ts
@@ -8784,8 +8825,8 @@ async function retirementAncestorState(targetRoot, relative3, journalOwnedPaths)
   for (let index = 1;index <= parts.length; index++) {
     const ancestor = parts.slice(0, index).join("/");
     try {
-      const stat = await lstat4(path3.join(canonical, ...parts.slice(0, index)));
-      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      const stat2 = await lstat5(path3.join(canonical, ...parts.slice(0, index)));
+      if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
         throw createdDirectoryConflict(relative3);
       }
     } catch (error) {
@@ -8805,14 +8846,14 @@ function createdDirectoryConflict(relative3) {
 }
 async function directoryIdentity(root, relative3) {
   const directory = await guardedPath(root, relative3);
-  const stat = await lstat4(directory, { bigint: true });
-  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+  const stat2 = await lstat5(directory, { bigint: true });
+  if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
     throw new Error(`Unsafe synchronization directory: ${relative3}`);
   }
   return {
     path: relative3,
-    device: stat.dev.toString(),
-    inode: stat.ino.toString()
+    device: stat2.dev.toString(),
+    inode: stat2.ino.toString()
   };
 }
 
@@ -8833,7 +8874,7 @@ function manifestDigest(files) {
 var PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
 
 // packages/container-lab/src/sync/state.ts
-import { lstat as lstat5, mkdir as mkdir5 } from "fs/promises";
+import { lstat as lstat6, mkdir as mkdir5 } from "fs/promises";
 import path4 from "path";
 async function syncStatePaths(identity3) {
   safeStateName(identity3.labId, "lab id");
@@ -8870,15 +8911,15 @@ async function ensureStateDirectory(stateRoot, relative3) {
       throw error;
     }
   });
-  const stat = await lstat5(directory);
-  if (stat.isSymbolicLink() || !stat.isDirectory()) {
+  const stat2 = await lstat6(directory);
+  if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
     throw new Error(`Unsafe synchronization state directory: ${relative3}`);
   }
 }
 async function readRequiredUnknownJson(file, message2) {
   try {
-    const stat = await lstat5(file);
-    if (stat.isSymbolicLink() || !stat.isFile()) {
+    const stat2 = await lstat6(file);
+    if (stat2.isSymbolicLink() || !stat2.isFile()) {
       throw new Error("Unsafe synchronization state file");
     }
     return await readUnknownJson(file);
@@ -9212,14 +9253,14 @@ function previewSemanticPayload(preview) {
 }
 
 // packages/container-lab/src/sync/recovery.ts
-import { lstat as lstat7, rm as rm6 } from "fs/promises";
+import { lstat as lstat8, rm as rm6 } from "fs/promises";
 import path6 from "path";
 
 // packages/container-lab/src/sync/staging.ts
 import {
   chmod,
   copyFile,
-  lstat as lstat6,
+  lstat as lstat7,
   readlink as readlink2,
   rename as rename3,
   rm as rm5,
@@ -9541,7 +9582,7 @@ async function resolveCreatingDirectory(targetRoot, journal, journalPath) {
     return;
   }
   try {
-    await lstat7(path6.join(targetRoot, ...relative3.split("/")));
+    await lstat8(path6.join(targetRoot, ...relative3.split("/")));
   } catch (error) {
     if (error.code !== "ENOENT") {
       throw error;
@@ -9580,8 +9621,8 @@ async function validateJournalRecords(state, journal, journalId, targetRoot) {
 }
 async function validateBackupDirectory(backupDir) {
   for (const directory of [backupDir, path6.join(backupDir, "target")]) {
-    const stat = await lstat7(directory);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) {
+    const stat2 = await lstat8(directory);
+    if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
       throw new Error("Invalid synchronization backup directory");
     }
     if (await canonicalRoot(directory) !== directory) {
@@ -9616,7 +9657,7 @@ async function recoverLabSync(roots, lab, environment) {
     throw new Error("lab runtime containment is invalid");
   }
   try {
-    if (!(await stat(lab.workspace)).isDirectory()) {
+    if (!(await stat2(lab.workspace)).isDirectory()) {
       return;
     }
   } catch (error) {
@@ -9646,17 +9687,10 @@ async function recoverLabSync(roots, lab, environment) {
   });
 }
 async function assertSourceRepositoryIdentity(lab, environment) {
-  const commonGit = (await runLocalGit([
-    "-C",
-    lab.sourceRoot,
-    "rev-parse",
-    "--path-format=absolute",
-    "--git-common-dir"
-  ], { timeoutMs: 1e4 }, environment)).stdout.toString().trim();
-  const actual = createHash3("sha256").update(await realpath2(commonGit)).digest("hex").slice(0, 12);
-  if (actual !== lab.repoHash) {
-    throw new Error("lab source repository identity no longer matches durable state");
+  if (lab.sourceRepositoryIdentity === undefined) {
+    throw new Error("lab source repository identity is absent; synchronization or journal recovery cannot proceed");
   }
+  await assertRepositoryIdentity(lab.sourceRoot, lab.sourceRepositoryIdentity, environment);
 }
 async function cleanupManagedLabDockerResources(lab, docker, environment) {
   await cleanupLabLabels(lab, lab.modeKind === "dockerfile", docker, environment);
@@ -10008,7 +10042,7 @@ async function boundedRemove(root, maxEntries) {
   async function scan(path7) {
     let info;
     try {
-      info = await lstat8(path7);
+      info = await lstat9(path7);
     } catch (error) {
       if (error.code === "ENOENT") {
         return;

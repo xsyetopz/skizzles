@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, realpath } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { internalImageTag } from "../compose/generation.ts";
 import { loadLabConfig } from "../config.ts";
@@ -11,6 +11,11 @@ import {
 } from "../docker.ts";
 import { withFileLock } from "../locks.ts";
 import { runLocalGit } from "../process/git.ts";
+import {
+  assertNoGitAlternates,
+  assertRepositoryIdentity,
+  inspectSourceRepository,
+} from "../process/repository.ts";
 import type { LabMetadata } from "../state/lab/contract.ts";
 import { listLabs, readLab, writeLab } from "../state/lab/store.ts";
 import {
@@ -63,36 +68,12 @@ export async function createProvisionedLab(
       if (existing.length >= 8) {
         throw new Error("an owner may have at most 8 labs");
       }
-      const sourceRoot = (
-        await runLocalGit(
-          ["-C", source, "rev-parse", "--show-toplevel"],
-          {
-            timeoutMs: 10_000,
-          },
-          context.environment,
-        )
-      ).stdout
-        .toString()
-        .trim();
-      const commonGit = (
-        await runLocalGit(
-          [
-            "-C",
-            sourceRoot,
-            "rev-parse",
-            "--path-format=absolute",
-            "--git-common-dir",
-          ],
-          { timeoutMs: 10_000 },
-          context.environment,
-        )
-      ).stdout
-        .toString()
-        .trim();
-      const repoHash = createHash("sha256")
-        .update(await realpath(commonGit))
-        .digest("hex")
-        .slice(0, 12);
+      const sourceRepository = await inspectSourceRepository(
+        source,
+        context.environment,
+      );
+      const sourceRoot = sourceRepository.root;
+      const repoHash = sourceRepository.repoHash;
       const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
       const id = `${requested}-${suffix}`;
       const runtimeRoot = join(
@@ -106,6 +87,7 @@ export async function createProvisionedLab(
         owner: context.owner,
         ownerKey: createHash("sha256").update(context.owner).digest("hex"),
         repoHash,
+        sourceRepositoryIdentity: sourceRepository.identity,
         composeProject: `ccl-${repoHash.slice(0, 8)}-${suffix}`,
         state: "provisioning",
         sourceRoot,
@@ -190,6 +172,7 @@ async function provisionLab(
         "--no-checkout",
         "--no-tags",
         "--no-hardlinks",
+        "--dissociate",
         lab.sourceRoot,
         lab.workspace,
       ],
@@ -207,6 +190,7 @@ async function provisionLab(
       },
       context.environment,
     );
+    await assertNoGitAlternates(lab.workspace, context.environment);
     await runLocalGit(
       ["-C", lab.workspace, "checkout", "--detach", head],
       {
@@ -324,6 +308,14 @@ async function assertProvisioning(
   if (current.state !== "provisioning") {
     throw new Error("lab provisioning was cancelled");
   }
+  if (current.sourceRepositoryIdentity === undefined) {
+    throw new Error("lab provisioning source repository identity is absent");
+  }
+  await assertRepositoryIdentity(
+    current.sourceRoot,
+    current.sourceRepositoryIdentity,
+    context.environment,
+  );
 }
 
 async function updateProvisioning(

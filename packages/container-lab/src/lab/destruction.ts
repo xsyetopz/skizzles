@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { readdir, realpath, stat } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
   cleanupLabLabels,
@@ -9,7 +8,7 @@ import {
 } from "../docker.ts";
 import { removeIfPresent } from "../files.ts";
 import { withFileLock } from "../locks.ts";
-import { runLocalGit } from "../process/git.ts";
+import { assertRepositoryIdentity } from "../process/repository.ts";
 import type { LabMetadata } from "../state/lab/contract.ts";
 import {
   listLabs,
@@ -199,30 +198,16 @@ export async function assertSourceRepositoryIdentity(
   lab: LabMetadata,
   environment: NodeJS.ProcessEnv,
 ): Promise<void> {
-  const commonGit = (
-    await runLocalGit(
-      [
-        "-C",
-        lab.sourceRoot,
-        "rev-parse",
-        "--path-format=absolute",
-        "--git-common-dir",
-      ],
-      { timeoutMs: 10_000 },
-      environment,
-    )
-  ).stdout
-    .toString()
-    .trim();
-  const actual = createHash("sha256")
-    .update(await realpath(commonGit))
-    .digest("hex")
-    .slice(0, 12);
-  if (actual !== lab.repoHash) {
+  if (lab.sourceRepositoryIdentity === undefined) {
     throw new Error(
-      "lab source repository identity no longer matches durable state",
+      "lab source repository identity is absent; synchronization or journal recovery cannot proceed",
     );
   }
+  await assertRepositoryIdentity(
+    lab.sourceRoot,
+    lab.sourceRepositoryIdentity,
+    environment,
+  );
 }
 
 export async function cleanupManagedLabDockerResources(

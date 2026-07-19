@@ -14,6 +14,8 @@ rewriting its rationale.
 | [0004](0004-measurement-gated-rust.md) | Accepted | Admit Rust only through a measured, reversible parity gate. |
 | [0005](0005-ephemeral-repository-security-tools.md) | Accepted | Verify Actions and credential hygiene with ephemeral checksum-pinned tools. |
 | [0006](0006-container-process-environment.md) | Accepted | Isolate Docker Compose and local Git process environments behind explicit capabilities. |
+| [0007](0007-repository-identity.md) | Accepted | Bind durable source identity to the common Git filesystem object and dissociate clone object stores. |
+| [0008](0008-typescript-source-parser.md) | Accepted | Parse static TypeScript dependency forms with one lifecycle-bounded compiler AST snapshot. |
 
 ## Record contract
 

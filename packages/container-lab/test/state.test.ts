@@ -194,6 +194,12 @@ describe("owner resolution and durable state", () => {
         },
       },
       {
+        message: "invalid source repository identity",
+        mutate: (value) => {
+          value["sourceRepositoryIdentity"] = "path-only";
+        },
+      },
+      {
         message: "invalid runtime files or findings",
         mutate: (value) => {
           persistedRuntime(value)["overrideFile"] = join(

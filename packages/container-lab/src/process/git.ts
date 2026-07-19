@@ -9,6 +9,8 @@ const isolatedGitConfiguration = [
   "core.hooksPath=/dev/null",
   "-c",
   "core.fsmonitor=false",
+  "-c",
+  "core.logAllRefUpdates=false",
 ] as const;
 
 /** Run local Git without ambient or repository-local executable configuration. */

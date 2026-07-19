@@ -1,6 +1,6 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   chmod,
   mkdir,
@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
 import { withFileLock } from "../../src/locks.ts";
+import { inspectSourceRepository } from "../../src/process/repository.ts";
 import { runCommand } from "../../src/process.ts";
 import { serializePublicJson } from "../../src/public/json.ts";
 import type { LabMetadata } from "../../src/state/lab/contract.ts";
@@ -75,21 +76,12 @@ async function oversizedPreviewFixture(
       "image: { name: node:24, service: dev }\n",
     );
   }
-  const commonGit = execFileSync(
-    "git",
-    [
-      "-C",
-      lab.sourceRoot,
-      "rev-parse",
-      "--path-format=absolute",
-      "--git-common-dir",
-    ],
-    { encoding: "utf8" },
-  ).trim();
-  lab.repoHash = createHash("sha256")
-    .update(await realpath(commonGit))
-    .digest("hex")
-    .slice(0, 12);
+  const sourceRepository = await inspectSourceRepository(
+    lab.sourceRoot,
+    process.env,
+  );
+  lab.repoHash = sourceRepository.repoHash;
+  lab.sourceRepositoryIdentity = sourceRepository.identity;
   const sourceFile = join(lab.runtimeRoot, "source.compose.json");
   const overrideFile = join(lab.runtimeRoot, "override.compose.yaml");
   await writeFile(sourceFile, '{"services":{"dev":{}}}');
