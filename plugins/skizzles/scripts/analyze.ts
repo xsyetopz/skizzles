@@ -5,7 +5,7 @@
 import { join as join2 } from "path";
 import process2 from "process";
 
-// packages/usage-analyzer/src/rollout-discovery.ts
+// packages/usage-analyzer/src/rollout/discovery.ts
 import { Database } from "bun:sqlite";
 import { join } from "path";
 var rolloutIdPattern = /([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\.jsonl$/i;
@@ -70,7 +70,7 @@ function loadTitles(codexHome) {
   return titles;
 }
 
-// packages/usage-analyzer/src/rollout-parser.ts
+// packages/usage-analyzer/src/rollout/parser.ts
 import { basename } from "path";
 
 // packages/usage-analyzer/src/usage.ts
@@ -190,7 +190,7 @@ function aggregateRecord(entries) {
   return Object.fromEntries([...entries].map(([key, value]) => [key, serializableAggregate(value)]));
 }
 
-// packages/usage-analyzer/src/rollout-reader.ts
+// packages/usage-analyzer/src/rollout/reader.ts
 async function* lines(path) {
   const reader = Bun.file(path).stream().getReader();
   const decoder = new TextDecoder;
@@ -234,7 +234,7 @@ async function* readEvents(path) {
   }
 }
 
-// packages/usage-analyzer/src/rollout-parser.ts
+// packages/usage-analyzer/src/rollout/parser.ts
 function classify(source) {
   const subagent = property(source, "subagent");
   if (property(subagent, "other") === "guardian") {

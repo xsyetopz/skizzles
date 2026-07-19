@@ -147,3 +147,52 @@ Treat commits as validated repository checkpoints, independent of `/goal` lifecy
 Commit when a coherent ownership slice is integrated, its focused proof passes, and no known breakage remains in that slice. Prefer a checkpoint before switching causal surfaces, beginning a risky refactor, transferring substantial ownership, or starting independent QA or Review. Keep unrelated slices separate and write commit messages in terms of the behavioral outcome.
 
 Do not commit every child completion automatically. The root first inspects shared-worktree ownership, integrates the slice, excludes unrelated user or agent changes, and verifies the evidence. Do not checkpoint a known-broken intermediate state merely to reduce diff size. Preserve reviewer corrections as later commits when practical so accepted history remains inspectable. Before final acceptance, validate the aggregate commit series and working tree, not only the newest checkpoint.
+
+## Versioned acceptance contract
+
+The published [acceptance schema](contracts/acceptance.schema.json) defines the
+portable v3 record: requirement IDs, objective-gate results, an explicit
+objective-gates-before-judge order, artifacts, evidence/effect bindings,
+integrity findings, fixed retries/seeds, policy/model/validator identity, fixed
+judge version and prompt digest, and author/reviewer fields.
+
+JSON Schema validates that shape; it does not prove that an effect occurred,
+compare identities, relate arbitrary references, or determine whether a
+verifier was hidden from an implementation. The repository's strict typed
+evaluator consumes trusted harness facts and explicit expected versions and
+digests. Acceptance records are bound to the expected objective and acceptance
+identity. Runtime effects are accepted only when their observation and evidence
+identity match independent harness-supplied facts. The acceptance digest is
+recomputed from the complete canonical record with only its self-referential
+digest zeroed; scope, obligation, check, proof-kind, evidence-reference,
+artifact, effect, actor, judge, finding, and run rewrites therefore require a
+new trusted digest. Runtime-specific gates
+require that effect evidence, while test results must bind a known test-suite
+artifact. The evaluator rejects duplicate or unknown requirements,
+non-contiguous gates, self-review, ineligible or unexpected reviewer identity,
+mutated verifier/test artifacts, untrusted/extra/missing test results, unbound or
+non-causal gate evidence, fake effects, retry overflow, and judge-before-gate
+execution. Finding labels supplied by an independent harness map to stable
+policy rejection codes for solution leakage, grader injection, hard-coded
+answers, and deceptive completion; the evaluator does not detect those
+conditions from arbitrary prose or source content. The
+canonical public
+[acceptance incident-regression corpus](fixtures/acceptance-incidents.json)
+contains a valid control plus executable mutations and stable rejection codes;
+it is implementation-visible regression input, not independent or private
+acceptance material.
+
+The schema and evaluator cannot intercept native Codex handoffs, attest that a
+host supplied truthful facts, independently discover adversarial findings, or
+enforce host lifecycle. Verifier-resistant detection requires acceptance and
+review contexts that are independent of the implementation under evaluation.
+A trusted integration must collect those facts and invoke the deterministic
+evaluator explicitly.
+
+Reviewer eligibility here is an exact local allowlist supplied by that trusted
+integration, not a claim of global personhood or identity infrastructure. Run
+replay protection likewise compares the submitted run ID with trusted prior
+run IDs; persistence and synchronization of that set remain host obligations.
+Handoffs also bind the acceptance document's repository-local reference to the
+exact trusted reference. Matching version and digest bytes at an unrelated
+location do not satisfy that local composition contract.

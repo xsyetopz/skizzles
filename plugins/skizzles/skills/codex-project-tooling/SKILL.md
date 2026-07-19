@@ -13,11 +13,11 @@ Use this skill to configure Codex behavior that belongs to a repository rather t
 2. Read the relevant reference before editing:
    - Hooks: `references/hooks.md`
    - Subagent roles: `references/subagent-roles.md`
-   - MCP authoring with Bun + FastMCP: `references/mcp-authoring.md`
-   - Codex MCP client behavior and config: `references/mcp-codex-client.md`
-   - Companion skills for MCPs: `references/mcp-associated-skills.md`
-   - MCP-managed environment stacks: `references/mcp-lifecycle-stacks.md`
-   - Project `.codex`, trust, and worktrees: `references/project-codex.md`
+   - MCP authoring with Bun + FastMCP: `references/mcp/authoring.md`
+   - Codex MCP client behavior and config: `references/mcp/client.md`
+   - Companion skills for MCPs: `references/mcp/skills.md`
+   - MCP-managed environment stacks: `references/mcp/lifecycle.md`
+   - Project `.codex`, trust, and worktrees: `references/codex.md`
 3. Inspect existing repo-local `.codex` files before adding new ones.
 4. Prefer committed, repo-local templates for durable team behavior. Keep personal secrets, machine paths, credentials, and temporary experiments out of committed config.
 5. Validate syntax and behavior with the narrowest practical check, such as parsing TOML/JSON, listing hooks, spawning a role in a safe test prompt, or inspecting an MCP server.

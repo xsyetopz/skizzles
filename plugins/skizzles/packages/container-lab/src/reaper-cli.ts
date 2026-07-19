@@ -6946,10 +6946,10 @@ var require_public_api = __commonJS((exports) => {
 
 // packages/container-lab/src/reaper-cli.ts
 import { homedir as homedir2 } from "os";
-import { join as join5 } from "path";
+import { join as join8 } from "path";
 import process5 from "process";
 
-// packages/container-lab/src/public-output.ts
+// packages/container-lab/src/public/output.ts
 function redactPublicText(value, maxBytes = 2000, maxLines = 8) {
   const redacted = value.replace(/\/(?:[^\s"'\\]|\\.)+/g, "[path]").replace(/\b[a-f0-9]{64}\b/gi, "[redacted]").replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[redacted]").replace(/\bcodex-container-lab:[A-Za-z0-9._-]+\b/g, "[redacted]").replace(/\bccl-[a-z0-9][a-z0-9-]*\b/gi, "[redacted]").replace(/io\.openai\.codex-container-lab\.owner=\S+/gi, "io.openai.codex-container-lab.owner=[redacted]").replace(/(?:ownerKey|runtimeRoot|stateRoot|composeArgs|managedImage)\s*[=:]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "[redacted]").split(`
 `).slice(-maxLines).join(`
@@ -6973,7 +6973,7 @@ function truncateUtf8(value, maxBytes) {
 // packages/container-lab/src/reaper-domain.ts
 import { Database } from "bun:sqlite";
 import { lstat as lstat7, readdir as readdir3, rm as rm7 } from "fs/promises";
-import { join as join4 } from "path";
+import { join as join7 } from "path";
 
 // node_modules/.bun/yaml@2.9.0/node_modules/yaml/dist/index.js
 var composer = require_composer();
@@ -7021,7 +7021,7 @@ var $stringify = publicApi.stringify;
 var $visit = visit.visit;
 var $visitAsync = visit.visitAsync;
 
-// packages/container-lab/src/compose-generation.ts
+// packages/container-lab/src/compose/generation.ts
 function composeCommandArgs(config, options) {
   const sourceFiles = config.mode.kind === "compose" ? config.mode.files : options.baseFile ? [options.baseFile] : [];
   if (sourceFiles.length === 0) {
@@ -7042,19 +7042,11 @@ function internalImageTag(ownerKey, labId) {
   return `codex-container-lab:${ownerKey.slice(0, 24)}-${labId}`;
 }
 
-// packages/container-lab/src/compose.ts
-function composeCommandArgs2(config, options) {
-  return composeCommandArgs(config, options);
-}
-function internalImageTag2(ownerKey, labId) {
-  return internalImageTag(ownerKey, labId);
-}
-
 // packages/container-lab/src/docker.ts
 import { spawn as spawn2 } from "child_process";
 import process from "process";
 
-// packages/container-lab/src/docker-support.ts
+// packages/container-lab/src/docker/environment.ts
 function scrubSecretEnvironment(names, environment) {
   const result = { ...environment };
   for (const name of names) {
@@ -7066,7 +7058,7 @@ function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// packages/container-lab/src/docker-cleanup.ts
+// packages/container-lab/src/docker/cleanup.ts
 var IMMUTABLE_IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
 async function cleanupLabLabelsInDocker(metadata, removeInternalImage, runner, environment) {
   const scrubbedRunner = scrubDockerRunnerEnvironment(runner, metadata.secretEnvironment, environment);
@@ -7142,7 +7134,7 @@ async function cleanupLabLabelsInDocker(metadata, removeInternalImage, runner, e
   }
 }
 async function removeManagedInternalImage(metadata, runner) {
-  const tag = internalImageTag2(metadata.ownerKey, metadata.id);
+  const tag = internalImageTag(metadata.ownerKey, metadata.id);
   const inspected = await runner.run([
     "image",
     "inspect",
@@ -7306,10 +7298,10 @@ async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultD
   await cleanupLabLabelsInDocker(metadata, removeInternalImage, runner, environment);
 }
 
-// packages/container-lab/src/lab-destruction.ts
+// packages/container-lab/src/lab/destruction.ts
 import { createHash as createHash3 } from "crypto";
 import { readdir as readdir2, realpath as realpath2, stat } from "fs/promises";
-import { join as join3 } from "path";
+import { join as join5 } from "path";
 import process4 from "process";
 
 // packages/container-lab/src/files.ts
@@ -7817,77 +7809,14 @@ function isRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// packages/container-lab/src/state.ts
+// packages/container-lab/src/state/lab/store.ts
+import { rm as rm3 } from "fs/promises";
+
+// packages/container-lab/src/state/layout.ts
 import { createHash as createHash2 } from "crypto";
-import { mkdir as mkdir3, rm as rm3 } from "fs/promises";
 import { homedir, tmpdir } from "os";
-import {
-  basename,
-  isAbsolute as isAbsolute2,
-  join as join2,
-  parse,
-  posix,
-  relative as relative2,
-  resolve as resolve2,
-  sep as sep2
-} from "path";
+import { join as join2, resolve as resolve2 } from "path";
 import process3 from "process";
-
-// packages/container-lab/src/lab-manifest.ts
-var manifestName = ".codex-container-lab.yaml";
-
-// packages/container-lab/src/config.ts
-var manifestName2 = manifestName;
-
-// packages/container-lab/src/state.ts
-var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
-var LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
-var REPOSITORY_HASH = /^[a-f0-9]{12}$/;
-var COMPOSE_PROJECT = /^ccl-[a-z0-9][a-z0-9-]{0,62}$/;
-var SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
-var ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-var URL_SCHEME = /^[a-z][a-z0-9+.-]*$/;
-var FINDING_SURFACES = new Set([
-  "host-bind",
-  "socket-bind",
-  "privileged",
-  "host-namespace",
-  "device",
-  "capability",
-  "secret",
-  "config",
-  "fixed-port",
-  "non-loopback-port"
-]);
-async function exactDirectoryChain2(root, segments, label, options = {}) {
-  return await exactDirectoryChain(root, segments, label, options);
-}
-async function assertOwnerStateDirectory(stateRoot, ownerKey, missingMessage, options = {}) {
-  if (!await exactDirectoryChain2(stateRoot, ["owners", ownerKey], "owner state directory", options)) {
-    throw new Error(missingMessage);
-  }
-}
-function assertTrustedLabRuntimeIdentity(roots, lab, options = {}) {
-  const expectedOwner = options.expectedOwner ?? lab.owner;
-  const expectedOwnerKey = options.expectedOwnerKey ?? ownerKey(expectedOwner);
-  const expectedRuntime = expectedLabRuntimeRoot(roots, expectedOwner, lab.id);
-  if (lab.owner !== expectedOwner || lab.ownerKey !== expectedOwnerKey || resolve2(lab.runtimeRoot) !== expectedRuntime || resolve2(lab.workspace) !== join2(expectedRuntime, "workspace")) {
-    throw new Error(options.containmentMessage ?? "lab runtime containment is invalid");
-  }
-}
-async function inspectTrustedLabRuntimeDirectories(roots, lab, options = {}) {
-  assertTrustedLabRuntimeIdentity(roots, lab, options);
-  const expectedOwner = options.expectedOwner ?? lab.owner;
-  const expectedOwnerKey = options.expectedOwnerKey ?? ownerKey(expectedOwner);
-  const chainOptions = {
-    ...options.canonicalMismatch === undefined ? {} : { canonicalMismatch: options.canonicalMismatch }
-  };
-  const runtimePresent = await exactDirectoryChain2(roots.runtimeRoot, [expectedOwnerKey, lab.id], "lab runtime directory", chainOptions);
-  if (runtimePresent && options.inspectWorkspace !== false) {
-    await exactDirectoryChain2(roots.runtimeRoot, [expectedOwnerKey, lab.id, "workspace"], "lab workspace", chainOptions);
-  }
-  return runtimePresent;
-}
 function defaultStateRoot() {
   return join2(homedir(), "Library", "Application Support", "OpenAI", "codex-container-lab");
 }
@@ -7933,40 +7862,6 @@ function activityLockPath(stateRoot, owner, labId) {
 function reapedOwnerPath(stateRoot, owner) {
   return join2(stateRoot, "reaped", `${ownerKey(owner)}.json`);
 }
-async function readReapedOwner(stateRoot, owner) {
-  let value;
-  try {
-    value = await readTrustedUnknownJson(stateRoot, ["reaped"], `${ownerKey(owner)}.json`, "reaped owner marker", { canonicalMismatch: "unsafe-indirection" });
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return;
-    }
-    throw error;
-  }
-  if (!isRecord3(value) || value["version"] !== 1 || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner) || !isTimestamp(value["reapedAt"])) {
-    throw new Error("invalid reaped owner manifest");
-  }
-  return {
-    version: 1,
-    owner: value["owner"],
-    ownerKey: value["ownerKey"],
-    reapedAt: value["reapedAt"]
-  };
-}
-async function markOwnerReaped(stateRoot, owner) {
-  const existing = await readReapedOwner(stateRoot, owner);
-  if (existing) {
-    return existing;
-  }
-  const manifest = {
-    version: 1,
-    owner,
-    ownerKey: ownerKey(owner),
-    reapedAt: new Date().toISOString()
-  };
-  await writeJsonAtomic(reapedOwnerPath(stateRoot, owner), manifest);
-  return manifest;
-}
 function labsDirectory(stateRoot, owner) {
   return join2(ownerDirectory(stateRoot, owner), "labs");
 }
@@ -7978,61 +7873,44 @@ function expectedLabRuntimeRoot(roots, owner, labId) {
   safeStateName(labId, "lab id");
   return join2(resolve2(roots.runtimeRoot), ownerKey(owner), labId);
 }
-async function readOwnerManifest(path2) {
-  const resolvedPath = resolve2(path2);
-  const directory = resolve2(resolvedPath, "..");
-  const key = basename(directory);
-  const owners = resolve2(directory, "..");
-  if (basename(resolvedPath) !== "owner.json" || basename(owners) !== "owners") {
-    throw new Error(`invalid owner manifest path: ${path2}`);
-  }
-  const stateRoot = resolve2(owners, "..");
-  const value = await readTrustedUnknownJson(stateRoot, ["owners", key], "owner.json", "owner manifest", { canonicalMismatch: "unsafe-indirection" });
-  if (!isRecord3(value) || value["version"] !== 1 || typeof value["owner"] !== "string" || typeof value["ownerKey"] !== "string" || !isTimestamp(value["createdAt"])) {
-    throw new Error(`invalid owner manifest: ${path2}`);
-  }
-  resolveOwner(value["owner"], {});
-  if (value["ownerKey"] !== ownerKey(value["owner"]) || basename(resolve2(path2, "..")) !== value["ownerKey"]) {
-    throw new Error(`owner manifest hash mismatch: ${path2}`);
-  }
-  return {
-    version: 1,
-    owner: value["owner"],
-    ownerKey: value["ownerKey"],
-    createdAt: value["createdAt"]
-  };
-}
-async function writeLab(roots, lab) {
-  assertLabMetadata(lab, roots, lab.owner, lab.id);
-  await writeJsonAtomic(labManifestPath(roots.stateRoot, lab.owner, lab.id), lab);
-}
-async function readLab(roots, owner, labId) {
-  safeStateName(labId, "lab id");
-  const value = await readTrustedUnknownJson(roots.stateRoot, ["owners", ownerKey(owner), "labs"], `${labId}.json`, "lab state file", { canonicalMismatch: "unsafe-indirection" });
-  assertLabMetadata(value, roots, owner, labId);
-  return value;
-}
-async function listLabs(roots, owner) {
-  const entries = await readTrustedDirectory(roots.stateRoot, ["owners", ownerKey(owner), "labs"], "lab state directory", { canonicalMismatch: "unsafe-indirection" });
-  if (!entries) {
-    return [];
-  }
-  const labs = [];
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    const name = entry.name;
-    if (!name.endsWith(".json")) {
-      throw new Error(`unexpected lab state entry: ${name}`);
-    }
-    if (!(entry.isFile() || entry.isSymbolicLink())) {
-      throw new Error(`unexpected lab state entry: ${name}`);
-    }
-    labs.push(await readLab(roots, owner, name.slice(0, -5)));
-  }
-  return labs;
-}
-async function removeLabState(stateRoot, owner, labId) {
-  await rm3(labManifestPath(stateRoot, owner, labId), { force: true });
-}
+
+// packages/container-lab/src/state/lab/validation.ts
+import {
+  isAbsolute as isAbsolute2,
+  join as join3,
+  parse,
+  posix,
+  relative as relative2,
+  resolve as resolve3,
+  sep as sep2
+} from "path";
+
+// packages/container-lab/src/lab/manifest.ts
+var manifestName = ".codex-container-lab.yaml";
+
+// packages/container-lab/src/config.ts
+var manifestName2 = manifestName;
+
+// packages/container-lab/src/state/lab/validation.ts
+var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
+var LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
+var REPOSITORY_HASH = /^[a-f0-9]{12}$/;
+var COMPOSE_PROJECT = /^ccl-[a-z0-9][a-z0-9-]{0,62}$/;
+var SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
+var ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+var URL_SCHEME = /^[a-z][a-z0-9+.-]*$/;
+var FINDING_SURFACES = new Set([
+  "host-bind",
+  "socket-bind",
+  "privileged",
+  "host-namespace",
+  "device",
+  "capability",
+  "secret",
+  "config",
+  "fixed-port",
+  "non-loopback-port"
+]);
 function assertLabMetadata(value, roots, owner, labId) {
   try {
     safeStateName(labId, "lab id");
@@ -8057,13 +7935,13 @@ function assertLabMetadata(value, roots, owner, labId) {
     if (!isNormalizedAbsolute(value["runtimeRoot"]) || value["runtimeRoot"] !== expectedRuntime) {
       throw new Error("invalid runtime root");
     }
-    if (value["workspace"] !== join2(expectedRuntime, "workspace")) {
+    if (value["workspace"] !== join3(expectedRuntime, "workspace")) {
       throw new Error("invalid workspace root");
     }
     if (!isNormalizedAbsolute(value["sourceRoot"]) || value["sourceRoot"] === parse(value["sourceRoot"]).root) {
       throw new Error("invalid source root");
     }
-    if (value["manifestPath"] !== join2(value["sourceRoot"], manifestName2)) {
+    if (value["manifestPath"] !== join3(value["sourceRoot"], manifestName2)) {
       throw new Error("invalid source manifest relationship");
     }
     if (typeof value["commandService"] !== "string" || !SERVICE_NAME.test(value["commandService"])) {
@@ -8094,7 +7972,7 @@ function assertLabMetadata(value, roots, owner, labId) {
       throw new Error("ready lab has no runtime");
     }
     if (value["modeKind"] === "dockerfile") {
-      if (value["managedImage"] !== internalImageTag2(value["ownerKey"], value["id"])) {
+      if (value["managedImage"] !== internalImageTag(value["ownerKey"], value["id"])) {
         throw new Error("invalid managed image");
       }
     } else if (value["managedImage"] !== undefined) {
@@ -8125,12 +8003,12 @@ function validatePersistedRuntime(lab, runtime) {
   if (JSON.stringify(config.secretEnvironment) !== JSON.stringify(lab["secretEnvironment"])) {
     throw new Error("secret environment metadata mismatch");
   }
-  const expectedOverride = join2(runtimeRoot, "override.compose.yaml");
-  const expectedBase = mode.kind === "compose" ? undefined : join2(runtimeRoot, "base.compose.yaml");
+  const expectedOverride = join3(runtimeRoot, "override.compose.yaml");
+  const expectedBase = mode.kind === "compose" ? undefined : join3(runtimeRoot, "base.compose.yaml");
   if (runtime["overrideFile"] !== expectedOverride || runtime["baseFile"] !== expectedBase || !Array.isArray(runtime["findings"]) || !runtime["findings"].every(isFinding) || JSON.stringify(runtime["findings"]) !== JSON.stringify(lab["findings"])) {
     throw new Error("invalid runtime files or findings");
   }
-  const expectedArgs = composeCommandArgs2(config, {
+  const expectedArgs = composeCommandArgs(config, {
     projectName: composeProject,
     overrideFile: expectedOverride,
     ...expectedBase === undefined ? {} : { baseFile: expectedBase }
@@ -8239,7 +8117,7 @@ function isPathInside(root, candidate, allowRoot = false) {
   return (allowRoot || fromRoot !== "") && fromRoot !== ".." && !fromRoot.startsWith(`..${sep2}`) && !isAbsolute2(fromRoot);
 }
 function isNormalizedAbsolute(value) {
-  return typeof value === "string" && !value.includes("\x00") && isAbsolute2(value) && resolve2(value) === value;
+  return typeof value === "string" && !value.includes("\x00") && isAbsolute2(value) && resolve3(value) === value;
 }
 function isEndpoint(value) {
   return isRecord3(value) && typeof value["name"] === "string" && SERVICE_NAME.test(value["name"]) && typeof value["service"] === "string" && SERVICE_NAME.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && isBoundedString(value["url"], 2048);
@@ -8277,23 +8155,72 @@ function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// packages/container-lab/src/git-manifest.ts
-import { execFile } from "child_process";
-import { promisify } from "util";
-var execFileAsync = promisify(execFile);
-var MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
-function manifestDigest(files) {
-  const compact = Object.keys(files).sort().map((name) => {
-    const file = files[name];
-    if (!file) {
-      throw new Error(`missing manifest entry: ${name}`);
+// packages/container-lab/src/state/lab/store.ts
+async function writeLab(roots, lab) {
+  assertLabMetadata(lab, roots, lab.owner, lab.id);
+  await writeJsonAtomic(labManifestPath(roots.stateRoot, lab.owner, lab.id), lab);
+}
+async function readLab(roots, owner, labId) {
+  safeStateName(labId, "lab id");
+  const value = await readTrustedUnknownJson(roots.stateRoot, ["owners", ownerKey(owner), "labs"], `${labId}.json`, "lab state file", { canonicalMismatch: "unsafe-indirection" });
+  assertLabMetadata(value, roots, owner, labId);
+  return value;
+}
+async function listLabs(roots, owner) {
+  const entries = await readTrustedDirectory(roots.stateRoot, ["owners", ownerKey(owner), "labs"], "lab state directory", { canonicalMismatch: "unsafe-indirection" });
+  if (!entries) {
+    return [];
+  }
+  const labs = [];
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    const name = entry.name;
+    if (!name.endsWith(".json")) {
+      throw new Error(`unexpected lab state entry: ${name}`);
     }
-    return [name, file.kind, file.sha256, file.size, file.mode];
-  });
-  return sha256(JSON.stringify(compact));
+    if (!(entry.isFile() || entry.isSymbolicLink())) {
+      throw new Error(`unexpected lab state entry: ${name}`);
+    }
+    labs.push(await readLab(roots, owner, name.slice(0, -5)));
+  }
+  return labs;
+}
+async function removeLabState(stateRoot, owner, labId) {
+  await rm3(labManifestPath(stateRoot, owner, labId), { force: true });
 }
 
-// packages/container-lab/src/sync-comparison.ts
+// packages/container-lab/src/state/runtime-trust.ts
+import { join as join4, resolve as resolve4 } from "path";
+async function exactDirectoryChain2(root, segments, label, options = {}) {
+  return await exactDirectoryChain(root, segments, label, options);
+}
+async function assertOwnerStateDirectory(stateRoot, ownerKey2, missingMessage, options = {}) {
+  if (!await exactDirectoryChain2(stateRoot, ["owners", ownerKey2], "owner state directory", options)) {
+    throw new Error(missingMessage);
+  }
+}
+function assertTrustedLabRuntimeIdentity(roots, lab, options = {}) {
+  const expectedOwner = options.expectedOwner ?? lab.owner;
+  const expectedOwnerKey = options.expectedOwnerKey ?? ownerKey(expectedOwner);
+  const expectedRuntime = expectedLabRuntimeRoot(roots, expectedOwner, lab.id);
+  if (lab.owner !== expectedOwner || lab.ownerKey !== expectedOwnerKey || resolve4(lab.runtimeRoot) !== expectedRuntime || resolve4(lab.workspace) !== join4(expectedRuntime, "workspace")) {
+    throw new Error(options.containmentMessage ?? "lab runtime containment is invalid");
+  }
+}
+async function inspectTrustedLabRuntimeDirectories(roots, lab, options = {}) {
+  assertTrustedLabRuntimeIdentity(roots, lab, options);
+  const expectedOwner = options.expectedOwner ?? lab.owner;
+  const expectedOwnerKey = options.expectedOwnerKey ?? ownerKey(expectedOwner);
+  const chainOptions = {
+    ...options.canonicalMismatch === undefined ? {} : { canonicalMismatch: options.canonicalMismatch }
+  };
+  const runtimePresent = await exactDirectoryChain2(roots.runtimeRoot, [expectedOwnerKey, lab.id], "lab runtime directory", chainOptions);
+  if (runtimePresent && options.inspectWorkspace !== false) {
+    await exactDirectoryChain2(roots.runtimeRoot, [expectedOwnerKey, lab.id, "workspace"], "lab workspace", chainOptions);
+  }
+  return runtimePresent;
+}
+
+// packages/container-lab/src/sync/comparison.ts
 function sameSyncFile(a, b) {
   if (a === b) {
     return true;
@@ -8304,9 +8231,9 @@ function sameSyncFile(a, b) {
   return a.kind === b.kind && a.sha256 === b.sha256 && a.size === b.size && a.mode === b.mode;
 }
 
-// packages/container-lab/src/sync-durability.ts
+// packages/container-lab/src/sync/durability.ts
 import { randomUUID as randomUUID2 } from "crypto";
-import { mkdir as mkdir4, open as open3, rename as rename2, rm as rm4, writeFile as writeFile3 } from "fs/promises";
+import { mkdir as mkdir3, open as open3, rename as rename2, rm as rm4, writeFile as writeFile3 } from "fs/promises";
 import path2 from "path";
 async function syncFile(file) {
   const handle = await open3(file, "r");
@@ -8326,7 +8253,7 @@ async function syncDirectory(directory) {
 }
 async function writeDurableJson(file, value) {
   const directory = path2.dirname(file);
-  await mkdir4(directory, { recursive: true, mode: 448 });
+  await mkdir3(directory, { recursive: true, mode: 448 });
   const temporary = `${file}.${randomUUID2()}.tmp`;
   try {
     await writeFile3(temporary, `${JSON.stringify(value)}
@@ -8339,15 +8266,31 @@ async function writeDurableJson(file, value) {
   }
 }
 
-// packages/container-lab/src/public-json.ts
+// packages/container-lab/src/sync/git-manifest.ts
+import { execFile } from "child_process";
+import { promisify } from "util";
+var execFileAsync = promisify(execFile);
+var MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
+function manifestDigest(files) {
+  const compact = Object.keys(files).sort().map((name) => {
+    const file = files[name];
+    if (!file) {
+      throw new Error(`missing manifest entry: ${name}`);
+    }
+    return [name, file.kind, file.sha256, file.size, file.mode];
+  });
+  return sha256(JSON.stringify(compact));
+}
+
+// packages/container-lab/src/public/json.ts
 var PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
 
-// packages/container-lab/src/sync-staging.ts
+// packages/container-lab/src/sync/staging.ts
 import {
   chmod,
   copyFile,
   lstat as lstat4,
-  mkdir as mkdir5,
+  mkdir as mkdir4,
   readlink as readlink2,
   rename as rename3,
   rm as rm5,
@@ -8441,12 +8384,12 @@ async function cleanupPublications(backups) {
   }
 }
 
-// packages/container-lab/src/sync-state.ts
-import { lstat as lstat5, mkdir as mkdir6 } from "fs/promises";
+// packages/container-lab/src/sync/state.ts
+import { lstat as lstat5, mkdir as mkdir5 } from "fs/promises";
 import path4 from "path";
 async function syncStatePaths(identity3) {
   safeStateName(identity3.labId, "lab id");
-  await mkdir6(identity3.stateRoot, { recursive: true, mode: 448 });
+  await mkdir5(identity3.stateRoot, { recursive: true, mode: 448 });
   const stateRoot = await canonicalRoot(identity3.stateRoot);
   const root = path4.join(stateRoot, "sync", identity3.labId);
   const previews = path4.join(root, "previews");
@@ -8474,7 +8417,7 @@ async function syncStatePaths(identity3) {
 }
 async function ensureStateDirectory(stateRoot, relative3) {
   const directory = await guardedPath(stateRoot, relative3, true);
-  await mkdir6(directory, { mode: 448 }).catch((error) => {
+  await mkdir5(directory, { mode: 448 }).catch((error) => {
     if (error.code !== "EEXIST") {
       throw error;
     }
@@ -8499,264 +8442,10 @@ async function readRequiredUnknownJson(file, message2) {
   }
 }
 
-// packages/container-lab/src/sync-validation.ts
-var SHA256 = /^[0-9a-f]{64}$/;
+// packages/container-lab/src/sync/validation/value.ts
 var TOKEN = /^[0-9a-f]{64}$/;
+var SHA256 = /^[0-9a-f]{64}$/;
 var DECIMAL = /^(?:0|[1-9][0-9]*)$/;
-function parseBaselineFile(value) {
-  const object = exactObject(value, "synchronization baseline", [
-    "version",
-    "files"
-  ]);
-  if (object.version !== 1) {
-    invalid("synchronization baseline version");
-  }
-  return { version: 1, files: parseFileRecord(object.files, "baseline files") };
-}
-function parseStoredPreview(value) {
-  const object = exactObject(value, "synchronization preview", [
-    "version",
-    "token",
-    "expiresAt",
-    "sourceDigest",
-    "targetDigest",
-    "changes",
-    "conflicts",
-    "labId",
-    "direction",
-    "sourceRoot",
-    "targetRoot",
-    "baselineDigest",
-    "missingTargetDirectories",
-    "deleteParentDirectories",
-    "binding",
-    "expectedTargets"
-  ]);
-  if (object.version !== 1) {
-    invalid("synchronization preview version");
-  }
-  const token = stringMatching(object.token, TOKEN, "preview token");
-  const expiresAt = parseIsoDate(object.expiresAt, "preview expiry");
-  const sourceDigest = digest(object.sourceDigest, "preview source digest");
-  const targetDigest = digest(object.targetDigest, "preview target digest");
-  const baselineDigest = digest(object.baselineDigest, "preview baseline digest");
-  const binding = digest(object.binding, "preview binding");
-  const labId = requiredString(object.labId, "preview lab id");
-  const direction = parseDirection(object.direction);
-  const sourceRoot = requiredString(object.sourceRoot, "preview source root");
-  const targetRoot = requiredString(object.targetRoot, "preview target root");
-  const changes = parseChanges(object.changes);
-  const conflicts = parseConflicts(object.conflicts);
-  assertDisjointPaths(changes, conflicts);
-  const expectedTargets = parseExpectedTargets(object.expectedTargets, changes);
-  const missingTargetDirectories = parsePathArray(object.missingTargetDirectories, "preview missing target directories");
-  const deleteParentDirectories = parseDirectoryIdentities(object.deleteParentDirectories, "preview delete parent directories");
-  if (missingTargetDirectories.some((directory) => !changes.some((change) => change.path.startsWith(`${directory}/`)))) {
-    invalid("preview missing target directory provenance");
-  }
-  if (JSON.stringify(deleteParentDirectories.map((entry) => entry.path)) !== JSON.stringify(expectedDeleteParentPaths(changes))) {
-    invalid("preview delete parent directory provenance");
-  }
-  return {
-    version: 1,
-    token,
-    expiresAt,
-    sourceDigest,
-    targetDigest,
-    baselineDigest,
-    binding,
-    labId,
-    direction,
-    sourceRoot,
-    targetRoot,
-    changes,
-    conflicts,
-    expectedTargets,
-    missingTargetDirectories,
-    deleteParentDirectories
-  };
-}
-function parseSyncJournal(value) {
-  const object = exactObject(value, "synchronization journal", [
-    "version",
-    "state",
-    "previewToken",
-    "previewBinding",
-    "targetRoot",
-    "baselinePath",
-    "newBaseline",
-    "backups",
-    "createdDirectories",
-    "deleteParentDirectories",
-    "mutatedPaths",
-    "appliedStates"
-  ], ["creatingDirectory"]);
-  if (object.version !== 1) {
-    invalid("synchronization journal version");
-  }
-  if (object.state !== "preparing" && object.state !== "prepared" && object.state !== "applied" && object.state !== "rolledBack" && object.state !== "committed") {
-    invalid("synchronization journal state");
-  }
-  const backups = parseBackups(object.backups);
-  const paths = backups.map((item) => item.path);
-  const { createdDirectories, creatingDirectory, deleteParentDirectories } = parseJournalDirectories(object, paths, object.state);
-  const mutatedPaths = parsePathArray(object.mutatedPaths, "mutated paths");
-  if (object.state === "preparing" && mutatedPaths.length > 0) {
-    invalid("preparing synchronization journal mutations");
-  }
-  for (const mutated of mutatedPaths) {
-    if (!paths.includes(mutated)) {
-      invalid("journal mutated path provenance");
-    }
-  }
-  const appliedStates = parseNullableFileRecord(object.appliedStates, "journal applied states");
-  if (!sameStringSet(Object.keys(appliedStates), paths)) {
-    invalid("journal applied state coverage");
-  }
-  for (const backup of backups) {
-    const intended = appliedStates[backup.path];
-    if (intended === undefined) {
-      invalid("journal applied state coverage");
-    }
-    if (!backup.publication) {
-      invalid("journal publication provenance");
-    }
-  }
-  return {
-    version: 1,
-    state: object.state,
-    previewToken: stringMatching(object.previewToken, TOKEN, "journal preview token"),
-    previewBinding: digest(object.previewBinding, "journal preview binding"),
-    targetRoot: requiredString(object.targetRoot, "journal target root"),
-    baselinePath: requiredString(object.baselinePath, "journal baseline path"),
-    newBaseline: parseBaselineFile(object.newBaseline),
-    backups,
-    createdDirectories,
-    ...creatingDirectory === undefined ? {} : { creatingDirectory },
-    deleteParentDirectories,
-    mutatedPaths,
-    appliedStates
-  };
-}
-function parseJournalDirectories(object, paths, state) {
-  const createdDirectories = parseDirectoryIdentities(object.createdDirectories, "journal created directories");
-  if (createdDirectories.some((directory) => !paths.some((relative3) => relative3.startsWith(`${directory.path}/`)))) {
-    invalid("journal created directory provenance");
-  }
-  if (state === "preparing" && createdDirectories.length > 0) {
-    invalid("preparing synchronization journal directories");
-  }
-  const creatingDirectory = object.creatingDirectory === undefined ? undefined : syncPath(object.creatingDirectory, "journal creating directory");
-  if (creatingDirectory !== undefined && (state !== "prepared" || createdDirectories.some((entry) => entry.path === creatingDirectory) || !paths.some((relative3) => relative3.startsWith(`${creatingDirectory}/`)))) {
-    invalid("journal creating directory provenance");
-  }
-  return {
-    createdDirectories,
-    ...creatingDirectory === undefined ? {} : { creatingDirectory },
-    deleteParentDirectories: parseDirectoryIdentities(object.deleteParentDirectories, "journal delete parent directories")
-  };
-}
-function parseChanges(value) {
-  if (!Array.isArray(value)) {
-    invalid("preview changes");
-  }
-  const changes = value.map((entry, index) => {
-    const object = objectValue(entry, `preview change ${index}`);
-    const action = object.action;
-    if (action !== "upsert" && action !== "delete") {
-      invalid(`preview change ${index} action`);
-    }
-    const keys = action === "upsert" ? ["path", "action", "file"] : ["path", "action"];
-    assertExactKeys(object, `preview change ${index}`, keys);
-    const relative3 = syncPath(object.path, `preview change ${index} path`);
-    const change = action === "upsert" ? {
-      path: relative3,
-      action,
-      file: parseSyncFile(object.file, relative3, `preview change ${index} file`)
-    } : { path: relative3, action };
-    return change;
-  });
-  assertSortedUnique(changes.map((item) => item.path), "preview change paths");
-  return changes;
-}
-function parseConflicts(value) {
-  if (!Array.isArray(value)) {
-    invalid("preview conflicts");
-  }
-  const conflicts = value.map((entry, index) => {
-    const object = objectValue(entry, `preview conflict ${index}`);
-    assertExactKeys(object, `preview conflict ${index}`, ["path"], ["baseline", "source", "target"]);
-    const relative3 = syncPath(object.path, `preview conflict ${index} path`);
-    const result = { path: relative3 };
-    for (const side of ["baseline", "source", "target"]) {
-      if (object[side] !== undefined) {
-        result[side] = parseSyncFile(object[side], relative3, `preview conflict ${index} ${side}`);
-      }
-    }
-    return result;
-  });
-  assertSortedUnique(conflicts.map((item) => item.path), "preview conflict paths");
-  return conflicts;
-}
-function parseExpectedTargets(value, changes) {
-  const expected = parseNullableFileRecord(value, "preview expected targets");
-  if (!sameStringSet(Object.keys(expected), changes.map((item) => item.path))) {
-    invalid("preview expected target coverage");
-  }
-  return expected;
-}
-function parseBackups(value) {
-  if (!Array.isArray(value)) {
-    invalid("journal backups");
-  }
-  const backups = value.map((entry, index) => {
-    const object = objectValue(entry, `journal backup ${index}`);
-    const existed = object.existed;
-    if (typeof existed !== "boolean") {
-      invalid(`journal backup ${index} existence`);
-    }
-    const required = existed ? ["path", "existed", "kind", "mode", "backup", "original"] : ["path", "existed", "original"];
-    assertExactKeys(object, `journal backup ${index}`, [
-      ...required,
-      "publication"
-    ]);
-    const relative3 = syncPath(object.path, `journal backup ${index} path`);
-    const publication = requiredString(object.publication, `journal backup ${index} publication`);
-    if (!existed) {
-      if (object.original !== null) {
-        invalid(`journal backup ${index} original`);
-      }
-      const record2 = {
-        path: relative3,
-        existed: false,
-        original: null,
-        publication
-      };
-      return record2;
-    }
-    const kind = object.kind;
-    if (kind !== "file" && kind !== "symlink") {
-      invalid(`journal backup ${index} kind`);
-    }
-    const mode = parseMode(object.mode, `journal backup ${index} mode`);
-    const original = parseSyncFile(object.original, relative3, `journal backup ${index} original`);
-    if (original.kind !== kind || original.mode !== mode) {
-      invalid(`journal backup ${index} descriptor`);
-    }
-    const record = {
-      path: relative3,
-      existed: true,
-      kind,
-      mode,
-      backup: requiredString(object.backup, `journal backup ${index} path`),
-      original,
-      publication
-    };
-    return record;
-  });
-  assertSortedUnique(backups.map((item) => item.path), "journal backup paths");
-  return backups;
-}
 function parseFileRecord(value, label) {
   const object = objectValue(value, label);
   const result = Object.create(null);
@@ -8793,19 +8482,6 @@ function parseDirectoryIdentities(value, label) {
   });
   assertSortedUnique(identities.map((entry) => entry.path), label);
   return identities;
-}
-function expectedDeleteParentPaths(changes) {
-  const parents = new Set;
-  for (const change of changes) {
-    if (change.action !== "delete") {
-      continue;
-    }
-    const parts = change.path.split("/").slice(0, -1);
-    for (let index = 1;index <= parts.length; index++) {
-      parents.add(parts.slice(0, index).join("/"));
-    }
-  }
-  return [...parents].sort();
 }
 function parseSyncFile(value, relative3, label) {
   const object = exactObject(value, label, [
@@ -8925,7 +8601,144 @@ function invalid(label) {
   throw new Error(`Invalid ${label}`);
 }
 
-// packages/container-lab/src/sync-preview.ts
+// packages/container-lab/src/sync/validation/preview.ts
+function parseBaselineFile(value) {
+  const object = exactObject(value, "synchronization baseline", [
+    "version",
+    "files"
+  ]);
+  if (object.version !== 1) {
+    invalid("synchronization baseline version");
+  }
+  return { version: 1, files: parseFileRecord(object.files, "baseline files") };
+}
+function parseStoredPreview(value) {
+  const object = exactObject(value, "synchronization preview", [
+    "version",
+    "token",
+    "expiresAt",
+    "sourceDigest",
+    "targetDigest",
+    "changes",
+    "conflicts",
+    "labId",
+    "direction",
+    "sourceRoot",
+    "targetRoot",
+    "baselineDigest",
+    "missingTargetDirectories",
+    "deleteParentDirectories",
+    "binding",
+    "expectedTargets"
+  ]);
+  if (object.version !== 1) {
+    invalid("synchronization preview version");
+  }
+  const token = stringMatching(object.token, TOKEN, "preview token");
+  const expiresAt = parseIsoDate(object.expiresAt, "preview expiry");
+  const sourceDigest = digest(object.sourceDigest, "preview source digest");
+  const targetDigest = digest(object.targetDigest, "preview target digest");
+  const baselineDigest = digest(object.baselineDigest, "preview baseline digest");
+  const binding = digest(object.binding, "preview binding");
+  const labId = requiredString(object.labId, "preview lab id");
+  const direction = parseDirection(object.direction);
+  const sourceRoot = requiredString(object.sourceRoot, "preview source root");
+  const targetRoot = requiredString(object.targetRoot, "preview target root");
+  const changes = parseChanges(object.changes);
+  const conflicts = parseConflicts(object.conflicts);
+  assertDisjointPaths(changes, conflicts);
+  const expectedTargets = parseExpectedTargets(object.expectedTargets, changes);
+  const missingTargetDirectories = parsePathArray(object.missingTargetDirectories, "preview missing target directories");
+  const deleteParentDirectories = parseDirectoryIdentities(object.deleteParentDirectories, "preview delete parent directories");
+  if (missingTargetDirectories.some((directory) => !changes.some((change) => change.path.startsWith(`${directory}/`)))) {
+    invalid("preview missing target directory provenance");
+  }
+  if (JSON.stringify(deleteParentDirectories.map((entry) => entry.path)) !== JSON.stringify(expectedDeleteParentPaths(changes))) {
+    invalid("preview delete parent directory provenance");
+  }
+  return {
+    version: 1,
+    token,
+    expiresAt,
+    sourceDigest,
+    targetDigest,
+    baselineDigest,
+    binding,
+    labId,
+    direction,
+    sourceRoot,
+    targetRoot,
+    changes,
+    conflicts,
+    expectedTargets,
+    missingTargetDirectories,
+    deleteParentDirectories
+  };
+}
+function parseChanges(value) {
+  if (!Array.isArray(value)) {
+    invalid("preview changes");
+  }
+  const changes = value.map((entry, index) => {
+    const object = objectValue(entry, `preview change ${index}`);
+    const action = object.action;
+    if (action !== "upsert" && action !== "delete") {
+      invalid(`preview change ${index} action`);
+    }
+    const keys = action === "upsert" ? ["path", "action", "file"] : ["path", "action"];
+    assertExactKeys(object, `preview change ${index}`, keys);
+    const relative3 = syncPath(object.path, `preview change ${index} path`);
+    const change = action === "upsert" ? {
+      path: relative3,
+      action,
+      file: parseSyncFile(object.file, relative3, `preview change ${index} file`)
+    } : { path: relative3, action };
+    return change;
+  });
+  assertSortedUnique(changes.map((item) => item.path), "preview change paths");
+  return changes;
+}
+function parseConflicts(value) {
+  if (!Array.isArray(value)) {
+    invalid("preview conflicts");
+  }
+  const conflicts = value.map((entry, index) => {
+    const object = objectValue(entry, `preview conflict ${index}`);
+    assertExactKeys(object, `preview conflict ${index}`, ["path"], ["baseline", "source", "target"]);
+    const relative3 = syncPath(object.path, `preview conflict ${index} path`);
+    const result = { path: relative3 };
+    for (const side of ["baseline", "source", "target"]) {
+      if (object[side] !== undefined) {
+        result[side] = parseSyncFile(object[side], relative3, `preview conflict ${index} ${side}`);
+      }
+    }
+    return result;
+  });
+  assertSortedUnique(conflicts.map((item) => item.path), "preview conflict paths");
+  return conflicts;
+}
+function parseExpectedTargets(value, changes) {
+  const expected = parseNullableFileRecord(value, "preview expected targets");
+  if (!sameStringSet(Object.keys(expected), changes.map((item) => item.path))) {
+    invalid("preview expected target coverage");
+  }
+  return expected;
+}
+function expectedDeleteParentPaths(changes) {
+  const parents = new Set;
+  for (const change of changes) {
+    if (change.action !== "delete") {
+      continue;
+    }
+    const parts = change.path.split("/").slice(0, -1);
+    for (let index = 1;index <= parts.length; index++) {
+      parents.add(parts.slice(0, index).join("/"));
+    }
+  }
+  return [...parents].sort();
+}
+
+// packages/container-lab/src/sync/preview.ts
 var DEFAULT_TTL_MS = 5 * 60 * 1000;
 function previewBinding(preview) {
   return sha256(JSON.stringify(previewSemanticPayload(preview)));
@@ -8950,9 +8763,145 @@ function previewSemanticPayload(preview) {
   };
 }
 
-// packages/container-lab/src/sync-recovery.ts
+// packages/container-lab/src/sync/recovery.ts
 import { lstat as lstat6, rm as rm6 } from "fs/promises";
 import path5 from "path";
+
+// packages/container-lab/src/sync/validation/journal.ts
+function parseSyncJournal(value) {
+  const object = exactObject(value, "synchronization journal", [
+    "version",
+    "state",
+    "previewToken",
+    "previewBinding",
+    "targetRoot",
+    "baselinePath",
+    "newBaseline",
+    "backups",
+    "createdDirectories",
+    "deleteParentDirectories",
+    "mutatedPaths",
+    "appliedStates"
+  ], ["creatingDirectory"]);
+  if (object.version !== 1) {
+    invalid("synchronization journal version");
+  }
+  if (object.state !== "preparing" && object.state !== "prepared" && object.state !== "applied" && object.state !== "rolledBack" && object.state !== "committed") {
+    invalid("synchronization journal state");
+  }
+  const backups = parseBackups(object.backups);
+  const paths = backups.map((item) => item.path);
+  const { createdDirectories, creatingDirectory, deleteParentDirectories } = parseJournalDirectories(object, paths, object.state);
+  const mutatedPaths = parsePathArray(object.mutatedPaths, "mutated paths");
+  if (object.state === "preparing" && mutatedPaths.length > 0) {
+    invalid("preparing synchronization journal mutations");
+  }
+  for (const mutated of mutatedPaths) {
+    if (!paths.includes(mutated)) {
+      invalid("journal mutated path provenance");
+    }
+  }
+  const appliedStates = parseNullableFileRecord(object.appliedStates, "journal applied states");
+  if (!sameStringSet(Object.keys(appliedStates), paths)) {
+    invalid("journal applied state coverage");
+  }
+  for (const backup of backups) {
+    const intended = appliedStates[backup.path];
+    if (intended === undefined) {
+      invalid("journal applied state coverage");
+    }
+    if (!backup.publication) {
+      invalid("journal publication provenance");
+    }
+  }
+  return {
+    version: 1,
+    state: object.state,
+    previewToken: stringMatching(object.previewToken, TOKEN, "journal preview token"),
+    previewBinding: digest(object.previewBinding, "journal preview binding"),
+    targetRoot: requiredString(object.targetRoot, "journal target root"),
+    baselinePath: requiredString(object.baselinePath, "journal baseline path"),
+    newBaseline: parseBaselineFile(object.newBaseline),
+    backups,
+    createdDirectories,
+    ...creatingDirectory === undefined ? {} : { creatingDirectory },
+    deleteParentDirectories,
+    mutatedPaths,
+    appliedStates
+  };
+}
+function parseJournalDirectories(object, paths, state) {
+  const createdDirectories = parseDirectoryIdentities(object.createdDirectories, "journal created directories");
+  if (createdDirectories.some((directory) => !paths.some((relative3) => relative3.startsWith(`${directory.path}/`)))) {
+    invalid("journal created directory provenance");
+  }
+  if (state === "preparing" && createdDirectories.length > 0) {
+    invalid("preparing synchronization journal directories");
+  }
+  const creatingDirectory = object.creatingDirectory === undefined ? undefined : syncPath(object.creatingDirectory, "journal creating directory");
+  if (creatingDirectory !== undefined && (state !== "prepared" || createdDirectories.some((entry) => entry.path === creatingDirectory) || !paths.some((relative3) => relative3.startsWith(`${creatingDirectory}/`)))) {
+    invalid("journal creating directory provenance");
+  }
+  return {
+    createdDirectories,
+    ...creatingDirectory === undefined ? {} : { creatingDirectory },
+    deleteParentDirectories: parseDirectoryIdentities(object.deleteParentDirectories, "journal delete parent directories")
+  };
+}
+function parseBackups(value) {
+  if (!Array.isArray(value)) {
+    invalid("journal backups");
+  }
+  const backups = value.map((entry, index) => {
+    const object = objectValue(entry, `journal backup ${index}`);
+    const existed = object.existed;
+    if (typeof existed !== "boolean") {
+      invalid(`journal backup ${index} existence`);
+    }
+    const required = existed ? ["path", "existed", "kind", "mode", "backup", "original"] : ["path", "existed", "original"];
+    assertExactKeys(object, `journal backup ${index}`, [
+      ...required,
+      "publication"
+    ]);
+    const relative3 = syncPath(object.path, `journal backup ${index} path`);
+    const publication = requiredString(object.publication, `journal backup ${index} publication`);
+    if (!existed) {
+      if (object.original !== null) {
+        invalid(`journal backup ${index} original`);
+      }
+      const record2 = {
+        path: relative3,
+        existed: false,
+        original: null,
+        publication
+      };
+      return record2;
+    }
+    const kind = object.kind;
+    if (kind !== "file" && kind !== "symlink") {
+      invalid(`journal backup ${index} kind`);
+    }
+    const mode = parseMode(object.mode, `journal backup ${index} mode`);
+    const original = parseSyncFile(object.original, relative3, `journal backup ${index} original`);
+    if (original.kind !== kind || original.mode !== mode) {
+      invalid(`journal backup ${index} descriptor`);
+    }
+    const record = {
+      path: relative3,
+      existed: true,
+      kind,
+      mode,
+      backup: requiredString(object.backup, `journal backup ${index} path`),
+      original,
+      publication
+    };
+    return record;
+  });
+  assertSortedUnique(backups.map((item) => item.path), "journal backup paths");
+  return backups;
+}
+
+// packages/container-lab/src/sync/recovery.ts
 var JOURNAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 async function recoverSyncTransactions(options) {
   const state = await syncStatePaths(options);
@@ -9161,9 +9110,9 @@ async function assertRecoveryDirectoryIdentities(targetRoot, journal) {
   await assertDirectoryIdentities(targetRoot, journal.createdDirectories, conflict);
   await assertDirectoryIdentities(targetRoot, journal.deleteParentDirectories, conflict);
 }
-// packages/container-lab/src/lab-destruction.ts
+// packages/container-lab/src/lab/destruction.ts
 async function recoverLabSync(roots, lab) {
-  if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join3(lab.runtimeRoot, "workspace")) {
+  if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join5(lab.runtimeRoot, "workspace")) {
     throw new Error("lab runtime containment is invalid");
   }
   try {
@@ -9176,7 +9125,7 @@ async function recoverLabSync(roots, lab) {
     }
     throw error;
   }
-  const journalDirectory = join3(lab.runtimeRoot, "sync", lab.id, "journals");
+  const journalDirectory = join5(lab.runtimeRoot, "sync", lab.id, "journals");
   let journals;
   try {
     journals = await readdir2(journalDirectory);
@@ -9213,6 +9162,79 @@ async function cleanupManagedLabDockerResources(lab, docker, environment = proce
   await cleanupLabLabels(lab, lab.modeKind === "dockerfile", docker, environment);
 }
 
+// packages/container-lab/src/state/owner-store.ts
+import { basename, join as join6, resolve as resolve5 } from "path";
+async function readReapedOwner(stateRoot, owner) {
+  let value;
+  try {
+    value = await readTrustedUnknownJson(stateRoot, ["reaped"], `${ownerKey(owner)}.json`, "reaped owner marker", { canonicalMismatch: "unsafe-indirection" });
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return;
+    }
+    throw error;
+  }
+  if (!isRecord4(value) || value["version"] !== 1 || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner) || !isTimestamp2(value["reapedAt"])) {
+    throw new Error("invalid reaped owner manifest");
+  }
+  return {
+    version: 1,
+    owner: value["owner"],
+    ownerKey: value["ownerKey"],
+    reapedAt: value["reapedAt"]
+  };
+}
+async function markOwnerReaped(stateRoot, owner) {
+  const existing = await readReapedOwner(stateRoot, owner);
+  if (existing) {
+    return existing;
+  }
+  const manifest = {
+    version: 1,
+    owner,
+    ownerKey: ownerKey(owner),
+    reapedAt: new Date().toISOString()
+  };
+  await writeJsonAtomic(reapedOwnerPath(stateRoot, owner), manifest);
+  return manifest;
+}
+async function readOwnerManifest(path6) {
+  const resolvedPath = resolve5(path6);
+  const directory = resolve5(resolvedPath, "..");
+  const key = basename(directory);
+  const owners = resolve5(directory, "..");
+  if (basename(resolvedPath) !== "owner.json" || basename(owners) !== "owners") {
+    throw new Error(`invalid owner manifest path: ${path6}`);
+  }
+  const stateRoot = resolve5(owners, "..");
+  const value = await readTrustedUnknownJson(stateRoot, ["owners", key], "owner.json", "owner manifest", { canonicalMismatch: "unsafe-indirection" });
+  if (!isRecord4(value) || value["version"] !== 1 || typeof value["owner"] !== "string" || typeof value["ownerKey"] !== "string" || !isTimestamp2(value["createdAt"])) {
+    throw new Error(`invalid owner manifest: ${path6}`);
+  }
+  resolveOwner(value["owner"], {});
+  if (value["ownerKey"] !== ownerKey(value["owner"]) || basename(resolve5(path6, "..")) !== value["ownerKey"]) {
+    throw new Error(`owner manifest hash mismatch: ${path6}`);
+  }
+  return {
+    version: 1,
+    owner: value["owner"],
+    ownerKey: value["ownerKey"],
+    createdAt: value["createdAt"]
+  };
+}
+function isTimestamp2(value) {
+  if (typeof value !== "string")
+    return false;
+  try {
+    return new Date(value).toISOString() === value;
+  } catch {
+    return false;
+  }
+}
+function isRecord4(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 // packages/container-lab/src/reaper-domain.ts
 var OWNER_KEY = /^[a-f0-9]{64}$/;
 async function reapArchivedOwners(options) {
@@ -9243,7 +9265,7 @@ async function reapArchivedOwners(options) {
     };
   }
   try {
-    const ownerRoot = join4(roots.stateRoot, "owners");
+    const ownerRoot = join7(roots.stateRoot, "owners");
     if (!await exactDirectoryChain2(roots.stateRoot, ["owners"], "owner state root")) {
       return result;
     }
@@ -9275,7 +9297,7 @@ async function reapArchivedOwners(options) {
         if (!await exactDirectoryChain2(roots.stateRoot, ["owners", entry.name], "owner state directory")) {
           throw new Error("owner state directory disappeared");
         }
-        owner = await readOwnerManifest(join4(ownerRoot, entry.name, "owner.json"));
+        owner = await readOwnerManifest(join7(ownerRoot, entry.name, "owner.json"));
       } catch {
         result.retainedOwners.push({
           ownerKey: fallbackKey,
@@ -9311,7 +9333,7 @@ async function reapArchivedOwners(options) {
         await options.beforeOwnerLock?.(owner.ownerKey);
         await withFileLock(ownerLockPath(roots.stateRoot, owner.owner), async () => {
           await assertOwnerStateDirectory(roots.stateRoot, owner.ownerKey, "owner state directory disappeared");
-          const currentOwner = await readOwnerManifest(join4(ownerRoot, owner.ownerKey, "owner.json"));
+          const currentOwner = await readOwnerManifest(join7(ownerRoot, owner.ownerKey, "owner.json"));
           if (currentOwner.owner !== owner.owner || currentOwner.ownerKey !== owner.ownerKey || currentOwner.createdAt !== owner.createdAt) {
             throw new Error("owner state changed before archive cleanup");
           }
@@ -9349,10 +9371,10 @@ async function reapArchivedOwners(options) {
           }
           await markOwnerReaped(roots.stateRoot, owner.owner);
           if (await exactDirectoryChain2(roots.stateRoot, ["owners", owner.ownerKey], "owner state directory")) {
-            await boundedRemove(join4(ownerRoot, owner.ownerKey), 1e5);
+            await boundedRemove(join7(ownerRoot, owner.ownerKey), 1e5);
           }
           if (await exactDirectoryChain2(roots.runtimeRoot, [owner.ownerKey], "owner runtime directory")) {
-            await boundedRemove(join4(roots.runtimeRoot, owner.ownerKey), 1e5);
+            await boundedRemove(join7(roots.runtimeRoot, owner.ownerKey), 1e5);
           }
           result.archivedOwnersCleaned.push(owner.ownerKey);
         }, { attempts: 600, delayMs: 50 });
@@ -9476,7 +9498,7 @@ async function validateReaperLab(roots, owner, ownerKey2, lab) {
     containmentMessage: "lab ownership or runtime containment is invalid"
   };
   assertTrustedLabRuntimeIdentity(roots, lab, identity3);
-  if (lab.modeKind === "dockerfile" && lab.managedImage !== internalImageTag2(ownerKey2, lab.id)) {
+  if (lab.modeKind === "dockerfile" && lab.managedImage !== internalImageTag(ownerKey2, lab.id)) {
     throw new Error("managed Dockerfile image identity is invalid");
   }
   await inspectTrustedLabRuntimeDirectories(roots, lab, identity3);
@@ -9500,7 +9522,7 @@ async function boundedRemove(root, maxEntries) {
       if (++count > maxEntries) {
         throw new Error("cleanup path exceeds bounded entry limit");
       }
-      await scan(join4(path6, name));
+      await scan(join7(path6, name));
     }
   }
   await scan(root);
@@ -9518,7 +9540,7 @@ var package_default = {
   private: true,
   type: "module",
   exports: {
-    ".": "./src/service.ts",
+    ".": "./src/lab/orchestrator.ts",
     "./integration-descriptor": "./assets/integrations/container-lab.json"
   },
   bin: {
@@ -9561,7 +9583,7 @@ async function reaperMain(args = process5.argv.slice(2)) {
       return 0;
     }
     const result = await reapArchivedOwners({
-      dbPath: parsed.dbPath ?? join5(homedir2(), ".codex", "state_5.sqlite"),
+      dbPath: parsed.dbPath ?? join8(homedir2(), ".codex", "state_5.sqlite"),
       roots: resolveRoots({
         ...parsed.stateRoot === undefined ? {} : { stateRoot: parsed.stateRoot },
         ...parsed.runtimeRoot === undefined ? {} : { runtimeRoot: parsed.runtimeRoot }

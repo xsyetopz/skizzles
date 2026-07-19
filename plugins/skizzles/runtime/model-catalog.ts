@@ -4,10 +4,23 @@
 // packages/model-catalog/src/index.ts
 import process3 from "process";
 
-// packages/model-catalog/src/catalog-refresh.ts
+// packages/model-catalog/src/catalog/refresh.ts
 import { join as join3, resolve as resolve2 } from "path";
 
-// packages/model-catalog/src/catalog-schema.ts
+// packages/model-catalog/src/codex-child.ts
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  writeFile
+} from "fs/promises";
+import { tmpdir } from "os";
+import { isAbsolute, join } from "path";
+import process from "process";
+
+// packages/model-catalog/src/catalog/schema.ts
 var LUNA_MODEL = "gpt-5.6-luna";
 var REQUIRED_MODELS = [
   "gpt-5.6-sol",
@@ -91,463 +104,7 @@ function applyLunaV2Overlay(value) {
   return { catalog: cloned, overlay: "applied" };
 }
 
-// packages/model-catalog/src/catalog-store.ts
-import { createHash } from "crypto";
-import {
-  chmod,
-  lstat,
-  mkdir,
-  open,
-  readFile,
-  realpath,
-  rename,
-  rm
-} from "fs/promises";
-import {
-  basename,
-  dirname,
-  isAbsolute,
-  join,
-  parse,
-  relative,
-  resolve,
-  sep
-} from "path";
-import process from "process";
-var MODEL_CACHE_TTL_MS = 300000;
-function physicalPathKey(path) {
-  return path.normalize("NFC").toLocaleLowerCase("en-US");
-}
-function isMissingFile(error) {
-  return error instanceof Error && "code" in error && error.code === "ENOENT";
-}
-function identity(metadata) {
-  return { dev: metadata.dev, ino: metadata.ino };
-}
-function sameIdentity(first, second) {
-  if (first === undefined || second === undefined) {
-    return first === second;
-  }
-  return first.dev === second.dev && first.ino === second.ino;
-}
-function pathComponents(path) {
-  const absolute = resolve(path);
-  const { root } = parse(absolute);
-  const segments = absolute.slice(root.length).split(sep).filter((segment) => segment.length > 0);
-  const paths = [root];
-  let current = root;
-  for (const segment of segments) {
-    current = join(current, segment);
-    paths.push(current);
-  }
-  return paths;
-}
-async function existingPathMetadata(path) {
-  try {
-    return await lstat(path);
-  } catch (error) {
-    if (isMissingFile(error)) {
-      return;
-    }
-    throw error;
-  }
-}
-async function rejectSymlinkAncestors(path) {
-  for (const component of pathComponents(path)) {
-    const metadata = await existingPathMetadata(component);
-    if (metadata === undefined) {
-      return;
-    }
-    if (metadata.isSymbolicLink()) {
-      throw new Error(`${path} must not contain symlink path components`);
-    }
-  }
-}
-function within(root, path) {
-  const child = relative(root, path);
-  return child === "" || !child.startsWith(`..${sep}`) && child !== "..";
-}
-async function firstMissingComponent(path) {
-  for (const component of pathComponents(path)) {
-    if (await existingPathMetadata(component) === undefined) {
-      return component;
-    }
-  }
-  return;
-}
-async function ensureDirectoryPath(path) {
-  await rejectSymlinkAncestors(path);
-  for (const component of pathComponents(path)) {
-    const metadata = await existingPathMetadata(component);
-    if (metadata === undefined) {
-      await mkdir(component, { mode: 448 });
-      const created = await lstat(component);
-      if (!created.isDirectory() || created.isSymbolicLink()) {
-        throw new Error(`${component} must be a directory`);
-      }
-      continue;
-    }
-    if (!metadata.isDirectory()) {
-      throw new Error(`${component} must be a directory`);
-    }
-  }
-}
-function privateMode(metadata) {
-  return (metadata.mode & 511) === 448;
-}
-async function validatePrivateDirectoryChain(privacyRoot, directory) {
-  if (!within(privacyRoot, directory)) {
-    throw new Error(`${directory} escapes its private storage root`);
-  }
-  await rejectSymlinkAncestors(directory);
-  const expectedUid = process.getuid?.();
-  for (const component of pathComponents(directory)) {
-    if (!within(privacyRoot, component)) {
-      continue;
-    }
-    const metadata = await lstat(component);
-    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-      throw new Error(`${component} must be a directory`);
-    }
-    if (expectedUid !== undefined && metadata.uid !== expectedUid) {
-      throw new Error(`${component} must be owned by the current user`);
-    }
-    if (!privateMode(metadata)) {
-      throw new Error(`${component} must have mode 0700`);
-    }
-    if (await realpath(component) !== component) {
-      throw new Error(`${component} must use its physical path`);
-    }
-  }
-}
-async function privacyRootFor(codexHome, directory) {
-  if (within(codexHome, directory)) {
-    return codexHome;
-  }
-  return await firstMissingComponent(directory) ?? directory;
-}
-async function preparePrivateParent(codexHome, target) {
-  const directory = dirname(target);
-  const privacyRoot = await privacyRootFor(codexHome, directory);
-  await ensureDirectoryPath(directory);
-  await validatePrivateDirectoryChain(privacyRoot, directory);
-}
-async function prepareStandaloneParent(target) {
-  const directory = dirname(target);
-  const privacyRoot = await firstMissingComponent(directory) ?? directory;
-  await ensureDirectoryPath(directory);
-  await validatePrivateDirectoryChain(privacyRoot, directory);
-}
-async function regularFileMetadata(path) {
-  const metadata = await lstat(path);
-  if (metadata.isSymbolicLink()) {
-    throw new Error(`${path} must not be a symlink`);
-  }
-  if (!metadata.isFile()) {
-    throw new Error(`${path} must be a regular file`);
-  }
-  return metadata;
-}
-function requireSingleLink(path, metadata) {
-  if (metadata.nlink !== 1) {
-    throw new Error(`${path} must have exactly one hard link`);
-  }
-  return metadata;
-}
-async function managedFileMetadata(path) {
-  return requireSingleLink(path, await regularFileMetadata(path));
-}
-async function validatePhysicalRegularFile(path) {
-  await rejectSymlinkAncestors(path);
-  await regularFileMetadata(path);
-}
-async function validatePhysicalDirectory(path) {
-  await rejectSymlinkAncestors(path);
-  const metadata = await lstat(path);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-    throw new Error(`${path} must be a directory`);
-  }
-  if (await realpath(path) !== path) {
-    throw new Error(`${path} must use its physical path`);
-  }
-}
-async function inspectTarget(path) {
-  await rejectSymlinkAncestors(path);
-  const physicalParent = await realpath(dirname(path));
-  if (physicalParent !== dirname(path)) {
-    throw new Error(`${path} must use its physical parent path`);
-  }
-  const metadata = await existingPathMetadata(path);
-  if (metadata === undefined) {
-    return { physicalPath: join(physicalParent, basename(path)) };
-  }
-  const regular = await managedFileMetadata(path);
-  return {
-    physicalPath: join(physicalParent, basename(path)),
-    identity: identity(regular),
-    metadata: regular
-  };
-}
-async function ensurePrivateFileMode(path) {
-  const metadata = await existingPathMetadata(path);
-  if (metadata === undefined) {
-    return;
-  }
-  const regular = await managedFileMetadata(path);
-  const expectedUid = process.getuid?.();
-  if (expectedUid !== undefined && regular.uid !== expectedUid) {
-    throw new Error(`${path} must be owned by the current user`);
-  }
-  if ((regular.mode & 511) === 384) {
-    return;
-  }
-  const expected = identity(regular);
-  await chmod(path, 384);
-  const repaired = await managedFileMetadata(path);
-  if (!sameIdentity(expected, identity(repaired))) {
-    throw new Error(`${path} changed during permission repair`);
-  }
-}
-async function targetSnapshot(path) {
-  const parent = await lstat(dirname(path));
-  if (!parent.isDirectory() || parent.isSymbolicLink()) {
-    throw new Error(`${dirname(path)} must be a directory`);
-  }
-  const target = await existingPathMetadata(path);
-  if (target !== undefined) {
-    if (!target.isFile() || target.isSymbolicLink()) {
-      throw new Error(`${path} must be a regular file`);
-    }
-    requireSingleLink(path, target);
-  }
-  return {
-    parent: identity(parent),
-    ...target === undefined ? {} : {
-      target: identity(target),
-      targetCtimeMs: target.ctimeMs,
-      targetMode: target.mode & 511,
-      targetMtimeMs: target.mtimeMs,
-      targetNlink: target.nlink,
-      targetSize: target.size
-    }
-  };
-}
-async function assertSnapshotUnchanged(path, expected) {
-  await rejectSymlinkAncestors(path);
-  const current = await targetSnapshot(path);
-  if (!(sameIdentity(current.parent, expected.parent) && sameIdentity(current.target, expected.target)) || current.targetCtimeMs !== expected.targetCtimeMs || current.targetMode !== expected.targetMode || current.targetMtimeMs !== expected.targetMtimeMs || current.targetNlink !== expected.targetNlink || current.targetSize !== expected.targetSize) {
-    throw new Error(`${path} changed during atomic replacement`);
-  }
-}
-async function syncDirectory(path) {
-  const handle = await open(path, "r");
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-}
-async function prepareCatalogStorePaths(paths) {
-  for (const path of [paths.output, paths.status, paths.cache]) {
-    if (!isAbsolute(path)) {
-      throw new Error(`${path} must be absolute`);
-    }
-    await preparePrivateParent(paths.codexHome, path);
-    await ensurePrivateFileMode(path);
-  }
-  await validateCatalogStorePaths(paths);
-}
-async function validateCatalogTarget(paths, path) {
-  const directory = dirname(path);
-  const privacyRoot = await privacyRootFor(paths.codexHome, directory);
-  await validatePrivateDirectoryChain(privacyRoot, directory);
-  const inspection = await inspectTarget(path);
-  if (inspection.metadata === undefined) {
-    return inspection;
-  }
-  const expectedUid = process.getuid?.();
-  if (expectedUid !== undefined && inspection.metadata.uid !== expectedUid || (inspection.metadata.mode & 511) !== 384) {
-    throw new Error(`${path} must be an owner-only mode 0600 file`);
-  }
-  return inspection;
-}
-function assertDistinctInspections(first, second) {
-  const samePath = physicalPathKey(first.physicalPath) === physicalPathKey(second.physicalPath);
-  const sameFile = first.identity !== undefined && second.identity !== undefined && sameIdentity(first.identity, second.identity);
-  if (samePath || sameFile) {
-    throw new Error("catalog output, status, and cache paths must be physically distinct");
-  }
-}
-async function validateCatalogStorePaths(paths) {
-  const inspections = await Promise.all([paths.output, paths.status, paths.cache].map((path) => validateCatalogTarget(paths, path)));
-  for (let left = 0;left < inspections.length; left += 1) {
-    for (let right = left + 1;right < inspections.length; right += 1) {
-      const first = inspections[left];
-      const second = inspections[right];
-      if (first === undefined || second === undefined) {
-        continue;
-      }
-      assertDistinctInspections(first, second);
-    }
-  }
-}
-async function readBoundedJsonFile(path, maxBytes) {
-  const metadata = await managedFileMetadata(path);
-  if (metadata.size > maxBytes) {
-    throw new Error("catalog input exceeds size limit");
-  }
-  const handle = await open(path, "r");
-  try {
-    const opened = requireSingleLink(path, await handle.stat());
-    if (!(opened.isFile() && sameIdentity(identity(metadata), identity(opened)))) {
-      throw new Error(`${path} changed while opening catalog input`);
-    }
-    const contents = Buffer.alloc(maxBytes + 1);
-    let length = 0;
-    while (length < contents.byteLength) {
-      const { bytesRead } = await handle.read(contents, length, contents.byteLength - length, null);
-      if (bytesRead === 0) {
-        break;
-      }
-      length += bytesRead;
-    }
-    if (length > maxBytes) {
-      throw new Error("catalog input exceeds size limit");
-    }
-    const completed = requireSingleLink(path, await handle.stat());
-    if (!sameIdentity(identity(opened), identity(completed))) {
-      throw new Error(`${path} changed while reading catalog input`);
-    }
-    return parseJson(contents.subarray(0, length).toString("utf8"));
-  } finally {
-    await handle.close();
-  }
-}
-async function cachedCatalog(path, expectedVersion, now, maxBytes) {
-  try {
-    const root = parseCatalogCache(await readBoundedJsonFile(path, maxBytes));
-    if (root.client_version !== expectedVersion) {
-      return;
-    }
-    const fetchedAt = Date.parse(root.fetched_at);
-    const age = now.getTime() - fetchedAt;
-    if (!Number.isFinite(fetchedAt) || age < 0 || age > MODEL_CACHE_TTL_MS) {
-      return;
-    }
-    return assertCompleteCatalog({ models: root.models });
-  } catch {
-    return;
-  }
-}
-async function validatedAtomicParent(path) {
-  if (!isAbsolute(path)) {
-    throw new Error(`${path} must be absolute`);
-  }
-  await prepareStandaloneParent(path);
-  await rejectSymlinkAncestors(path);
-  const parent = dirname(path);
-  const metadata = await lstat(parent);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
-    throw new Error(`${parent} must be a directory`);
-  }
-  if (!privateMode(metadata)) {
-    throw new Error(`${parent} must have mode 0700`);
-  }
-  const expectedUid = process.getuid?.();
-  if (expectedUid !== undefined && metadata.uid !== expectedUid) {
-    throw new Error(`${parent} must be owned by the current user`);
-  }
-  return parent;
-}
-async function preparedTarget(path, contents) {
-  let expected = await targetSnapshot(path);
-  if (expected.target === undefined) {
-    return { expected, unchanged: false };
-  }
-  if (expected.targetMode !== 384) {
-    await chmod(path, 384);
-    expected = await targetSnapshot(path);
-  }
-  await assertSnapshotUnchanged(path, expected);
-  if (expected.targetSize !== Buffer.byteLength(contents)) {
-    return { expected, unchanged: false };
-  }
-  const currentContents = await readFile(path, "utf8");
-  await assertSnapshotUnchanged(path, expected);
-  return { expected, unchanged: currentContents === contents };
-}
-async function writeSyncedTemporary(temporary, contents) {
-  try {
-    const handle = await open(temporary, "wx", 384);
-    try {
-      const opened = requireSingleLink(temporary, await handle.stat());
-      if ((opened.mode & 511) !== 384) {
-        throw new Error(`${temporary} must have mode 0600`);
-      }
-      await handle.writeFile(contents, "utf8");
-      await handle.sync();
-      const completed = requireSingleLink(temporary, await handle.stat());
-      if (!sameIdentity(identity(opened), identity(completed)) || (completed.mode & 511) !== 384) {
-        throw new Error(`${temporary} changed while staging atomic output`);
-      }
-    } finally {
-      await handle.close();
-    }
-    return await targetSnapshot(temporary);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
-}
-async function promoteTemporary(path, parent, temporary, temporaryExpected, expected, options) {
-  await assertSnapshotUnchanged(path, expected);
-  await assertSnapshotUnchanged(temporary, temporaryExpected);
-  await options.beforePromote?.();
-  await assertSnapshotUnchanged(path, expected);
-  await assertSnapshotUnchanged(temporary, temporaryExpected);
-  await rename(temporary, path);
-  await syncDirectory(parent);
-  const promoted = await managedFileMetadata(path);
-  if ((promoted.mode & 511) !== 384 || !sameIdentity(identity(promoted), temporaryExpected.target)) {
-    throw new Error(`${path} must have mode 0600`);
-  }
-}
-async function writePrivateAtomic(path, contents, options = {}) {
-  const parent = await validatedAtomicParent(path);
-  const target = await preparedTarget(path, contents);
-  if (target.unchanged) {
-    return false;
-  }
-  const temporary = join(parent, `.${globalThis.crypto.randomUUID()}.tmp`);
-  let created = false;
-  try {
-    const temporaryExpected = await writeSyncedTemporary(temporary, contents);
-    created = true;
-    await promoteTemporary(path, parent, temporary, temporaryExpected, target.expected, options);
-    created = false;
-    return true;
-  } finally {
-    if (created) {
-      await rm(temporary, { force: true });
-    }
-  }
-}
-function digest(contents) {
-  return createHash("sha256").update(contents).digest("hex");
-}
-
 // packages/model-catalog/src/codex-child.ts
-import {
-  lstat as lstat2,
-  mkdir as mkdir2,
-  mkdtemp,
-  realpath as realpath2,
-  rm as rm2,
-  writeFile
-} from "fs/promises";
-import { tmpdir } from "os";
-import { isAbsolute as isAbsolute2, join as join2 } from "path";
-import process2 from "process";
 var SEMANTIC_VERSION = /(?<![0-9A-Za-z-])((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)(?=\s|$)/;
 var CHILD_FAILURE_MESSAGES = {
   "bundled-exit": "codex bundled catalog command failed",
@@ -580,27 +137,27 @@ function commandEnvironment(home) {
     LANG: "C",
     LC_ALL: "C",
     NO_COLOR: "1",
-    PATH: process2.env["PATH"] ?? "/usr/bin:/bin",
-    TMPDIR: join2(home, "tmp"),
-    XDG_CACHE_HOME: join2(home, "xdg-cache"),
-    XDG_CONFIG_HOME: join2(home, "xdg-config"),
-    XDG_DATA_HOME: join2(home, "xdg-data")
+    PATH: process.env["PATH"] ?? "/usr/bin:/bin",
+    TMPDIR: join(home, "tmp"),
+    XDG_CACHE_HOME: join(home, "xdg-cache"),
+    XDG_CONFIG_HOME: join(home, "xdg-config"),
+    XDG_DATA_HOME: join(home, "xdg-data")
   };
 }
 async function isolatedHome() {
-  const physicalTemp = await realpath2(tmpdir());
-  const home = await mkdtemp(join2(physicalTemp, "skizzles-model-catalog-"));
+  const physicalTemp = await realpath(tmpdir());
+  const home = await mkdtemp(join(physicalTemp, "skizzles-model-catalog-"));
   for (const directory of ["tmp", "xdg-cache", "xdg-config", "xdg-data"]) {
-    await mkdir2(join2(home, directory), { mode: 448 });
+    await mkdir(join(home, directory), { mode: 448 });
   }
   return home;
 }
 async function validateCodexBinary(path) {
   try {
-    if (!isAbsolute2(path) || await realpath2(path) !== path) {
+    if (!isAbsolute(path) || await realpath(path) !== path) {
       throw new CodexChildError("unsafe-binary");
     }
-    const metadata = await lstat2(path);
+    const metadata = await lstat(path);
     if (!metadata.isFile() || metadata.isSymbolicLink()) {
       throw new CodexChildError("unsafe-binary");
     }
@@ -613,10 +170,10 @@ async function validateCodexBinary(path) {
 }
 function signalGroup(pid, signal) {
   try {
-    if (process2.platform === "win32") {
-      process2.kill(pid, signal);
+    if (process.platform === "win32") {
+      process.kill(pid, signal);
     } else {
-      process2.kill(-pid, signal);
+      process.kill(-pid, signal);
     }
     return true;
   } catch (error) {
@@ -754,7 +311,7 @@ async function runIsolatedCodex(codexBinary, argsFactory, limits) {
     }
     throw new CodexChildError("lifecycle");
   } finally {
-    await rm2(home, { recursive: true, force: true }).catch(() => {
+    await rm(home, { recursive: true, force: true }).catch(() => {
       throw new CodexChildError("lifecycle");
     });
   }
@@ -790,7 +347,7 @@ async function bundledCatalog(codexBinary, limits) {
 }
 async function preflightCatalog(codexBinary, contents, limits) {
   const result = await runIsolatedCodex(codexBinary, async (home) => {
-    const candidate = join2(home, "candidate.json");
+    const candidate = join(home, "candidate.json");
     await writeFile(candidate, contents, { mode: 384, flag: "wx" });
     return [
       "debug",
@@ -809,7 +366,452 @@ async function preflightCatalog(codexBinary, contents, limits) {
   }
 }
 
-// packages/model-catalog/src/catalog-refresh.ts
+// packages/model-catalog/src/catalog/store.ts
+import { createHash } from "crypto";
+import {
+  chmod,
+  lstat as lstat2,
+  mkdir as mkdir2,
+  open,
+  readFile,
+  realpath as realpath2,
+  rename,
+  rm as rm2
+} from "fs/promises";
+import {
+  basename,
+  dirname,
+  isAbsolute as isAbsolute2,
+  join as join2,
+  parse,
+  relative,
+  resolve,
+  sep
+} from "path";
+import process2 from "process";
+var MODEL_CACHE_TTL_MS = 300000;
+function physicalPathKey(path) {
+  return path.normalize("NFC").toLocaleLowerCase("en-US");
+}
+function isMissingFile(error) {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+function identity(metadata) {
+  return { dev: metadata.dev, ino: metadata.ino };
+}
+function sameIdentity(first, second) {
+  if (first === undefined || second === undefined) {
+    return first === second;
+  }
+  return first.dev === second.dev && first.ino === second.ino;
+}
+function pathComponents(path) {
+  const absolute = resolve(path);
+  const { root } = parse(absolute);
+  const segments = absolute.slice(root.length).split(sep).filter((segment) => segment.length > 0);
+  const paths = [root];
+  let current = root;
+  for (const segment of segments) {
+    current = join2(current, segment);
+    paths.push(current);
+  }
+  return paths;
+}
+async function existingPathMetadata(path) {
+  try {
+    return await lstat2(path);
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return;
+    }
+    throw error;
+  }
+}
+async function rejectSymlinkAncestors(path) {
+  for (const component of pathComponents(path)) {
+    const metadata = await existingPathMetadata(component);
+    if (metadata === undefined) {
+      return;
+    }
+    if (metadata.isSymbolicLink()) {
+      throw new Error(`${path} must not contain symlink path components`);
+    }
+  }
+}
+function within(root, path) {
+  const child = relative(root, path);
+  return child === "" || !child.startsWith(`..${sep}`) && child !== "..";
+}
+async function firstMissingComponent(path) {
+  for (const component of pathComponents(path)) {
+    if (await existingPathMetadata(component) === undefined) {
+      return component;
+    }
+  }
+  return;
+}
+async function ensureDirectoryPath(path) {
+  await rejectSymlinkAncestors(path);
+  for (const component of pathComponents(path)) {
+    const metadata = await existingPathMetadata(component);
+    if (metadata === undefined) {
+      await mkdir2(component, { mode: 448 });
+      const created = await lstat2(component);
+      if (!created.isDirectory() || created.isSymbolicLink()) {
+        throw new Error(`${component} must be a directory`);
+      }
+      continue;
+    }
+    if (!metadata.isDirectory()) {
+      throw new Error(`${component} must be a directory`);
+    }
+  }
+}
+function privateMode(metadata) {
+  return (metadata.mode & 511) === 448;
+}
+async function validatePrivateDirectoryChain(privacyRoot, directory) {
+  if (!within(privacyRoot, directory)) {
+    throw new Error(`${directory} escapes its private storage root`);
+  }
+  await rejectSymlinkAncestors(directory);
+  const expectedUid = process2.getuid?.();
+  for (const component of pathComponents(directory)) {
+    if (!within(privacyRoot, component)) {
+      continue;
+    }
+    const metadata = await lstat2(component);
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+      throw new Error(`${component} must be a directory`);
+    }
+    if (expectedUid !== undefined && metadata.uid !== expectedUid) {
+      throw new Error(`${component} must be owned by the current user`);
+    }
+    if (!privateMode(metadata)) {
+      throw new Error(`${component} must have mode 0700`);
+    }
+    if (await realpath2(component) !== component) {
+      throw new Error(`${component} must use its physical path`);
+    }
+  }
+}
+async function privacyRootFor(codexHome, directory) {
+  if (within(codexHome, directory)) {
+    return codexHome;
+  }
+  return await firstMissingComponent(directory) ?? directory;
+}
+async function preparePrivateParent(codexHome, target) {
+  const directory = dirname(target);
+  const privacyRoot = await privacyRootFor(codexHome, directory);
+  await ensureDirectoryPath(directory);
+  await validatePrivateDirectoryChain(privacyRoot, directory);
+}
+async function prepareStandaloneParent(target) {
+  const directory = dirname(target);
+  const privacyRoot = await firstMissingComponent(directory) ?? directory;
+  await ensureDirectoryPath(directory);
+  await validatePrivateDirectoryChain(privacyRoot, directory);
+}
+async function regularFileMetadata(path) {
+  const metadata = await lstat2(path);
+  if (metadata.isSymbolicLink()) {
+    throw new Error(`${path} must not be a symlink`);
+  }
+  if (!metadata.isFile()) {
+    throw new Error(`${path} must be a regular file`);
+  }
+  return metadata;
+}
+function requireSingleLink(path, metadata) {
+  if (metadata.nlink !== 1) {
+    throw new Error(`${path} must have exactly one hard link`);
+  }
+  return metadata;
+}
+async function managedFileMetadata(path) {
+  return requireSingleLink(path, await regularFileMetadata(path));
+}
+async function validatePhysicalRegularFile(path) {
+  await rejectSymlinkAncestors(path);
+  await regularFileMetadata(path);
+}
+async function validatePhysicalDirectory(path) {
+  await rejectSymlinkAncestors(path);
+  const metadata = await lstat2(path);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new Error(`${path} must be a directory`);
+  }
+  if (await realpath2(path) !== path) {
+    throw new Error(`${path} must use its physical path`);
+  }
+}
+async function inspectTarget(path) {
+  await rejectSymlinkAncestors(path);
+  const physicalParent = await realpath2(dirname(path));
+  if (physicalParent !== dirname(path)) {
+    throw new Error(`${path} must use its physical parent path`);
+  }
+  const metadata = await existingPathMetadata(path);
+  if (metadata === undefined) {
+    return { physicalPath: join2(physicalParent, basename(path)) };
+  }
+  const regular = await managedFileMetadata(path);
+  return {
+    physicalPath: join2(physicalParent, basename(path)),
+    identity: identity(regular),
+    metadata: regular
+  };
+}
+async function ensurePrivateFileMode(path) {
+  const metadata = await existingPathMetadata(path);
+  if (metadata === undefined) {
+    return;
+  }
+  const regular = await managedFileMetadata(path);
+  const expectedUid = process2.getuid?.();
+  if (expectedUid !== undefined && regular.uid !== expectedUid) {
+    throw new Error(`${path} must be owned by the current user`);
+  }
+  if ((regular.mode & 511) === 384) {
+    return;
+  }
+  const expected = identity(regular);
+  await chmod(path, 384);
+  const repaired = await managedFileMetadata(path);
+  if (!sameIdentity(expected, identity(repaired))) {
+    throw new Error(`${path} changed during permission repair`);
+  }
+}
+async function targetSnapshot(path) {
+  const parent = await lstat2(dirname(path));
+  if (!parent.isDirectory() || parent.isSymbolicLink()) {
+    throw new Error(`${dirname(path)} must be a directory`);
+  }
+  const target = await existingPathMetadata(path);
+  if (target !== undefined) {
+    if (!target.isFile() || target.isSymbolicLink()) {
+      throw new Error(`${path} must be a regular file`);
+    }
+    requireSingleLink(path, target);
+  }
+  return {
+    parent: identity(parent),
+    ...target === undefined ? {} : {
+      target: identity(target),
+      targetCtimeMs: target.ctimeMs,
+      targetMode: target.mode & 511,
+      targetMtimeMs: target.mtimeMs,
+      targetNlink: target.nlink,
+      targetSize: target.size
+    }
+  };
+}
+async function assertSnapshotUnchanged(path, expected) {
+  await rejectSymlinkAncestors(path);
+  const current = await targetSnapshot(path);
+  if (!(sameIdentity(current.parent, expected.parent) && sameIdentity(current.target, expected.target)) || current.targetCtimeMs !== expected.targetCtimeMs || current.targetMode !== expected.targetMode || current.targetMtimeMs !== expected.targetMtimeMs || current.targetNlink !== expected.targetNlink || current.targetSize !== expected.targetSize) {
+    throw new Error(`${path} changed during atomic replacement`);
+  }
+}
+async function syncDirectory(path) {
+  const handle = await open(path, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+async function prepareCatalogStorePaths(paths) {
+  for (const path of [paths.output, paths.status, paths.cache]) {
+    if (!isAbsolute2(path)) {
+      throw new Error(`${path} must be absolute`);
+    }
+    await preparePrivateParent(paths.codexHome, path);
+    await ensurePrivateFileMode(path);
+  }
+  await validateCatalogStorePaths(paths);
+}
+async function validateCatalogTarget(paths, path) {
+  const directory = dirname(path);
+  const privacyRoot = await privacyRootFor(paths.codexHome, directory);
+  await validatePrivateDirectoryChain(privacyRoot, directory);
+  const inspection = await inspectTarget(path);
+  if (inspection.metadata === undefined) {
+    return inspection;
+  }
+  const expectedUid = process2.getuid?.();
+  if (expectedUid !== undefined && inspection.metadata.uid !== expectedUid || (inspection.metadata.mode & 511) !== 384) {
+    throw new Error(`${path} must be an owner-only mode 0600 file`);
+  }
+  return inspection;
+}
+function assertDistinctInspections(first, second) {
+  const samePath = physicalPathKey(first.physicalPath) === physicalPathKey(second.physicalPath);
+  const sameFile = first.identity !== undefined && second.identity !== undefined && sameIdentity(first.identity, second.identity);
+  if (samePath || sameFile) {
+    throw new Error("catalog output, status, and cache paths must be physically distinct");
+  }
+}
+async function validateCatalogStorePaths(paths) {
+  const inspections = await Promise.all([paths.output, paths.status, paths.cache].map((path) => validateCatalogTarget(paths, path)));
+  for (let left = 0;left < inspections.length; left += 1) {
+    for (let right = left + 1;right < inspections.length; right += 1) {
+      const first = inspections[left];
+      const second = inspections[right];
+      if (first === undefined || second === undefined) {
+        continue;
+      }
+      assertDistinctInspections(first, second);
+    }
+  }
+}
+async function readBoundedJsonFile(path, maxBytes) {
+  const metadata = await managedFileMetadata(path);
+  if (metadata.size > maxBytes) {
+    throw new Error("catalog input exceeds size limit");
+  }
+  const handle = await open(path, "r");
+  try {
+    const opened = requireSingleLink(path, await handle.stat());
+    if (!(opened.isFile() && sameIdentity(identity(metadata), identity(opened)))) {
+      throw new Error(`${path} changed while opening catalog input`);
+    }
+    const contents = Buffer.alloc(maxBytes + 1);
+    let length = 0;
+    while (length < contents.byteLength) {
+      const { bytesRead } = await handle.read(contents, length, contents.byteLength - length, null);
+      if (bytesRead === 0) {
+        break;
+      }
+      length += bytesRead;
+    }
+    if (length > maxBytes) {
+      throw new Error("catalog input exceeds size limit");
+    }
+    const completed = requireSingleLink(path, await handle.stat());
+    if (!sameIdentity(identity(opened), identity(completed))) {
+      throw new Error(`${path} changed while reading catalog input`);
+    }
+    return parseJson(contents.subarray(0, length).toString("utf8"));
+  } finally {
+    await handle.close();
+  }
+}
+async function cachedCatalog(path, expectedVersion, now, maxBytes) {
+  try {
+    const root = parseCatalogCache(await readBoundedJsonFile(path, maxBytes));
+    if (root.client_version !== expectedVersion) {
+      return;
+    }
+    const fetchedAt = Date.parse(root.fetched_at);
+    const age = now.getTime() - fetchedAt;
+    if (!Number.isFinite(fetchedAt) || age < 0 || age > MODEL_CACHE_TTL_MS) {
+      return;
+    }
+    return assertCompleteCatalog({ models: root.models });
+  } catch {
+    return;
+  }
+}
+async function validatedAtomicParent(path) {
+  if (!isAbsolute2(path)) {
+    throw new Error(`${path} must be absolute`);
+  }
+  await prepareStandaloneParent(path);
+  await rejectSymlinkAncestors(path);
+  const parent = dirname(path);
+  const metadata = await lstat2(parent);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+    throw new Error(`${parent} must be a directory`);
+  }
+  if (!privateMode(metadata)) {
+    throw new Error(`${parent} must have mode 0700`);
+  }
+  const expectedUid = process2.getuid?.();
+  if (expectedUid !== undefined && metadata.uid !== expectedUid) {
+    throw new Error(`${parent} must be owned by the current user`);
+  }
+  return parent;
+}
+async function preparedTarget(path, contents) {
+  let expected = await targetSnapshot(path);
+  if (expected.target === undefined) {
+    return { expected, unchanged: false };
+  }
+  if (expected.targetMode !== 384) {
+    await chmod(path, 384);
+    expected = await targetSnapshot(path);
+  }
+  await assertSnapshotUnchanged(path, expected);
+  if (expected.targetSize !== Buffer.byteLength(contents)) {
+    return { expected, unchanged: false };
+  }
+  const currentContents = await readFile(path, "utf8");
+  await assertSnapshotUnchanged(path, expected);
+  return { expected, unchanged: currentContents === contents };
+}
+async function writeSyncedTemporary(temporary, contents) {
+  try {
+    const handle = await open(temporary, "wx", 384);
+    try {
+      const opened = requireSingleLink(temporary, await handle.stat());
+      if ((opened.mode & 511) !== 384) {
+        throw new Error(`${temporary} must have mode 0600`);
+      }
+      await handle.writeFile(contents, "utf8");
+      await handle.sync();
+      const completed = requireSingleLink(temporary, await handle.stat());
+      if (!sameIdentity(identity(opened), identity(completed)) || (completed.mode & 511) !== 384) {
+        throw new Error(`${temporary} changed while staging atomic output`);
+      }
+    } finally {
+      await handle.close();
+    }
+    return await targetSnapshot(temporary);
+  } catch (error) {
+    await rm2(temporary, { force: true });
+    throw error;
+  }
+}
+async function promoteTemporary(path, parent, temporary, temporaryExpected, expected, options) {
+  await assertSnapshotUnchanged(path, expected);
+  await assertSnapshotUnchanged(temporary, temporaryExpected);
+  await options.beforePromote?.();
+  await assertSnapshotUnchanged(path, expected);
+  await assertSnapshotUnchanged(temporary, temporaryExpected);
+  await rename(temporary, path);
+  await syncDirectory(parent);
+  const promoted = await managedFileMetadata(path);
+  if ((promoted.mode & 511) !== 384 || !sameIdentity(identity(promoted), temporaryExpected.target)) {
+    throw new Error(`${path} must have mode 0600`);
+  }
+}
+async function writePrivateAtomic(path, contents, options = {}) {
+  const parent = await validatedAtomicParent(path);
+  const target = await preparedTarget(path, contents);
+  if (target.unchanged) {
+    return false;
+  }
+  const temporary = join2(parent, `.${globalThis.crypto.randomUUID()}.tmp`);
+  let created = false;
+  try {
+    const temporaryExpected = await writeSyncedTemporary(temporary, contents);
+    created = true;
+    await promoteTemporary(path, parent, temporary, temporaryExpected, target.expected, options);
+    created = false;
+    return true;
+  } finally {
+    if (created) {
+      await rm2(temporary, { force: true });
+    }
+  }
+}
+function digest(contents) {
+  return createHash("sha256").update(contents).digest("hex");
+}
+
+// packages/model-catalog/src/catalog/refresh.ts
 var DEFAULT_MAX_CATALOG_BYTES = 8 * 1024 * 1024;
 var DEFAULT_MAX_STDERR_BYTES = 16 * 1024;
 var DEFAULT_TIMEOUT_MS = 1e4;
@@ -1074,7 +1076,12 @@ if (import.meta.main) {
   try {
     await runModelCatalogCli(process3.argv.slice(2));
   } catch (error) {
-    console.error(error instanceof Error ? error.message : "model catalog operation failed");
+    if (error instanceof Error) {
+      const { message } = error;
+      console.error(message);
+    } else {
+      console.error("model catalog operation failed");
+    }
     process3.exit(1);
   }
 }

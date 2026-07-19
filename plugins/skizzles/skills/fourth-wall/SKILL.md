@@ -156,3 +156,48 @@ When observed behavior reveals a reusable routing or lifecycle caveat, follow [r
 - Do not turn size, difficulty, or uncertainty into a blocker. A blocker identifies an external dependency, contradiction, safety issue, or owner decision.
 - Do not accept completion prose as proof.
 - Do not attempt to promote a child into the root. Root renewal requires a new top-level task and an explicit handoff.
+
+## Versioned trust contracts
+
+The published [context-envelope schema](contracts/context-envelope.schema.json)
+defines the portable v3 JSON shape. Each property records origin/time, trust,
+canonical SHA-256 coverage, scope/objective/policy identity, retention/expiry,
+sensitivity/redaction, transformations and producers, and property-specific
+validation evidence. The published
+[handoff/review schema](contracts/handoff-review.schema.json) defines the
+portable objective, input, artifact, acceptance, policy/model, actor, and
+evidence-reference shape.
+
+JSON Schema validates document structure; it does not compare actor identities,
+recompute digests, consult current policy/model versions, or compare timestamps
+with a trusted clock. The repository's plugin composition checker pins the
+exact published schema bytes and runs strict typed evaluators with explicit
+clock and expected-version options. Context validation timestamps must follow
+retrieval and every recorded transformation, and canonical calendar timestamps
+are checked without date normalization. Those evaluators reject duplicate
+context properties, incomplete integrity coverage, stale data, unredacted
+secrets, self-review, reference mismatches, and model-transformed data presented
+as validated without property-matched deterministic evidence. Property names
+must match their containing property in every validation state, including
+untrusted, invalid, and unvalidated records. Contract publication reads bind
+the opened file identity and compare every ancestor identity before and after
+the read. Descriptor metadata is compared around two bounded positioned reads,
+so transient hardlinks and in-place rewrites fail even if the final pathname is
+restored. Device, inode, link, size, and nanosecond timestamps remain bigint
+throughout; supported runtimes must expose exact bigint stats or validation
+fails closed. Handoff acceptance references must equal the exact repository-local
+reference supplied by trusted evaluator options; this is a local composition
+identity, not a global registry. The canonical
+public [trust-boundary incident-regression corpus](fixtures/trust-boundary-incidents.json)
+contains valid controls plus executable mutations and stable rejection codes.
+It is implementation-visible regression input, not independent or private
+acceptance material.
+
+Published contract assets are bounded to 1 MiB. Composition rejects duplicate
+JSON object keys by decoded identity before `JSON.parse`, including collisions
+between literal and Unicode-escaped key spellings.
+
+Neither the published schemas nor the repository evaluator intercept native
+Codex handoffs, attest that a host supplied truthful facts, or enforce the host
+lifecycle. Native integration must collect trusted facts and invoke a
+deterministic consumer explicitly.
