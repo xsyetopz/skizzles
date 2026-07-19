@@ -39,8 +39,8 @@ complete package-to-artifact map.
 
 - Do not mutate a real Codex home, installed plugin, live hooks, `PATH`, launchd,
   or another host environment during repository development.
-- Preserve the tracked root `.DS_Store`; do not stage, normalize, or distribute
-  Finder metadata elsewhere.
+- Keep Finder metadata ignored and absent; do not stage, normalize, or
+  distribute it.
 - Distributables must contain no machine paths, credentials, symlinks, caches,
   logs, databases, build output, or live state.
 - Preserve unrelated work. The root integration owner alone creates Git
