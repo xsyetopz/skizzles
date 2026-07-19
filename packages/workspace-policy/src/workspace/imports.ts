@@ -5,6 +5,7 @@ import {
   type WorkspaceFinding,
   type WorkspacePackage,
 } from "./contract.ts";
+import { hasRuntimeDependency } from "./dependencies.ts";
 import { listFiles } from "./filesystem.ts";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
@@ -128,9 +129,10 @@ function validateImport(
     return;
   }
   const inTest = relativePath.startsWith("test/");
+  const runtimeDependency = hasRuntimeDependency(item.manifest, dependency);
   if (
     !(
-      dependency in item.manifest.dependencies ||
+      runtimeDependency ||
       (inTest && dependency in item.manifest.devDependencies)
     )
   ) {
@@ -138,7 +140,7 @@ function validateImport(
       findings,
       "undeclared-dependency",
       findingPath,
-      `${dependency} is not a direct ${inTest ? "dependency or devDependency" : "runtime dependency"}`,
+      `${dependency} is not a direct ${inTest ? "runtime, optional, peer, or development dependency" : "runtime, optional, or peer dependency"}`,
     );
     return;
   }

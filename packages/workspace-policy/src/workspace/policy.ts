@@ -76,7 +76,7 @@ async function validateWorkspace(
   }
 
   await validateWorkspaceImports(packages, findings);
-  await validateWorkspaceFitness(packages, findings);
+  await validateWorkspaceFitness(rootManifest, packages, findings);
   validateExpectedPackageNames(names, options.expectedPackageNames, findings);
   await validateLockfiles(root, findings);
   await validateRootSourceIsolation(root, packageRoots, findings);

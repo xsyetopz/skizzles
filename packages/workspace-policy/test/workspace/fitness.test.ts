@@ -74,6 +74,7 @@ describe("mandatory workspace architecture fitness", () => {
 
   it("requires workspace ranges for internal development dependencies", async () => {
     const root = await fixture();
+    await addPackage(root, "two", "@skizzles/two");
     const manifest = packageManifest("@skizzles/example");
     manifest.devDependencies["@skizzles/two"] = "^0.1.0";
     await writeManifest(root, "example", manifest);
@@ -119,7 +120,7 @@ describe("mandatory workspace architecture fitness", () => {
       code: "workspace-dependency-bin-linker-risk",
       path: "packages/two",
       message:
-        "@skizzles/two is consumed by @skizzles/example and must not declare bin: Bun 1.3.14 chmods dereferenced workspace binary targets during install",
+        "@skizzles/two is consumed by @skizzles/example (packages/example) and must not declare bin: Bun 1.3.14 chmods dereferenced workspace binary targets during install",
     });
   });
 

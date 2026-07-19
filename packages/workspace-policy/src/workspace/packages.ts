@@ -6,9 +6,12 @@ import {
   type WorkspaceFinding,
   type WorkspaceManifest,
 } from "./contract.ts";
+import {
+  validatePackageDependencies,
+  validateRootDependencyPolicy,
+} from "./dependencies.ts";
 import { validateExportImports } from "./export-imports.ts";
 
-const TOOL_DEPENDENCIES = ["@types/bun", "@types/node", "typescript"] as const;
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const PORTABLE_FASTMCP_ROOT =
   "skills/codex-project-tooling/assets/fastmcp-bun-template";
@@ -51,7 +54,7 @@ export async function readPackageManifest(
     code: "invalid-package-manifest",
     path: toPortablePath(packageRoot),
     message:
-      "manifest must declare name, version, private ESM status, scripts, dependencies, and exports; bin is optional",
+      "manifest must declare name, version, private ESM status, scripts, string-valued dependency maps, and exports; bin is optional",
   });
   return undefined;
 }
@@ -69,12 +72,18 @@ function packageManifest(value: unknown): PackageManifest | undefined {
   const scripts = stringRecord(value["scripts"]);
   const dependencies = optionalStringRecord(value["dependencies"]);
   const devDependencies = optionalStringRecord(value["devDependencies"]);
+  const optionalDependencies = optionalStringRecord(
+    value["optionalDependencies"],
+  );
+  const peerDependencies = optionalStringRecord(value["peerDependencies"]);
   const exports = entrypointRecord(value["exports"]);
   const bin = entrypointRecord(value["bin"]);
   if (
     scripts === undefined ||
     dependencies === undefined ||
     devDependencies === undefined ||
+    optionalDependencies === undefined ||
+    peerDependencies === undefined ||
     exports === undefined ||
     bin === undefined
   ) {
@@ -88,6 +97,8 @@ function packageManifest(value: unknown): PackageManifest | undefined {
     scripts,
     dependencies,
     devDependencies,
+    optionalDependencies,
+    peerDependencies,
     exports,
     bin,
   };
@@ -97,13 +108,7 @@ export function validateRootManifest(
   manifest: WorkspaceManifest,
   findings: WorkspaceFinding[],
 ): void {
-  if (Object.keys(manifest.dependencies).length > 0) {
-    findings.push({
-      code: "root-runtime-dependency",
-      path: "package.json",
-      message: "the orchestration root must not own runtime dependencies",
-    });
-  }
+  validateRootDependencyPolicy(manifest, findings);
   for (const dependency of ["fastmcp", "zod"]) {
     if (dependency in manifest.devDependencies) {
       findings.push({
@@ -201,53 +206,6 @@ function validatePackageMetadata(
         "invalid-biome-command",
         relativeRoot,
         `package check must start with ${requiredPrefix}`,
-      );
-    }
-  }
-}
-
-function validatePackageDependencies(
-  relativeRoot: string,
-  manifest: PackageManifest,
-  findings: WorkspaceFinding[],
-): void {
-  if (
-    "@biomejs/biome" in manifest.dependencies ||
-    "@biomejs/biome" in manifest.devDependencies
-  ) {
-    addFinding(
-      findings,
-      "local-biome-dependency",
-      relativeRoot,
-      "Biome must not be installed as a workspace dependency",
-    );
-  }
-  for (const dependency of TOOL_DEPENDENCIES) {
-    if (
-      !(
-        dependency in manifest.dependencies ||
-        dependency in manifest.devDependencies
-      )
-    ) {
-      addFinding(
-        findings,
-        "missing-tool-dependency",
-        relativeRoot,
-        `missing direct ${dependency} dependency`,
-      );
-    }
-  }
-  const declaredDependencies = {
-    ...manifest.devDependencies,
-    ...manifest.dependencies,
-  };
-  for (const [name, range] of Object.entries(declaredDependencies)) {
-    if (name.startsWith("@skizzles/") && range !== "workspace:*") {
-      addFinding(
-        findings,
-        "workspace-range",
-        relativeRoot,
-        `${name} must use workspace:*`,
       );
     }
   }

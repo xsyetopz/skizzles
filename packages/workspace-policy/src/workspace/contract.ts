@@ -16,6 +16,8 @@ export interface PackageManifest {
   scripts: Record<string, string>;
   dependencies: Record<string, string>;
   devDependencies: Record<string, string>;
+  optionalDependencies: Record<string, string>;
+  peerDependencies: Record<string, string>;
   exports: Record<string, string>;
   bin: Record<string, string>;
 }

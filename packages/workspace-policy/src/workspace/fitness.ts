@@ -3,8 +3,13 @@ import { relative, resolve, sep } from "node:path";
 import {
   addFinding,
   type WorkspaceFinding,
+  type WorkspaceManifest,
   type WorkspacePackage,
 } from "./contract.ts";
+import {
+  dependencyNames,
+  validateWorkspaceDependencyRanges,
+} from "./dependencies.ts";
 import { listFiles } from "./filesystem.ts";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
@@ -31,14 +36,26 @@ interface FileReview {
 }
 
 export async function validateWorkspaceFitness(
+  rootManifest: WorkspaceManifest,
   packages: readonly WorkspacePackage[],
   findings: WorkspaceFinding[],
 ): Promise<void> {
   const packagesByName = new Map(
     packages.map((item) => [item.manifest.name, item]),
   );
+  validateWorkspaceDependencyRanges(
+    rootManifest,
+    packages,
+    packagesByName,
+    findings,
+  );
   validatePublicSurfaceBudgets(packages, findings);
-  validateWorkspaceDependencyBins(packages, packagesByName, findings);
+  validateWorkspaceDependencyBins(
+    rootManifest,
+    packages,
+    packagesByName,
+    findings,
+  );
   validatePackageCycles(packages, packagesByName, findings);
   for (const item of packages) {
     await validateOwnedSources(item, packagesByName, findings);
@@ -46,22 +63,33 @@ export async function validateWorkspaceFitness(
 }
 
 function validateWorkspaceDependencyBins(
+  rootManifest: WorkspaceManifest,
   packages: readonly WorkspacePackage[],
   packagesByName: ReadonlyMap<string, WorkspacePackage>,
   findings: WorkspaceFinding[],
 ): void {
   const consumersByDependency = new Map<string, Set<string>>();
-  for (const { manifest } of packages) {
-    for (const dependency of [
-      ...Object.keys(manifest.dependencies),
-      ...Object.keys(manifest.devDependencies),
-    ]) {
+  const consumers = [
+    {
+      identity: rootManifest.name,
+      path: "package.json",
+      manifest: rootManifest,
+    },
+    ...packages.map(({ manifest, relativeRoot }) => ({
+      identity: manifest.name,
+      path: relativeRoot,
+      manifest,
+    })),
+  ];
+  for (const consumer of consumers) {
+    for (const dependency of dependencyNames(consumer.manifest)) {
       if (!packagesByName.has(dependency)) {
         continue;
       }
-      const consumers = consumersByDependency.get(dependency) ?? new Set();
-      consumers.add(manifest.name);
-      consumersByDependency.set(dependency, consumers);
+      const dependencyConsumers =
+        consumersByDependency.get(dependency) ?? new Set();
+      dependencyConsumers.add(`${consumer.identity} (${consumer.path})`);
+      consumersByDependency.set(dependency, dependencyConsumers);
     }
   }
   for (const item of packages) {
@@ -116,14 +144,7 @@ function validatePackageCycles(
   for (const { manifest } of packages) {
     edges.set(
       manifest.name,
-      [
-        ...new Set([
-          ...Object.keys(manifest.dependencies),
-          ...Object.keys(manifest.devDependencies),
-        ]),
-      ]
-        .filter((name) => packagesByName.has(name))
-        .sort(),
+      dependencyNames(manifest).filter((name) => packagesByName.has(name)),
     );
   }
   const complete = new Set<string>();

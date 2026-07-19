@@ -21,3 +21,23 @@ The archive reaper never writes Codex's database. It opens the configured databa
 Owner discovery, final archive rechecks, and owner removal are serialized with lab creation through a durable owner lock. After the final archived recheck, a small exact-owner tombstone prevents a queued or later create from resurrecting that reaped identity.
 
 To keep output and resource use bounded, previews expose at most 100 fully visible entries. A preview issues an apply token only when that complete, untruncated public result fits within the 16 KiB JSON budget; otherwise it fails closed and the change set must be reduced. Synchronization is capped at 20,000 paths, 64 MiB per file, and 512 MiB total. One owner has at most eight labs. Attached command arguments and environment payloads are bounded, and service-log responses have both line and hard byte caps. Internal persistence and runtime fields never cross the normal public JSON boundary.
+
+Host-side Docker and Git subprocesses use a private process adapter. An
+already-aborted request is rejected before spawn. On POSIX, the adapter starts
+each command as a dedicated process-group leader and owns that exact group
+until it has disappeared. Timeout, abort, stream failure, and leader exit with
+descendants still holding output pipes all enter the same cleanup path: send
+`SIGTERM`, wait for a bounded grace period, send `SIGKILL` if required, and
+probe until the group is absent before reporting the command outcome. A
+transient permission-denied probe is treated as potentially present, while a
+permission-denied signal is a cleanup failure. The adapter never signals the
+group again after observing it absent. Captured stdout and stderr are truncated
+to their configured memory cap without changing an otherwise completed
+command's result.
+
+This process-group boundary contains cooperative trusted tooling; it is not a
+host sandbox. A same-user command can deliberately create a new session with
+`setsid`, detach from the owned group, and retain inherited resources. Windows
+has no supported tree primitive in this package, so the host subprocess adapter
+rejects every Windows request before spawn instead of offering a partial
+direct-child path or claiming that it cleaned a process tree.

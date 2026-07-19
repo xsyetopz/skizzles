@@ -6947,7 +6947,7 @@ var require_public_api = __commonJS((exports) => {
 // packages/container-lab/src/reaper-cli.ts
 import { homedir as homedir2 } from "os";
 import { join as join8 } from "path";
-import process5 from "process";
+import process8 from "process";
 
 // packages/container-lab/src/public/output.ts
 function redactPublicText(value, maxBytes = 2000, maxLines = 8) {
@@ -7044,7 +7044,7 @@ function internalImageTag(ownerKey, labId) {
 
 // packages/container-lab/src/docker.ts
 import { spawn as spawn2 } from "child_process";
-import process from "process";
+import process4 from "process";
 
 // packages/container-lab/src/docker/environment.ts
 function scrubSecretEnvironment(names, environment) {
@@ -7231,70 +7231,363 @@ function scrubDockerRunnerEnvironment(runner, names, environment) {
 }
 
 // packages/container-lab/src/process.ts
+import process3 from "process";
+
+// packages/container-lab/src/process/execution.ts
 import { spawn } from "child_process";
-async function runCommand(command, args, options = {}) {
+import process2 from "process";
+
+// packages/container-lab/src/process/group.ts
+import process from "process";
+var TERMINATION_GRACE_MS = 250;
+var TERMINATION_CONFIRMATION_MS = 2000;
+var GROUP_POLL_MS = 10;
+async function cleanupOwnedProcess(processGroup, command) {
+  if (processGroup === undefined) {
+    return;
+  }
+  if (!processGroupExists(processGroup, command)) {
+    return;
+  }
+  if (!signalProcessGroup(processGroup, "SIGTERM", command)) {
+    return;
+  }
+  if (await waitForProcessGroupExit(processGroup, TERMINATION_GRACE_MS, command)) {
+    return;
+  }
+  if (!signalProcessGroup(processGroup, "SIGKILL", command)) {
+    return;
+  }
+  if (await waitForProcessGroupExit(processGroup, TERMINATION_CONFIRMATION_MS, command)) {
+    return;
+  }
+  throw new Error(`${command} cleanup failed: process group ${processGroup} remains after SIGKILL`);
+}
+function signalProcessGroup(processGroup, signal, command) {
+  try {
+    process.kill(-processGroup, signal);
+    return true;
+  } catch (error) {
+    if (isMissingProcess(error)) {
+      return false;
+    }
+    throw new Error(`${command} cleanup failed: cannot send ${signal} to process group ${processGroup}: ${asError(error).message}`, { cause: error });
+  }
+}
+function processGroupExists(processGroup, command) {
+  try {
+    process.kill(-processGroup, 0);
+    return true;
+  } catch (error) {
+    if (isMissingProcess(error)) {
+      return false;
+    }
+    if (isPermissionDenied(error)) {
+      return true;
+    }
+    throw new Error(`${command} cleanup failed: cannot verify process group ${processGroup}: ${asError(error).message}`, { cause: error });
+  }
+}
+async function waitForProcessGroupExit(processGroup, timeoutMs, command) {
   return await new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: options.env,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    const cap = options.maxOutputBytes ?? 4 * 1024 * 1024;
-    const stdout = [];
-    const stderr = [];
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    let timedOut = false;
-    const collect = (chunks, chunk, current) => {
-      const remaining = cap - current;
-      if (remaining > 0) {
-        chunks.push(chunk.subarray(0, remaining));
+    const deadline = Date.now() + timeoutMs;
+    const poll = () => {
+      try {
+        if (!processGroupExists(processGroup, command)) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() >= deadline) {
+          resolve(false);
+          return;
+        }
+        setTimeout(poll, GROUP_POLL_MS);
+      } catch (error) {
+        reject(error);
       }
-      return current + chunk.byteLength;
     };
-    child.stdout.on("data", (chunk) => {
-      stdoutBytes = collect(stdout, chunk, stdoutBytes);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderrBytes = collect(stderr, chunk, stderrBytes);
-    });
-    const abort = () => child.kill("SIGKILL");
-    options.signal?.addEventListener("abort", abort, { once: true });
-    const timeout = options.timeoutMs ? setTimeout(() => {
-      timedOut = true;
-      abort();
-    }, options.timeoutMs) : undefined;
-    child.once("error", reject);
-    child.once("close", (code) => {
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-      options.signal?.removeEventListener("abort", abort);
-      const result = {
-        code: code ?? (timedOut ? 124 : 1),
-        stdout: Buffer.concat(stdout),
-        stderr: Buffer.concat(stderr)
-      };
-      if (options.signal?.aborted) {
-        return reject(new Error(`${command} aborted`));
-      }
-      if (result.code !== 0 && !options.allowFailure) {
-        return reject(new Error(`${command} ${args.join(" ")} failed (${result.code}): ${result.stderr.toString().trim()}`));
-      }
-      resolve(result);
-    });
+    poll();
   });
+}
+function isMissingProcess(error) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH";
+}
+function isPermissionDenied(error) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "EPERM";
+}
+function asError(error) {
+  if (error instanceof Error) {
+    return error;
+  }
+  return new Error(String(error));
+}
+
+// packages/container-lab/src/process/platform.ts
+function assertProcessPlatform(platform, command) {
+  if (platform === "win32") {
+    throw new Error(`${command} requires POSIX process-group ownership; win32 is unsupported`);
+  }
+}
+
+// packages/container-lab/src/process/execution.ts
+var DEFAULT_OUTPUT_BYTES = 4194304;
+var PIPE_RELEASE_GRACE_MS = 250;
+var TIMEOUT_EXIT_CODE = 124;
+
+class CommandExecution {
+  stdout = [];
+  stderr = [];
+  cap;
+  stdoutBytes = 0;
+  stderrBytes = 0;
+  child;
+  timeout;
+  pipeRelease;
+  cleanup;
+  cleanupFinished = false;
+  resolve;
+  reject;
+  command;
+  args;
+  options;
+  state = {
+    closeCode: undefined,
+    closeObserved: false,
+    exitObserved: false,
+    pipesReleased: false,
+    timedOut: false,
+    abortRequested: false,
+    processError: undefined,
+    cleanupError: undefined
+  };
+  constructor(command, args, options) {
+    this.command = command;
+    this.args = args;
+    this.options = options;
+    this.cap = options.maxOutputBytes ?? DEFAULT_OUTPUT_BYTES;
+  }
+  execute() {
+    return new Promise((resolve, reject) => {
+      this.resolve = resolve;
+      this.reject = reject;
+      this.start();
+    });
+  }
+  start() {
+    this.options.signal?.addEventListener("abort", this.onAbort, {
+      once: true
+    });
+    if (this.options.signal?.aborted) {
+      this.finishBeforeSpawn(new Error(`${this.command} aborted`));
+      return;
+    }
+    try {
+      this.child = spawn(this.command, this.args, {
+        cwd: this.options.cwd,
+        env: this.options.env,
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: true
+      });
+    } catch (error) {
+      this.finishBeforeSpawn(asError2(error));
+      return;
+    }
+    this.attachChild(this.child);
+    if (this.state.abortRequested || this.options.signal?.aborted) {
+      this.state.abortRequested = true;
+      this.confirmCleanup();
+    }
+    if (this.options.timeoutMs) {
+      this.timeout = setTimeout(this.onTimeout, this.options.timeoutMs);
+    }
+  }
+  attachChild(child) {
+    child.stdout.on("data", this.onStdout);
+    child.stderr.on("data", this.onStderr);
+    child.stdout.once("error", this.onStreamError);
+    child.stderr.once("error", this.onStreamError);
+    child.once("error", this.onProcessError);
+    child.once("exit", this.onExit);
+    child.once("close", this.onClose);
+  }
+  onAbort = () => {
+    this.state.abortRequested = true;
+    if (this.child !== undefined) {
+      this.confirmCleanup();
+    }
+  };
+  onTimeout = () => {
+    this.state.timedOut = true;
+    this.confirmCleanup();
+  };
+  onStdout = (chunk) => {
+    this.stdoutBytes = this.collect(this.stdout, chunk, this.stdoutBytes);
+  };
+  onStderr = (chunk) => {
+    this.stderrBytes = this.collect(this.stderr, chunk, this.stderrBytes);
+  };
+  onStreamError = (error) => {
+    this.state.processError ??= error;
+    this.confirmCleanup();
+  };
+  onProcessError = (error) => {
+    this.state.processError = error;
+    this.confirmCleanup();
+    if (this.child?.pid === undefined) {
+      this.state.closeObserved = true;
+      this.state.pipesReleased = true;
+      this.finish();
+    }
+  };
+  onExit = (code) => {
+    this.state.exitObserved = true;
+    this.state.closeCode = code;
+    this.clearTimeout();
+    this.confirmCleanup();
+  };
+  onClose = (code) => {
+    this.state.closeObserved = true;
+    this.state.closeCode = code;
+    this.clearTimeout();
+    this.confirmCleanup();
+    this.finish();
+  };
+  collect(chunks, chunk, current) {
+    const remaining = this.cap - current;
+    if (remaining > 0) {
+      chunks.push(chunk.subarray(0, remaining));
+    }
+    return current + chunk.byteLength;
+  }
+  confirmCleanup() {
+    if (this.cleanup !== undefined) {
+      return;
+    }
+    this.cleanup = cleanupOwnedProcess(this.child?.pid, this.command);
+    this.cleanup.then(this.onCleanupSuccess, this.onCleanupFailure);
+  }
+  onCleanupSuccess = () => {
+    this.cleanupFinished = true;
+    this.releasePipesIfCloseIsHeld();
+    this.finish();
+  };
+  onCleanupFailure = (error) => {
+    this.state.cleanupError = asError2(error);
+    this.cleanupFinished = true;
+    this.releasePipes();
+    this.finish();
+  };
+  releasePipesIfCloseIsHeld() {
+    if (this.state.closeObserved || !this.state.exitObserved) {
+      return;
+    }
+    this.pipeRelease = setTimeout(() => {
+      this.releasePipes();
+      this.finish();
+    }, PIPE_RELEASE_GRACE_MS);
+  }
+  releasePipes() {
+    if (this.state.pipesReleased) {
+      return;
+    }
+    this.state.pipesReleased = true;
+    this.child?.stdout.destroy();
+    this.child?.stderr.destroy();
+  }
+  finish() {
+    if (this.resolve === undefined || this.reject === undefined || !this.cleanupFinished || !(this.state.closeObserved || this.state.pipesReleased)) {
+      return;
+    }
+    this.teardown();
+    const { resolve, reject } = this;
+    this.resolve = undefined;
+    this.reject = undefined;
+    const result = this.commandResult();
+    const failure = this.outcomeFailure(result);
+    if (failure !== undefined) {
+      reject(failure);
+      return;
+    }
+    resolve(result);
+  }
+  outcomeFailure(result) {
+    if (this.state.cleanupError !== undefined) {
+      this.child?.unref();
+      return this.state.cleanupError;
+    }
+    if (this.state.processError !== undefined) {
+      return this.state.processError;
+    }
+    if (this.state.abortRequested || this.options.signal?.aborted) {
+      return new Error(`${this.command} aborted`);
+    }
+    if (result.code === 0 || this.options.allowFailure) {
+      return;
+    }
+    return new Error(`${this.command} ${this.args.join(" ")} failed (${result.code}): ${result.stderr.toString().trim()}`);
+  }
+  commandResult() {
+    let code = this.state.closeCode ?? 1;
+    if (this.state.timedOut) {
+      code = TIMEOUT_EXIT_CODE;
+    }
+    return {
+      code,
+      stdout: Buffer.concat(this.stdout),
+      stderr: Buffer.concat(this.stderr)
+    };
+  }
+  finishBeforeSpawn(error) {
+    this.options.signal?.removeEventListener("abort", this.onAbort);
+    this.reject?.(error);
+  }
+  clearTimeout() {
+    if (this.timeout !== undefined) {
+      clearTimeout(this.timeout);
+      this.timeout = undefined;
+    }
+  }
+  teardown() {
+    this.clearTimeout();
+    if (this.pipeRelease !== undefined) {
+      clearTimeout(this.pipeRelease);
+    }
+    this.options.signal?.removeEventListener("abort", this.onAbort);
+    this.child?.stdout.removeListener("data", this.onStdout);
+    this.child?.stderr.removeListener("data", this.onStderr);
+    this.child?.stdout.removeListener("error", this.onStreamError);
+    this.child?.stderr.removeListener("error", this.onStreamError);
+  }
+}
+function asError2(error) {
+  if (error instanceof Error) {
+    return error;
+  }
+  return new Error(String(error));
+}
+async function executeCommand(command, args, options) {
+  assertProcessPlatform(process2.platform, command);
+  return await new CommandExecution(command, args, options).execute();
+}
+
+// packages/container-lab/src/process.ts
+async function runCommand(command, args, options = {}) {
+  assertProcessPlatform(process3.platform, command);
+  if (options.signal?.aborted) {
+    throw new Error(`${command} aborted`);
+  }
+  return await executeCommand(command, args, options);
 }
 
 // packages/container-lab/src/docker.ts
 var defaultDockerRunner = {
   run: async (args, options = {}) => await runCommand("docker", args, options),
   spawn: (args, options = {}) => spawn2("docker", args, {
-    env: options.env ?? process.env,
+    env: options.env ?? process4.env,
     stdio: ["pipe", "pipe", "pipe"]
   })
 };
-async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultDockerRunner, environment = process.env) {
+async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultDockerRunner, environment = process4.env) {
   await cleanupLabLabelsInDocker(metadata, removeInternalImage, runner, environment);
 }
 
@@ -7302,7 +7595,7 @@ async function cleanupLabLabels(metadata, removeInternalImage, runner = defaultD
 import { createHash as createHash3 } from "crypto";
 import { readdir as readdir2, realpath as realpath2, stat } from "fs/promises";
 import { join as join5 } from "path";
-import process4 from "process";
+import process7 from "process";
 
 // packages/container-lab/src/files.ts
 import { createHash, randomUUID } from "crypto";
@@ -7590,7 +7883,7 @@ import {
   writeFile as writeFile2
 } from "fs/promises";
 import { dirname } from "path";
-import process2 from "process";
+import process5 from "process";
 async function withFileLock(path2, operation, options = {}) {
   const attempts = options.attempts ?? 100;
   const delayMs = options.delayMs ?? 50;
@@ -7600,11 +7893,11 @@ async function withFileLock(path2, operation, options = {}) {
     if (options.signal?.aborted) {
       throw new Error("operation was cancelled while waiting for a state lock");
     }
-    const candidate = `${path2}.candidate-${process2.pid}-${crypto.randomUUID()}`;
+    const candidate = `${path2}.candidate-${process5.pid}-${crypto.randomUUID()}`;
     let acquired = false;
     try {
       await writeFile2(candidate, JSON.stringify({
-        pid: process2.pid,
+        pid: process5.pid,
         createdAt: new Date().toISOString()
       }), { mode: 384, flag: "wx" });
       try {
@@ -7686,10 +7979,10 @@ async function removeConfirmedStaleLock(path2, staleMs, processProbe) {
   }
 }
 async function reclaimSameLock(path2, inspected, staleMs, processProbe) {
-  const candidate = `${path2}.reclaim-candidate-${process2.pid}-${crypto.randomUUID()}`;
+  const candidate = `${path2}.reclaim-candidate-${process5.pid}-${crypto.randomUUID()}`;
   try {
     await writeFile2(candidate, JSON.stringify({
-      pid: process2.pid,
+      pid: process5.pid,
       createdAt: new Date().toISOString()
     }), { mode: 384, flag: "wx" });
     const candidateIdentity = identity2(await lstat3(candidate, { bigint: true }));
@@ -7803,7 +8096,7 @@ function identity2(info) {
   return { dev: info.dev, ino: info.ino };
 }
 function probeProcess(pid) {
-  process2.kill(pid, 0);
+  process5.kill(pid, 0);
 }
 function isRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -7816,7 +8109,7 @@ import { rm as rm3 } from "fs/promises";
 import { createHash as createHash2 } from "crypto";
 import { homedir, tmpdir } from "os";
 import { join as join2, resolve as resolve2 } from "path";
-import process3 from "process";
+import process6 from "process";
 function defaultStateRoot() {
   return join2(homedir(), "Library", "Application Support", "OpenAI", "codex-container-lab");
 }
@@ -7825,11 +8118,11 @@ function defaultRuntimeRoot() {
 }
 function resolveRoots(options = {}) {
   return {
-    stateRoot: resolve2(options.stateRoot ?? process3.env["CODEX_CONTAINER_LAB_STATE_ROOT"] ?? defaultStateRoot()),
-    runtimeRoot: resolve2(options.runtimeRoot ?? process3.env["CODEX_CONTAINER_LAB_RUNTIME_ROOT"] ?? defaultRuntimeRoot())
+    stateRoot: resolve2(options.stateRoot ?? process6.env["CODEX_CONTAINER_LAB_STATE_ROOT"] ?? defaultStateRoot()),
+    runtimeRoot: resolve2(options.runtimeRoot ?? process6.env["CODEX_CONTAINER_LAB_RUNTIME_ROOT"] ?? defaultRuntimeRoot())
   };
 }
-function resolveOwner(explicit, environment = process3.env) {
+function resolveOwner(explicit, environment = process6.env) {
   const owner = explicit ?? environment["CODEX_THREAD_ID"];
   if (owner === undefined || owner.length === 0) {
     throw new Error("owner is required: pass --owner THREAD_ID or set CODEX_THREAD_ID");
@@ -9158,7 +9451,7 @@ async function assertSourceRepositoryIdentity(lab) {
     throw new Error("lab source repository identity no longer matches durable state");
   }
 }
-async function cleanupManagedLabDockerResources(lab, docker, environment = process4.env) {
+async function cleanupManagedLabDockerResources(lab, docker, environment = process7.env) {
   await cleanupLabLabels(lab, lab.modeKind === "dockerfile", docker, environment);
 }
 
@@ -9567,7 +9860,7 @@ var CONTAINER_LAB_VERSION = package_default.version;
 
 // packages/container-lab/src/reaper-cli.ts
 var REAPER_OUTPUT_MAX_BYTES = 1536;
-async function reaperMain(args = process5.argv.slice(2)) {
+async function reaperMain(args = process8.argv.slice(2)) {
   try {
     const parsed = parseArgs(args);
     if (parsed.help) {
@@ -9617,9 +9910,9 @@ function writeError(code, error) {
       code,
       message: boundedRedacted(error instanceof Error ? error.message : String(error), 240)
     }
-  }, process5.stderr);
+  }, process8.stderr);
 }
-function writeOutput(value, stream = process5.stdout) {
+function writeOutput(value, stream = process8.stdout) {
   let serialized = JSON.stringify(value);
   if (Buffer.byteLength(`${serialized}
 `, "utf8") > REAPER_OUTPUT_MAX_BYTES) {
@@ -9680,7 +9973,7 @@ function reaperHelp() {
   return "codex-container-lab-reaper [--db PATH] [--state-root PATH] [--runtime-root PATH]";
 }
 if (import.meta.main) {
-  process5.exit(await reaperMain());
+  process8.exit(await reaperMain());
 }
 export {
   reaperOutput,
