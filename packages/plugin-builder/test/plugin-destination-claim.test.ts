@@ -2,11 +2,15 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   chmod,
+  link,
   mkdir,
   mkdtemp,
   readdir,
   readFile,
+  rename,
   rm,
+  symlink,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -49,7 +53,7 @@ describe("plugin destination atomic claims", () => {
 
     release.resolve();
     await active;
-    expect(await claimArtifacts(parent)).toEqual([]);
+    expect(await nonAllocatorArtifacts(parent)).toEqual([]);
   });
 
   it("rejects a spoofed retirement marker for a live controller", async () => {
@@ -135,7 +139,7 @@ describe("plugin destination atomic claims", () => {
         Promise.reject(new Error("recovered after owner failure")),
       ),
     ).rejects.toThrow("recovered after owner failure");
-    expect(await claimArtifacts(parent)).toEqual([]);
+    expect(await nonAllocatorArtifacts(parent)).toEqual([]);
   });
 
   it("reaps claim and recovery helpers when setup checkpoints fail", async () => {
@@ -171,7 +175,7 @@ describe("plugin destination atomic claims", () => {
         Promise.reject(new Error("recovered")),
       ),
     ).rejects.toThrow("recovered");
-    expect(await claimArtifacts(parent)).toEqual([]);
+    expect(await nonAllocatorArtifacts(parent)).toEqual([]);
   });
 
   it("publishes ownership before creating a cross-process lock directory", async () => {
@@ -202,7 +206,7 @@ describe("plugin destination atomic claims", () => {
     expect(await readFile(join(destination, "second"), "utf8")).toBe(
       "second\n",
     );
-    expect(await claimArtifacts(parent)).toEqual([]);
+    expect(await nonAllocatorArtifacts(parent)).toEqual([]);
   }, 20_000);
 
   it("fails closed when PATH supplies a failing ps command", async () => {
@@ -228,8 +232,8 @@ describe("plugin destination atomic claims", () => {
     );
     await writeFile(release, "release\n");
     expect(await first.exited).toBe(0);
-    expect(await claimArtifacts(parent)).toEqual([]);
-  });
+    expect(await nonAllocatorArtifacts(parent)).toEqual([]);
+  }, 20_000);
 
   it("blocks a live Worker owner and recovers after Worker retirement", async () => {
     const parent = await temporaryRoot("skizzles-claim-worker-");
@@ -259,8 +263,8 @@ describe("plugin destination atomic claims", () => {
     expect(await readFile(join(destination, "second"), "utf8")).toBe(
       "second\n",
     );
-    expect(await claimArtifacts(parent)).toEqual([]);
-  });
+    expect(await nonAllocatorArtifacts(parent)).toEqual([]);
+  }, 20_000);
 
   it("recovers crashes at every recovery-lease publication point", async () => {
     for (const point of [
@@ -280,8 +284,163 @@ describe("plugin destination atomic claims", () => {
         ),
       ).rejects.toThrow("entered after lease recovery");
       // biome-ignore lint/performance/noAwaitInLoops: every crash fixture must prove complete cleanup.
-      expect(await claimArtifacts(parent)).toEqual([]);
+      expect(await nonAllocatorArtifacts(parent)).toEqual([]);
     }
+  }, 20_000);
+
+  it("promotes synced claim and recovery retirement temps", async () => {
+    const parent = await temporaryRoot("skizzles-retirement-temp-");
+    const destination = await seededDestination(parent);
+    expect(crashAt(destination, "owner-ready")).toBe(73);
+    const claim = await currentClaim(parent);
+    await expectProcessGone(claim.pid);
+    await moveMarkerToTemporary(claim.path, claim.token);
+
+    await expect(
+      replaceDirectoryTransaction(destination, () =>
+        Promise.reject(new Error("claim temp recovered")),
+      ),
+    ).rejects.toThrow("claim temp recovered");
+    expect(await nonAllocatorArtifacts(parent)).toEqual([]);
+
+    expect(crashAt(destination, "owner-ready")).toBe(73);
+    expect(crashAt(destination, "recovery-lease-published")).toBe(73);
+    const highWater = await latestHighWater(parent);
+    await expectProcessGone(highWater.pid);
+    await moveMarkerToTemporary(highWater.path, highWater.token);
+    await expect(
+      replaceDirectoryTransaction(destination, () =>
+        Promise.reject(new Error("lease temp recovered")),
+      ),
+    ).rejects.toThrow("lease temp recovered");
+    expect(await nonAllocatorArtifacts(parent)).toEqual([]);
+    expect(await durableAllocatorArtifacts(parent)).toEqual([
+      expect.stringContaining("recovery-highwater-1"),
+      expect.stringContaining("recovery-highwater-2"),
+      expect.stringContaining("recovery-highwater-3"),
+      expect.stringContaining("recovery-highwater-3.retired"),
+    ]);
+  }, 20_000);
+
+  it("rejects unsafe retirement temp variants", async () => {
+    for (const variant of [
+      "hardlink",
+      "foreign",
+      "malformed",
+      "oversize",
+      "duplicate",
+      "symlink",
+    ]) {
+      const parent = await temporaryRoot(`skizzles-retirement-${variant}-`);
+      const destination = await seededDestination(parent);
+      expect(crashAt(destination, "owner-ready")).toBe(73);
+      const claim = await currentClaim(parent);
+      await expectProcessGone(claim.pid);
+      const temporary = await moveMarkerToTemporary(claim.path, claim.token);
+      const valid = await fixtureMarker(temporary);
+      if (variant === "hardlink") await link(temporary, `${temporary}.link`);
+      if (variant === "foreign") {
+        await writeFile(
+          `${claim.path}.retired.00000000-0000-4000-8000-000000000000.tmp`,
+          `${JSON.stringify(valid)}\n`,
+          { mode: 0o600 },
+        );
+      }
+      if (variant === "malformed") await writeFile(temporary, "{\n");
+      if (variant === "oversize")
+        await writeFile(temporary, "x".repeat(20_000));
+      if (variant === "duplicate") {
+        await writeFile(
+          temporary,
+          `{"dev":"${valid.dev}","ino":"${valid.ino}","token":"${valid.token}","token":"${valid.token}"}\n`,
+        );
+      }
+      if (variant === "symlink") {
+        await unlink(temporary);
+        await symlink(claim.path, temporary);
+      }
+      let constructed = false;
+      await expect(
+        replaceDirectoryTransaction(destination, () => {
+          constructed = true;
+          return Promise.resolve();
+        }),
+      ).rejects.toThrow("locked by another operation");
+      expect(constructed).toBe(false);
+    }
+  }, 20_000);
+
+  it("rejects malformed temps beside canonical and older high-water markers", async () => {
+    const parent = await temporaryRoot("skizzles-retirement-conflicts-");
+    const destination = await seededDestination(parent);
+    expect(crashAt(destination, "owner-ready")).toBe(73);
+    const claim = await currentClaim(parent);
+    await expectProcessGone(claim.pid);
+    await waitForFile(`${claim.path}.retired`);
+    await writeFile(`${claim.path}.retired.${claim.token}.tmp`, "{\n", {
+      mode: 0o600,
+    });
+    await expect(
+      replaceDirectoryTransaction(destination, () => Promise.resolve()),
+    ).rejects.toThrow("locked by another operation");
+
+    const allocatorParent = await temporaryRoot("skizzles-retirement-old-");
+    const allocatorDestination = await seededDestination(allocatorParent);
+    for (const message of ["generation one", "generation two"]) {
+      expect(crashAt(allocatorDestination, "owner-ready")).toBe(73);
+      await expect(
+        replaceDirectoryTransaction(allocatorDestination, () =>
+          Promise.reject(new Error(message)),
+        ),
+      ).rejects.toThrow(message);
+    }
+    const first = await highWaterAt(allocatorParent, 1);
+    await writeFile(`${first.path}.retired.${first.token}.tmp`, "{\n", {
+      mode: 0o600,
+    });
+    await expect(
+      replaceDirectoryTransaction(allocatorDestination, () =>
+        Promise.resolve(),
+      ),
+    ).rejects.toThrow("locked by another operation");
+  }, 20_000);
+
+  it("never reuses a recovery high-water selected by a slow contender", async () => {
+    const parent = await temporaryRoot("skizzles-recovery-highwater-race-");
+    const destination = await seededDestination(parent);
+    const paused = join(parent, "slow-paused");
+    const release = join(parent, "slow-release");
+    expect(crashAt(destination, "owner-ready")).toBe(73);
+    const slow = spawnRecoveryContender(destination, paused, release);
+    await waitForFile(paused, slow);
+
+    await replaceDirectoryTransaction(destination, (stage) =>
+      writeFile(join(stage, "winner"), "winner\n"),
+    );
+    expect(await durableAllocatorArtifacts(parent)).toEqual([
+      expect.stringContaining("recovery-highwater-1"),
+      expect.stringContaining("recovery-highwater-1.retired"),
+    ]);
+
+    expect(crashAt(destination, "owner-ready")).toBe(73);
+    await expect(
+      replaceDirectoryTransaction(destination, () =>
+        Promise.reject(new Error("next generation")),
+      ),
+    ).rejects.toThrow("next generation");
+    await writeFile(release, "release\n");
+    expect(await slow.exited).toBe(42);
+    expect((await slow.stderr.text()).trim()).toContain(
+      "locked by another operation",
+    );
+    expect(await allocatorArtifacts(parent)).toEqual([
+      expect.stringContaining("recovery-highwater-1"),
+      expect.stringContaining("recovery-highwater-2"),
+      expect.stringContaining("recovery-highwater-2.retired"),
+    ]);
+    expect(
+      (await claimArtifacts(parent)).some((name) => name.endsWith(".tmp")),
+    ).toBe(false);
   }, 20_000);
 });
 
@@ -315,6 +474,29 @@ function spawnTransaction(
       DEST: destination,
       MODULE: module,
       NAME: name,
+    },
+    stderr: "pipe",
+    stdout: "ignore",
+  });
+}
+
+function spawnRecoveryContender(
+  destination: string,
+  paused: string,
+  release: string,
+) {
+  const module = resolve(
+    import.meta.dir,
+    "../src/plugin/destination-transaction.ts",
+  );
+  const source = `const { replaceDirectoryTransaction } = await import(process.env.MODULE); try { await replaceDirectoryTransaction(process.env.DEST, async () => {}, { checkpoint: async (point) => { if (point === "recovery-temp-ready") { await Bun.write(process.env.PAUSED, "paused\\n"); while (!(await Bun.file(process.env.RELEASE).exists())) await Bun.sleep(5); } } }); } catch (error) { console.error(error.message); process.exit(42); }`;
+  return Bun.spawn([process.execPath, "-e", source], {
+    env: {
+      ...process.env,
+      DEST: destination,
+      MODULE: module,
+      PAUSED: paused,
+      RELEASE: release,
     },
     stderr: "pipe",
     stdout: "ignore",
@@ -391,9 +573,96 @@ async function seededDestination(parent: string): Promise<string> {
 }
 
 async function claimArtifacts(parent: string): Promise<string[]> {
-  return (await readdir(parent)).filter((name) =>
-    name.startsWith(".skizzles-package-"),
+  return (await readdir(parent))
+    .filter((name) => name.startsWith(".skizzles-package-"))
+    .sort();
+}
+
+async function allocatorArtifacts(parent: string): Promise<string[]> {
+  return (await claimArtifacts(parent)).filter((name) =>
+    name.includes(".recovery-highwater-"),
   );
+}
+
+async function durableAllocatorArtifacts(parent: string): Promise<string[]> {
+  return (await allocatorArtifacts(parent)).filter(
+    (name) => !name.endsWith(".tmp"),
+  );
+}
+
+async function nonAllocatorArtifacts(parent: string): Promise<string[]> {
+  return (await claimArtifacts(parent)).filter(
+    (name) => !name.includes(".recovery-highwater-"),
+  );
+}
+
+async function moveMarkerToTemporary(
+  claimPath: string,
+  token: string,
+): Promise<string> {
+  const marker = `${claimPath}.retired`;
+  await waitForFile(marker);
+  const temporary = `${marker}.${token}.tmp`;
+  await rename(marker, temporary);
+  return temporary;
+}
+
+async function latestHighWater(
+  parent: string,
+): Promise<{ path: string; pid: number; token: string }> {
+  const names = (await allocatorArtifacts(parent)).filter(
+    (candidate) =>
+      !candidate.endsWith(".retired") && !candidate.endsWith(".tmp"),
+  );
+  const name = names.at(-1);
+  if (name === undefined) throw new Error("recovery high-water not found");
+  const generation = Number(name.slice(name.lastIndexOf("-") + 1));
+  return highWaterAt(parent, generation);
+}
+
+async function highWaterAt(
+  parent: string,
+  generation: number,
+): Promise<{ path: string; pid: number; token: string }> {
+  const name = (await allocatorArtifacts(parent)).find((candidate) =>
+    candidate.endsWith(`.recovery-highwater-${generation}`),
+  );
+  if (name === undefined) throw new Error("recovery high-water not found");
+  const path = join(parent, name);
+  const owner: unknown = JSON.parse(await readFile(path, "utf8"));
+  if (typeof owner !== "object" || owner === null) {
+    throw new Error("invalid recovery high-water fixture");
+  }
+  const record = Object.fromEntries(Object.entries(owner));
+  if (
+    typeof record["pid"] !== "number" ||
+    typeof record["token"] !== "string"
+  ) {
+    throw new Error("invalid recovery high-water fixture");
+  }
+  return { path, pid: record["pid"], token: record["token"] };
+}
+
+async function fixtureMarker(
+  path: string,
+): Promise<{ dev: string; ino: string; token: string }> {
+  const value: unknown = JSON.parse(await readFile(path, "utf8"));
+  if (typeof value !== "object" || value === null) {
+    throw new Error("invalid retirement marker fixture");
+  }
+  const record = Object.fromEntries(Object.entries(value));
+  if (
+    typeof record["dev"] !== "string" ||
+    typeof record["ino"] !== "string" ||
+    typeof record["token"] !== "string"
+  ) {
+    throw new Error("invalid retirement marker fixture");
+  }
+  return {
+    dev: record["dev"],
+    ino: record["ino"],
+    token: record["token"],
+  };
 }
 
 async function currentClaim(

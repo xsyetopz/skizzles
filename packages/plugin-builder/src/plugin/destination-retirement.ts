@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
-import { open, unlink } from "node:fs/promises";
-import { dirname } from "node:path";
+import { link, lstat, open, readdir, unlink } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import type { LockOwner } from "./destination-journal.ts";
 import {
   ownerControllerIsDead,
@@ -12,6 +12,7 @@ import type { FileIdentity } from "./destination-path.ts";
 const MARKER_FIELD_COUNT = 3;
 const MARKER_MODE = 0o600n;
 const MODE_MASK = 0o777n;
+const PRIVATE_JSON_LIMIT = 16_384n;
 
 interface RetirableClaim {
   identity: FileIdentity;
@@ -72,53 +73,174 @@ async function claimRetirementConfirmed(
 ): Promise<boolean> {
   if (ownerControllerIsDead(claim.owner)) {
     await ownerRemainsActive(claim.owner, 100);
-    return true;
+    return completeRetirementMarker(claim, true, true);
   }
-  if (await hasValidRetirementMarker(claim)) return true;
+  if (await completeRetirementMarker(claim, false, false)) return true;
   if (await ownerRemainsActive(claim.owner)) return false;
-  return hasValidRetirementMarker(claim);
+  return completeRetirementMarker(claim, true, false);
 }
 
 async function hasValidRetirementMarker(
   claim: RetirableClaim,
 ): Promise<boolean> {
-  let handle: Awaited<ReturnType<typeof open>>;
-  try {
-    handle = await open(
-      retirementMarkerPath(claim.path),
-      constants.O_RDONLY | constants.O_NOFOLLOW,
-    );
-  } catch {
+  const snapshot = await readMarker(retirementMarkerPath(claim.path));
+  return snapshot !== undefined && markerMatches(snapshot.marker, claim);
+}
+
+async function completeRetirementMarker(
+  claim: RetirableClaim,
+  ownerRetired: boolean,
+  allowAbsent: boolean,
+): Promise<boolean> {
+  const markerPath = retirementMarkerPath(claim.path);
+  const temporaryPath = `${markerPath}.${claim.owner.token}.tmp`;
+  const candidates = (await readdir(dirname(markerPath))).filter(
+    (name) =>
+      name.startsWith(`${basename(markerPath)}.`) && name.endsWith(".tmp"),
+  );
+  if (
+    candidates.some((name) => join(dirname(markerPath), name) !== temporaryPath)
+  ) {
+    return false;
+  }
+  const markerExists = await pathEntryExists(markerPath);
+  const marker = await readMarker(markerPath);
+  const hasTemporary = candidates.includes(basename(temporaryPath));
+  const temporary = hasTemporary ? await readMarker(temporaryPath) : undefined;
+  if (marker !== undefined) {
+    if (!markerMatches(marker.marker, claim)) return false;
+    if (hasTemporary && temporary === undefined) return false;
+    if (temporary === undefined) return true;
+    if (
+      !markerMatches(temporary.marker, claim) ||
+      marker.identity.dev !== temporary.identity.dev ||
+      marker.identity.ino !== temporary.identity.ino ||
+      marker.links !== 2n ||
+      temporary.links !== 2n
+    ) {
+      return false;
+    }
+    await unlink(temporaryPath);
+    await syncDirectory(dirname(markerPath));
+    return true;
+  }
+  if (markerExists) return false;
+  if (temporary === undefined) {
+    return ownerRetired && allowAbsent && !hasTemporary;
+  }
+  if (
+    !ownerRetired ||
+    temporary.links !== 1n ||
+    !markerMatches(temporary.marker, claim)
+  ) {
     return false;
   }
   try {
+    await link(temporaryPath, markerPath);
+  } catch (error) {
+    if (!isAlreadyExists(error)) throw error;
+  }
+  await syncDirectory(dirname(markerPath));
+  const published = await readMarker(markerPath);
+  if (
+    published === undefined ||
+    !markerMatches(published.marker, claim) ||
+    published.identity.dev !== temporary.identity.dev ||
+    published.identity.ino !== temporary.identity.ino
+  ) {
+    return false;
+  }
+  await unlink(temporaryPath);
+  await syncDirectory(dirname(markerPath));
+  return true;
+}
+
+async function pathEntryExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (isMissing(error)) return false;
+    throw error;
+  }
+}
+
+async function readMarker(path: string): Promise<
+  | {
+      identity: FileIdentity;
+      links: bigint;
+      marker: RetirementMarker;
+    }
+  | undefined
+> {
+  let handle: Awaited<ReturnType<typeof open>>;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch (error) {
+    if (isMissing(error)) return;
+    return;
+  }
+  try {
     const stat = await handle.stat({ bigint: true });
-    if (!stat.isFile() || (stat.mode & MODE_MASK) !== MARKER_MODE) {
-      return false;
+    if (
+      !stat.isFile() ||
+      (stat.mode & MODE_MASK) !== MARKER_MODE ||
+      stat.size > PRIVATE_JSON_LIMIT
+    ) {
+      return;
     }
     const marker = parseMarker(parsePrivateJson(await handle.readFile("utf8")));
-    return (
-      marker.dev === String(claim.identity.dev) &&
-      marker.ino === String(claim.identity.ino) &&
-      marker.token === claim.owner.token
-    );
+    return {
+      identity: { dev: stat.dev, ino: stat.ino },
+      links: stat.nlink,
+      marker,
+    };
   } catch {
-    return false;
+    return;
   } finally {
     await handle.close();
   }
 }
 
+function markerMatches(
+  marker: RetirementMarker,
+  claim: RetirableClaim,
+): boolean {
+  return (
+    marker.dev === String(claim.identity.dev) &&
+    marker.ino === String(claim.identity.ino) &&
+    marker.token === claim.owner.token
+  );
+}
+
+function isAlreadyExists(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "EEXIST";
+}
+
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
 async function removeRetirementArtifacts(claim: RetirableClaim): Promise<void> {
   const marker = retirementMarkerPath(claim.path);
-  if (await hasValidRetirementMarker(claim)) {
-    await unlink(marker).catch(() => undefined);
-    const directory = await open(dirname(marker), "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
+  const prefix = `${basename(marker)}.`;
+  const hasTemporary = (await readdir(dirname(marker))).some(
+    (name) => name.startsWith(prefix) && name.endsWith(".tmp"),
+  );
+  if (!(await pathEntryExists(marker)) && !hasTemporary) return;
+  if (!(await completeRetirementMarker(claim, true, false))) {
+    throw new Error("unsafe retirement artifacts");
+  }
+  await unlink(marker);
+  await syncDirectory(dirname(marker));
+}
+
+async function syncDirectory(path: string): Promise<void> {
+  const directory = await open(path, "r");
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
   }
 }
 

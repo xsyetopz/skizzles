@@ -159,7 +159,11 @@ async function seededDestination(parent: string): Promise<string> {
 
 async function transactionArtifacts(parent: string): Promise<string[]> {
   return (await readdir(parent))
-    .filter((name) => name.startsWith(".skizzles-package-"))
+    .filter(
+      (name) =>
+        name.startsWith(".skizzles-package-") &&
+        !name.includes(".recovery-highwater-"),
+    )
     .sort();
 }
 

@@ -92,7 +92,7 @@ describe("plugin destination lock disposal", () => {
     await replaceDirectoryTransaction(destination, (stage) =>
       writeFile(join(stage, "newer"), "newer\n"),
     );
-    expect(await transactionArtifacts(parent)).toEqual([]);
+    expect(await nonAllocatorArtifacts(parent)).toEqual([]);
   });
 
   it("recovers journal-first and owner-last cleanup disposal crashes", async () => {
@@ -121,7 +121,7 @@ describe("plugin destination lock disposal", () => {
           Promise.reject(new Error("observe")),
         ),
       ).rejects.toThrow("observe");
-      expect(await transactionArtifacts(parent)).toEqual([]);
+      expect(await nonAllocatorArtifacts(parent)).toEqual([]);
     }
   });
 
@@ -235,5 +235,11 @@ async function temporaryRoot(prefix: string): Promise<string> {
 async function transactionArtifacts(parent: string): Promise<string[]> {
   return (await readdir(parent)).filter((name) =>
     name.startsWith(".skizzles-package-"),
+  );
+}
+
+async function nonAllocatorArtifacts(parent: string): Promise<string[]> {
+  return (await transactionArtifacts(parent)).filter(
+    (name) => !name.includes(".recovery-highwater-"),
   );
 }

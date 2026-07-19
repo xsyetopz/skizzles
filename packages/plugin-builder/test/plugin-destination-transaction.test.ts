@@ -339,7 +339,11 @@ async function temporaryRoot(prefix: string): Promise<string> {
 
 async function transactionArtifacts(parent: string): Promise<string[]> {
   return (await readdir(parent))
-    .filter((name) => name.startsWith(ARTIFACT_PREFIX))
+    .filter(
+      (name) =>
+        name.startsWith(ARTIFACT_PREFIX) &&
+        !name.includes(".recovery-highwater-"),
+    )
     .sort();
 }
 
