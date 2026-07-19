@@ -8488,21 +8488,28 @@ function compactError(value) {
 }
 
 // packages/container-lab/src/docker/attached-process.ts
+function containerTemporaryDirectory() {
+  return 'temporary_directory=$(dirname "$(mktemp -u)")';
+}
+function containerPidFile(runId) {
+  return `pid_file="$temporary_directory/.codex-container-lab-run-${runId}.pid"`;
+}
 function launchAttachedDockerProcess(runtime, invocation, runner, environment) {
   const workdir = invocation.cwd === "." ? runtime.config.runtime.workspace : posix2.join(runtime.config.runtime.workspace, invocation.cwd);
-  const pidFile = `/tmp/.codex-container-lab-run-${invocation.runId}.pid`;
   const processIdentity = `CODEX_CONTAINER_LAB_RUN_ID=${invocation.runId}`;
   const wrapper = [
-    "command -v setsid >/dev/null 2>&1 || { echo 'configured command service requires setsid' >&2; exit 127; }",
+    "command -v setsid >/dev/null 2>&1 && command -v mktemp >/dev/null 2>&1 && command -v dirname >/dev/null 2>&1 || { echo 'configured command service requires setsid, mktemp, and dirname' >&2; exit 127; }",
+    containerTemporaryDirectory(),
+    containerPidFile(invocation.runId),
     "exec 3<&0",
     `${processIdentity} setsid "$@" <&3 3<&- & child=$!`,
     "exec 3<&-",
-    `printf '%s %s\\n' ${shellQuote(invocation.runId)} "$child" > ${shellQuote(pidFile)}`,
+    `printf '%s %s\\n' ${shellQuote(invocation.runId)} "$child" > "$pid_file"`,
     'wait "$child"; code=$?',
     'kill -TERM -- -"$child" 2>/dev/null || :',
     'attempt=0; while kill -0 -- -"$child" 2>/dev/null && [ "$attempt" -lt 20 ]; do sleep 0.1; attempt=$((attempt + 1)); done',
     'kill -KILL -- -"$child" 2>/dev/null || :',
-    `rm -f ${shellQuote(pidFile)}`,
+    'rm -f "$pid_file"',
     'exit "$code"'
   ].join("; ");
   const args = [
@@ -8526,21 +8533,23 @@ function launchAttachedDockerProcess(runtime, invocation, runner, environment) {
   });
 }
 async function terminateAttachedDockerProcess(runtime, identity2, signal, runner, environment) {
-  const pidFile = `/tmp/.codex-container-lab-run-${identity2.runId}.pid`;
   const expectedIdentity = `CODEX_CONTAINER_LAB_RUN_ID=${identity2.runId}`;
   const marker = "codex-container-lab-termination:";
   const killScript = [
+    "command -v mktemp >/dev/null 2>&1 && command -v dirname >/dev/null 2>&1 || exit 127",
+    containerTemporaryDirectory(),
+    containerPidFile(identity2.runId),
     `termination_result() { printf '%s\\n' ${shellQuote(marker)}"$1"; exit 0; }`,
-    `recorded_token=; pid=; extra=; read -r recorded_token pid extra < ${shellQuote(pidFile)} 2>/dev/null || termination_result unavailable`,
+    'recorded_token=; pid=; extra=; read -r recorded_token pid extra < "$pid_file" 2>/dev/null || termination_result unavailable',
     `case "$pid" in ''|*[!0-9]*) termination_result identity-mismatch;; esac`,
     `[ -z "$extra" ] || termination_result identity-mismatch`,
     `[ "$recorded_token" = ${shellQuote(identity2.runId)} ] || termination_result identity-mismatch`,
-    `kill -0 -- -"$pid" 2>/dev/null || { rm -f ${shellQuote(pidFile)}; termination_result absent; }`,
+    'kill -0 -- -"$pid" 2>/dev/null || { rm -f "$pid_file"; termination_result absent; }',
     `[ -r "/proc/$pid/environ" ] || termination_result unavailable`,
     "command -v tr >/dev/null 2>&1 && command -v grep >/dev/null 2>&1 || termination_result unavailable",
     `tr '\\000' '\\n' < "/proc/$pid/environ" | grep -Fqx -- ${shellQuote(expectedIdentity)} || termination_result identity-mismatch`,
-    `kill -${signal} -- -"$pid" 2>/dev/null && { [ "${signal}" != KILL ] || rm -f ${shellQuote(pidFile)}; termination_result signaled; }`,
-    `kill -0 -- -"$pid" 2>/dev/null || { rm -f ${shellQuote(pidFile)}; termination_result absent; }`,
+    `kill -${signal} -- -"$pid" 2>/dev/null && { [ "${signal}" != KILL ] || rm -f "$pid_file"; termination_result signaled; }`,
+    'kill -0 -- -"$pid" 2>/dev/null || { rm -f "$pid_file"; termination_result absent; }',
     "termination_result unavailable"
   ].join("; ");
   let result;
@@ -11961,17 +11970,25 @@ async function assertRepositoryIdentity(repositoryRoot, expected, environment) {
 }
 async function assertNoGitAlternates(repositoryRoot, environment) {
   const commonGitDirectory = await canonicalCommonGitDirectory(repositoryRoot, environment);
-  try {
-    await lstat11(join6(commonGitDirectory, "objects", "info", "alternates"));
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return;
+  const names = ["alternates", "http-alternates"];
+  const present = await Promise.all(names.map(async (name) => {
+    try {
+      await lstat11(join6(commonGitDirectory, "objects", "info", name));
+      return name;
+    } catch (error) {
+      if (isMissingAlternate(error)) {
+        return;
+      }
+      throw new Error("could not verify Git alternate object-store isolation", { cause: error });
     }
-    throw new Error("could not verify Git alternate object-store isolation", {
-      cause: error
-    });
+  }));
+  const retained = present.find((name) => name !== undefined);
+  if (retained !== undefined) {
+    throw new Error(`Git alternate object-store isolation was not established: objects/info/${retained} exists`);
   }
-  throw new Error("Git alternate object-store isolation was not established");
+}
+function isMissingAlternate(error) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 async function canonicalCommonGitDirectory(repositoryRoot, environment) {
   const commonGitDirectory = (await runLocalGit([
@@ -12133,16 +12150,6 @@ async function recoverLabSync(roots, lab, environment) {
   if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join8(lab.runtimeRoot, "workspace")) {
     throw new Error("lab runtime containment is invalid");
   }
-  try {
-    if (!(await stat3(lab.workspace)).isDirectory()) {
-      return;
-    }
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return;
-    }
-    throw error;
-  }
   const journalDirectory = join8(lab.runtimeRoot, "sync", lab.id, "journals");
   let journals;
   try {
@@ -12157,11 +12164,29 @@ async function recoverLabSync(roots, lab, environment) {
     return;
   }
   await assertSourceRepositoryIdentity(lab, environment);
+  const workspacePresent = await directoryExists(lab.workspace);
+  const allowedTargetRoots = [lab.sourceRoot];
+  if (workspacePresent) {
+    allowedTargetRoots.push(lab.workspace);
+  }
   await recoverSyncTransactions({
     stateRoot: lab.runtimeRoot,
     labId: lab.id,
-    allowedTargetRoots: [lab.sourceRoot, lab.workspace]
+    allowedTargetRoots
   });
+}
+async function directoryExists(path9) {
+  try {
+    return (await stat3(path9)).isDirectory();
+  } catch (error) {
+    if (isMissingDirectory(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+function isMissingDirectory(error) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 async function assertSourceRepositoryIdentity(lab, environment) {
   if (lab.sourceRepositoryIdentity === undefined) {

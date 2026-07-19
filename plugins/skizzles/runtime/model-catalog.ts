@@ -2,23 +2,1145 @@
 // @bun
 
 // packages/model-catalog/src/index.ts
-import process3 from "process";
+import process6 from "process";
 
 // packages/model-catalog/src/catalog/refresh.ts
-import { join as join3, resolve as resolve2 } from "path";
+import { join as join7, resolve as resolve3 } from "path";
 
-// packages/model-catalog/src/codex-child.ts
+// packages/run-workspace/src/errors.ts
+class RunWorkspaceError extends Error {
+  code;
+  constructor(code, message, options) {
+    super(message, options);
+    this.name = "RunWorkspaceError";
+    this.code = code;
+  }
+}
+
+// packages/run-workspace/src/aborted.ts
+class RunWorkspaceAbortedError extends RunWorkspaceError {
+  signal;
+  constructor(message = "Run workspace creation was aborted", signal) {
+    super("RUN_WORKSPACE_ABORTED", message);
+    this.name = "RunWorkspaceAbortedError";
+    this.signal = signal;
+  }
+}
+// packages/run-workspace/src/janitor.ts
+import { basename, dirname, join as join3 } from "path";
+
+// packages/run-workspace/src/marker.ts
+import { join as join2 } from "path";
+
+// packages/run-workspace/src/platform.ts
+import { execFile } from "child_process";
+import { constants, realpathSync } from "fs";
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
+  open,
+  opendir,
+  readdir,
+  readFile,
   realpath,
-  rm,
-  writeFile
+  rename,
+  rm
 } from "fs/promises";
 import { tmpdir } from "os";
-import { isAbsolute, join } from "path";
+import { join, win32 } from "path";
 import process from "process";
+import { promisify } from "util";
+var execFileAsync = promisify(execFile);
+var decimalPattern = /^\d+$/u;
+var whitespacePattern = /\s+/gu;
+var darwinBootPattern = /sec\s*=\s*(\d+),\s*usec\s*=\s*(\d+)/u;
+function errorCode(error) {
+  if (typeof error !== "object" || error === null || !("code" in error))
+    return;
+  return typeof error.code === "string" ? error.code : undefined;
+}
+function deadline(milliseconds) {
+  let timer;
+  const elapsed = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      timer = undefined;
+      resolve();
+    }, milliseconds);
+  });
+  return {
+    elapsed,
+    cancel: () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    }
+  };
+}
+async function linuxIdentity(pid) {
+  try {
+    const [bootId, stat] = await Promise.all([
+      readFile("/proc/sys/kernel/random/boot_id", "utf8"),
+      readFile(`/proc/${pid}/stat`, "utf8")
+    ]);
+    const startTicks = parseLinuxStartTicks(stat);
+    if (startTicks === undefined)
+      return;
+    return { platform: "linux", token: `${bootId.trim()}:${startTicks}` };
+  } catch {
+    return;
+  }
+}
+async function darwinIdentity(pid) {
+  try {
+    const [processResult, bootResult] = await Promise.all([
+      execFileAsync("/bin/ps", ["-p", String(pid), "-o", "lstart="], {
+        encoding: "utf8",
+        timeout: 2000
+      }),
+      execFileAsync("/usr/sbin/sysctl", ["-n", "kern.boottime"], {
+        encoding: "utf8",
+        timeout: 2000
+      })
+    ]);
+    const normalized = processResult.stdout.trim().replace(whitespacePattern, " ");
+    const bootIdentity = parseDarwinBootTime(bootResult.stdout);
+    if (normalized.length === 0)
+      return;
+    if (bootIdentity === undefined)
+      return;
+    return { platform: "darwin", token: `${bootIdentity}:${normalized}` };
+  } catch {
+    return;
+  }
+}
+function parseDarwinBootTime(output) {
+  const match = darwinBootPattern.exec(output);
+  const seconds = match?.[1];
+  const microseconds = match?.[2];
+  if (seconds === undefined || microseconds === undefined)
+    return;
+  return `${seconds}.${microseconds}`;
+}
+function parseLinuxStartTicks(stat) {
+  const commandEnd = stat.lastIndexOf(")");
+  if (commandEnd < 0)
+    return;
+  const fields = stat.slice(commandEnd + 1).trim().split(whitespacePattern);
+  const startTicks = fields[19];
+  if (startTicks === undefined || !decimalPattern.test(startTicks))
+    return;
+  return startTicks;
+}
+async function windowsIdentity(pid) {
+  const systemRoot = process.env["SystemRoot"];
+  if (systemRoot === undefined || systemRoot.length === 0) {
+    return;
+  }
+  const powershell = win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  try {
+    const script = `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToFileTimeUtc()`;
+    const result = await execFileAsync(powershell, ["-NoLogo", "-NoProfile", "-Command", script], {
+      encoding: "utf8",
+      timeout: 3000,
+      windowsHide: true
+    });
+    const token = result.stdout.trim();
+    if (!decimalPattern.test(token))
+      return;
+    return { platform: "win32", token };
+  } catch {
+    return;
+  }
+}
+function getProcessIdentity(platform, pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return Promise.resolve(undefined);
+  }
+  if (platform === "linux") {
+    return linuxIdentity(pid);
+  }
+  if (platform === "darwin") {
+    return darwinIdentity(pid);
+  }
+  if (platform === "win32") {
+    return windowsIdentity(pid);
+  }
+  return Promise.resolve(undefined);
+}
+async function observeProcess(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0)
+    return;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "ESRCH")
+      return false;
+    if (code === "EPERM")
+      return true;
+    return;
+  }
+}
+async function fileIdentity(path) {
+  try {
+    const stats = await lstat(path, { bigint: true });
+    if (!stats.isDirectory() || stats.isSymbolicLink()) {
+      return;
+    }
+    return {
+      device: stats.dev.toString(10),
+      inode: stats.ino.toString(10),
+      birthtimeNs: stats.birthtimeNs.toString(10)
+    };
+  } catch {
+    return;
+  }
+}
+async function isRegularFile(path) {
+  try {
+    const stats = await lstat(path);
+    return stats.isFile() && !stats.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+async function pathExists(path) {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (errorCode(error) === "ENOENT")
+      return false;
+    return;
+  }
+}
+async function isPrivateDirectory(path) {
+  try {
+    const stats = await lstat(path);
+    if (!stats.isDirectory() || stats.isSymbolicLink())
+      return false;
+    if (process.platform === "win32")
+      return true;
+    const currentUserId = process.getuid?.();
+    return (stats.mode & 63) === 0 && (currentUserId === undefined || stats.uid === currentUserId);
+  } catch {
+    return false;
+  }
+}
+async function writeReplacement(path, contents) {
+  const temporary = `${path}.next-${crypto.randomUUID()}`;
+  await writeSynced(temporary, contents, true);
+  try {
+    await rename(temporary, path);
+    await syncParent(path);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => {
+      return;
+    });
+    throw error;
+  }
+}
+async function syncParent(path) {
+  if (process.platform === "win32")
+    return;
+  const directory = await open(join(path, ".."), constants.O_RDONLY);
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+}
+async function writeSynced(path, contents, exclusive) {
+  const flags = exclusive ? constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY : constants.O_WRONLY;
+  const handle = await open(path, flags, 384);
+  try {
+    await handle.writeFile(contents, { encoding: "utf8" });
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await syncParent(path);
+}
+async function readSecureFile(path, maximumBytes) {
+  const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
+  let handle;
+  try {
+    const pathBefore = await lstat(path, { bigint: true });
+    if (!pathBefore.isFile() || pathBefore.isSymbolicLink() || pathBefore.size > BigInt(maximumBytes) || process.platform !== "win32" && (Number(pathBefore.mode) & 63) !== 0) {
+      return;
+    }
+    handle = await open(path, constants.O_RDONLY | noFollow);
+    const before = await handle.stat({ bigint: true });
+    if (!before.isFile() || pathBefore.dev !== before.dev || pathBefore.ino !== before.ino || pathBefore.birthtimeNs !== before.birthtimeNs || before.size > BigInt(maximumBytes) || process.platform !== "win32" && (Number(before.mode) & 63) !== 0) {
+      return;
+    }
+    const contents = await handle.readFile({ encoding: "utf8" });
+    const after = await handle.stat({ bigint: true });
+    const pathAfter = await lstat(path, { bigint: true });
+    if (before.dev !== after.dev || before.ino !== after.ino || before.birthtimeNs !== after.birthtimeNs || before.size !== after.size || pathAfter.isSymbolicLink() || after.dev !== pathAfter.dev || after.ino !== pathAfter.ino || after.birthtimeNs !== pathAfter.birthtimeNs) {
+      return;
+    }
+    return contents;
+  } catch {
+    return;
+  } finally {
+    await handle?.close().catch(() => {
+      return;
+    });
+  }
+}
+async function scanDirectory(path, limit) {
+  const directory = await opendir(path);
+  const names = [];
+  try {
+    while (names.length <= limit) {
+      const entry = await directory.read();
+      if (entry === null)
+        return { names, truncated: false };
+      names.push(entry.name);
+    }
+    return { names: names.slice(0, limit), truncated: true };
+  } finally {
+    try {
+      await directory.close();
+    } catch {}
+  }
+}
+function systemRuntime() {
+  return {
+    pid: process.pid,
+    platform: process.platform,
+    now: Date.now,
+    deadline,
+    temporaryDirectory: () => realpathSync(tmpdir()),
+    processIdentity: (pid) => getProcessIdentity(process.platform, pid),
+    processExists: observeProcess,
+    mkdir: (path, options) => mkdir(path, options),
+    chmod,
+    mkdtemp,
+    lstatIdentity: fileIdentity,
+    isDirectory: async (path) => await fileIdentity(path) !== undefined,
+    isPrivateDirectory,
+    isFile: isRegularFile,
+    pathExists,
+    realpath,
+    readFile: (path) => readFile(path, "utf8"),
+    readSecureFile,
+    writeExclusive: (path, contents) => writeSynced(path, contents, true),
+    writeReplace: writeReplacement,
+    readdir: async (path) => readdir(path),
+    scanDirectory,
+    rename,
+    removeRoot: (path) => rm(path, {
+      recursive: true,
+      force: false,
+      maxRetries: 5,
+      retryDelay: 100
+    }),
+    errorCode
+  };
+}
+var managedDirectoryName = "skizzles-run-workspaces";
+var markerName = ".skizzles-run-workspace.json";
+function managedParent(runtime) {
+  return join(runtime.temporaryDirectory(), managedDirectoryName);
+}
+
+// packages/run-workspace/src/safety.ts
+async function inspectCanonicalDirectory(runtime, path) {
+  const [identity, canonical] = await Promise.all([
+    runtime.lstatIdentity(path),
+    runtime.realpath(path).catch(() => {
+      return;
+    })
+  ]);
+  if (identity === undefined || canonical !== path)
+    return;
+  return { identity };
+}
+async function inspectPrivateDirectory(runtime, path) {
+  const [inspected, privateOwner] = await Promise.all([
+    inspectCanonicalDirectory(runtime, path),
+    runtime.isPrivateDirectory(path)
+  ]);
+  if (inspected === undefined || !privateOwner)
+    return;
+  return inspected;
+}
+
+// packages/run-workspace/src/marker.ts
+var markerSchema = 1;
+var decimalPattern2 = /^\d+$/u;
+var runIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+var maximumReasonLength = 256;
+var maximumMarkerBytes = 16 * 1024;
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function exactKeys(record, required, optional) {
+  const allowed = new Set([...required, ...optional]);
+  return Object.keys(record).every((key) => allowed.has(key));
+}
+function parseFileIdentity(value) {
+  if (!isRecord(value)) {
+    return;
+  }
+  if (!exactKeys(value, ["device", "inode", "birthtimeNs"], [])) {
+    return;
+  }
+  const { device, inode, birthtimeNs } = value;
+  if (typeof device !== "string" || typeof inode !== "string" || typeof birthtimeNs !== "string" || !decimalPattern2.test(device) || !decimalPattern2.test(inode) || !decimalPattern2.test(birthtimeNs)) {
+    return;
+  }
+  return { device, inode, birthtimeNs };
+}
+function parseProcessIdentity(value) {
+  if (!isRecord(value)) {
+    return;
+  }
+  if (!exactKeys(value, ["platform", "token"], [])) {
+    return;
+  }
+  const { platform, token } = value;
+  if (platform !== "linux" && platform !== "darwin" && platform !== "win32" || typeof token !== "string" || token.length === 0) {
+    return;
+  }
+  return { platform, token };
+}
+function parseMarker(contents) {
+  let value;
+  try {
+    value = JSON.parse(contents);
+  } catch {
+    return;
+  }
+  if (!isRecord(value)) {
+    return;
+  }
+  const required = [
+    "schema",
+    "runId",
+    "root",
+    "rootIdentity",
+    "ownerPid",
+    "ownerIdentity",
+    "createdAtMs",
+    "state"
+  ];
+  if (!exactKeys(value, required, ["reason"])) {
+    return;
+  }
+  const rootIdentity = parseFileIdentity(value["rootIdentity"]);
+  const ownerIdentity = parseProcessIdentity(value["ownerIdentity"]);
+  const state = value["state"];
+  const schema = value["schema"];
+  const runId = value["runId"];
+  const root = value["root"];
+  const ownerPid = value["ownerPid"];
+  const createdAtMs = value["createdAtMs"];
+  const reason = value["reason"];
+  if (schema !== markerSchema || typeof runId !== "string" || !runIdPattern.test(runId) || typeof root !== "string" || root.length === 0 || rootIdentity === undefined || !Number.isSafeInteger(ownerPid) || typeof ownerPid !== "number" || ownerPid <= 0 || ownerIdentity === undefined || !Number.isSafeInteger(createdAtMs) || typeof createdAtMs !== "number" || createdAtMs < 0 || state !== "open" && state !== "preserved" && state !== "cleanup-failed" && state !== "reaping" || reason !== undefined && typeof reason !== "string") {
+    return;
+  }
+  const marker = {
+    schema: markerSchema,
+    runId,
+    root,
+    rootIdentity,
+    ownerPid,
+    ownerIdentity,
+    createdAtMs,
+    state,
+    ...typeof reason === "string" ? { reason } : {}
+  };
+  return serializeMarker(marker) === contents ? marker : undefined;
+}
+function sameFileIdentity(left, right) {
+  return left.device === right.device && left.inode === right.inode && left.birthtimeNs === right.birthtimeNs;
+}
+function sameProcessIdentity(left, right) {
+  return left.platform === right.platform && left.token === right.token;
+}
+function markerPath(root) {
+  return join2(root, markerName);
+}
+function serializeMarker(marker) {
+  return `${JSON.stringify(marker, undefined, 2)}
+`;
+}
+async function readMarker(runtime, root) {
+  try {
+    const contents = await runtime.readSecureFile(markerPath(root), maximumMarkerBytes);
+    return contents === undefined ? undefined : parseMarker(contents);
+  } catch {
+    return;
+  }
+}
+async function verifyMarkedRoot(runtime, root, expectedRunId, transitionalRoot) {
+  const [inspected, marker] = await Promise.all([
+    inspectPrivateDirectory(runtime, root),
+    readMarker(runtime, root)
+  ]);
+  if (inspected === undefined || marker === undefined) {
+    throw new RunWorkspaceError("UNVERIFIED_ROOT", "Refusing to clean an unverified run root");
+  }
+  const acceptedMarkerPath = marker.root === root || marker.root === transitionalRoot;
+  if (!(acceptedMarkerPath && sameFileIdentity(inspected.identity, marker.rootIdentity)) || expectedRunId !== undefined && marker.runId !== expectedRunId) {
+    throw new RunWorkspaceError("ROOT_IDENTITY_CHANGED", "Run workspace identity changed");
+  }
+  return marker;
+}
+function safeReason(reason) {
+  const sanitized = [...reason].map((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127 ? " " : character;
+  }).join("");
+  return sanitized.trim().slice(0, maximumReasonLength);
+}
+
+// packages/run-workspace/src/janitor.ts
+var defaultMinimumAgeMs = 60 * 60 * 1000;
+var defaultScanLimit = 128;
+function integerOption(value, fallback, name, maximum) {
+  const selected = value ?? fallback;
+  if (!Number.isSafeInteger(selected) || selected < 0 || selected > maximum) {
+    throw new RunWorkspaceError("INVALID_OPTION", `${name} must be an integer from 0 to ${maximum}`);
+  }
+  return selected;
+}
+function candidateName(name) {
+  return name.startsWith("run-") || name.startsWith("reaping-");
+}
+function transitionalRoot(runtime, root, marker) {
+  if (marker.root === root)
+    return;
+  const parent = managedParent(runtime);
+  if (dirname(root) === parent && dirname(marker.root) === parent && basename(root).startsWith(`reaping-${marker.runId}-`) && candidateName(basename(marker.root))) {
+    return marker.root;
+  }
+  return;
+}
+async function verifyCandidate(runtime, root, marker) {
+  const transition = transitionalRoot(runtime, root, marker);
+  if (marker.root !== root && transition === undefined) {
+    throw new RunWorkspaceError("ROOT_IDENTITY_CHANGED", "Run workspace identity changed");
+  }
+  await verifyMarkedRoot(runtime, root, marker.runId, transition);
+}
+async function classify(runtime, root, minimumAgeMs) {
+  if (!await runtime.isFile(markerPath(root)))
+    return { clean: false, skip: "unmarked" };
+  const marker = await readMarker(runtime, root);
+  if (marker === undefined)
+    return { clean: false, skip: "malformed-marker" };
+  if (marker.state === "preserved")
+    return { clean: false, skip: "preserved" };
+  if (runtime.now() - marker.createdAtMs < minimumAgeMs)
+    return { clean: false, skip: "too-young" };
+  try {
+    await verifyCandidate(runtime, root, marker);
+  } catch {
+    return { clean: false, skip: "identity-mismatch" };
+  }
+  const currentIdentity = await runtime.processIdentity(marker.ownerPid);
+  if (currentIdentity !== undefined) {
+    if (sameProcessIdentity(currentIdentity, marker.ownerIdentity)) {
+      return { clean: false, skip: "live-owner" };
+    }
+    return { clean: true };
+  }
+  const exists = await runtime.processExists(marker.ownerPid);
+  if (exists === false)
+    return { clean: true };
+  return { clean: false, skip: "unknown-owner" };
+}
+async function reap(runtime, root) {
+  const marker = await readMarker(runtime, root);
+  if (marker === undefined) {
+    if (await runtime.pathExists(root) === false)
+      return "claimed";
+    throw new RunWorkspaceError("MALFORMED_MARKER", "Marker vanished before cleanup");
+  }
+  try {
+    await verifyCandidate(runtime, root, marker);
+  } catch (error) {
+    if (await runtime.pathExists(root) === false)
+      return "claimed";
+    throw error;
+  }
+  const claimed = join3(managedParent(runtime), `reaping-${marker.runId}-${crypto.randomUUID()}`);
+  try {
+    await runtime.rename(root, claimed);
+  } catch (error) {
+    if (await runtime.pathExists(root) === false)
+      return "claimed";
+    throw error;
+  }
+  const verified = await verifyMarkedRoot(runtime, claimed, marker.runId, marker.root);
+  const reapingMarker = {
+    ...verified,
+    root: claimed,
+    state: "reaping"
+  };
+  await runtime.writeReplace(markerPath(claimed), serializeMarker(reapingMarker));
+  await verifyMarkedRoot(runtime, claimed, marker.runId);
+  try {
+    await runtime.removeRoot(claimed);
+  } catch (error) {
+    const failedMarker = {
+      ...reapingMarker,
+      state: "cleanup-failed",
+      reason: "CLEANUP_FAILED"
+    };
+    await runtime.writeReplace(markerPath(claimed), serializeMarker(failedMarker)).catch(() => {
+      return;
+    });
+    throw error;
+  }
+  return "deleted";
+}
+async function cleanupStaleWithRuntime(options, runtime) {
+  const minimumAgeMs = integerOption(options.minimumAgeMs, defaultMinimumAgeMs, "minimumAgeMs", 365 * 24 * 60 * 60 * 1000);
+  const scanLimit = integerOption(options.scanLimit, defaultScanLimit, "scanLimit", 1e4);
+  const parent = managedParent(runtime);
+  const parentExists = await runtime.pathExists(parent);
+  if (parentExists === false) {
+    return { deleted: [], skipped: [], failed: [], truncated: false };
+  }
+  if (await inspectPrivateDirectory(runtime, parent) === undefined) {
+    return {
+      deleted: [],
+      skipped: [],
+      failed: [{ rootName: managedDirectoryName, error: "CLEANUP_FAILED" }],
+      truncated: false
+    };
+  }
+  let scan;
+  try {
+    scan = await runtime.scanDirectory(parent, scanLimit);
+  } catch (error) {
+    if (runtime.errorCode(error) === "ENOENT") {
+      return { deleted: [], skipped: [], failed: [], truncated: false };
+    }
+    return {
+      deleted: [],
+      skipped: [],
+      failed: [{ rootName: managedDirectoryName, error: "CLEANUP_FAILED" }],
+      truncated: false
+    };
+  }
+  const selected = scan.names.filter(candidateName).sort();
+  const deleted = [];
+  const skipped = [];
+  const failed = [];
+  for (const name of selected) {
+    const root = join3(parent, name);
+    if (!await runtime.isDirectory(root)) {
+      skipped.push({ rootName: name, reason: "unmarked" });
+      continue;
+    }
+    const classification = await classify(runtime, root, minimumAgeMs);
+    if (!classification.clean) {
+      skipped.push({
+        rootName: name,
+        reason: classification.skip ?? "unknown-owner"
+      });
+      continue;
+    }
+    try {
+      const result = await reap(runtime, root);
+      if (result === "deleted")
+        deleted.push(name);
+      else
+        skipped.push({ rootName: name, reason: "claimed" });
+    } catch {
+      failed.push({ rootName: name, error: "CLEANUP_FAILED" });
+    }
+  }
+  return { deleted, skipped, failed, truncated: scan.truncated };
+}
+function cleanupStale(options = {}) {
+  return cleanupStaleWithRuntime(options, systemRuntime());
+}
+// packages/run-workspace/src/lifecycle.ts
+import {
+  basename as basename2,
+  isAbsolute,
+  join as join4,
+  relative,
+  resolve,
+  win32 as win322
+} from "path";
+
+// packages/run-workspace/src/children.ts
+function observeExit(attempt) {
+  let exit;
+  try {
+    exit = attempt.child.waitForExit();
+  } catch {
+    return Promise.resolve();
+  }
+  return exit.then(() => {
+    attempt.exited = true;
+  }, () => {
+    return;
+  });
+}
+function childError(forceFailed) {
+  if (forceFailed)
+    return "FORCE_STOP_FAILED";
+  return "EXIT_UNCONFIRMED";
+}
+async function waitForChildren(attempts, milliseconds, runtime, escalation) {
+  const waiting = Promise.all(attempts.map((attempt) => attempt.wait)).then(() => {
+    return;
+  });
+  const deadline2 = runtime.deadline(milliseconds);
+  const contenders = [waiting, deadline2.elapsed];
+  if (escalation !== undefined)
+    contenders.push(escalation);
+  try {
+    await Promise.race(contenders);
+  } finally {
+    deadline2.cancel();
+  }
+}
+function childReport(attempt) {
+  const base = {
+    label: attempt.child.label,
+    stopped: attempt.exited,
+    forced: attempt.forced
+  };
+  const withPid = attempt.child.pid === undefined ? base : { ...base, pid: attempt.child.pid };
+  if (attempt.exited)
+    return withPid;
+  return { ...withPid, error: childError(attempt.forceFailed) };
+}
+async function stopChildren(options) {
+  const attempts = [...options.children].reverse().map((child) => ({
+    child,
+    exited: false,
+    forced: false,
+    forceFailed: false,
+    wait: Promise.resolve()
+  }));
+  for (const attempt of attempts) {
+    attempt.wait = observeExit(attempt);
+    try {
+      Promise.resolve(attempt.child.requestStop()).catch(() => {
+        return;
+      });
+    } catch {}
+  }
+  await waitForChildren(attempts, options.gracefulStopMs, options.runtime, options.escalation);
+  const unresolved = attempts.filter((attempt) => !attempt.exited);
+  for (const attempt of unresolved) {
+    attempt.forced = true;
+    try {
+      Promise.resolve(attempt.child.forceStop()).catch(() => {
+        attempt.forceFailed = true;
+      });
+    } catch {
+      attempt.forceFailed = true;
+    }
+    attempt.wait = observeExit(attempt);
+  }
+  await waitForChildren(unresolved, options.forceStopMs, options.runtime);
+  return attempts.map(childReport);
+}
+
+// packages/run-workspace/src/signals.ts
+import process2 from "process";
+var targets = new Set;
+var listeners = new Map;
+function supportedSignals() {
+  if (process2.platform === "win32")
+    return ["SIGINT", "SIGTERM"];
+  return ["SIGHUP", "SIGINT", "SIGTERM"];
+}
+function install() {
+  if (listeners.size > 0)
+    return;
+  for (const signal of supportedSignals()) {
+    const listener = () => {
+      const error = new RunWorkspaceAbortedError(`Run workspace interrupted by ${signal}`, signal);
+      for (const target of [...targets])
+        target.abort(error);
+    };
+    listeners.set(signal, listener);
+    process2.on(signal, listener);
+  }
+}
+function uninstall() {
+  if (targets.size > 0)
+    return;
+  for (const [signal, listener] of listeners)
+    process2.off(signal, listener);
+  listeners.clear();
+}
+function coordinateSignals(target) {
+  targets.add(target);
+  install();
+  let active = true;
+  return () => {
+    if (!active)
+      return;
+    active = false;
+    targets.delete(target);
+    uninstall();
+  };
+}
+
+// packages/run-workspace/src/lifecycle.ts
+var defaultGracefulStopMs = 5000;
+var defaultForceStopMs = 5000;
+function isAborted(signal) {
+  return signal?.aborted === true;
+}
+function duration(value, fallback, name) {
+  const selected = value ?? fallback;
+  if (!Number.isSafeInteger(selected) || selected < 0 || selected > 300000) {
+    throw new RunWorkspaceError("INVALID_OPTION", `${name} must be an integer from 0 to 300000`);
+  }
+  return selected;
+}
+
+class OwnedRunWorkspace {
+  signal;
+  #runtime;
+  #runId;
+  #gracefulStopMs;
+  #forceStopMs;
+  #controller = new AbortController;
+  #children = [];
+  #forceGate;
+  #releaseForceGate;
+  #root;
+  #marker;
+  #state = "open";
+  #preserveReason;
+  #preservePromise;
+  #closePromise;
+  #finalReport;
+  #removeSignalCoordination;
+  #removeExternalAbort;
+  #interruptCount = 0;
+  constructor(root, marker, runtime, options) {
+    this.#root = root;
+    this.#marker = marker;
+    this.#runtime = runtime;
+    this.#runId = marker.runId;
+    this.#gracefulStopMs = duration(options.gracefulStopMs, defaultGracefulStopMs, "gracefulStopMs");
+    this.#forceStopMs = duration(options.forceStopMs, defaultForceStopMs, "forceStopMs");
+    this.signal = this.#controller.signal;
+    let releaseForceGate = () => {
+      return;
+    };
+    this.#forceGate = new Promise((resolveGate) => {
+      releaseForceGate = resolveGate;
+    });
+    this.#releaseForceGate = releaseForceGate;
+    if (options.handleSignals === true) {
+      this.#removeSignalCoordination = coordinateSignals({
+        abort: (error) => this.#interrupt(error)
+      });
+    }
+    if (options.signal !== undefined) {
+      const externalSignal = options.signal;
+      const abort = () => this.#interrupt(new RunWorkspaceAbortedError);
+      this.#removeExternalAbort = () => externalSignal.removeEventListener("abort", abort);
+      externalSignal.addEventListener("abort", abort, { once: true });
+      if (externalSignal.aborted && !this.signal.aborted) {
+        this.#interrupt(new RunWorkspaceAbortedError);
+      }
+    }
+  }
+  path(...relativeParts) {
+    if (this.#state !== "open") {
+      throw new RunWorkspaceError("WORKSPACE_CLOSED", "Run workspace is closing or closed");
+    }
+    for (const part of relativeParts) {
+      const segments = part.split(/[\\/]/u);
+      if (part.length === 0 || part.includes("\x00") || isAbsolute(part) || win322.isAbsolute(part) || segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+        throw new RunWorkspaceError("INVALID_PATH", "Run workspace paths must be unambiguous relatives");
+      }
+    }
+    const selected = resolve(this.#root, ...relativeParts);
+    const fromRoot = relative(this.#root, selected);
+    if (fromRoot.startsWith("..") || isAbsolute(fromRoot)) {
+      throw new RunWorkspaceError("INVALID_PATH", "Run workspace path escapes its root");
+    }
+    return selected;
+  }
+  registerChild(child) {
+    if (this.#state !== "open") {
+      throw new RunWorkspaceError("WORKSPACE_CLOSED", "Cannot register a child after close begins");
+    }
+    if (child.label.trim().length === 0) {
+      throw new RunWorkspaceError("INVALID_CHILD", "Owned child label must not be empty");
+    }
+    if (child.pid !== undefined && (!Number.isSafeInteger(child.pid) || child.pid <= 0)) {
+      throw new RunWorkspaceError("INVALID_CHILD", "Owned child pid must be a positive integer");
+    }
+    this.#children.push(child);
+  }
+  preserve(reason) {
+    if (this.#state !== "open") {
+      return Promise.reject(new RunWorkspaceError("WORKSPACE_CLOSED", "Cannot preserve after close begins"));
+    }
+    const normalized = safeReason(reason);
+    if (normalized.length === 0) {
+      return Promise.reject(new RunWorkspaceError("INVALID_REASON", "Preservation requires a non-empty reason"));
+    }
+    if (this.#preservePromise !== undefined)
+      return this.#preservePromise;
+    const active = this.#publishPreservation(normalized);
+    this.#preservePromise = active;
+    active.then(() => {
+      return;
+    }, () => {
+      if (this.#preservePromise === active) {
+        this.#preservePromise = undefined;
+      }
+    }).catch(() => {
+      return;
+    });
+    return active;
+  }
+  async#publishPreservation(normalized) {
+    const marker = {
+      ...this.#marker,
+      state: "preserved",
+      reason: normalized
+    };
+    await verifyMarkedRoot(this.#runtime, this.#root, this.#runId);
+    await this.#runtime.writeReplace(markerPath(this.#root), serializeMarker(marker));
+    await verifyMarkedRoot(this.#runtime, this.#root, this.#runId);
+    this.#marker = marker;
+    this.#preserveReason = normalized;
+  }
+  close() {
+    if (this.#finalReport !== undefined)
+      return Promise.resolve(this.#finalReport);
+    if (this.#closePromise !== undefined)
+      return this.#closePromise;
+    this.#state = "closing";
+    const active = this.#close();
+    this.#closePromise = active;
+    active.then((report) => {
+      if (report.state === "cleanup-failed") {
+        this.#state = "cleanup-failed";
+        this.#closePromise = undefined;
+      } else {
+        this.#state = "closed";
+        this.#finalReport = report;
+        this.#removeSignalCoordination?.();
+      }
+    }).catch(() => {
+      return;
+    });
+    return active;
+  }
+  #interrupt(error) {
+    this.#interruptCount += 1;
+    if (!this.#controller.signal.aborted)
+      this.#controller.abort(error);
+    if (this.#interruptCount > 1)
+      this.#releaseForceGate();
+    this.close().catch(() => {
+      return;
+    });
+  }
+  async#markFailure(children, error) {
+    const marker = {
+      ...this.#marker,
+      root: this.#root,
+      state: "cleanup-failed",
+      reason: error
+    };
+    try {
+      await verifyMarkedRoot(this.#runtime, this.#root, this.#runId, this.#marker.root);
+      await this.#runtime.writeReplace(markerPath(this.#root), serializeMarker(marker));
+      this.#marker = marker;
+    } catch {}
+    return {
+      state: "cleanup-failed",
+      runId: this.#runId,
+      rootName: basename2(this.#root),
+      children,
+      error
+    };
+  }
+  async#deleteRoot() {
+    const marker = await verifyMarkedRoot(this.#runtime, this.#root, this.#runId, this.#marker.root);
+    const source = this.#root;
+    const claimed = join4(managedParent(this.#runtime), `reaping-${this.#runId}-${crypto.randomUUID()}`);
+    await this.#runtime.rename(source, claimed);
+    this.#root = claimed;
+    const reapingMarker = {
+      ...marker,
+      root: claimed,
+      state: "reaping"
+    };
+    await verifyMarkedRoot(this.#runtime, claimed, this.#runId, source);
+    await this.#runtime.writeReplace(markerPath(claimed), serializeMarker(reapingMarker));
+    this.#marker = reapingMarker;
+    await verifyMarkedRoot(this.#runtime, claimed, this.#runId);
+    await this.#runtime.removeRoot(claimed);
+  }
+  async#close() {
+    this.#removeExternalAbort?.();
+    const preservation = this.#preservePromise;
+    const children = await stopChildren({
+      children: this.#children,
+      runtime: this.#runtime,
+      gracefulStopMs: this.#gracefulStopMs,
+      forceStopMs: this.#forceStopMs,
+      escalation: this.#forceGate
+    });
+    if (preservation !== undefined) {
+      try {
+        await preservation;
+      } catch {
+        return this.#markFailure(children, "CLEANUP_FAILED");
+      }
+    }
+    if (children.some((child) => !child.stopped) && this.#preserveReason !== undefined) {
+      return {
+        state: "cleanup-failed",
+        runId: this.#runId,
+        rootName: basename2(this.#root),
+        children,
+        error: "CHILD_UNCONFIRMED"
+      };
+    }
+    if (children.some((child) => !child.stopped))
+      return this.#markFailure(children, "CHILD_UNCONFIRMED");
+    if (this.#preserveReason !== undefined) {
+      return {
+        state: "preserved",
+        runId: this.#runId,
+        rootName: basename2(this.#root),
+        children
+      };
+    }
+    try {
+      await this.#deleteRoot();
+      return {
+        state: "deleted",
+        runId: this.#runId,
+        rootName: basename2(this.#marker.root),
+        children
+      };
+    } catch {
+      return this.#markFailure(children, "CLEANUP_FAILED");
+    }
+  }
+}
+async function prepareParent(runtime) {
+  const parent = managedParent(runtime);
+  await runtime.mkdir(parent, { recursive: true, mode: 448 });
+  if (await inspectCanonicalDirectory(runtime, parent) === undefined) {
+    throw new RunWorkspaceError("UNSAFE_PARENT", "Managed temporary parent is not a real directory");
+  }
+  await runtime.chmod(parent, 448);
+  if (await inspectPrivateDirectory(runtime, parent) === undefined) {
+    throw new RunWorkspaceError("UNSAFE_PARENT", "Managed temporary parent is not owner-private");
+  }
+  return parent;
+}
+async function hasInitializationAuthority(runtime, root, marker, markerPublished) {
+  if (marker === undefined)
+    return false;
+  const inspected = await inspectCanonicalDirectory(runtime, root);
+  if (inspected === undefined || !sameFileIdentity(inspected.identity, marker.rootIdentity)) {
+    return false;
+  }
+  if (!markerPublished)
+    return true;
+  const persisted = await readMarker(runtime, root);
+  return persisted !== undefined && persisted.runId === marker.runId && persisted.root === root && sameFileIdentity(persisted.rootIdentity, marker.rootIdentity);
+}
+async function createWithRuntime(options, runtime) {
+  if (isAborted(options.signal))
+    throw new RunWorkspaceAbortedError;
+  const ownerIdentity = await runtime.processIdentity(runtime.pid);
+  if (ownerIdentity === undefined) {
+    throw new RunWorkspaceError("UNKNOWN_PROCESS_IDENTITY", "Current process start identity is unavailable");
+  }
+  const parent = await prepareParent(runtime);
+  const root = await runtime.mkdtemp(join4(parent, "run-"));
+  const runId = crypto.randomUUID();
+  let marker;
+  let markerPublished = false;
+  let workspace;
+  try {
+    const inspected = await inspectCanonicalDirectory(runtime, root);
+    if (inspected === undefined) {
+      throw new RunWorkspaceError("UNSAFE_ROOT", "Created run workspace is not a real directory");
+    }
+    marker = {
+      schema: 1,
+      runId,
+      root,
+      rootIdentity: inspected.identity,
+      ownerPid: runtime.pid,
+      ownerIdentity,
+      createdAtMs: runtime.now(),
+      state: "open"
+    };
+    await runtime.writeExclusive(markerPath(root), serializeMarker(marker));
+    markerPublished = true;
+    await runtime.chmod(root, 448);
+    if (await inspectPrivateDirectory(runtime, root) === undefined) {
+      throw new RunWorkspaceError("UNSAFE_ROOT", "Created run workspace is not owner-private");
+    }
+    if (isAborted(options.signal))
+      throw new RunWorkspaceAbortedError;
+    workspace = new OwnedRunWorkspace(root, marker, runtime, options);
+    if (workspace.signal.aborted) {
+      const report = await workspace.close();
+      if (report.state === "cleanup-failed") {
+        throw new RunWorkspaceError("INITIALIZATION_FAILED", "Aborted run workspace cleanup must be retried");
+      }
+      throw new RunWorkspaceAbortedError;
+    }
+    return workspace;
+  } catch (error) {
+    if (workspace !== undefined)
+      throw error;
+    if (!await hasInitializationAuthority(runtime, root, marker, markerPublished)) {
+      throw new RunWorkspaceError("INITIALIZATION_FAILED", "Run workspace initialization cleanup authority was lost", { cause: error });
+    }
+    try {
+      await runtime.removeRoot(root);
+    } catch (removalError) {
+      if (marker !== undefined && await hasInitializationAuthority(runtime, root, marker, markerPublished)) {
+        const failed = {
+          ...marker,
+          state: "cleanup-failed",
+          reason: "INITIALIZATION_FAILED"
+        };
+        await runtime.writeReplace(markerPath(root), serializeMarker(failed)).catch(() => {
+          return;
+        });
+      }
+      throw new RunWorkspaceError("INITIALIZATION_FAILED", "Run workspace initialization failed and cleanup must be retried", { cause: removalError });
+    }
+    throw error;
+  }
+}
+function create(options = {}) {
+  return createWithRuntime(options, systemRuntime());
+}
+// packages/model-catalog/src/codex-child.ts
+import { lstat as lstat2, mkdir as mkdir2, realpath as realpath2, writeFile } from "fs/promises";
+import { isAbsolute as isAbsolute2, join as join5 } from "path";
+import process4 from "process";
 
 // packages/model-catalog/src/catalog/schema.ts
 var LUNA_MODEL = "gpt-5.6-luna";
@@ -104,10 +1226,94 @@ function applyLunaV2Overlay(value) {
   return { catalog: cloned, overlay: "applied" };
 }
 
+// packages/model-catalog/src/codex-group.ts
+import process3 from "process";
+var EXIT_POLL_MS = 10;
+var FORCED_EXIT_TIMEOUT_MS = 2000;
+function signalGroup(pid, signal) {
+  try {
+    process3.kill(-pid, signal);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") {
+      return false;
+    }
+    throw error;
+  }
+}
+async function settlesWithin(settled, milliseconds) {
+  let timer;
+  const elapsed = new Promise((resolve2) => {
+    timer = setTimeout(() => {
+      timer = undefined;
+      resolve2(false);
+    }, milliseconds);
+  });
+  try {
+    return await Promise.race([settled.then(() => true), elapsed]);
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer);
+    }
+  }
+}
+function codexProcessGroup(pid, label) {
+  let absent = false;
+  let exit;
+  const observeExit2 = async () => {
+    while (!absent) {
+      if (!signalGroup(pid, 0)) {
+        absent = true;
+        return;
+      }
+      await Bun.sleep(EXIT_POLL_MS);
+    }
+  };
+  const waitForExit = () => {
+    exit ??= observeExit2();
+    return exit;
+  };
+  const requestStop = () => {
+    if (absent) {
+      return;
+    }
+    if (!signalGroup(pid, "SIGTERM")) {
+      absent = true;
+    }
+  };
+  const forceStop = () => {
+    if (absent) {
+      return;
+    }
+    if (!signalGroup(pid, "SIGKILL")) {
+      absent = true;
+    }
+  };
+  const stopWithin = async (graceMs) => {
+    requestStop();
+    if (await settlesWithin(waitForExit(), graceMs)) {
+      return;
+    }
+    forceStop();
+    if (!await settlesWithin(waitForExit(), FORCED_EXIT_TIMEOUT_MS)) {
+      throw new Error("Codex process group survived forced termination");
+    }
+  };
+  return {
+    label,
+    pid,
+    requestStop,
+    forceStop,
+    waitForExit,
+    stopWithin
+  };
+}
+
 // packages/model-catalog/src/codex-child.ts
 var SEMANTIC_VERSION = /(?<![0-9A-Za-z-])((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)(?=\s|$)/;
 var CHILD_FAILURE_MESSAGES = {
   "bundled-exit": "codex bundled catalog command failed",
+  cancelled: "codex command was cancelled",
   "invalid-bundled-json": "codex bundled catalog returned invalid JSON",
   "invalid-preflight-json": "catalog preflight returned invalid JSON",
   lifecycle: "codex command cleanup failed",
@@ -117,6 +1323,7 @@ var CHILD_FAILURE_MESSAGES = {
   "stdout-limit": "codex stdout exceeds its byte limit",
   stream: "codex command stream failed",
   timeout: "codex command timed out",
+  "unsupported-platform": "Codex child process groups are unsupported on Windows until Job Object ownership is implemented",
   "unsafe-binary": "codex binary must be a physical absolute regular file",
   "version-exit": "codex version command failed",
   "version-format": "codex version did not contain a valid full semantic version"
@@ -130,6 +1337,15 @@ class CodexChildError extends Error {
     this.code = code;
   }
 }
+var systemCodexRuntime = {
+  platform: process4.platform,
+  spawn: (command, options) => Bun.spawn(command, options)
+};
+function requireOwnedProcessScope(platform) {
+  if (platform === "win32") {
+    throw new CodexChildError("unsupported-platform");
+  }
+}
 function commandEnvironment(home) {
   return {
     CODEX_HOME: home,
@@ -137,27 +1353,27 @@ function commandEnvironment(home) {
     LANG: "C",
     LC_ALL: "C",
     NO_COLOR: "1",
-    PATH: process.env["PATH"] ?? "/usr/bin:/bin",
-    TMPDIR: join(home, "tmp"),
-    XDG_CACHE_HOME: join(home, "xdg-cache"),
-    XDG_CONFIG_HOME: join(home, "xdg-config"),
-    XDG_DATA_HOME: join(home, "xdg-data")
+    PATH: process4.env["PATH"] ?? "/usr/bin:/bin",
+    TMPDIR: join5(home, "tmp"),
+    XDG_CACHE_HOME: join5(home, "xdg-cache"),
+    XDG_CONFIG_HOME: join5(home, "xdg-config"),
+    XDG_DATA_HOME: join5(home, "xdg-data")
   };
 }
-async function isolatedHome() {
-  const physicalTemp = await realpath(tmpdir());
-  const home = await mkdtemp(join(physicalTemp, "skizzles-model-catalog-"));
+async function isolatedHome(workspace) {
+  const home = workspace.path(`codex-home-${crypto.randomUUID()}`);
+  await mkdir2(home, { mode: 448 });
   for (const directory of ["tmp", "xdg-cache", "xdg-config", "xdg-data"]) {
-    await mkdir(join(home, directory), { mode: 448 });
+    await mkdir2(join5(home, directory), { mode: 448 });
   }
   return home;
 }
 async function validateCodexBinary(path) {
   try {
-    if (!isAbsolute(path) || await realpath(path) !== path) {
+    if (!isAbsolute2(path) || await realpath2(path) !== path) {
       throw new CodexChildError("unsafe-binary");
     }
-    const metadata = await lstat(path);
+    const metadata = await lstat2(path);
     if (!metadata.isFile() || metadata.isSymbolicLink()) {
       throw new CodexChildError("unsafe-binary");
     }
@@ -167,36 +1383,6 @@ async function validateCodexBinary(path) {
     }
     throw new CodexChildError("unsafe-binary");
   }
-}
-function signalGroup(pid, signal) {
-  try {
-    if (process.platform === "win32") {
-      process.kill(pid, signal);
-    } else {
-      process.kill(-pid, signal);
-    }
-    return true;
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ESRCH") {
-      return false;
-    }
-    throw new CodexChildError("lifecycle");
-  }
-}
-async function terminateGroup(pid, graceMs) {
-  if (!signalGroup(pid, "SIGTERM")) {
-    return false;
-  }
-  const deadline = Date.now() + graceMs;
-  while (Date.now() < deadline) {
-    await Bun.sleep(Math.min(10, Math.max(1, deadline - Date.now())));
-    if (!signalGroup(pid, 0)) {
-      return true;
-    }
-  }
-  signalGroup(pid, "SIGKILL");
-  await Bun.sleep(10);
-  return true;
 }
 function concatenate(chunks, length) {
   const output = new Uint8Array(length);
@@ -241,14 +1427,15 @@ async function collectBounded(stream, limit, failure, signal, stop) {
   }
   return concatenate(chunks, length);
 }
-async function runIsolatedCodex(codexBinary, argsFactory, limits) {
+async function runIsolatedCodex(workspace, codexBinary, argsFactory, limits, runtime) {
+  requireOwnedProcessScope(runtime.platform);
   await validateCodexBinary(codexBinary);
-  const home = await isolatedHome();
+  const home = await isolatedHome(workspace);
   try {
     const args = typeof argsFactory === "function" ? await argsFactory(home) : argsFactory;
     let child;
     try {
-      child = Bun.spawn([codexBinary, ...args], {
+      child = runtime.spawn([codexBinary, ...args], {
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
@@ -258,14 +1445,25 @@ async function runIsolatedCodex(codexBinary, argsFactory, limits) {
     } catch {
       throw new CodexChildError("spawn");
     }
+    const group = codexProcessGroup(child.pid, `codex-${child.pid}`);
+    try {
+      workspace.registerChild(group);
+    } catch {
+      await group.stopWithin(limits.terminationGraceMs).catch(() => {
+        return;
+      });
+      await child.exited.catch(() => {
+        return;
+      });
+      throw new CodexChildError("lifecycle");
+    }
     const controller = new AbortController;
     let failure;
     let cleanupFailed = false;
     let cleanup;
     const cleanGroup = () => {
-      cleanup ??= terminateGroup(child.pid, limits.terminationGraceMs).catch(() => {
+      cleanup ??= group.stopWithin(limits.terminationGraceMs).catch(() => {
         cleanupFailed = true;
-        return false;
       });
       return cleanup;
     };
@@ -276,12 +1474,16 @@ async function runIsolatedCodex(codexBinary, argsFactory, limits) {
         return;
       });
     };
+    const cancel = () => stop("cancelled");
+    workspace.signal.addEventListener("abort", cancel, { once: true });
+    if (workspace.signal.aborted) {
+      cancel();
+    }
     const timer = setTimeout(() => stop("timeout"), limits.timeoutMs);
     try {
       const exited = child.exited.then(async (exitCode2) => {
-        if (await cleanGroup()) {
-          controller.abort();
-        }
+        await cleanGroup();
+        controller.abort();
         return exitCode2;
       });
       const [stdout, , exitCode] = await Promise.all([
@@ -299,6 +1501,7 @@ async function runIsolatedCodex(codexBinary, argsFactory, limits) {
       return { stdout, exitCode };
     } finally {
       clearTimeout(timer);
+      workspace.signal.removeEventListener("abort", cancel);
       controller.abort();
       await cleanGroup();
       await child.exited.catch(() => {
@@ -310,10 +1513,6 @@ async function runIsolatedCodex(codexBinary, argsFactory, limits) {
       throw error;
     }
     throw new CodexChildError("lifecycle");
-  } finally {
-    await rm(home, { recursive: true, force: true }).catch(() => {
-      throw new CodexChildError("lifecycle");
-    });
   }
 }
 function parseJsonOutput(output, failure) {
@@ -323,11 +1522,11 @@ function parseJsonOutput(output, failure) {
     throw new CodexChildError(failure);
   }
 }
-async function clientVersion(codexBinary, limits) {
-  const result = await runIsolatedCodex(codexBinary, ["--version"], {
+async function clientVersion(workspace, codexBinary, limits, runtime = systemCodexRuntime) {
+  const result = await runIsolatedCodex(workspace, codexBinary, ["--version"], {
     ...limits,
     maxStdoutBytes: Math.min(limits.maxStdoutBytes, 1024)
-  });
+  }, runtime);
   if (result.exitCode !== 0) {
     throw new CodexChildError("version-exit");
   }
@@ -338,16 +1537,16 @@ async function clientVersion(codexBinary, limits) {
   }
   return version;
 }
-async function bundledCatalog(codexBinary, limits) {
-  const result = await runIsolatedCodex(codexBinary, ["debug", "models", "--bundled"], limits);
+async function bundledCatalog(workspace, codexBinary, limits, runtime = systemCodexRuntime) {
+  const result = await runIsolatedCodex(workspace, codexBinary, ["debug", "models", "--bundled"], limits, runtime);
   if (result.exitCode !== 0) {
     throw new CodexChildError("bundled-exit");
   }
   return assertCompleteCatalog(parseJsonOutput(result.stdout, "invalid-bundled-json"));
 }
-async function preflightCatalog(codexBinary, contents, limits) {
-  const result = await runIsolatedCodex(codexBinary, async (home) => {
-    const candidate = join(home, "candidate.json");
+async function preflightCatalog(workspace, codexBinary, contents, limits, runtime = systemCodexRuntime) {
+  const result = await runIsolatedCodex(workspace, codexBinary, async (home) => {
+    const candidate = join5(home, "candidate.json");
     await writeFile(candidate, contents, { mode: 384, flag: "wx" });
     return [
       "debug",
@@ -355,7 +1554,7 @@ async function preflightCatalog(codexBinary, contents, limits) {
       "-c",
       `model_catalog_json=${JSON.stringify(candidate)}`
     ];
-  }, limits);
+  }, limits, runtime);
   if (result.exitCode !== 0) {
     throw new CodexChildError("preflight-exit");
   }
@@ -369,26 +1568,26 @@ async function preflightCatalog(codexBinary, contents, limits) {
 // packages/model-catalog/src/catalog/store.ts
 import { createHash } from "crypto";
 import {
-  chmod,
-  lstat as lstat2,
-  mkdir as mkdir2,
-  open,
-  readFile,
-  realpath as realpath2,
-  rename,
+  chmod as chmod2,
+  lstat as lstat3,
+  mkdir as mkdir3,
+  open as open2,
+  readFile as readFile2,
+  realpath as realpath3,
+  rename as rename2,
   rm as rm2
 } from "fs/promises";
 import {
-  basename,
-  dirname,
-  isAbsolute as isAbsolute2,
-  join as join2,
+  basename as basename3,
+  dirname as dirname2,
+  isAbsolute as isAbsolute3,
+  join as join6,
   parse,
-  relative,
-  resolve,
+  relative as relative2,
+  resolve as resolve2,
   sep
 } from "path";
-import process2 from "process";
+import process5 from "process";
 var MODEL_CACHE_TTL_MS = 300000;
 function physicalPathKey(path) {
   return path.normalize("NFC").toLocaleLowerCase("en-US");
@@ -406,20 +1605,20 @@ function sameIdentity(first, second) {
   return first.dev === second.dev && first.ino === second.ino;
 }
 function pathComponents(path) {
-  const absolute = resolve(path);
+  const absolute = resolve2(path);
   const { root } = parse(absolute);
   const segments = absolute.slice(root.length).split(sep).filter((segment) => segment.length > 0);
   const paths = [root];
   let current = root;
   for (const segment of segments) {
-    current = join2(current, segment);
+    current = join6(current, segment);
     paths.push(current);
   }
   return paths;
 }
 async function existingPathMetadata(path) {
   try {
-    return await lstat2(path);
+    return await lstat3(path);
   } catch (error) {
     if (isMissingFile(error)) {
       return;
@@ -439,7 +1638,7 @@ async function rejectSymlinkAncestors(path) {
   }
 }
 function within(root, path) {
-  const child = relative(root, path);
+  const child = relative2(root, path);
   return child === "" || !child.startsWith(`..${sep}`) && child !== "..";
 }
 async function firstMissingComponent(path) {
@@ -455,8 +1654,8 @@ async function ensureDirectoryPath(path) {
   for (const component of pathComponents(path)) {
     const metadata = await existingPathMetadata(component);
     if (metadata === undefined) {
-      await mkdir2(component, { mode: 448 });
-      const created = await lstat2(component);
+      await mkdir3(component, { mode: 448 });
+      const created = await lstat3(component);
       if (!created.isDirectory() || created.isSymbolicLink()) {
         throw new Error(`${component} must be a directory`);
       }
@@ -475,12 +1674,12 @@ async function validatePrivateDirectoryChain(privacyRoot, directory) {
     throw new Error(`${directory} escapes its private storage root`);
   }
   await rejectSymlinkAncestors(directory);
-  const expectedUid = process2.getuid?.();
+  const expectedUid = process5.getuid?.();
   for (const component of pathComponents(directory)) {
     if (!within(privacyRoot, component)) {
       continue;
     }
-    const metadata = await lstat2(component);
+    const metadata = await lstat3(component);
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
       throw new Error(`${component} must be a directory`);
     }
@@ -490,7 +1689,7 @@ async function validatePrivateDirectoryChain(privacyRoot, directory) {
     if (!privateMode(metadata)) {
       throw new Error(`${component} must have mode 0700`);
     }
-    if (await realpath2(component) !== component) {
+    if (await realpath3(component) !== component) {
       throw new Error(`${component} must use its physical path`);
     }
   }
@@ -502,19 +1701,19 @@ async function privacyRootFor(codexHome, directory) {
   return await firstMissingComponent(directory) ?? directory;
 }
 async function preparePrivateParent(codexHome, target) {
-  const directory = dirname(target);
+  const directory = dirname2(target);
   const privacyRoot = await privacyRootFor(codexHome, directory);
   await ensureDirectoryPath(directory);
   await validatePrivateDirectoryChain(privacyRoot, directory);
 }
 async function prepareStandaloneParent(target) {
-  const directory = dirname(target);
+  const directory = dirname2(target);
   const privacyRoot = await firstMissingComponent(directory) ?? directory;
   await ensureDirectoryPath(directory);
   await validatePrivateDirectoryChain(privacyRoot, directory);
 }
 async function regularFileMetadata(path) {
-  const metadata = await lstat2(path);
+  const metadata = await lstat3(path);
   if (metadata.isSymbolicLink()) {
     throw new Error(`${path} must not be a symlink`);
   }
@@ -538,27 +1737,27 @@ async function validatePhysicalRegularFile(path) {
 }
 async function validatePhysicalDirectory(path) {
   await rejectSymlinkAncestors(path);
-  const metadata = await lstat2(path);
+  const metadata = await lstat3(path);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error(`${path} must be a directory`);
   }
-  if (await realpath2(path) !== path) {
+  if (await realpath3(path) !== path) {
     throw new Error(`${path} must use its physical path`);
   }
 }
 async function inspectTarget(path) {
   await rejectSymlinkAncestors(path);
-  const physicalParent = await realpath2(dirname(path));
-  if (physicalParent !== dirname(path)) {
+  const physicalParent = await realpath3(dirname2(path));
+  if (physicalParent !== dirname2(path)) {
     throw new Error(`${path} must use its physical parent path`);
   }
   const metadata = await existingPathMetadata(path);
   if (metadata === undefined) {
-    return { physicalPath: join2(physicalParent, basename(path)) };
+    return { physicalPath: join6(physicalParent, basename3(path)) };
   }
   const regular = await managedFileMetadata(path);
   return {
-    physicalPath: join2(physicalParent, basename(path)),
+    physicalPath: join6(physicalParent, basename3(path)),
     identity: identity(regular),
     metadata: regular
   };
@@ -569,7 +1768,7 @@ async function ensurePrivateFileMode(path) {
     return;
   }
   const regular = await managedFileMetadata(path);
-  const expectedUid = process2.getuid?.();
+  const expectedUid = process5.getuid?.();
   if (expectedUid !== undefined && regular.uid !== expectedUid) {
     throw new Error(`${path} must be owned by the current user`);
   }
@@ -577,16 +1776,16 @@ async function ensurePrivateFileMode(path) {
     return;
   }
   const expected = identity(regular);
-  await chmod(path, 384);
+  await chmod2(path, 384);
   const repaired = await managedFileMetadata(path);
   if (!sameIdentity(expected, identity(repaired))) {
     throw new Error(`${path} changed during permission repair`);
   }
 }
 async function targetSnapshot(path) {
-  const parent = await lstat2(dirname(path));
+  const parent = await lstat3(dirname2(path));
   if (!parent.isDirectory() || parent.isSymbolicLink()) {
-    throw new Error(`${dirname(path)} must be a directory`);
+    throw new Error(`${dirname2(path)} must be a directory`);
   }
   const target = await existingPathMetadata(path);
   if (target !== undefined) {
@@ -615,7 +1814,7 @@ async function assertSnapshotUnchanged(path, expected) {
   }
 }
 async function syncDirectory(path) {
-  const handle = await open(path, "r");
+  const handle = await open2(path, "r");
   try {
     await handle.sync();
   } finally {
@@ -624,7 +1823,7 @@ async function syncDirectory(path) {
 }
 async function prepareCatalogStorePaths(paths) {
   for (const path of [paths.output, paths.status, paths.cache]) {
-    if (!isAbsolute2(path)) {
+    if (!isAbsolute3(path)) {
       throw new Error(`${path} must be absolute`);
     }
     await preparePrivateParent(paths.codexHome, path);
@@ -633,14 +1832,14 @@ async function prepareCatalogStorePaths(paths) {
   await validateCatalogStorePaths(paths);
 }
 async function validateCatalogTarget(paths, path) {
-  const directory = dirname(path);
+  const directory = dirname2(path);
   const privacyRoot = await privacyRootFor(paths.codexHome, directory);
   await validatePrivateDirectoryChain(privacyRoot, directory);
   const inspection = await inspectTarget(path);
   if (inspection.metadata === undefined) {
     return inspection;
   }
-  const expectedUid = process2.getuid?.();
+  const expectedUid = process5.getuid?.();
   if (expectedUid !== undefined && inspection.metadata.uid !== expectedUid || (inspection.metadata.mode & 511) !== 384) {
     throw new Error(`${path} must be an owner-only mode 0600 file`);
   }
@@ -671,7 +1870,7 @@ async function readBoundedJsonFile(path, maxBytes) {
   if (metadata.size > maxBytes) {
     throw new Error("catalog input exceeds size limit");
   }
-  const handle = await open(path, "r");
+  const handle = await open2(path, "r");
   try {
     const opened = requireSingleLink(path, await handle.stat());
     if (!(opened.isFile() && sameIdentity(identity(metadata), identity(opened)))) {
@@ -715,20 +1914,20 @@ async function cachedCatalog(path, expectedVersion, now, maxBytes) {
   }
 }
 async function validatedAtomicParent(path) {
-  if (!isAbsolute2(path)) {
+  if (!isAbsolute3(path)) {
     throw new Error(`${path} must be absolute`);
   }
   await prepareStandaloneParent(path);
   await rejectSymlinkAncestors(path);
-  const parent = dirname(path);
-  const metadata = await lstat2(parent);
+  const parent = dirname2(path);
+  const metadata = await lstat3(parent);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error(`${parent} must be a directory`);
   }
   if (!privateMode(metadata)) {
     throw new Error(`${parent} must have mode 0700`);
   }
-  const expectedUid = process2.getuid?.();
+  const expectedUid = process5.getuid?.();
   if (expectedUid !== undefined && metadata.uid !== expectedUid) {
     throw new Error(`${parent} must be owned by the current user`);
   }
@@ -740,20 +1939,20 @@ async function preparedTarget(path, contents) {
     return { expected, unchanged: false };
   }
   if (expected.targetMode !== 384) {
-    await chmod(path, 384);
+    await chmod2(path, 384);
     expected = await targetSnapshot(path);
   }
   await assertSnapshotUnchanged(path, expected);
   if (expected.targetSize !== Buffer.byteLength(contents)) {
     return { expected, unchanged: false };
   }
-  const currentContents = await readFile(path, "utf8");
+  const currentContents = await readFile2(path, "utf8");
   await assertSnapshotUnchanged(path, expected);
   return { expected, unchanged: currentContents === contents };
 }
 async function writeSyncedTemporary(temporary, contents) {
   try {
-    const handle = await open(temporary, "wx", 384);
+    const handle = await open2(temporary, "wx", 384);
     try {
       const opened = requireSingleLink(temporary, await handle.stat());
       if ((opened.mode & 511) !== 384) {
@@ -780,7 +1979,7 @@ async function promoteTemporary(path, parent, temporary, temporaryExpected, expe
   await options.beforePromote?.();
   await assertSnapshotUnchanged(path, expected);
   await assertSnapshotUnchanged(temporary, temporaryExpected);
-  await rename(temporary, path);
+  await rename2(temporary, path);
   await syncDirectory(parent);
   const promoted = await managedFileMetadata(path);
   if ((promoted.mode & 511) !== 384 || !sameIdentity(identity(promoted), temporaryExpected.target)) {
@@ -793,7 +1992,7 @@ async function writePrivateAtomic(path, contents, options = {}) {
   if (target.unchanged) {
     return false;
   }
-  const temporary = join2(parent, `.${globalThis.crypto.randomUUID()}.tmp`);
+  const temporary = join6(parent, `.${globalThis.crypto.randomUUID()}.tmp`);
   let created = false;
   try {
     const temporaryExpected = await writeSyncedTemporary(temporary, contents);
@@ -816,14 +2015,18 @@ var DEFAULT_MAX_CATALOG_BYTES = 8 * 1024 * 1024;
 var DEFAULT_MAX_STDERR_BYTES = 16 * 1024;
 var DEFAULT_TIMEOUT_MS = 1e4;
 var DEFAULT_TERMINATION_GRACE_MS = 100;
+var WORKSPACE_FORCE_STOP_MS = 2500;
+var systemCatalogRefreshRuntime = {
+  codex: systemCodexRuntime
+};
 function resolveCatalogPaths(options) {
-  const codexHome = resolve2(options.codexHome);
+  const codexHome = resolve3(options.codexHome);
   const paths = {
     codexHome,
-    codexBinary: resolve2(options.codexBinary),
-    output: resolve2(options.output ?? join3(codexHome, "skizzles", "model-catalog.json")),
-    status: resolve2(options.status ?? join3(codexHome, "skizzles", "model-catalog-status.json")),
-    cache: resolve2(options.cache ?? join3(codexHome, "models_cache.json"))
+    codexBinary: resolve3(options.codexBinary),
+    output: resolve3(options.output ?? join7(codexHome, "skizzles", "model-catalog.json")),
+    status: resolve3(options.status ?? join7(codexHome, "skizzles", "model-catalog-status.json")),
+    cache: resolve3(options.cache ?? join7(codexHome, "models_cache.json"))
   };
   const distinct = new Set([paths.output, paths.status, paths.cache]);
   if (distinct.size !== 3) {
@@ -843,59 +2046,104 @@ function commandLimits(options) {
   }
   return limits;
 }
-async function preparedCatalog(paths, limits, now) {
-  const version = await clientVersion(paths.codexBinary, limits);
+async function preparedCatalog(workspace, paths, limits, now, runtime) {
+  const version = await clientVersion(workspace, paths.codexBinary, limits, runtime);
   const cached = await cachedCatalog(paths.cache, version, now, limits.maxStdoutBytes);
   let source = cached ? "cache" : "bundled";
-  let sourceCatalog = cached ?? await bundledCatalog(paths.codexBinary, limits);
+  let sourceCatalog = cached ?? await bundledCatalog(workspace, paths.codexBinary, limits, runtime);
   let overlaid = applyLunaV2Overlay(sourceCatalog);
   let contents = `${JSON.stringify(overlaid.catalog, null, 2)}
 `;
   try {
-    await preflightCatalog(paths.codexBinary, contents, limits);
+    await preflightCatalog(workspace, paths.codexBinary, contents, limits, runtime);
   } catch (error) {
     if (source !== "cache") {
       throw error;
     }
     source = "bundled";
-    sourceCatalog = await bundledCatalog(paths.codexBinary, limits);
+    sourceCatalog = await bundledCatalog(workspace, paths.codexBinary, limits, runtime);
     overlaid = applyLunaV2Overlay(sourceCatalog);
     contents = `${JSON.stringify(overlaid.catalog, null, 2)}
 `;
-    await preflightCatalog(paths.codexBinary, contents, limits);
+    await preflightCatalog(workspace, paths.codexBinary, contents, limits, runtime);
   }
   return { source, contents, overlay: overlaid.overlay };
 }
 async function refreshCatalog(options) {
+  return await refreshCatalogWithRuntime(options, systemCatalogRefreshRuntime);
+}
+async function refreshCatalogWithRuntime(options, runtime) {
   const paths = resolveCatalogPaths(options);
-  await prepareCatalogStorePaths(paths);
   const limits = commandLimits(options);
-  const prepared = await preparedCatalog(paths, limits, options.now ?? new Date);
-  await validateCatalogStorePaths(paths);
-  const revalidatePaths = async () => validateCatalogStorePaths(paths);
-  const updated = await writePrivateAtomic(paths.output, prepared.contents, {
-    beforePromote: revalidatePaths
-  });
-  const result = {
-    ok: true,
-    source: prepared.source,
-    updated,
-    lunaOverlay: prepared.overlay,
-    catalogChanged: updated,
-    generation: digest(prepared.contents),
-    output: paths.output
-  };
-  await writePrivateAtomic(paths.status, `${JSON.stringify({ ...result, checkedAt: new Date().toISOString() }, null, 2)}
+  requireOwnedProcessScope(runtime.codex.platform);
+  let workspace;
+  try {
+    const stale = await cleanupStale();
+    if (stale.failed.length > 0) {
+      throw new CodexChildError("lifecycle");
+    }
+    const workspaceOptions = {
+      gracefulStopMs: limits.terminationGraceMs,
+      forceStopMs: WORKSPACE_FORCE_STOP_MS
+    };
+    workspace = options.signal === undefined ? await create(workspaceOptions) : await create({ ...workspaceOptions, signal: options.signal });
+  } catch {
+    throw new CodexChildError("lifecycle");
+  }
+  let outcome;
+  try {
+    await prepareCatalogStorePaths(paths);
+    const prepared = await preparedCatalog(workspace, paths, limits, options.now ?? new Date, runtime.codex);
+    await validateCatalogStorePaths(paths);
+    const revalidatePaths = async () => validateCatalogStorePaths(paths);
+    const requireActive = () => {
+      if (workspace.signal.aborted) {
+        throw new CodexChildError("cancelled");
+      }
+    };
+    requireActive();
+    const updated = await writePrivateAtomic(paths.output, prepared.contents, {
+      beforePromote: async () => {
+        await revalidatePaths();
+        await runtime.commitHooks?.beforeOutputPromote?.();
+        requireActive();
+      }
+    });
+    const result = {
+      ok: true,
+      source: prepared.source,
+      updated,
+      lunaOverlay: prepared.overlay,
+      catalogChanged: updated,
+      generation: digest(prepared.contents),
+      output: paths.output
+    };
+    await runtime.commitHooks?.afterOutputCommit?.();
+    await writePrivateAtomic(paths.status, `${JSON.stringify({ ...result, checkedAt: new Date().toISOString() }, null, 2)}
 `, { beforePromote: revalidatePaths });
-  return result;
+    outcome = { ok: true, result };
+  } catch (error) {
+    outcome = { ok: false, error };
+  }
+  let cleanupSucceeded = false;
+  try {
+    cleanupSucceeded = (await workspace.close()).state === "deleted";
+  } catch {}
+  if (!cleanupSucceeded) {
+    throw new CodexChildError("lifecycle");
+  }
+  if (!outcome.ok) {
+    throw outcome.error;
+  }
+  return outcome.result;
 }
 
 // packages/model-catalog/src/cli.ts
-import { readFile as readFile2 } from "fs/promises";
-import { isAbsolute as isAbsolute4, resolve as resolve4 } from "path";
+import { readFile as readFile3 } from "fs/promises";
+import { isAbsolute as isAbsolute5, resolve as resolve5 } from "path";
 
 // packages/model-catalog/src/launch-agent.ts
-import { isAbsolute as isAbsolute3, join as join4, resolve as resolve3 } from "path";
+import { isAbsolute as isAbsolute4, join as join8, resolve as resolve4 } from "path";
 var UNRESOLVED_PLACEHOLDER = /__[A-Z0-9_]+__/;
 function xml(value) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
@@ -906,14 +2154,14 @@ function renderLaunchAgent(template, values) {
     __SCRIPT_ABSOLUTE_PATH__: values.script,
     __CODEX_HOME_ABSOLUTE_PATH__: values.codexHome,
     __CODEX_BINARY_ABSOLUTE_PATH__: values.codexBinary,
-    __MODELS_CACHE_ABSOLUTE_PATH__: join4(values.codexHome, "models_cache.json")
+    __MODELS_CACHE_ABSOLUTE_PATH__: join8(values.codexHome, "models_cache.json")
   };
   let rendered = template;
   for (const [placeholder, value] of Object.entries(replacements)) {
-    if (!isAbsolute3(value)) {
+    if (!isAbsolute4(value)) {
       throw new Error(`${placeholder} must be absolute`);
     }
-    rendered = rendered.replaceAll(placeholder, xml(resolve3(value)));
+    rendered = rendered.replaceAll(placeholder, xml(resolve4(value)));
   }
   if (UNRESOLVED_PLACEHOLDER.test(rendered)) {
     throw new Error("launch agent template contains unresolved placeholders");
@@ -945,7 +2193,7 @@ function recordValue(args, index, allowed, values) {
   if (found === undefined || found.startsWith("--")) {
     throw new Error(`${flag} requires a value`);
   }
-  if (found.length === 0 || !isAbsolute4(found)) {
+  if (found.length === 0 || !isAbsolute5(found)) {
     throw new Error(`${flag} requires a nonempty absolute path`);
   }
   values[flag] = found;
@@ -1039,14 +2287,14 @@ async function runRenderLaunchAgent(args) {
     validatePhysicalDirectory(codexHome),
     validatePhysicalRegularFile(codexBinary)
   ]);
-  const rendered = renderLaunchAgent(await readFile2(template, "utf8"), {
+  const rendered = renderLaunchAgent(await readFile3(template, "utf8"), {
     bun,
     script,
     codexHome,
     codexBinary
   });
   await writePrivateAtomic(output, rendered);
-  console.log(JSON.stringify({ ok: true, output: resolve4(output) }));
+  console.log(JSON.stringify({ ok: true, output: resolve5(output) }));
 }
 function runModelCatalogCli(args) {
   const [command, ...options] = args;
@@ -1074,7 +2322,7 @@ function renderLaunchAgent2(template, values) {
 }
 if (import.meta.main) {
   try {
-    await runModelCatalogCli(process3.argv.slice(2));
+    await runModelCatalogCli(process6.argv.slice(2));
   } catch (error) {
     if (error instanceof Error) {
       const { message } = error;
@@ -1082,7 +2330,7 @@ if (import.meta.main) {
     } else {
       console.error("model catalog operation failed");
     }
-    process3.exit(1);
+    process6.exit(1);
   }
 }
 export {

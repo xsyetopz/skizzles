@@ -9656,16 +9656,6 @@ async function recoverLabSync(roots, lab, environment) {
   if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join5(lab.runtimeRoot, "workspace")) {
     throw new Error("lab runtime containment is invalid");
   }
-  try {
-    if (!(await stat2(lab.workspace)).isDirectory()) {
-      return;
-    }
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      return;
-    }
-    throw error;
-  }
   const journalDirectory = join5(lab.runtimeRoot, "sync", lab.id, "journals");
   let journals;
   try {
@@ -9680,11 +9670,29 @@ async function recoverLabSync(roots, lab, environment) {
     return;
   }
   await assertSourceRepositoryIdentity(lab, environment);
+  const workspacePresent = await directoryExists(lab.workspace);
+  const allowedTargetRoots = [lab.sourceRoot];
+  if (workspacePresent) {
+    allowedTargetRoots.push(lab.workspace);
+  }
   await recoverSyncTransactions({
     stateRoot: lab.runtimeRoot,
     labId: lab.id,
-    allowedTargetRoots: [lab.sourceRoot, lab.workspace]
+    allowedTargetRoots
   });
+}
+async function directoryExists(path7) {
+  try {
+    return (await stat2(path7)).isDirectory();
+  } catch (error) {
+    if (isMissingDirectory(error)) {
+      return false;
+    }
+    throw error;
+  }
+}
+function isMissingDirectory(error) {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 async function assertSourceRepositoryIdentity(lab, environment) {
   if (lab.sourceRepositoryIdentity === undefined) {

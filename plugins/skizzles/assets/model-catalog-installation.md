@@ -17,7 +17,19 @@ The default output is `CODEX_HOME/skizzles/model-catalog.json`; bounded status i
 
 The command line requires every path value to be a nonempty absolute path and rejects unknown options, duplicate options, positional arguments, and missing values. Existing path components must be physical rather than symlinked. Catalog storage directories are owner-owned with mode `0700`; managed catalog, status, cache, and staged files are single-link files with mode `0600`. External hard links are rejected before permission repair, reads, no-op decisions, or promotion. This is fail-closed host wiring: correct the path or invocation rather than relying on implicit resolution or ignored arguments.
 
+Codex probe execution currently requires Unix detached process-group ownership.
+On Windows, refresh fails before stale cleanup, persistent-path mutation, or
+child spawn until a Windows Job Object adapter can prove whole-tree exit. A
+direct child PID is intentionally not accepted as equivalent ownership.
+
 Atomic promotion revalidates parent and target identities plus all catalog-path aliases immediately before rename, then synchronizes the file and parent directory. Bun's pathname APIs do not expose a directory-file-descriptor `openat`/`renameat` transaction, so this resists accidental or cooperating replacement but does not claim race-free containment against a hostile local process that can rewrite owner-controlled directories between the final check and rename.
+
+Output promotion is also the cancellation commit point. Cancellation observed
+by the final pre-promotion validation removes the staged file and preserves both
+the previous catalog and previous status. After the catalog rename commits,
+refresh deliberately completes the corresponding bounded status document even
+if cancellation arrives, then closes the disposable run workspace. This avoids
+reporting cancellation with a newly promoted catalog and stale status.
 
 Verify that the output contains every expected model and exactly one Luna entry marked V2. Configure Codex with the absolute generated path:
 

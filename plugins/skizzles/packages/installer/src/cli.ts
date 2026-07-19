@@ -2,11 +2,1141 @@
 // @bun
 
 // packages/installer/src/cli.ts
-import process5 from "process";
+import process8 from "process";
 
-// packages/installer/src/cli-arguments.ts
-import { isAbsolute, resolve } from "path";
+// packages/run-workspace/src/errors.ts
+class RunWorkspaceError extends Error {
+  code;
+  constructor(code, message, options) {
+    super(message, options);
+    this.name = "RunWorkspaceError";
+    this.code = code;
+  }
+}
+
+// packages/run-workspace/src/aborted.ts
+class RunWorkspaceAbortedError extends RunWorkspaceError {
+  signal;
+  constructor(message = "Run workspace creation was aborted", signal) {
+    super("RUN_WORKSPACE_ABORTED", message);
+    this.name = "RunWorkspaceAbortedError";
+    this.signal = signal;
+  }
+}
+// packages/run-workspace/src/janitor.ts
+import { basename, dirname, join as join3 } from "path";
+
+// packages/run-workspace/src/marker.ts
+import { join as join2 } from "path";
+
+// packages/run-workspace/src/platform.ts
+import { execFile } from "child_process";
+import { constants, realpathSync } from "fs";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  opendir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm
+} from "fs/promises";
+import { tmpdir } from "os";
+import { join, win32 } from "path";
 import process from "process";
+import { promisify } from "util";
+var execFileAsync = promisify(execFile);
+var decimalPattern = /^\d+$/u;
+var whitespacePattern = /\s+/gu;
+var darwinBootPattern = /sec\s*=\s*(\d+),\s*usec\s*=\s*(\d+)/u;
+function errorCode(error) {
+  if (typeof error !== "object" || error === null || !("code" in error))
+    return;
+  return typeof error.code === "string" ? error.code : undefined;
+}
+function deadline(milliseconds) {
+  let timer;
+  const elapsed = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      timer = undefined;
+      resolve();
+    }, milliseconds);
+  });
+  return {
+    elapsed,
+    cancel: () => {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    }
+  };
+}
+async function linuxIdentity(pid) {
+  try {
+    const [bootId, stat] = await Promise.all([
+      readFile("/proc/sys/kernel/random/boot_id", "utf8"),
+      readFile(`/proc/${pid}/stat`, "utf8")
+    ]);
+    const startTicks = parseLinuxStartTicks(stat);
+    if (startTicks === undefined)
+      return;
+    return { platform: "linux", token: `${bootId.trim()}:${startTicks}` };
+  } catch {
+    return;
+  }
+}
+async function darwinIdentity(pid) {
+  try {
+    const [processResult, bootResult] = await Promise.all([
+      execFileAsync("/bin/ps", ["-p", String(pid), "-o", "lstart="], {
+        encoding: "utf8",
+        timeout: 2000
+      }),
+      execFileAsync("/usr/sbin/sysctl", ["-n", "kern.boottime"], {
+        encoding: "utf8",
+        timeout: 2000
+      })
+    ]);
+    const normalized = processResult.stdout.trim().replace(whitespacePattern, " ");
+    const bootIdentity = parseDarwinBootTime(bootResult.stdout);
+    if (normalized.length === 0)
+      return;
+    if (bootIdentity === undefined)
+      return;
+    return { platform: "darwin", token: `${bootIdentity}:${normalized}` };
+  } catch {
+    return;
+  }
+}
+function parseDarwinBootTime(output) {
+  const match = darwinBootPattern.exec(output);
+  const seconds = match?.[1];
+  const microseconds = match?.[2];
+  if (seconds === undefined || microseconds === undefined)
+    return;
+  return `${seconds}.${microseconds}`;
+}
+function parseLinuxStartTicks(stat) {
+  const commandEnd = stat.lastIndexOf(")");
+  if (commandEnd < 0)
+    return;
+  const fields = stat.slice(commandEnd + 1).trim().split(whitespacePattern);
+  const startTicks = fields[19];
+  if (startTicks === undefined || !decimalPattern.test(startTicks))
+    return;
+  return startTicks;
+}
+async function windowsIdentity(pid) {
+  const systemRoot = process.env["SystemRoot"];
+  if (systemRoot === undefined || systemRoot.length === 0) {
+    return;
+  }
+  const powershell = win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  try {
+    const script = `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().ToFileTimeUtc()`;
+    const result = await execFileAsync(powershell, ["-NoLogo", "-NoProfile", "-Command", script], {
+      encoding: "utf8",
+      timeout: 3000,
+      windowsHide: true
+    });
+    const token = result.stdout.trim();
+    if (!decimalPattern.test(token))
+      return;
+    return { platform: "win32", token };
+  } catch {
+    return;
+  }
+}
+function getProcessIdentity(platform, pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    return Promise.resolve(undefined);
+  }
+  if (platform === "linux") {
+    return linuxIdentity(pid);
+  }
+  if (platform === "darwin") {
+    return darwinIdentity(pid);
+  }
+  if (platform === "win32") {
+    return windowsIdentity(pid);
+  }
+  return Promise.resolve(undefined);
+}
+async function observeProcess(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0)
+    return;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "ESRCH")
+      return false;
+    if (code === "EPERM")
+      return true;
+    return;
+  }
+}
+async function fileIdentity(path) {
+  try {
+    const stats = await lstat(path, { bigint: true });
+    if (!stats.isDirectory() || stats.isSymbolicLink()) {
+      return;
+    }
+    return {
+      device: stats.dev.toString(10),
+      inode: stats.ino.toString(10),
+      birthtimeNs: stats.birthtimeNs.toString(10)
+    };
+  } catch {
+    return;
+  }
+}
+async function isRegularFile(path) {
+  try {
+    const stats = await lstat(path);
+    return stats.isFile() && !stats.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+async function pathExists(path) {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if (errorCode(error) === "ENOENT")
+      return false;
+    return;
+  }
+}
+async function isPrivateDirectory(path) {
+  try {
+    const stats = await lstat(path);
+    if (!stats.isDirectory() || stats.isSymbolicLink())
+      return false;
+    if (process.platform === "win32")
+      return true;
+    const currentUserId = process.getuid?.();
+    return (stats.mode & 63) === 0 && (currentUserId === undefined || stats.uid === currentUserId);
+  } catch {
+    return false;
+  }
+}
+async function writeReplacement(path, contents) {
+  const temporary = `${path}.next-${crypto.randomUUID()}`;
+  await writeSynced(temporary, contents, true);
+  try {
+    await rename(temporary, path);
+    await syncParent(path);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => {
+      return;
+    });
+    throw error;
+  }
+}
+async function syncParent(path) {
+  if (process.platform === "win32")
+    return;
+  const directory = await open(join(path, ".."), constants.O_RDONLY);
+  try {
+    await directory.sync();
+  } finally {
+    await directory.close();
+  }
+}
+async function writeSynced(path, contents, exclusive) {
+  const flags = exclusive ? constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY : constants.O_WRONLY;
+  const handle = await open(path, flags, 384);
+  try {
+    await handle.writeFile(contents, { encoding: "utf8" });
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  await syncParent(path);
+}
+async function readSecureFile(path, maximumBytes) {
+  const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
+  let handle;
+  try {
+    const pathBefore = await lstat(path, { bigint: true });
+    if (!pathBefore.isFile() || pathBefore.isSymbolicLink() || pathBefore.size > BigInt(maximumBytes) || process.platform !== "win32" && (Number(pathBefore.mode) & 63) !== 0) {
+      return;
+    }
+    handle = await open(path, constants.O_RDONLY | noFollow);
+    const before = await handle.stat({ bigint: true });
+    if (!before.isFile() || pathBefore.dev !== before.dev || pathBefore.ino !== before.ino || pathBefore.birthtimeNs !== before.birthtimeNs || before.size > BigInt(maximumBytes) || process.platform !== "win32" && (Number(before.mode) & 63) !== 0) {
+      return;
+    }
+    const contents = await handle.readFile({ encoding: "utf8" });
+    const after = await handle.stat({ bigint: true });
+    const pathAfter = await lstat(path, { bigint: true });
+    if (before.dev !== after.dev || before.ino !== after.ino || before.birthtimeNs !== after.birthtimeNs || before.size !== after.size || pathAfter.isSymbolicLink() || after.dev !== pathAfter.dev || after.ino !== pathAfter.ino || after.birthtimeNs !== pathAfter.birthtimeNs) {
+      return;
+    }
+    return contents;
+  } catch {
+    return;
+  } finally {
+    await handle?.close().catch(() => {
+      return;
+    });
+  }
+}
+async function scanDirectory(path, limit) {
+  const directory = await opendir(path);
+  const names = [];
+  try {
+    while (names.length <= limit) {
+      const entry = await directory.read();
+      if (entry === null)
+        return { names, truncated: false };
+      names.push(entry.name);
+    }
+    return { names: names.slice(0, limit), truncated: true };
+  } finally {
+    try {
+      await directory.close();
+    } catch {}
+  }
+}
+function systemRuntime() {
+  return {
+    pid: process.pid,
+    platform: process.platform,
+    now: Date.now,
+    deadline,
+    temporaryDirectory: () => realpathSync(tmpdir()),
+    processIdentity: (pid) => getProcessIdentity(process.platform, pid),
+    processExists: observeProcess,
+    mkdir: (path, options) => mkdir(path, options),
+    chmod,
+    mkdtemp,
+    lstatIdentity: fileIdentity,
+    isDirectory: async (path) => await fileIdentity(path) !== undefined,
+    isPrivateDirectory,
+    isFile: isRegularFile,
+    pathExists,
+    realpath,
+    readFile: (path) => readFile(path, "utf8"),
+    readSecureFile,
+    writeExclusive: (path, contents) => writeSynced(path, contents, true),
+    writeReplace: writeReplacement,
+    readdir: async (path) => readdir(path),
+    scanDirectory,
+    rename,
+    removeRoot: (path) => rm(path, {
+      recursive: true,
+      force: false,
+      maxRetries: 5,
+      retryDelay: 100
+    }),
+    errorCode
+  };
+}
+var managedDirectoryName = "skizzles-run-workspaces";
+var markerName = ".skizzles-run-workspace.json";
+function managedParent(runtime) {
+  return join(runtime.temporaryDirectory(), managedDirectoryName);
+}
+
+// packages/run-workspace/src/safety.ts
+async function inspectCanonicalDirectory(runtime, path) {
+  const [identity, canonical] = await Promise.all([
+    runtime.lstatIdentity(path),
+    runtime.realpath(path).catch(() => {
+      return;
+    })
+  ]);
+  if (identity === undefined || canonical !== path)
+    return;
+  return { identity };
+}
+async function inspectPrivateDirectory(runtime, path) {
+  const [inspected, privateOwner] = await Promise.all([
+    inspectCanonicalDirectory(runtime, path),
+    runtime.isPrivateDirectory(path)
+  ]);
+  if (inspected === undefined || !privateOwner)
+    return;
+  return inspected;
+}
+
+// packages/run-workspace/src/marker.ts
+var markerSchema = 1;
+var decimalPattern2 = /^\d+$/u;
+var runIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+var maximumReasonLength = 256;
+var maximumMarkerBytes = 16 * 1024;
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function exactKeys(record, required, optional) {
+  const allowed = new Set([...required, ...optional]);
+  return Object.keys(record).every((key) => allowed.has(key));
+}
+function parseFileIdentity(value) {
+  if (!isRecord(value)) {
+    return;
+  }
+  if (!exactKeys(value, ["device", "inode", "birthtimeNs"], [])) {
+    return;
+  }
+  const { device, inode, birthtimeNs } = value;
+  if (typeof device !== "string" || typeof inode !== "string" || typeof birthtimeNs !== "string" || !decimalPattern2.test(device) || !decimalPattern2.test(inode) || !decimalPattern2.test(birthtimeNs)) {
+    return;
+  }
+  return { device, inode, birthtimeNs };
+}
+function parseProcessIdentity(value) {
+  if (!isRecord(value)) {
+    return;
+  }
+  if (!exactKeys(value, ["platform", "token"], [])) {
+    return;
+  }
+  const { platform, token } = value;
+  if (platform !== "linux" && platform !== "darwin" && platform !== "win32" || typeof token !== "string" || token.length === 0) {
+    return;
+  }
+  return { platform, token };
+}
+function parseMarker(contents) {
+  let value;
+  try {
+    value = JSON.parse(contents);
+  } catch {
+    return;
+  }
+  if (!isRecord(value)) {
+    return;
+  }
+  const required = [
+    "schema",
+    "runId",
+    "root",
+    "rootIdentity",
+    "ownerPid",
+    "ownerIdentity",
+    "createdAtMs",
+    "state"
+  ];
+  if (!exactKeys(value, required, ["reason"])) {
+    return;
+  }
+  const rootIdentity = parseFileIdentity(value["rootIdentity"]);
+  const ownerIdentity = parseProcessIdentity(value["ownerIdentity"]);
+  const state = value["state"];
+  const schema = value["schema"];
+  const runId = value["runId"];
+  const root = value["root"];
+  const ownerPid = value["ownerPid"];
+  const createdAtMs = value["createdAtMs"];
+  const reason = value["reason"];
+  if (schema !== markerSchema || typeof runId !== "string" || !runIdPattern.test(runId) || typeof root !== "string" || root.length === 0 || rootIdentity === undefined || !Number.isSafeInteger(ownerPid) || typeof ownerPid !== "number" || ownerPid <= 0 || ownerIdentity === undefined || !Number.isSafeInteger(createdAtMs) || typeof createdAtMs !== "number" || createdAtMs < 0 || state !== "open" && state !== "preserved" && state !== "cleanup-failed" && state !== "reaping" || reason !== undefined && typeof reason !== "string") {
+    return;
+  }
+  const marker = {
+    schema: markerSchema,
+    runId,
+    root,
+    rootIdentity,
+    ownerPid,
+    ownerIdentity,
+    createdAtMs,
+    state,
+    ...typeof reason === "string" ? { reason } : {}
+  };
+  return serializeMarker(marker) === contents ? marker : undefined;
+}
+function sameFileIdentity(left, right) {
+  return left.device === right.device && left.inode === right.inode && left.birthtimeNs === right.birthtimeNs;
+}
+function sameProcessIdentity(left, right) {
+  return left.platform === right.platform && left.token === right.token;
+}
+function markerPath(root) {
+  return join2(root, markerName);
+}
+function serializeMarker(marker) {
+  return `${JSON.stringify(marker, undefined, 2)}
+`;
+}
+async function readMarker(runtime, root) {
+  try {
+    const contents = await runtime.readSecureFile(markerPath(root), maximumMarkerBytes);
+    return contents === undefined ? undefined : parseMarker(contents);
+  } catch {
+    return;
+  }
+}
+async function verifyMarkedRoot(runtime, root, expectedRunId, transitionalRoot) {
+  const [inspected, marker] = await Promise.all([
+    inspectPrivateDirectory(runtime, root),
+    readMarker(runtime, root)
+  ]);
+  if (inspected === undefined || marker === undefined) {
+    throw new RunWorkspaceError("UNVERIFIED_ROOT", "Refusing to clean an unverified run root");
+  }
+  const acceptedMarkerPath = marker.root === root || marker.root === transitionalRoot;
+  if (!(acceptedMarkerPath && sameFileIdentity(inspected.identity, marker.rootIdentity)) || expectedRunId !== undefined && marker.runId !== expectedRunId) {
+    throw new RunWorkspaceError("ROOT_IDENTITY_CHANGED", "Run workspace identity changed");
+  }
+  return marker;
+}
+function safeReason(reason) {
+  const sanitized = [...reason].map((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127 ? " " : character;
+  }).join("");
+  return sanitized.trim().slice(0, maximumReasonLength);
+}
+
+// packages/run-workspace/src/janitor.ts
+var defaultMinimumAgeMs = 60 * 60 * 1000;
+var defaultScanLimit = 128;
+function integerOption(value, fallback, name, maximum) {
+  const selected = value ?? fallback;
+  if (!Number.isSafeInteger(selected) || selected < 0 || selected > maximum) {
+    throw new RunWorkspaceError("INVALID_OPTION", `${name} must be an integer from 0 to ${maximum}`);
+  }
+  return selected;
+}
+function candidateName(name) {
+  return name.startsWith("run-") || name.startsWith("reaping-");
+}
+function transitionalRoot(runtime, root, marker) {
+  if (marker.root === root)
+    return;
+  const parent = managedParent(runtime);
+  if (dirname(root) === parent && dirname(marker.root) === parent && basename(root).startsWith(`reaping-${marker.runId}-`) && candidateName(basename(marker.root))) {
+    return marker.root;
+  }
+  return;
+}
+async function verifyCandidate(runtime, root, marker) {
+  const transition = transitionalRoot(runtime, root, marker);
+  if (marker.root !== root && transition === undefined) {
+    throw new RunWorkspaceError("ROOT_IDENTITY_CHANGED", "Run workspace identity changed");
+  }
+  await verifyMarkedRoot(runtime, root, marker.runId, transition);
+}
+async function classify(runtime, root, minimumAgeMs) {
+  if (!await runtime.isFile(markerPath(root)))
+    return { clean: false, skip: "unmarked" };
+  const marker = await readMarker(runtime, root);
+  if (marker === undefined)
+    return { clean: false, skip: "malformed-marker" };
+  if (marker.state === "preserved")
+    return { clean: false, skip: "preserved" };
+  if (runtime.now() - marker.createdAtMs < minimumAgeMs)
+    return { clean: false, skip: "too-young" };
+  try {
+    await verifyCandidate(runtime, root, marker);
+  } catch {
+    return { clean: false, skip: "identity-mismatch" };
+  }
+  const currentIdentity = await runtime.processIdentity(marker.ownerPid);
+  if (currentIdentity !== undefined) {
+    if (sameProcessIdentity(currentIdentity, marker.ownerIdentity)) {
+      return { clean: false, skip: "live-owner" };
+    }
+    return { clean: true };
+  }
+  const exists = await runtime.processExists(marker.ownerPid);
+  if (exists === false)
+    return { clean: true };
+  return { clean: false, skip: "unknown-owner" };
+}
+async function reap(runtime, root) {
+  const marker = await readMarker(runtime, root);
+  if (marker === undefined) {
+    if (await runtime.pathExists(root) === false)
+      return "claimed";
+    throw new RunWorkspaceError("MALFORMED_MARKER", "Marker vanished before cleanup");
+  }
+  try {
+    await verifyCandidate(runtime, root, marker);
+  } catch (error) {
+    if (await runtime.pathExists(root) === false)
+      return "claimed";
+    throw error;
+  }
+  const claimed = join3(managedParent(runtime), `reaping-${marker.runId}-${crypto.randomUUID()}`);
+  try {
+    await runtime.rename(root, claimed);
+  } catch (error) {
+    if (await runtime.pathExists(root) === false)
+      return "claimed";
+    throw error;
+  }
+  const verified = await verifyMarkedRoot(runtime, claimed, marker.runId, marker.root);
+  const reapingMarker = {
+    ...verified,
+    root: claimed,
+    state: "reaping"
+  };
+  await runtime.writeReplace(markerPath(claimed), serializeMarker(reapingMarker));
+  await verifyMarkedRoot(runtime, claimed, marker.runId);
+  try {
+    await runtime.removeRoot(claimed);
+  } catch (error) {
+    const failedMarker = {
+      ...reapingMarker,
+      state: "cleanup-failed",
+      reason: "CLEANUP_FAILED"
+    };
+    await runtime.writeReplace(markerPath(claimed), serializeMarker(failedMarker)).catch(() => {
+      return;
+    });
+    throw error;
+  }
+  return "deleted";
+}
+async function cleanupStaleWithRuntime(options, runtime) {
+  const minimumAgeMs = integerOption(options.minimumAgeMs, defaultMinimumAgeMs, "minimumAgeMs", 365 * 24 * 60 * 60 * 1000);
+  const scanLimit = integerOption(options.scanLimit, defaultScanLimit, "scanLimit", 1e4);
+  const parent = managedParent(runtime);
+  const parentExists = await runtime.pathExists(parent);
+  if (parentExists === false) {
+    return { deleted: [], skipped: [], failed: [], truncated: false };
+  }
+  if (await inspectPrivateDirectory(runtime, parent) === undefined) {
+    return {
+      deleted: [],
+      skipped: [],
+      failed: [{ rootName: managedDirectoryName, error: "CLEANUP_FAILED" }],
+      truncated: false
+    };
+  }
+  let scan;
+  try {
+    scan = await runtime.scanDirectory(parent, scanLimit);
+  } catch (error) {
+    if (runtime.errorCode(error) === "ENOENT") {
+      return { deleted: [], skipped: [], failed: [], truncated: false };
+    }
+    return {
+      deleted: [],
+      skipped: [],
+      failed: [{ rootName: managedDirectoryName, error: "CLEANUP_FAILED" }],
+      truncated: false
+    };
+  }
+  const selected = scan.names.filter(candidateName).sort();
+  const deleted = [];
+  const skipped = [];
+  const failed = [];
+  for (const name of selected) {
+    const root = join3(parent, name);
+    if (!await runtime.isDirectory(root)) {
+      skipped.push({ rootName: name, reason: "unmarked" });
+      continue;
+    }
+    const classification = await classify(runtime, root, minimumAgeMs);
+    if (!classification.clean) {
+      skipped.push({
+        rootName: name,
+        reason: classification.skip ?? "unknown-owner"
+      });
+      continue;
+    }
+    try {
+      const result = await reap(runtime, root);
+      if (result === "deleted")
+        deleted.push(name);
+      else
+        skipped.push({ rootName: name, reason: "claimed" });
+    } catch {
+      failed.push({ rootName: name, error: "CLEANUP_FAILED" });
+    }
+  }
+  return { deleted, skipped, failed, truncated: scan.truncated };
+}
+function cleanupStale(options = {}) {
+  return cleanupStaleWithRuntime(options, systemRuntime());
+}
+// packages/run-workspace/src/lifecycle.ts
+import {
+  basename as basename2,
+  isAbsolute,
+  join as join4,
+  relative,
+  resolve,
+  win32 as win322
+} from "path";
+
+// packages/run-workspace/src/children.ts
+function observeExit(attempt) {
+  let exit;
+  try {
+    exit = attempt.child.waitForExit();
+  } catch {
+    return Promise.resolve();
+  }
+  return exit.then(() => {
+    attempt.exited = true;
+  }, () => {
+    return;
+  });
+}
+function childError(forceFailed) {
+  if (forceFailed)
+    return "FORCE_STOP_FAILED";
+  return "EXIT_UNCONFIRMED";
+}
+async function waitForChildren(attempts, milliseconds, runtime, escalation) {
+  const waiting = Promise.all(attempts.map((attempt) => attempt.wait)).then(() => {
+    return;
+  });
+  const deadline2 = runtime.deadline(milliseconds);
+  const contenders = [waiting, deadline2.elapsed];
+  if (escalation !== undefined)
+    contenders.push(escalation);
+  try {
+    await Promise.race(contenders);
+  } finally {
+    deadline2.cancel();
+  }
+}
+function childReport(attempt) {
+  const base = {
+    label: attempt.child.label,
+    stopped: attempt.exited,
+    forced: attempt.forced
+  };
+  const withPid = attempt.child.pid === undefined ? base : { ...base, pid: attempt.child.pid };
+  if (attempt.exited)
+    return withPid;
+  return { ...withPid, error: childError(attempt.forceFailed) };
+}
+async function stopChildren(options) {
+  const attempts = [...options.children].reverse().map((child) => ({
+    child,
+    exited: false,
+    forced: false,
+    forceFailed: false,
+    wait: Promise.resolve()
+  }));
+  for (const attempt of attempts) {
+    attempt.wait = observeExit(attempt);
+    try {
+      Promise.resolve(attempt.child.requestStop()).catch(() => {
+        return;
+      });
+    } catch {}
+  }
+  await waitForChildren(attempts, options.gracefulStopMs, options.runtime, options.escalation);
+  const unresolved = attempts.filter((attempt) => !attempt.exited);
+  for (const attempt of unresolved) {
+    attempt.forced = true;
+    try {
+      Promise.resolve(attempt.child.forceStop()).catch(() => {
+        attempt.forceFailed = true;
+      });
+    } catch {
+      attempt.forceFailed = true;
+    }
+    attempt.wait = observeExit(attempt);
+  }
+  await waitForChildren(unresolved, options.forceStopMs, options.runtime);
+  return attempts.map(childReport);
+}
+
+// packages/run-workspace/src/signals.ts
+import process2 from "process";
+var targets = new Set;
+var listeners = new Map;
+function supportedSignals() {
+  if (process2.platform === "win32")
+    return ["SIGINT", "SIGTERM"];
+  return ["SIGHUP", "SIGINT", "SIGTERM"];
+}
+function install() {
+  if (listeners.size > 0)
+    return;
+  for (const signal of supportedSignals()) {
+    const listener = () => {
+      const error = new RunWorkspaceAbortedError(`Run workspace interrupted by ${signal}`, signal);
+      for (const target of [...targets])
+        target.abort(error);
+    };
+    listeners.set(signal, listener);
+    process2.on(signal, listener);
+  }
+}
+function uninstall() {
+  if (targets.size > 0)
+    return;
+  for (const [signal, listener] of listeners)
+    process2.off(signal, listener);
+  listeners.clear();
+}
+function coordinateSignals(target) {
+  targets.add(target);
+  install();
+  let active = true;
+  return () => {
+    if (!active)
+      return;
+    active = false;
+    targets.delete(target);
+    uninstall();
+  };
+}
+
+// packages/run-workspace/src/lifecycle.ts
+var defaultGracefulStopMs = 5000;
+var defaultForceStopMs = 5000;
+function isAborted(signal) {
+  return signal?.aborted === true;
+}
+function duration(value, fallback, name) {
+  const selected = value ?? fallback;
+  if (!Number.isSafeInteger(selected) || selected < 0 || selected > 300000) {
+    throw new RunWorkspaceError("INVALID_OPTION", `${name} must be an integer from 0 to 300000`);
+  }
+  return selected;
+}
+
+class OwnedRunWorkspace {
+  signal;
+  #runtime;
+  #runId;
+  #gracefulStopMs;
+  #forceStopMs;
+  #controller = new AbortController;
+  #children = [];
+  #forceGate;
+  #releaseForceGate;
+  #root;
+  #marker;
+  #state = "open";
+  #preserveReason;
+  #preservePromise;
+  #closePromise;
+  #finalReport;
+  #removeSignalCoordination;
+  #removeExternalAbort;
+  #interruptCount = 0;
+  constructor(root, marker, runtime, options) {
+    this.#root = root;
+    this.#marker = marker;
+    this.#runtime = runtime;
+    this.#runId = marker.runId;
+    this.#gracefulStopMs = duration(options.gracefulStopMs, defaultGracefulStopMs, "gracefulStopMs");
+    this.#forceStopMs = duration(options.forceStopMs, defaultForceStopMs, "forceStopMs");
+    this.signal = this.#controller.signal;
+    let releaseForceGate = () => {
+      return;
+    };
+    this.#forceGate = new Promise((resolveGate) => {
+      releaseForceGate = resolveGate;
+    });
+    this.#releaseForceGate = releaseForceGate;
+    if (options.handleSignals === true) {
+      this.#removeSignalCoordination = coordinateSignals({
+        abort: (error) => this.#interrupt(error)
+      });
+    }
+    if (options.signal !== undefined) {
+      const externalSignal = options.signal;
+      const abort = () => this.#interrupt(new RunWorkspaceAbortedError);
+      this.#removeExternalAbort = () => externalSignal.removeEventListener("abort", abort);
+      externalSignal.addEventListener("abort", abort, { once: true });
+      if (externalSignal.aborted && !this.signal.aborted) {
+        this.#interrupt(new RunWorkspaceAbortedError);
+      }
+    }
+  }
+  path(...relativeParts) {
+    if (this.#state !== "open") {
+      throw new RunWorkspaceError("WORKSPACE_CLOSED", "Run workspace is closing or closed");
+    }
+    for (const part of relativeParts) {
+      const segments = part.split(/[\\/]/u);
+      if (part.length === 0 || part.includes("\x00") || isAbsolute(part) || win322.isAbsolute(part) || segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
+        throw new RunWorkspaceError("INVALID_PATH", "Run workspace paths must be unambiguous relatives");
+      }
+    }
+    const selected = resolve(this.#root, ...relativeParts);
+    const fromRoot = relative(this.#root, selected);
+    if (fromRoot.startsWith("..") || isAbsolute(fromRoot)) {
+      throw new RunWorkspaceError("INVALID_PATH", "Run workspace path escapes its root");
+    }
+    return selected;
+  }
+  registerChild(child) {
+    if (this.#state !== "open") {
+      throw new RunWorkspaceError("WORKSPACE_CLOSED", "Cannot register a child after close begins");
+    }
+    if (child.label.trim().length === 0) {
+      throw new RunWorkspaceError("INVALID_CHILD", "Owned child label must not be empty");
+    }
+    if (child.pid !== undefined && (!Number.isSafeInteger(child.pid) || child.pid <= 0)) {
+      throw new RunWorkspaceError("INVALID_CHILD", "Owned child pid must be a positive integer");
+    }
+    this.#children.push(child);
+  }
+  preserve(reason) {
+    if (this.#state !== "open") {
+      return Promise.reject(new RunWorkspaceError("WORKSPACE_CLOSED", "Cannot preserve after close begins"));
+    }
+    const normalized = safeReason(reason);
+    if (normalized.length === 0) {
+      return Promise.reject(new RunWorkspaceError("INVALID_REASON", "Preservation requires a non-empty reason"));
+    }
+    if (this.#preservePromise !== undefined)
+      return this.#preservePromise;
+    const active = this.#publishPreservation(normalized);
+    this.#preservePromise = active;
+    active.then(() => {
+      return;
+    }, () => {
+      if (this.#preservePromise === active) {
+        this.#preservePromise = undefined;
+      }
+    }).catch(() => {
+      return;
+    });
+    return active;
+  }
+  async#publishPreservation(normalized) {
+    const marker = {
+      ...this.#marker,
+      state: "preserved",
+      reason: normalized
+    };
+    await verifyMarkedRoot(this.#runtime, this.#root, this.#runId);
+    await this.#runtime.writeReplace(markerPath(this.#root), serializeMarker(marker));
+    await verifyMarkedRoot(this.#runtime, this.#root, this.#runId);
+    this.#marker = marker;
+    this.#preserveReason = normalized;
+  }
+  close() {
+    if (this.#finalReport !== undefined)
+      return Promise.resolve(this.#finalReport);
+    if (this.#closePromise !== undefined)
+      return this.#closePromise;
+    this.#state = "closing";
+    const active = this.#close();
+    this.#closePromise = active;
+    active.then((report) => {
+      if (report.state === "cleanup-failed") {
+        this.#state = "cleanup-failed";
+        this.#closePromise = undefined;
+      } else {
+        this.#state = "closed";
+        this.#finalReport = report;
+        this.#removeSignalCoordination?.();
+      }
+    }).catch(() => {
+      return;
+    });
+    return active;
+  }
+  #interrupt(error) {
+    this.#interruptCount += 1;
+    if (!this.#controller.signal.aborted)
+      this.#controller.abort(error);
+    if (this.#interruptCount > 1)
+      this.#releaseForceGate();
+    this.close().catch(() => {
+      return;
+    });
+  }
+  async#markFailure(children, error) {
+    const marker = {
+      ...this.#marker,
+      root: this.#root,
+      state: "cleanup-failed",
+      reason: error
+    };
+    try {
+      await verifyMarkedRoot(this.#runtime, this.#root, this.#runId, this.#marker.root);
+      await this.#runtime.writeReplace(markerPath(this.#root), serializeMarker(marker));
+      this.#marker = marker;
+    } catch {}
+    return {
+      state: "cleanup-failed",
+      runId: this.#runId,
+      rootName: basename2(this.#root),
+      children,
+      error
+    };
+  }
+  async#deleteRoot() {
+    const marker = await verifyMarkedRoot(this.#runtime, this.#root, this.#runId, this.#marker.root);
+    const source = this.#root;
+    const claimed = join4(managedParent(this.#runtime), `reaping-${this.#runId}-${crypto.randomUUID()}`);
+    await this.#runtime.rename(source, claimed);
+    this.#root = claimed;
+    const reapingMarker = {
+      ...marker,
+      root: claimed,
+      state: "reaping"
+    };
+    await verifyMarkedRoot(this.#runtime, claimed, this.#runId, source);
+    await this.#runtime.writeReplace(markerPath(claimed), serializeMarker(reapingMarker));
+    this.#marker = reapingMarker;
+    await verifyMarkedRoot(this.#runtime, claimed, this.#runId);
+    await this.#runtime.removeRoot(claimed);
+  }
+  async#close() {
+    this.#removeExternalAbort?.();
+    const preservation = this.#preservePromise;
+    const children = await stopChildren({
+      children: this.#children,
+      runtime: this.#runtime,
+      gracefulStopMs: this.#gracefulStopMs,
+      forceStopMs: this.#forceStopMs,
+      escalation: this.#forceGate
+    });
+    if (preservation !== undefined) {
+      try {
+        await preservation;
+      } catch {
+        return this.#markFailure(children, "CLEANUP_FAILED");
+      }
+    }
+    if (children.some((child) => !child.stopped) && this.#preserveReason !== undefined) {
+      return {
+        state: "cleanup-failed",
+        runId: this.#runId,
+        rootName: basename2(this.#root),
+        children,
+        error: "CHILD_UNCONFIRMED"
+      };
+    }
+    if (children.some((child) => !child.stopped))
+      return this.#markFailure(children, "CHILD_UNCONFIRMED");
+    if (this.#preserveReason !== undefined) {
+      return {
+        state: "preserved",
+        runId: this.#runId,
+        rootName: basename2(this.#root),
+        children
+      };
+    }
+    try {
+      await this.#deleteRoot();
+      return {
+        state: "deleted",
+        runId: this.#runId,
+        rootName: basename2(this.#marker.root),
+        children
+      };
+    } catch {
+      return this.#markFailure(children, "CLEANUP_FAILED");
+    }
+  }
+}
+async function prepareParent(runtime) {
+  const parent = managedParent(runtime);
+  await runtime.mkdir(parent, { recursive: true, mode: 448 });
+  if (await inspectCanonicalDirectory(runtime, parent) === undefined) {
+    throw new RunWorkspaceError("UNSAFE_PARENT", "Managed temporary parent is not a real directory");
+  }
+  await runtime.chmod(parent, 448);
+  if (await inspectPrivateDirectory(runtime, parent) === undefined) {
+    throw new RunWorkspaceError("UNSAFE_PARENT", "Managed temporary parent is not owner-private");
+  }
+  return parent;
+}
+async function hasInitializationAuthority(runtime, root, marker, markerPublished) {
+  if (marker === undefined)
+    return false;
+  const inspected = await inspectCanonicalDirectory(runtime, root);
+  if (inspected === undefined || !sameFileIdentity(inspected.identity, marker.rootIdentity)) {
+    return false;
+  }
+  if (!markerPublished)
+    return true;
+  const persisted = await readMarker(runtime, root);
+  return persisted !== undefined && persisted.runId === marker.runId && persisted.root === root && sameFileIdentity(persisted.rootIdentity, marker.rootIdentity);
+}
+async function createWithRuntime(options, runtime) {
+  if (isAborted(options.signal))
+    throw new RunWorkspaceAbortedError;
+  const ownerIdentity = await runtime.processIdentity(runtime.pid);
+  if (ownerIdentity === undefined) {
+    throw new RunWorkspaceError("UNKNOWN_PROCESS_IDENTITY", "Current process start identity is unavailable");
+  }
+  const parent = await prepareParent(runtime);
+  const root = await runtime.mkdtemp(join4(parent, "run-"));
+  const runId = crypto.randomUUID();
+  let marker;
+  let markerPublished = false;
+  let workspace;
+  try {
+    const inspected = await inspectCanonicalDirectory(runtime, root);
+    if (inspected === undefined) {
+      throw new RunWorkspaceError("UNSAFE_ROOT", "Created run workspace is not a real directory");
+    }
+    marker = {
+      schema: 1,
+      runId,
+      root,
+      rootIdentity: inspected.identity,
+      ownerPid: runtime.pid,
+      ownerIdentity,
+      createdAtMs: runtime.now(),
+      state: "open"
+    };
+    await runtime.writeExclusive(markerPath(root), serializeMarker(marker));
+    markerPublished = true;
+    await runtime.chmod(root, 448);
+    if (await inspectPrivateDirectory(runtime, root) === undefined) {
+      throw new RunWorkspaceError("UNSAFE_ROOT", "Created run workspace is not owner-private");
+    }
+    if (isAborted(options.signal))
+      throw new RunWorkspaceAbortedError;
+    workspace = new OwnedRunWorkspace(root, marker, runtime, options);
+    if (workspace.signal.aborted) {
+      const report = await workspace.close();
+      if (report.state === "cleanup-failed") {
+        throw new RunWorkspaceError("INITIALIZATION_FAILED", "Aborted run workspace cleanup must be retried");
+      }
+      throw new RunWorkspaceAbortedError;
+    }
+    return workspace;
+  } catch (error) {
+    if (workspace !== undefined)
+      throw error;
+    if (!await hasInitializationAuthority(runtime, root, marker, markerPublished)) {
+      throw new RunWorkspaceError("INITIALIZATION_FAILED", "Run workspace initialization cleanup authority was lost", { cause: error });
+    }
+    try {
+      await runtime.removeRoot(root);
+    } catch (removalError) {
+      if (marker !== undefined && await hasInitializationAuthority(runtime, root, marker, markerPublished)) {
+        const failed = {
+          ...marker,
+          state: "cleanup-failed",
+          reason: "INITIALIZATION_FAILED"
+        };
+        await runtime.writeReplace(markerPath(root), serializeMarker(failed)).catch(() => {
+          return;
+        });
+      }
+      throw new RunWorkspaceError("INITIALIZATION_FAILED", "Run workspace initialization failed and cleanup must be retried", { cause: removalError });
+    }
+    throw error;
+  }
+}
+function create(options = {}) {
+  return createWithRuntime(options, systemRuntime());
+}
+// packages/installer/src/cli-arguments.ts
+import { isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
+import process3 from "process";
 var FLAG_NAMES = {
   "--codex-home": "codexHome",
   "--codex-binary": "codexBinary",
@@ -20,7 +1150,7 @@ var FLAG_NAMES = {
 };
 function usage() {
   console.error("usage: skizzles-installer install --surface <skills|harness> [--codex-home PATH|--home PATH] [--source-root PATH] [--transfer link|copy] [--dry-run] | uninstall --surface <skills|harness> [--codex-home PATH|--home PATH] [--dry-run] | configure --codex-home PATH --codex-binary PATH --orchestration <aggressive|passive> [--dry-run] | unconfigure --codex-home PATH --codex-binary PATH [--dry-run] | prompt-policy apply --codex-home PATH --codex-binary ABSOLUTE_PATH --source-root PATH [--dry-run] | prompt-policy restore --codex-home PATH --codex-binary ABSOLUTE_PATH [--dry-run] | doctor --home PATH --codex-home PATH");
-  process.exit(2);
+  process3.exit(2);
 }
 function parseInstallerCommand(argv) {
   const remaining = [...argv];
@@ -45,7 +1175,7 @@ function parseInstallerCommand(argv) {
 function parseInstall(argv) {
   const flags = parseFlags(argv, allowed("surface", "codexHome", "home", "sourceRoot", "transfer", "dryRun"));
   const surface = parseSurface(required(flags.surface));
-  const sourceRoot = resolve(flags.sourceRoot ?? defaultSourceRoot());
+  const sourceRoot = resolve2(flags.sourceRoot ?? defaultSourceRoot());
   const transfer = parseTransfer(flags.transfer ?? "link");
   if (surface === "skills") {
     if (flags.home !== undefined) {
@@ -54,7 +1184,7 @@ function parseInstall(argv) {
     return {
       command: "install",
       surface,
-      codexHome: resolve(required(flags.codexHome)),
+      codexHome: resolve2(required(flags.codexHome)),
       sourceRoot,
       transfer,
       dryRun: flags.dryRun
@@ -66,7 +1196,7 @@ function parseInstall(argv) {
   return {
     command: "install",
     surface,
-    home: resolve(required(flags.home)),
+    home: resolve2(required(flags.home)),
     sourceRoot,
     transfer,
     dryRun: flags.dryRun
@@ -82,7 +1212,7 @@ function parseUninstall(argv) {
     return {
       command: "uninstall",
       surface,
-      codexHome: resolve(required(flags.codexHome)),
+      codexHome: resolve2(required(flags.codexHome)),
       dryRun: flags.dryRun
     };
   }
@@ -92,7 +1222,7 @@ function parseUninstall(argv) {
   return {
     command: "uninstall",
     surface,
-    home: resolve(required(flags.home)),
+    home: resolve2(required(flags.home)),
     dryRun: flags.dryRun
   };
 }
@@ -100,15 +1230,15 @@ function parseDoctor(argv) {
   const flags = parseFlags(argv, allowed("home", "codexHome"));
   return {
     command: "doctor",
-    home: resolve(required(flags.home)),
-    codexHome: resolve(required(flags.codexHome))
+    home: resolve2(required(flags.home)),
+    codexHome: resolve2(required(flags.codexHome))
   };
 }
 function parseConfigure(argv) {
   const flags = parseFlags(argv, allowed("codexHome", "codexBinary", "orchestration", "dryRun"));
   return {
     command: "configure",
-    codexHome: resolve(required(flags.codexHome)),
+    codexHome: resolve2(required(flags.codexHome)),
     codexBinary: required(flags.codexBinary),
     orchestration: parseOrchestration(required(flags.orchestration)),
     dryRun: flags.dryRun
@@ -118,7 +1248,7 @@ function parseUnconfigure(argv) {
   const flags = parseFlags(argv, allowed("codexHome", "codexBinary", "dryRun"));
   return {
     command: "unconfigure",
-    codexHome: resolve(required(flags.codexHome)),
+    codexHome: resolve2(required(flags.codexHome)),
     codexBinary: required(flags.codexBinary),
     dryRun: flags.dryRun
   };
@@ -130,9 +1260,9 @@ function parsePromptPolicy(argv) {
     return {
       command: "prompt-policy",
       action,
-      codexHome: resolve(required(flags.codexHome)),
+      codexHome: resolve2(required(flags.codexHome)),
       codexBinary: absoluteBinary(required(flags.codexBinary)),
-      sourceRoot: resolve(required(flags.sourceRoot)),
+      sourceRoot: resolve2(required(flags.sourceRoot)),
       dryRun: flags.dryRun
     };
   }
@@ -141,7 +1271,7 @@ function parsePromptPolicy(argv) {
     return {
       command: "prompt-policy",
       action,
-      codexHome: resolve(required(flags.codexHome)),
+      codexHome: resolve2(required(flags.codexHome)),
       codexBinary: absoluteBinary(required(flags.codexBinary)),
       dryRun: flags.dryRun
     };
@@ -191,29 +1321,28 @@ function parseOrchestration(value) {
   return usage();
 }
 function absoluteBinary(value) {
-  if (!isAbsolute(value)) {
+  if (!isAbsolute2(value)) {
     usage();
   }
   return value;
 }
 function defaultSourceRoot() {
-  return resolve(import.meta.dir, "../../..");
+  return resolve2(import.meta.dir, "../../..");
 }
 
 // packages/installer/src/config.ts
-import { existsSync as existsSync3, rmSync as rmSync4 } from "fs";
-import { join as join4, resolve as resolve5 } from "path";
+import { existsSync as existsSync3, rmSync as rmSync3 } from "fs";
+import { join as join8, resolve as resolve6 } from "path";
 
 // packages/installer/src/codex-config.ts
-import { chmodSync as chmodSync4, mkdtempSync, realpathSync as realpathSync2, rmSync as rmSync3 } from "fs";
-import { tmpdir } from "os";
-import { join as join3 } from "path";
+import { chmodSync as chmodSync4, mkdirSync as mkdirSync4, realpathSync as realpathSync3 } from "fs";
+import { join as join7 } from "path";
 
 // packages/installer/src/codex-config/preview.ts
 import {
   chmodSync as chmodSync2,
   closeSync,
-  constants,
+  constants as constants2,
   fstatSync,
   lstatSync as lstatSync3,
   mkdirSync as mkdirSync2,
@@ -221,7 +1350,7 @@ import {
   readFileSync as readFileSync2,
   writeFileSync
 } from "fs";
-import { dirname, isAbsolute as isAbsolute3, join as join2, relative, resolve as resolve4, sep } from "path";
+import { dirname as dirname2, isAbsolute as isAbsolute4, join as join6, relative as relative2, resolve as resolve5, sep } from "path";
 
 // packages/installer/src/managed-files.ts
 import {
@@ -235,7 +1364,7 @@ import {
   renameSync,
   rmSync
 } from "fs";
-import { join, resolve as resolve2 } from "path";
+import { join as join5, resolve as resolve3 } from "path";
 function pathEntryExists(path) {
   try {
     lstatSync(path);
@@ -255,7 +1384,7 @@ function copyDirectoryExclusive(source, target, copyEntry = (from, to) => cpSync
       if (name === ".DS_Store") {
         continue;
       }
-      copyEntry(join(source, name), join(target, name));
+      copyEntry(join5(source, name), join5(target, name));
     }
   } catch (error) {
     rmSync(target, { recursive: true, force: true });
@@ -263,10 +1392,10 @@ function copyDirectoryExclusive(source, target, copyEntry = (from, to) => cpSync
   }
 }
 function assertManagedParentsAreReal(rootInput, managedParents) {
-  const root = resolve2(rootInput);
+  const root = resolve3(rootInput);
   for (const path of [
     root,
-    ...managedParents.map((parent) => join(root, parent))
+    ...managedParents.map((parent) => join5(root, parent))
   ]) {
     if (pathEntryExists(path) && lstatSync(path).isSymbolicLink()) {
       throw new Error(`refusing to manage through a symlinked parent: ${path}`);
@@ -294,7 +1423,7 @@ function sameTree(left, right) {
     if (leftNames.join("\x00") !== rightNames.join("\x00")) {
       return false;
     }
-    return leftNames.every((name) => sameTree(join(left, name), join(right, name)));
+    return leftNames.every((name) => sameTree(join5(left, name), join5(right, name)));
   }
   return readFileSync(left).equals(readFileSync(right));
 }
@@ -303,6 +1432,136 @@ function rollbackStagedMoves(moved) {
     if (pathEntryExists(item.to) && !pathEntryExists(item.from)) {
       renameSync(item.to, item.from);
     }
+  }
+}
+
+// packages/installer/src/codex-config/rpc.ts
+import { mkdir as mkdir2 } from "fs/promises";
+import processRuntime from "process";
+
+// packages/installer/src/codex-config/supervisor.ts
+import process4 from "process";
+var EXIT_TIMEOUT_MS = 2000;
+var POLL_MS = 10;
+var SOURCE = String.raw`
+process.on("SIGTERM", () => undefined);
+const command = JSON.parse(Bun.argv[1]);
+const publish = (value) => process.send?.(value);
+try {
+  const tool = Bun.spawn(command, { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+  publish({ type: "ready" });
+  tool.exited.then(
+    (exitCode) => publish({ type: "exited", exitCode }),
+    () => publish({ type: "tool-error" }),
+  );
+} catch {
+  publish({ type: "spawn-error" });
+}
+setInterval(() => undefined, 2147483647);
+`;
+function spawnRpcSupervisor(command, environment) {
+  let state = "pending";
+  let protocolFailure;
+  let child;
+  child = Bun.spawn([process4.execPath, "--eval", SOURCE, JSON.stringify(command)], {
+    env: environment,
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    detached: true,
+    ipc(message) {
+      const next = protocolMessage(message, state);
+      if (next instanceof Error) {
+        protocolFailure ??= next;
+      } else {
+        state = next;
+      }
+    }
+  });
+  const waitFor = async (accepted, timeoutMs) => {
+    const deadline2 = Date.now() + timeoutMs;
+    while (Date.now() < deadline2) {
+      if (protocolFailure !== undefined)
+        throw protocolFailure;
+      if (accepted.has(state))
+        return state;
+      const event = await Promise.race([
+        child.exited.then(() => "exited"),
+        Bun.sleep(POLL_MS).then(() => "pending")
+      ]);
+      if (event === "exited")
+        throw new Error("Codex app-server supervisor exited unexpectedly");
+    }
+    return;
+  };
+  return {
+    process: child,
+    scope: supervisorScope(child),
+    waitUntilReady: async () => {
+      const result = await waitFor(new Set(["ready", "exited", "spawn-error", "tool-error"]), EXIT_TIMEOUT_MS);
+      if (result !== "ready") {
+        throw new Error("Codex app-server could not start");
+      }
+    },
+    waitForToolExit: async (timeoutMs) => await waitFor(new Set(["exited", "spawn-error", "tool-error"]), timeoutMs) === "exited"
+  };
+}
+function protocolMessage(value, current) {
+  if (typeof value !== "object" || value === null || !("type" in value)) {
+    return new Error("Codex app-server supervisor protocol is invalid");
+  }
+  const keys = Object.keys(value);
+  if (value.type === "ready" && keys.length === 1 && current === "pending")
+    return "ready";
+  if (value.type === "exited" && keys.length === 2 && "exitCode" in value && Number.isSafeInteger(value.exitCode) && current === "ready")
+    return "exited";
+  if ((value.type === "spawn-error" || value.type === "tool-error") && keys.length === 1)
+    return value.type;
+  return new Error("Codex app-server supervisor protocol is invalid");
+}
+function supervisorScope(child) {
+  const signal = (value) => {
+    signalOwnedSupervisor(child.exitCode !== null, child.pid, value);
+  };
+  return {
+    label: "Codex app-server supervisor",
+    pid: child.pid,
+    requestStop: () => signal("SIGTERM"),
+    forceStop: () => signal("SIGKILL"),
+    waitForExit: async () => {
+      const exited = await Promise.race([
+        child.exited.then(() => true),
+        Bun.sleep(EXIT_TIMEOUT_MS).then(() => false)
+      ]);
+      if (!exited)
+        throw new Error("Codex app-server supervisor did not exit");
+      const deadline2 = Date.now() + EXIT_TIMEOUT_MS;
+      while (Date.now() < deadline2) {
+        try {
+          process4.kill(-child.pid, 0);
+        } catch (error) {
+          if (error instanceof Error && "code" in error && error.code === "ESRCH")
+            return;
+          if (!(error instanceof Error && ("code" in error) && error.code === "EPERM"))
+            throw error;
+        }
+        await Bun.sleep(POLL_MS);
+      }
+      throw new Error("Codex app-server process scope exit could not be verified");
+    }
+  };
+}
+function signalOwnedSupervisor(supervisorExited, pid, signal, kill = process4.kill) {
+  if (supervisorExited)
+    return false;
+  try {
+    kill(-pid, signal);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") {
+      return false;
+    }
+    throw error;
   }
 }
 
@@ -320,8 +1579,8 @@ var SAFE_METHOD_PATTERN = /^[A-Za-z][A-Za-z0-9_./-]{0,63}$/u;
 class ConfigRpcError extends Error {
   kind;
   code;
-  constructor(kind, message, code) {
-    super(message);
+  constructor(kind, message, code, options) {
+    super(message, options);
     this.name = "ConfigRpcError";
     this.kind = kind;
     this.code = code;
@@ -342,22 +1601,36 @@ function safeConfigWriteError(error) {
 
 class AppServerRpc {
   process;
+  supervisor;
   nextId = 1;
   pending = new Map;
-  constructor(process2) {
-    this.process = process2;
+  constructor(supervisor) {
+    this.supervisor = supervisor;
+    this.process = supervisor.process;
   }
-  static async create(codexHome, codexBinary) {
-    const process2 = Bun.spawn([codexBinary, "app-server"], {
-      env: { ...Bun.env, CODEX_HOME: codexHome },
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe"
+  static async create(codexHome, codexBinary, workspace) {
+    assertAppServerPlatform(processRuntime.platform);
+    const processTemp = workspace.path("process-temp", "codex-app-server");
+    await mkdir2(processTemp, { recursive: true, mode: 448 });
+    const supervisor = spawnRpcSupervisor([codexBinary, "app-server"], {
+      ...Bun.env,
+      CODEX_HOME: codexHome,
+      TEMP: processTemp,
+      TMP: processTemp,
+      TMPDIR: processTemp
     });
-    const rpc = new AppServerRpc(process2);
+    const rpc = new AppServerRpc(supervisor);
+    try {
+      workspace.registerChild(supervisor.scope);
+    } catch (error) {
+      await supervisor.scope.forceStop();
+      await supervisor.scope.waitForExit();
+      throw error;
+    }
     rpc.consumeStdout();
     rpc.consumeStderr();
     try {
+      await supervisor.waitUntilReady();
       await rpc.request("initialize", {
         clientInfo: {
           name: "skizzles_installer",
@@ -369,7 +1642,11 @@ class AppServerRpc {
       rpc.send({ method: "initialized" });
       return rpc;
     } catch (error) {
-      await rpc.close();
+      try {
+        await rpc.close();
+      } catch (cleanup) {
+        throw new ConfigRpcError("transport", "Codex app-server cleanup failed after startup failure", undefined, { cause: new AggregateError([cleanup, error]) });
+      }
       throw error;
     }
   }
@@ -381,29 +1658,12 @@ class AppServerRpc {
   }
   async close() {
     this.process.stdin.end();
-    const exited = await Promise.race([
-      this.process.exited.then(() => true),
-      Bun.sleep(2000).then(() => false)
-    ]);
-    if (exited) {
-      return;
+    if (!await this.supervisor.waitForToolExit(2000)) {
+      await this.supervisor.scope.requestStop();
+      await Bun.sleep(100);
     }
-    this.process.kill();
-    const terminated = await Promise.race([
-      this.process.exited.then(() => true),
-      Bun.sleep(1000).then(() => false)
-    ]);
-    if (terminated) {
-      return;
-    }
-    this.process.kill(9);
-    const killed = await Promise.race([
-      this.process.exited.then(() => true),
-      Bun.sleep(1000).then(() => false)
-    ]);
-    if (!killed) {
-      throw new ConfigRpcError("transport", "Codex app-server did not terminate after its input was closed");
-    }
+    await this.supervisor.scope.forceStop();
+    await this.supervisor.scope.waitForExit();
   }
   request(method, params) {
     const id = this.nextId++;
@@ -482,6 +1742,11 @@ class AppServerRpc {
       }
       decoder.decode(value, { stream: true });
     }
+  }
+}
+function assertAppServerPlatform(platform) {
+  if (platform === "win32") {
+    throw new ConfigRpcError("transport", "Codex app-server process scopes require Windows Job Object support");
   }
 }
 function classifyProtocolError(error) {
@@ -571,17 +1836,17 @@ function safeMethodName(method) {
 }
 
 // packages/installer/src/codex-config/values.ts
-import { existsSync as existsSync2, lstatSync as lstatSync2, realpathSync } from "fs";
-import { isAbsolute as isAbsolute2, resolve as resolve3 } from "path";
+import { existsSync as existsSync2, lstatSync as lstatSync2, realpathSync as realpathSync2 } from "fs";
+import { isAbsolute as isAbsolute3, resolve as resolve4 } from "path";
 function canonicalExistingPath(path) {
-  const absolute = resolve3(path);
-  return existsSync2(absolute) ? realpathSync(absolute) : absolute;
+  const absolute = resolve4(path);
+  return existsSync2(absolute) ? realpathSync2(absolute) : absolute;
 }
 function validateCodexBinary(codexBinary) {
-  if (!isAbsolute2(codexBinary)) {
+  if (!isAbsolute3(codexBinary)) {
     throw new Error("--codex-binary must be an absolute path");
   }
-  const binary = resolve3(codexBinary);
+  const binary = resolve4(codexBinary);
   if (!existsSync2(binary)) {
     throw new Error(`Codex binary is missing: ${binary}`);
   }
@@ -677,11 +1942,11 @@ function statNanoseconds(nanoseconds, milliseconds) {
   return typeof milliseconds === "bigint" ? milliseconds * 1000000n : BigInt(Math.round(milliseconds * 1e6));
 }
 function createConfigPreviewSnapshot(selectedHome, previewHome) {
-  const configPath = join2(selectedHome, "config.toml");
+  const configPath = join6(selectedHome, "config.toml");
   if (!pathEntryExists(configPath)) {
     return;
   }
-  const configBytes = copyPrivateSnapshotFile(selectedHome, configPath, join2(previewHome, "config.toml"), "selected Codex config", MAX_PREVIEW_TOTAL_BYTES);
+  const configBytes = copyPrivateSnapshotFile(selectedHome, configPath, join6(previewHome, "config.toml"), "selected Codex config", MAX_PREVIEW_TOTAL_BYTES);
   const budget = {
     bytes: configBytes,
     copied: new Set([canonicalExistingPath(configPath)]),
@@ -690,7 +1955,7 @@ function createConfigPreviewSnapshot(selectedHome, previewHome) {
   copyRelativeConfigInputs(configPath, selectedHome, previewHome, budget, 0);
 }
 function copyRelativeConfigInputs(documentPath, selectedHome, previewHome, budget, depth) {
-  const contents = readFileSync2(join2(previewHome, safeSnapshotRelativePath(selectedHome, documentPath)), "utf8");
+  const contents = readFileSync2(join6(previewHome, safeSnapshotRelativePath(selectedHome, documentPath)), "utf8");
   let parsed;
   try {
     parsed = Bun.TOML.parse(contents);
@@ -698,10 +1963,10 @@ function copyRelativeConfigInputs(documentPath, selectedHome, previewHome, budge
     return;
   }
   for (const reference of configFileReferences(parsed)) {
-    if (isAbsolute3(reference.value) || isHomeRelative(reference.value)) {
+    if (isAbsolute4(reference.value) || isHomeRelative(reference.value)) {
       continue;
     }
-    const source = resolve4(dirname(documentPath), reference.value);
+    const source = resolve5(dirname2(documentPath), reference.value);
     const relativePath = safeSnapshotRelativePath(selectedHome, source);
     const sourceKey = canonicalExistingPath(source);
     if (budget.copied.has(sourceKey)) {
@@ -714,7 +1979,7 @@ function copyRelativeConfigInputs(documentPath, selectedHome, previewHome, budge
       throw new Error("dry-run snapshot nested-config depth limit exceeded");
     }
     budget.referencedFiles += 1;
-    const destination = join2(previewHome, relativePath);
+    const destination = join6(previewHome, relativePath);
     const copiedBytes = copyPrivateSnapshotFile(selectedHome, source, destination, reference.key, Math.min(MAX_PREVIEW_FILE_BYTES, MAX_PREVIEW_TOTAL_BYTES - budget.bytes));
     budget.bytes += copiedBytes;
     budget.copied.add(sourceKey);
@@ -761,7 +2026,7 @@ function snapshotSourceIdentities(selectedHome, source, label) {
   let current = selectedHome;
   for (const segment of ["", ...relativePath.split(sep)]) {
     if (segment) {
-      current = join2(current, segment);
+      current = join6(current, segment);
     }
     let metadata;
     try {
@@ -781,8 +2046,8 @@ function snapshotSourceIdentities(selectedHome, source, label) {
   return identities;
 }
 function safeSnapshotRelativePath(selectedHome, source) {
-  const relativePath = relative(selectedHome, source);
-  if (!relativePath || relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute3(relativePath)) {
+  const relativePath = relative2(selectedHome, source);
+  if (!relativePath || relativePath === ".." || relativePath.startsWith(`..${sep}`) || isAbsolute4(relativePath)) {
     throw new Error("selected Codex config-relative input escapes the selected home");
   }
   return relativePath;
@@ -793,7 +2058,7 @@ function copyPrivateSnapshotFile(selectedHome, source, destination, label, maxBy
   if (!expectedFile) {
     throw new Error("config snapshot identity is empty");
   }
-  const descriptor = openSync(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const descriptor = openSync(source, constants2.O_RDONLY | constants2.O_NOFOLLOW);
   let bytes;
   try {
     const opened = fstatSync(descriptor, { bigint: true });
@@ -803,7 +2068,7 @@ function copyPrivateSnapshotFile(selectedHome, source, destination, label, maxBy
     }
     assertSnapshotIdentities(identities, label);
     bytes = readFileSync2(descriptor);
-    const rereadDescriptor = openSync(source, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const rereadDescriptor = openSync(source, constants2.O_RDONLY | constants2.O_NOFOLLOW);
     try {
       const rereadStat = fstatSync(rereadDescriptor, { bigint: true });
       assertSnapshotStat(rereadStat, expectedFile, label);
@@ -818,8 +2083,8 @@ function copyPrivateSnapshotFile(selectedHome, source, destination, label, maxBy
   } finally {
     closeSync(descriptor);
   }
-  mkdirSync2(dirname(destination), { recursive: true, mode: 448 });
-  chmodSync2(dirname(destination), 448);
+  mkdirSync2(dirname2(destination), { recursive: true, mode: 448 });
+  chmodSync2(dirname2(destination), 448);
   writeFileSync(destination, bytes, { flag: "wx", mode: 384 });
   chmodSync2(destination, 384);
   return bytes.byteLength;
@@ -880,7 +2145,7 @@ function remapPreviewValue(value, previewHome, selectedHome) {
       return selectedHome;
     }
     if (value.startsWith(`${previewHome}${sep}`)) {
-      return join2(selectedHome, relative(previewHome, value));
+      return join6(selectedHome, relative2(previewHome, value));
     }
     return value;
   }
@@ -906,7 +2171,7 @@ import {
   rmSync as rmSync2,
   writeFileSync as writeFileSync2
 } from "fs";
-import { dirname as dirname2 } from "path";
+import { dirname as dirname3 } from "path";
 function ensurePrivateDirectory(path) {
   if (pathEntryExists(path) && lstatSync4(path).isSymbolicLink()) {
     throw new Error(`refusing to manage through a symlinked directory: ${path}`);
@@ -915,7 +2180,7 @@ function ensurePrivateDirectory(path) {
   chmodSync3(path, 448);
 }
 function writePrivateJson(path, value, exclusive = false) {
-  ensurePrivateDirectory(dirname2(path));
+  ensurePrivateDirectory(dirname3(path));
   const contents = `${JSON.stringify(value, null, 2)}
 `;
   if (exclusive) {
@@ -945,37 +2210,77 @@ function readJsonFile(path, label) {
 // packages/installer/src/codex-config.ts
 async function openConfigRpcSession(options) {
   const selectedHome = canonicalExistingPath(options.codexHome);
-  const configPath = join3(selectedHome, "config.toml");
+  const configPath = join7(selectedHome, "config.toml");
+  const owned = options.workspace === undefined && options.rpcFactory === undefined ? await createOwnedWorkspace() : undefined;
+  const workspace = options.workspace ?? owned;
   if (!options.dryRun || options.rpcFactory) {
-    return {
-      rpc: await (options.rpcFactory ?? AppServerRpc.create)(selectedHome, options.codexBinary),
-      configPath,
-      cleanup: noRpcCleanup
-    };
+    try {
+      const rpc = options.rpcFactory ? await options.rpcFactory(selectedHome, options.codexBinary) : await AppServerRpc.create(selectedHome, options.codexBinary, requiredWorkspace(workspace));
+      return {
+        rpc,
+        configPath,
+        cleanup: () => closeOwnedWorkspace(owned)
+      };
+    } catch (error) {
+      await closeOwnedWorkspace(owned, { error });
+      throw error;
+    }
   }
-  const previewHome = realpathSync2(mkdtempSync(join3(tmpdir(), "skizzles-config-preview-")));
-  chmodSync4(previewHome, 448);
   try {
+    const previewPath = requiredWorkspace(workspace).path("config-preview");
+    mkdirSync4(previewPath, { recursive: true, mode: 448 });
+    const previewHome = realpathSync3(previewPath);
+    chmodSync4(previewHome, 448);
     createConfigPreviewSnapshot(selectedHome, previewHome);
-    const inner = await AppServerRpc.create(previewHome, options.codexBinary);
+    const inner = await AppServerRpc.create(previewHome, options.codexBinary, requiredWorkspace(workspace));
     return {
       rpc: new PreviewConfigRpc(inner, previewHome, selectedHome),
       configPath,
-      cleanup: () => rmSync3(previewHome, { recursive: true, force: true })
+      cleanup: () => closeOwnedWorkspace(owned)
     };
   } catch (error) {
-    rmSync3(previewHome, { recursive: true, force: true });
+    await closeOwnedWorkspace(owned, { error });
     throw error;
   }
 }
-function noRpcCleanup() {}
+function requiredWorkspace(workspace) {
+  if (workspace === undefined) {
+    throw new Error("installer operation requires a run workspace");
+  }
+  return workspace;
+}
+async function createOwnedWorkspace() {
+  const stale = await cleanupStale();
+  if (stale.failed.length > 0 || stale.truncated) {
+    throw new Error("installer stale workspace cleanup failed");
+  }
+  return await create();
+}
+async function closeOwnedWorkspace(workspace, operation) {
+  if (workspace === undefined)
+    return;
+  let report;
+  try {
+    report = await workspace.close();
+  } catch (cleanup) {
+    throw new Error("installer temporary cleanup failed", {
+      cause: operation === undefined ? cleanup : new AggregateError([cleanup, operation.error], "workspace cleanup and config RPC acquisition both failed")
+    });
+  }
+  if (report.state === "cleanup-failed") {
+    const cleanup = new Error(`installer temporary cleanup failed: ${report.error ?? "CLEANUP_FAILED"}`);
+    throw new Error(cleanup.message, {
+      cause: operation === undefined ? cleanup : new AggregateError([cleanup, operation.error], "workspace cleanup and config RPC acquisition both failed")
+    });
+  }
+}
 
 // packages/installer/src/config.ts
 var aggressiveModeHint = "Proactive complexity-aware delegation is active. Follow $fourth-wall whenever orchestration would materially improve speed or quality.";
 var rootHint = "Fourth Wall applies. Read and follow $fourth-wall before this task's first orchestration action.";
 var subagentHint = "Fourth Wall applies. Read and follow $fourth-wall and the behavioral role resource named in your assignment.";
 function configReceiptPath(codexHome) {
-  return join4(canonicalExistingPath(codexHome), ".skizzles", "config-receipt.json");
+  return join8(canonicalExistingPath(codexHome), ".skizzles", "config-receipt.json");
 }
 function desiredConfigEdits(orchestration) {
   const edits = [
@@ -1060,10 +2365,10 @@ function isJsonValue2(value) {
   return object !== undefined && Object.values(object).every(isJsonValue2);
 }
 function validateReceiptTarget(receipt, codexHome, codexBinary) {
-  if (resolve5(receipt.codexBinary) !== codexBinary) {
+  if (resolve6(receipt.codexBinary) !== codexBinary) {
     throw new Error(`use the Codex binary recorded by the config receipt: ${receipt.codexBinary}`);
   }
-  if (resolve5(receipt.configPath) !== join4(codexHome, "config.toml")) {
+  if (resolve6(receipt.configPath) !== join8(codexHome, "config.toml")) {
     throw new Error("config receipt points outside the selected CODEX_HOME");
   }
 }
@@ -1101,7 +2406,7 @@ async function writeConfigBatch(rpc, edits, filePath, expectedVersion, conflictR
     });
   } catch (error) {
     if (conflictReceiptPath && isConfigVersionConflict(error)) {
-      rmSync4(conflictReceiptPath, { force: true });
+      rmSync3(conflictReceiptPath, { force: true });
     }
     throw safeConfigWriteError(error);
   }
@@ -1128,12 +2433,13 @@ async function configureCodex(options) {
   assertManagedParentsAreReal(codexHome, [".skizzles"]);
   const receiptPath = configReceiptPath(codexHome);
   const existingReceipt = pendingConfigureReceipt(receiptPath, codexHome, codexBinary, options.orchestration);
-  const configPath = join4(codexHome, "config.toml");
+  const configPath = join8(codexHome, "config.toml");
   const rpcSession = await openConfigRpcSession({
     codexHome,
     codexBinary,
     dryRun: options.dryRun,
-    rpcFactory: options.rpcFactory
+    rpcFactory: options.rpcFactory,
+    workspace: options.workspace
   });
   const { rpc } = rpcSession;
   try {
@@ -1162,7 +2468,7 @@ async function configureCodex(options) {
     try {
       await rpc.close();
     } finally {
-      rpcSession.cleanup();
+      await rpcSession.cleanup();
     }
   }
 }
@@ -1177,7 +2483,8 @@ async function unconfigureCodex(options) {
     codexHome,
     codexBinary,
     dryRun: options.dryRun,
-    rpcFactory: options.rpcFactory
+    rpcFactory: options.rpcFactory,
+    workspace: options.workspace
   });
   const { rpc } = rpcSession;
   try {
@@ -1186,7 +2493,7 @@ async function unconfigureCodex(options) {
     const atAfter = valuesMatchAfter(layer.config, receipt.values);
     if (atBefore && (receipt.state === "pending" || receipt.state === "restoring")) {
       if (!options.dryRun) {
-        rmSync4(receiptPath);
+        rmSync3(receiptPath);
       }
       return receipt;
     }
@@ -1208,13 +2515,13 @@ async function unconfigureCodex(options) {
     } catch (error) {
       throw safeConfigWriteError(error);
     }
-    rmSync4(receiptPath);
+    rmSync3(receiptPath);
     return receipt;
   } finally {
     try {
       await rpc.close();
     } finally {
-      rpcSession.cleanup();
+      await rpcSession.cleanup();
     }
   }
 }
@@ -1222,16 +2529,14 @@ async function unconfigureCodex(options) {
 // packages/installer/src/doctor.ts
 import {
   accessSync,
-  constants as constants2,
+  constants as constants3,
   existsSync as existsSync6,
   lstatSync as lstatSync7,
-  mkdtempSync as mkdtempSync2,
-  readFileSync as readFileSync6,
-  rmSync as rmSync7
+  mkdirSync as mkdirSync7,
+  readFileSync as readFileSync6
 } from "fs";
-import { tmpdir as tmpdir2 } from "os";
-import { delimiter, join as join7, resolve as resolve8 } from "path";
-import process3 from "process";
+import { delimiter, join as join11, resolve as resolve9 } from "path";
+import process6 from "process";
 // packages/container-lab/assets/integrations/container-lab.json
 var container_lab_default = {
   id: "codex-container-lab",
@@ -1290,17 +2595,17 @@ var container_lab_default = {
 import {
   existsSync as existsSync4,
   lstatSync as lstatSync5,
-  mkdirSync as mkdirSync4,
+  mkdirSync as mkdirSync5,
   readFileSync as readFileSync4,
   readlinkSync,
   renameSync as renameSync3,
-  rmSync as rmSync5,
+  rmSync as rmSync4,
   symlinkSync,
   writeFileSync as writeFileSync3
 } from "fs";
-import { dirname as dirname3, join as join5, resolve as resolve6 } from "path";
+import { dirname as dirname4, join as join9, resolve as resolve7 } from "path";
 function harnessReceiptPath(home) {
-  return join5(resolve6(home), ".skizzles", "harness-receipt.json");
+  return join9(resolve7(home), ".skizzles", "harness-receipt.json");
 }
 function pluginEntry() {
   return {
@@ -1343,11 +2648,11 @@ function objectValue2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
 }
 function installHarness(options) {
-  const home = resolve6(options.home);
-  const sourceRoot = resolve6(options.sourceRoot);
-  const pluginSource = join5(sourceRoot, "plugins", "skizzles");
-  const pluginTarget = join5(home, "plugins", "skizzles");
-  const marketplacePath = join5(home, ".agents", "plugins", "marketplace.json");
+  const home = resolve7(options.home);
+  const sourceRoot = resolve7(options.sourceRoot);
+  const pluginSource = join9(sourceRoot, "plugins", "skizzles");
+  const pluginTarget = join9(home, "plugins", "skizzles");
+  const marketplacePath = join9(home, ".agents", "plugins", "marketplace.json");
   const receiptPath = harnessReceiptPath(home);
   assertManagedParentsAreReal(home, [
     "plugins",
@@ -1355,7 +2660,7 @@ function installHarness(options) {
     ".agents/plugins",
     ".skizzles"
   ]);
-  if (!existsSync4(join5(pluginSource, ".codex-plugin", "plugin.json"))) {
+  if (!existsSync4(join9(pluginSource, ".codex-plugin", "plugin.json"))) {
     throw new Error(`generated plugin is missing: ${pluginSource}`);
   }
   if (pathEntryExists(pluginTarget)) {
@@ -1380,28 +2685,28 @@ function installHarness(options) {
     return receipt;
   }
   try {
-    mkdirSync4(dirname3(pluginTarget), { recursive: true });
+    mkdirSync5(dirname4(pluginTarget), { recursive: true });
     if (options.transfer === "link") {
       symlinkSync(pluginSource, pluginTarget, "dir");
     } else {
       copyDirectoryExclusive(pluginSource, pluginTarget);
     }
-    mkdirSync4(dirname3(marketplacePath), { recursive: true });
+    mkdirSync5(dirname4(marketplacePath), { recursive: true });
     writeFileSync3(marketplacePath, marketplaceAfter, { flag: "wx" });
-    mkdirSync4(dirname3(receiptPath), { recursive: true });
+    mkdirSync5(dirname4(receiptPath), { recursive: true });
     writeFileSync3(receiptPath, `${JSON.stringify(receipt, null, 2)}
 `, {
       flag: "wx"
     });
   } catch (error) {
-    rmSync5(pluginTarget, { recursive: true, force: true });
-    rmSync5(marketplacePath, { force: true });
+    rmSync4(pluginTarget, { recursive: true, force: true });
+    rmSync4(marketplacePath, { force: true });
     throw error;
   }
   return receipt;
 }
 function uninstallHarness(homeInput, dryRun = false, move = renameSync3) {
-  const home = resolve6(homeInput);
+  const home = resolve7(homeInput);
   assertManagedParentsAreReal(home, [
     "plugins",
     ".agents",
@@ -1409,21 +2714,21 @@ function uninstallHarness(homeInput, dryRun = false, move = renameSync3) {
     ".skizzles"
   ]);
   const receipt = readReceipt2(home);
-  const expectedTarget = join5(home, "plugins", "skizzles");
-  const expectedMarketplace = join5(home, ".agents", "plugins", "marketplace.json");
-  if (resolve6(receipt.pluginTarget) !== expectedTarget || resolve6(receipt.marketplacePath) !== expectedMarketplace) {
+  const expectedTarget = join9(home, "plugins", "skizzles");
+  const expectedMarketplace = join9(home, ".agents", "plugins", "marketplace.json");
+  if (resolve7(receipt.pluginTarget) !== expectedTarget || resolve7(receipt.marketplacePath) !== expectedMarketplace) {
     throw new Error("harness receipt targets are outside the selected HOME");
   }
   if (!pathEntryExists(receipt.pluginTarget)) {
     throw new Error("owned plugin target is missing");
   }
-  const pluginSource = join5(receipt.sourceRoot, "plugins", "skizzles");
+  const pluginSource = join9(receipt.sourceRoot, "plugins", "skizzles");
   if (receipt.transfer === "link") {
     if (!lstatSync5(receipt.pluginTarget).isSymbolicLink()) {
       throw new Error("owned plugin link changed type");
     }
-    const actual = resolve6(dirname3(receipt.pluginTarget), readlinkSync(receipt.pluginTarget));
-    if (actual !== resolve6(pluginSource)) {
+    const actual = resolve7(dirname4(receipt.pluginTarget), readlinkSync(receipt.pluginTarget));
+    if (actual !== resolve7(pluginSource)) {
       throw new Error("owned plugin link target drifted");
     }
   } else if (!sameTree(pluginSource, receipt.pluginTarget)) {
@@ -1435,8 +2740,8 @@ function uninstallHarness(homeInput, dryRun = false, move = renameSync3) {
   if (dryRun) {
     return receipt;
   }
-  const quarantine = join5(home, ".skizzles", `harness-uninstall-${crypto.randomUUID()}`);
-  mkdirSync4(quarantine);
+  const quarantine = join9(home, ".skizzles", `harness-uninstall-${crypto.randomUUID()}`);
+  mkdirSync5(quarantine);
   const moved = [];
   try {
     for (const [from, name] of [
@@ -1444,17 +2749,17 @@ function uninstallHarness(homeInput, dryRun = false, move = renameSync3) {
       [receipt.pluginTarget, "plugin"],
       [harnessReceiptPath(home), "receipt.json"]
     ]) {
-      const to = join5(quarantine, name);
+      const to = join9(quarantine, name);
       move(from, to);
       moved.push({ from, to });
     }
   } catch (error) {
     rollbackStagedMoves(moved);
-    rmSync5(quarantine, { recursive: true, force: true });
+    rmSync4(quarantine, { recursive: true, force: true });
     throw error;
   }
   try {
-    rmSync5(quarantine, { recursive: true, force: true });
+    rmSync4(quarantine, { recursive: true, force: true });
   } catch {}
   return receipt;
 }
@@ -1463,27 +2768,27 @@ function uninstallHarness(homeInput, dryRun = false, move = renameSync3) {
 import {
   existsSync as existsSync5,
   lstatSync as lstatSync6,
-  mkdirSync as mkdirSync5,
+  mkdirSync as mkdirSync6,
   readdirSync as readdirSync2,
   readFileSync as readFileSync5,
   readlinkSync as readlinkSync2,
   renameSync as renameSync4,
-  rmSync as rmSync6,
+  rmSync as rmSync5,
   symlinkSync as symlinkSync2,
   writeFileSync as writeFileSync4
 } from "fs";
-import { dirname as dirname4, join as join6, relative as relative2, resolve as resolve7 } from "path";
-import process2 from "process";
+import { dirname as dirname5, join as join10, relative as relative3, resolve as resolve8 } from "path";
+import process5 from "process";
 var receiptName = "skills-receipt.json";
 function skillsReceiptPath(codexHome) {
-  return join6(resolve7(codexHome), ".skizzles", receiptName);
+  return join10(resolve8(codexHome), ".skizzles", receiptName);
 }
 function publicSkills(sourceRoot) {
-  const root = join6(resolve7(sourceRoot), "skills");
+  const root = join10(resolve8(sourceRoot), "skills");
   if (!existsSync5(root)) {
     throw new Error(`canonical skills directory is missing: ${root}`);
   }
-  return readdirSync2(root, { withFileTypes: true }).filter((entry) => entry.isDirectory() && existsSync5(join6(root, entry.name, "SKILL.md"))).map((entry) => ({ name: entry.name, source: join6(root, entry.name) })).sort((left, right) => left.name.localeCompare(right.name));
+  return readdirSync2(root, { withFileTypes: true }).filter((entry) => entry.isDirectory() && existsSync5(join10(root, entry.name, "SKILL.md"))).map((entry) => ({ name: entry.name, source: join10(root, entry.name) })).sort((left, right) => left.name.localeCompare(right.name));
 }
 function readReceipt3(codexHome) {
   const path = skillsReceiptPath(codexHome);
@@ -1514,8 +2819,8 @@ function objectValue3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
 }
 function installSkills(options) {
-  const codexHome = resolve7(options.codexHome);
-  const sourceRoot = resolve7(options.sourceRoot);
+  const codexHome = resolve8(options.codexHome);
+  const sourceRoot = resolve8(options.sourceRoot);
   assertManagedParentsAreReal(codexHome, ["skills", ".skizzles"]);
   const receiptPath = skillsReceiptPath(codexHome);
   if (pathEntryExists(receiptPath)) {
@@ -1524,7 +2829,7 @@ function installSkills(options) {
   const skills = publicSkills(sourceRoot).map(({ name, source }) => ({
     name,
     source,
-    target: join6(codexHome, "skills", name)
+    target: join10(codexHome, "skills", name)
   }));
   if (skills.length === 0) {
     throw new Error("no public skills were found");
@@ -1542,7 +2847,7 @@ function installSkills(options) {
   if (options.dryRun) {
     return receipt;
   }
-  mkdirSync5(join6(codexHome, "skills"), { recursive: true });
+  mkdirSync6(join10(codexHome, "skills"), { recursive: true });
   const created = [];
   try {
     for (const skill of skills) {
@@ -1553,36 +2858,36 @@ function installSkills(options) {
       }
       created.push(skill.target);
     }
-    mkdirSync5(dirname4(receiptPath), { recursive: true });
+    mkdirSync6(dirname5(receiptPath), { recursive: true });
     writeFileSync4(receiptPath, `${JSON.stringify(receipt, null, 2)}
 `, {
       flag: "wx"
     });
   } catch (error) {
     for (const target of created.reverse()) {
-      rmSync6(target, { recursive: true, force: true });
+      rmSync5(target, { recursive: true, force: true });
     }
     throw error;
   }
   return receipt;
 }
 function uninstallSkills(codexHomeInput, dryRun = false, move = renameSync4) {
-  const codexHome = resolve7(codexHomeInput);
+  const codexHome = resolve8(codexHomeInput);
   assertManagedParentsAreReal(codexHome, ["skills", ".skizzles"]);
   const receipt = readReceipt3(codexHome);
   for (const skill of receipt.skills) {
-    const target = resolve7(skill.target);
-    const expectedParent = join6(codexHome, "skills");
-    if (dirname4(target) !== expectedParent || !pathEntryExists(target)) {
+    const target = resolve8(skill.target);
+    const expectedParent = join10(codexHome, "skills");
+    if (dirname5(target) !== expectedParent || !pathEntryExists(target)) {
       throw new Error(`owned skill target is missing or outside CODEX_HOME: ${target}`);
     }
-    const source = join6(receipt.sourceRoot, "skills", skill.name);
+    const source = join10(receipt.sourceRoot, "skills", skill.name);
     if (receipt.transfer === "link") {
       if (!lstatSync6(target).isSymbolicLink()) {
         throw new Error(`owned link changed type: ${target}`);
       }
-      const actual = resolve7(dirname4(target), readlinkSync2(target));
-      if (actual !== resolve7(source)) {
+      const actual = resolve8(dirname5(target), readlinkSync2(target));
+      if (actual !== resolve8(source)) {
         throw new Error(`owned link target drifted: ${target}`);
       }
     } else if (!sameTree(source, target)) {
@@ -1592,26 +2897,26 @@ function uninstallSkills(codexHomeInput, dryRun = false, move = renameSync4) {
   if (dryRun) {
     return receipt;
   }
-  const quarantine = join6(codexHome, ".skizzles", `uninstall-${crypto.randomUUID()}`);
-  mkdirSync5(quarantine);
+  const quarantine = join10(codexHome, ".skizzles", `uninstall-${crypto.randomUUID()}`);
+  mkdirSync6(quarantine);
   const moved = [];
   try {
     for (const skill of receipt.skills) {
-      const destination = join6(quarantine, skill.name);
+      const destination = join10(quarantine, skill.name);
       move(skill.target, destination);
       moved.push({ from: skill.target, to: destination });
     }
     const receiptPath = skillsReceiptPath(codexHome);
-    const receiptDestination = join6(quarantine, receiptName);
+    const receiptDestination = join10(quarantine, receiptName);
     move(receiptPath, receiptDestination);
     moved.push({ from: receiptPath, to: receiptDestination });
   } catch (error) {
     rollbackStagedMoves(moved);
-    rmSync6(quarantine, { recursive: true, force: true });
+    rmSync5(quarantine, { recursive: true, force: true });
     throw error;
   }
   try {
-    rmSync6(quarantine, { recursive: true, force: true });
+    rmSync5(quarantine, { recursive: true, force: true });
   } catch {}
   return receipt;
 }
@@ -1622,14 +2927,14 @@ function receiptSummary(receipt) {
     sourceRoot: receipt.sourceRoot,
     skills: receipt.skills.map(({ name, target }) => ({
       name,
-      target: relative2(process2.cwd(), target) || target
+      target: relative3(process5.cwd(), target) || target
     }))
   };
 }
 
 // packages/installer/src/doctor.ts
-var COMMIT_PATTERN = /^[0-9a-f]{40}$/;
-var LINE_PATTERN = /\r?\n/;
+var COMMIT_PATTERN = /^[0-9a-f]{40}$/u;
+var LINE_PATTERN = /\r?\n/u;
 function contract(descriptorPath) {
   const value = descriptorPath === undefined ? container_lab_default : JSON.parse(readFileSync6(descriptorPath, "utf8"));
   const root = objectValue4(value);
@@ -1687,9 +2992,9 @@ function executable(name, pathValue) {
     if (!directory) {
       continue;
     }
-    const candidate = resolve8(directory, name);
+    const candidate = resolve9(directory, name);
     try {
-      accessSync(candidate, constants2.X_OK);
+      accessSync(candidate, constants3.X_OK);
       return candidate;
     } catch {}
   }
@@ -1727,13 +3032,22 @@ function adminJson(command, args, environment, maximumBytes, timeoutMs) {
   }
   return record;
 }
-function inspectContainerLab(operational, reaper, descriptor, pathValue, timeoutMs) {
+function inspectContainerLab(operational, reaper, descriptor, pathValue, timeoutMs, workspace) {
   const base = {
     version: `configured-${descriptor.configuredRuntime}-unverified`
   };
-  const root = mkdtempSync2(join7(tmpdir2(), "skizzles-container-lab-doctor-"));
+  const root = workspace.path("container-lab-doctor");
+  mkdirSync7(root, { recursive: true, mode: 448 });
   try {
-    const environment = { PATH: pathValue, HOME: join7(root, "home") };
+    const processTemp = join11(root, "tmp");
+    mkdirSync7(processTemp, { recursive: true, mode: 448 });
+    const environment = {
+      PATH: pathValue,
+      HOME: join11(root, "home"),
+      TEMP: processTemp,
+      TMP: processTemp,
+      TMPDIR: processTemp
+    };
     const help = adminJson(operational, ["--help"], environment, descriptor.execution.adminMaxBytes, timeoutMs);
     const reaperHelp = adminJson(reaper, ["--help"], environment, descriptor.execution.adminMaxBytes, timeoutMs);
     if (typeof help["help"] !== "string" || !help["help"].includes("run --lab") || typeof reaperHelp["help"] !== "string" || !reaperHelp["help"].includes("codex-container-lab-reaper")) {
@@ -1749,9 +3063,9 @@ function inspectContainerLab(operational, reaper, descriptor, pathValue, timeout
       "--owner",
       `skizzles-doctor-${crypto.randomUUID()}`,
       "--state-root",
-      join7(root, "state"),
+      join11(root, "state"),
       "--runtime-root",
-      join7(root, "runtime"),
+      join11(root, "runtime"),
       "health"
     ], environment, descriptor.execution.adminMaxBytes, timeoutMs);
     if (health["ok"] !== true || typeof health["dockerAvailable"] !== "boolean" || typeof health["labs"] !== "number") {
@@ -1780,11 +3094,9 @@ function inspectContainerLab(operational, reaper, descriptor, pathValue, timeout
       ready: false,
       reason
     };
-  } finally {
-    rmSync7(root, { recursive: true, force: true });
   }
 }
-function doctorContainerLab(pathValue = process3.env["PATH"] ?? "", descriptorPath, timeoutMs = 5000) {
+function doctorContainerLab(pathValue = process6.env["PATH"] ?? "", descriptorPath, timeoutMs = 5000, workspace) {
   const descriptor = contract(descriptorPath);
   const operational = executable(descriptor.binaries.operational, pathValue);
   const reaper = executable(descriptor.binaries.reaper, pathValue);
@@ -1800,10 +3112,10 @@ function doctorContainerLab(pathValue = process3.env["PATH"] ?? "", descriptorPa
       reason: "optional Container Lab PATH convenience binaries are missing"
     };
   }
-  return inspectContainerLab([operational], [reaper], descriptor, pathValue, timeoutMs);
+  return inspectContainerLab([operational], [reaper], descriptor, pathValue, timeoutMs, requiredWorkspace2(workspace));
 }
-function doctor(home, codexHome, pathValue = process3.env["PATH"] ?? "") {
-  const containerLab = doctorContainerLab(pathValue);
+function doctor(home, codexHome, pathValue = process6.env["PATH"] ?? "", workspace) {
+  const containerLab = doctorContainerLab(pathValue, undefined, 5000, workspace);
   let skills = "absent";
   let harness = "absent";
   if (existsSync6(skillsReceiptPath(codexHome))) {
@@ -1828,10 +3140,64 @@ function doctor(home, codexHome, pathValue = process3.env["PATH"] ?? "") {
     containerLab
   };
 }
+function requiredWorkspace2(workspace) {
+  if (workspace === undefined) {
+    throw new Error("Container Lab doctor requires a run workspace");
+  }
+  return workspace;
+}
+
+// packages/installer/src/lifecycle.ts
+var systemLifecycle = { cleanupStale, create };
+async function runInstallerOperation(operation) {
+  return await runInstallerOperationWithLifecycle(operation, systemLifecycle);
+}
+async function runInstallerOperationWithLifecycle(operation, lifecycle) {
+  const stale = await lifecycle.cleanupStale();
+  if (stale.failed.length > 0 || stale.truncated) {
+    throw new Error("installer stale workspace cleanup failed");
+  }
+  const workspace = await lifecycle.create({ handleSignals: true });
+  let outcome;
+  try {
+    const interrupted = new Promise((_resolve, reject) => {
+      const abort = () => reject(workspace.signal.reason);
+      workspace.signal.addEventListener("abort", abort, { once: true });
+      if (workspace.signal.aborted)
+        abort();
+    });
+    outcome = {
+      ok: true,
+      value: await Promise.race([operation(workspace), interrupted])
+    };
+  } catch (error) {
+    outcome = { ok: false, error };
+  }
+  let report;
+  try {
+    report = await workspace.close();
+  } catch (error) {
+    throw new Error("installer temporary cleanup failed", {
+      cause: outcome.ok ? error : new AggregateError([error, outcome.error], "workspace cleanup and installer operation both failed")
+    });
+  }
+  if (report.state === "cleanup-failed") {
+    const cleanupError = new Error(`installer temporary cleanup failed: ${report.error ?? "CLEANUP_FAILED"}`);
+    throw new Error(cleanupError.message, {
+      cause: outcome.ok ? cleanupError : new AggregateError([cleanupError, outcome.error], "workspace cleanup and installer operation both failed")
+    });
+  }
+  if (workspace.signal.reason instanceof RunWorkspaceAbortedError) {
+    throw workspace.signal.reason;
+  }
+  if (!outcome.ok)
+    throw outcome.error;
+  return outcome.value;
+}
 
 // packages/installer/src/prompt-policy.ts
 import { existsSync as existsSync10, lstatSync as lstatSync11 } from "fs";
-import { isAbsolute as isAbsolute6, join as join10, resolve as resolve12 } from "path";
+import { isAbsolute as isAbsolute7, join as join14, resolve as resolve13 } from "path";
 
 // packages/prompt-layer/src/lifecycle/contract.ts
 var PROMPT_LAYER_SOURCE_PATHS = {
@@ -1908,6 +3274,30 @@ var CANONICAL_PATHS = [
 
 // packages/prompt-layer/src/shipped-language/policy.ts
 var MAX_POLICY_BYTES = 64 * 1024;
+
+// packages/prompt-layer/src/lifecycle/workspace.ts
+import { mkdir as mkdir3 } from "fs/promises";
+class OwnedPromptWorkspace {
+  signal;
+  #workspace;
+  #sequence = 0;
+  constructor(workspace) {
+    this.#workspace = workspace;
+    this.signal = workspace.signal;
+  }
+  async directory(purpose) {
+    this.throwIfAborted();
+    const sequence = this.#sequence;
+    this.#sequence += 1;
+    const path = this.#workspace.path(`${purpose}-${sequence}`);
+    await mkdir3(path, { recursive: false, mode: 448 });
+    this.throwIfAborted();
+    return path;
+  }
+  throwIfAborted() {
+    this.signal.throwIfAborted();
+  }
+}
 // packages/prompt-layer/src/cli.ts
 if (false) {}
 
@@ -1917,19 +3307,19 @@ import {
   chmodSync as chmodSync5,
   existsSync as existsSync7,
   lstatSync as lstatSync8,
-  mkdirSync as mkdirSync6,
+  mkdirSync as mkdirSync8,
   readdirSync as readdirSync3,
   readFileSync as readFileSync7,
-  realpathSync as realpathSync3,
+  realpathSync as realpathSync4,
   renameSync as renameSync5,
   rmdirSync,
-  rmSync as rmSync8,
+  rmSync as rmSync6,
   statSync,
   writeFileSync as writeFileSync5
 } from "fs";
-import { tmpdir as tmpdir3 } from "os";
-import { basename, dirname as dirname5, join as join8, resolve as resolve9 } from "path";
-import process4 from "process";
+import { tmpdir as tmpdir2 } from "os";
+import { basename as basename3, dirname as dirname6, join as join12, resolve as resolve10 } from "path";
+import process7 from "process";
 var LOCK_SCHEMA = "skizzles.prompt-policy-lock";
 var LOCK_VERSION2 = 1;
 var OWNER_NAME = "owner.json";
@@ -1956,10 +3346,10 @@ var DARWIN_MONTHS = [
   "Dec"
 ];
 function promptPolicyLockPath(codexHome, lockParent = defaultLockParent()) {
-  const absolute = resolve9(codexHome);
-  const canonical = existsSync7(absolute) ? realpathSync3(absolute) : absolute;
+  const absolute = resolve10(codexHome);
+  const canonical = existsSync7(absolute) ? realpathSync4(absolute) : absolute;
   const key = createHash("sha256").update(canonical).digest("hex");
-  return join8(resolve9(lockParent), key);
+  return join12(resolve10(lockParent), key);
 }
 async function withPromptPolicyLock(codexHome, operation, options, work) {
   const lock = await acquireLock(codexHome, operation, options);
@@ -1973,9 +3363,9 @@ async function withPromptPolicyLock(codexHome, operation, options, work) {
   }
 }
 function acquireLock(codexHome, operation, options) {
-  const parent = resolve9(options?.lockParent ?? defaultLockParent());
+  const parent = resolve10(options?.lockParent ?? defaultLockParent());
   ensureSafeParent(parent);
-  const processStartIdentity = (options?.processStartIdentity ?? defaultProcessStartIdentity)(process4.pid);
+  const processStartIdentity = (options?.processStartIdentity ?? defaultProcessStartIdentity)(process7.pid);
   if (!validProcessStartIdentity2(processStartIdentity)) {
     throw new Error("cannot establish process-start identity for prompt-policy lifecycle lock");
   }
@@ -1983,7 +3373,7 @@ function acquireLock(codexHome, operation, options) {
     schema: LOCK_SCHEMA,
     version: LOCK_VERSION2,
     operation,
-    pid: process4.pid,
+    pid: process7.pid,
     processStartIdentity,
     token: randomUUID(),
     createdAtUnixMs: Date.now()
@@ -1997,7 +3387,7 @@ function acquireLock(codexHome, operation, options) {
   return reclaimStaleLock(parent, path, owner, options);
 }
 function cleanupLockOrphans(parent, lockPath, options) {
-  const prefix = `${basename(lockPath)}.`;
+  const prefix = `${basename3(lockPath)}.`;
   const grace = options?.incompleteGraceMs ?? DEFAULT_INCOMPLETE_GRACE_MS;
   for (const name of readdirSync3(parent).sort()) {
     if (!name.startsWith(prefix)) {
@@ -2007,7 +3397,7 @@ function cleanupLockOrphans(parent, lockPath, options) {
     if (!ORPHAN_NAME_PATTERN.test(suffix)) {
       throw new Error("prompt-policy lock parent contains malformed orphan state");
     }
-    const path = join8(parent, name);
+    const path = join12(parent, name);
     const metadata = lstatSync8(path);
     if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
       throw new Error("prompt-policy lock orphan is not a safe directory");
@@ -2015,7 +3405,7 @@ function cleanupLockOrphans(parent, lockPath, options) {
     if ((metadata.mode & 511) !== 448) {
       throw new Error("prompt-policy lock orphan must have mode 0700");
     }
-    const identity = fileIdentity2(path);
+    const identity = fileIdentity3(path);
     const entries = readdirSync3(path).sort();
     if (entries.length > 1 || entries.length === 1 && entries[0] !== OWNER_NAME) {
       throw new Error("prompt-policy lock orphan contains unexpected entries");
@@ -2035,7 +3425,7 @@ function cleanupLockOrphans(parent, lockPath, options) {
 }
 function createLock(parent, path, owner) {
   try {
-    mkdirSync6(path, { mode: 448 });
+    mkdirSync8(path, { mode: 448 });
   } catch (error) {
     if (isNodeError2(error) && error.code === "EEXIST") {
       return;
@@ -2043,14 +3433,14 @@ function createLock(parent, path, owner) {
     throw error;
   }
   chmodSync5(path, 448);
-  const identity = fileIdentity2(path);
+  const identity = fileIdentity3(path);
   try {
-    writeFileSync5(join8(path, OWNER_NAME), `${JSON.stringify(owner, null, 2)}
+    writeFileSync5(join12(path, OWNER_NAME), `${JSON.stringify(owner, null, 2)}
 `, {
       flag: "wx",
       mode: 384
     });
-    chmodSync5(join8(path, OWNER_NAME), 384);
+    chmodSync5(join12(path, OWNER_NAME), 384);
     const handle = { parent, path, identity, owner };
     verifyOwnedLock(handle, "initialization");
     return handle;
@@ -2071,7 +3461,7 @@ async function reclaimStaleLock(parent, path, replacement, options) {
   if ((metadata.mode & 511) !== 448) {
     throw new Error("prompt-policy lifecycle lock must have mode 0700");
   }
-  const identity = fileIdentity2(path);
+  const identity = fileIdentity3(path);
   const entries = readdirSync3(path).sort();
   if (entries.length > 1 || entries.length === 1 && entries[0] !== OWNER_NAME) {
     throw new Error("prompt-policy lifecycle lock contains unexpected entries");
@@ -2136,7 +3526,7 @@ function removeQuarantine(path, identity, ownerExpected) {
     throw new Error("prompt-policy lock quarantine contains unexpected entries");
   }
   if (ownerExpected) {
-    rmSync8(join8(path, OWNER_NAME));
+    rmSync6(join12(path, OWNER_NAME));
   }
   rmdirSync(path);
 }
@@ -2155,7 +3545,7 @@ function verifyOwnedLock(lock, phase) {
   }
 }
 function readOwner(lockPath) {
-  const path = join8(lockPath, OWNER_NAME);
+  const path = join12(lockPath, OWNER_NAME);
   const metadata = lstatSync8(path);
   if (metadata.isSymbolicLink() || !metadata.isFile()) {
     throw new Error("prompt-policy lock owner is not a regular file");
@@ -2216,7 +3606,7 @@ function assertStaleOwner(owner, provider = defaultProcessStartIdentity) {
   }
 }
 function defaultProcessStartIdentity(pid) {
-  if (process4.platform === "linux") {
+  if (process7.platform === "linux") {
     try {
       const stat = readFileSync7(`/proc/${pid}/stat`, "utf8");
       const commandEnd = stat.lastIndexOf(")");
@@ -2230,9 +3620,9 @@ function defaultProcessStartIdentity(pid) {
       return;
     }
   }
-  if (process4.platform === "darwin") {
+  if (process7.platform === "darwin") {
     const result = Bun.spawnSync(["/bin/ps", "-o", "lstart=", "-p", String(pid)], {
-      env: { ...process4.env, LANG: "C", LC_ALL: "C", TZ: "UTC" },
+      env: { ...process7.env, LANG: "C", LC_ALL: "C", TZ: "UTC" },
       stdout: "pipe",
       stderr: "ignore"
     });
@@ -2267,7 +3657,7 @@ function normalizeDarwinProcessStart(output) {
 }
 function processExists(pid) {
   try {
-    process4.kill(pid, 0);
+    process7.kill(pid, 0);
     return true;
   } catch (error) {
     if (isNodeError2(error) && error.code === "EPERM") {
@@ -2285,14 +3675,14 @@ function validProcessStartIdentity2(value) {
 function sameOwner(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
-function fileIdentity2(path) {
+function fileIdentity3(path) {
   const metadata = lstatSync8(path);
   return { dev: metadata.dev, ino: metadata.ino };
 }
 function assertIdentity(path, expected, message) {
   let actual;
   try {
-    actual = fileIdentity2(path);
+    actual = fileIdentity3(path);
   } catch {
     throw new Error(message);
   }
@@ -2301,7 +3691,7 @@ function assertIdentity(path, expected, message) {
   }
 }
 function ensureSafeParent(parent) {
-  const ancestor = dirname5(parent);
+  const ancestor = dirname6(parent);
   const ancestorMetadata = statSync(ancestor);
   if (!ancestorMetadata.isDirectory()) {
     throw new Error("prompt-policy lock parent ancestor is not a directory");
@@ -2315,7 +3705,7 @@ function ensureSafeParent(parent) {
     if (!isNodeError2(error) || error.code !== "ENOENT") {
       throw error;
     }
-    mkdirSync6(parent, { mode: 448 });
+    mkdirSync8(parent, { mode: 448 });
   }
   chmodSync5(parent, 448);
 }
@@ -2331,10 +3721,10 @@ function removeParentIfEmpty(parent) {
     throw error;
   }
 }
-function defaultLockParent() {
-  const uid = typeof process4.getuid === "function" ? process4.getuid() : process4.pid;
-  const systemTemp = process4.platform === "win32" ? tmpdir3() : realpathSync3("/tmp");
-  return join8(systemTemp, `skizzles-prompt-policy-locks-${uid}`);
+function defaultLockParent(temporaryDirectory = tmpdir2()) {
+  const uid = typeof process7.getuid === "function" ? process7.getuid() : process7.pid;
+  const systemTemp = realpathSync4(temporaryDirectory);
+  return join12(systemTemp, `skizzles-prompt-policy-locks-${uid}`);
 }
 function isObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -2348,19 +3738,19 @@ import {
   chmodSync as chmodSync6,
   existsSync as existsSync9,
   lstatSync as lstatSync10,
-  mkdirSync as mkdirSync7,
+  mkdirSync as mkdirSync9,
   readdirSync as readdirSync4,
   readFileSync as readFileSync9,
   rmdirSync as rmdirSync2,
-  rmSync as rmSync9,
+  rmSync as rmSync7,
   writeFileSync as writeFileSync6
 } from "fs";
-import { dirname as dirname7, isAbsolute as isAbsolute5, resolve as resolve11 } from "path";
+import { dirname as dirname8, isAbsolute as isAbsolute6, resolve as resolve12 } from "path";
 
 // packages/installer/src/prompt-policy/source.ts
 import { createHash as createHash2 } from "crypto";
-import { existsSync as existsSync8, lstatSync as lstatSync9, readFileSync as readFileSync8, realpathSync as realpathSync4 } from "fs";
-import { dirname as dirname6, isAbsolute as isAbsolute4, join as join9, relative as relative3, resolve as resolve10 } from "path";
+import { existsSync as existsSync8, lstatSync as lstatSync9, readFileSync as readFileSync8, realpathSync as realpathSync5 } from "fs";
+import { dirname as dirname7, isAbsolute as isAbsolute5, join as join13, relative as relative4, resolve as resolve11 } from "path";
 var MACHINE_PATH_PATTERNS = [
   /\/Users\/[A-Za-z0-9._-]+(?:\/|\b)/,
   /\/home\/[A-Za-z0-9._-]+(?:\/|\b)/,
@@ -2369,10 +3759,10 @@ var MACHINE_PATH_PATTERNS = [
 var IMMUTABLE_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 var SHA256_PATTERN = /^[0-9a-f]{64}$/;
 function readPolicySource(sourceRootInput, descriptorPathInput) {
-  if (!isAbsolute4(sourceRootInput)) {
+  if (!isAbsolute5(sourceRootInput)) {
     throw new Error("--source-root must be an absolute path");
   }
-  const requestedRoot = resolve10(sourceRootInput);
+  const requestedRoot = resolve11(sourceRootInput);
   if (!existsSync8(requestedRoot)) {
     throw new Error(`prompt-policy source root is missing: ${requestedRoot}`);
   }
@@ -2382,7 +3772,7 @@ function readPolicySource(sourceRootInput, descriptorPathInput) {
   if (!lstatSync9(requestedRoot).isDirectory()) {
     throw new Error(`prompt-policy source root is not a directory: ${requestedRoot}`);
   }
-  const sourceRoot = realpathSync4(requestedRoot);
+  const sourceRoot = realpathSync5(requestedRoot);
   const descriptorPath = portableRelativePath(descriptorPathInput, "prompt-policy descriptor path");
   const packagedDescriptorPath = PROMPT_POLICY_DESCRIPTOR_PATHS.packagedPath;
   const descriptorSuffix = `/${packagedDescriptorPath}`;
@@ -2395,18 +3785,18 @@ function readPolicySource(sourceRootInput, descriptorPathInput) {
   validateText2(descriptorBytes, "prompt-policy descriptor");
   rejectMachinePaths2(descriptorBytes, "prompt-policy descriptor");
   const descriptor = record2(readJsonFile(descriptorAbsolute, "prompt-policy descriptor"), "prompt-policy descriptor");
-  exactKeys(descriptor, ["schema", "version", "base", "developerInstructions", "compactPrompt"], "prompt-policy descriptor");
+  exactKeys2(descriptor, ["schema", "version", "base", "developerInstructions", "compactPrompt"], "prompt-policy descriptor");
   if (descriptor["schema"] !== "skizzles.prompt-policy" || descriptor["version"] !== 1) {
     throw new Error("unsupported prompt-policy descriptor schema or version");
   }
   const base = record2(descriptor["base"], "prompt-policy base");
-  exactKeys(base, ["role", "applied", "provenance", "upstream", "legal"], "prompt-policy base");
+  exactKeys2(base, ["role", "applied", "provenance", "upstream", "legal"], "prompt-policy base");
   const role = stringValue2(base["role"], "prompt-policy base role");
   const applied = parseFileFact(base["applied"], "base applied prompt");
   const provenance = parseFileFact(base["provenance"], "base provenance");
   const upstream = parseUpstreamFact(base["upstream"]);
   const legal = record2(base["legal"], "prompt-policy legal inputs");
-  exactKeys(legal, ["license", "notice"], "prompt-policy legal inputs");
+  exactKeys2(legal, ["license", "notice"], "prompt-policy legal inputs");
   const license = parseLegalFact(legal["license"], "prompt-policy LICENSE");
   const notice = parseLegalFact(legal["notice"], "prompt-policy NOTICE");
   assertCanonicalLegalMappings(license, notice);
@@ -2451,7 +3841,7 @@ function readPolicySource(sourceRootInput, descriptorPathInput) {
 }
 function parseFileFact(value, label) {
   const object = record2(value, label);
-  exactKeys(object, ["path", "sha256", "bytes"], label);
+  exactKeys2(object, ["path", "sha256", "bytes"], label);
   const path = portableRelativePath(object["path"], `${label} path`);
   return {
     path,
@@ -2461,7 +3851,7 @@ function parseFileFact(value, label) {
 }
 function parseLegalFact(value, label) {
   const object = record2(value, label);
-  exactKeys(object, ["sourcePath", "packagedPath", "sha256", "bytes"], label);
+  exactKeys2(object, ["sourcePath", "packagedPath", "sha256", "bytes"], label);
   return {
     sourcePath: portableRelativePath(object["sourcePath"], `${label} sourcePath`),
     packagedPath: portableRelativePath(object["packagedPath"], `${label} packagedPath`),
@@ -2470,14 +3860,14 @@ function parseLegalFact(value, label) {
   };
 }
 function assertCanonicalLegalMappings(license, notice) {
-  const canonicalSourceRoot = dirname6(dirname6(PROMPT_POLICY_DESCRIPTOR_PATHS.canonicalWorkspacePath));
+  const canonicalSourceRoot = dirname7(dirname7(PROMPT_POLICY_DESCRIPTOR_PATHS.canonicalWorkspacePath));
   if (license.sourcePath !== `${canonicalSourceRoot}/upstream/LICENSE` || license.packagedPath !== "third_party/openai-codex/LICENSE" || notice.sourcePath !== `${canonicalSourceRoot}/upstream/NOTICE` || notice.packagedPath !== "third_party/openai-codex/NOTICE") {
     throw new Error("prompt-policy legal paths must use the exact canonical LICENSE and NOTICE mappings");
   }
 }
 function parseUpstreamFact(value) {
   const object = record2(value, "prompt-policy upstream");
-  exactKeys(object, ["repository", "commit", "path", "sha256", "bytes"], "prompt-policy upstream");
+  exactKeys2(object, ["repository", "commit", "path", "sha256", "bytes"], "prompt-policy upstream");
   const repository = stringValue2(object["repository"], "upstream repository");
   if (repository !== "https://github.com/openai/codex") {
     throw new Error("prompt-policy upstream repository must be official OpenAI Codex");
@@ -2495,13 +3885,13 @@ function parseUpstreamFact(value) {
   };
 }
 function readFactFile(root, sourcePrefix, fact, label) {
-  const path = sourcePrefix ? join9(sourcePrefix, fact.path) : fact.path;
+  const path = sourcePrefix ? join13(sourcePrefix, fact.path) : fact.path;
   const bytes = readFileSync8(resolveContainedFile(root, path, label));
   assertDigest(bytes, fact, label);
   return bytes;
 }
 function readLegalFile(root, fact, label) {
-  const candidates = [fact.sourcePath, fact.packagedPath].filter((path) => existsSync8(resolve10(root, path)));
+  const candidates = [fact.sourcePath, fact.packagedPath].filter((path) => existsSync8(resolve11(root, path)));
   if (candidates.length === 0) {
     throw new Error(`${label} is missing from source and packaged policy paths`);
   }
@@ -2550,14 +3940,14 @@ function validateProvenance(bytes, facts) {
 }
 function resolveContainedFile(root, path, label) {
   const portable = portableRelativePath(path, `${label} path`);
-  const absolute = resolve10(root, portable);
-  const containment = relative3(root, absolute);
-  if (containment.startsWith("..") || isAbsolute4(containment)) {
+  const absolute = resolve11(root, portable);
+  const containment = relative4(root, absolute);
+  if (containment.startsWith("..") || isAbsolute5(containment)) {
     throw new Error(`${label} escapes prompt-policy source root`);
   }
   let current = root;
   for (const segment of portable.split("/")) {
-    current = join9(current, segment);
+    current = join13(current, segment);
     if (!pathEntryExists(current)) {
       throw new Error(`${label} is missing: ${portable}`);
     }
@@ -2566,14 +3956,14 @@ function resolveContainedFile(root, path, label) {
       throw new Error(`${label} uses a symlink: ${portable}`);
     }
   }
-  if (!lstatSync9(absolute).isFile() || realpathSync4(absolute) !== absolute) {
+  if (!lstatSync9(absolute).isFile() || realpathSync5(absolute) !== absolute) {
     throw new Error(`${label} must be a contained regular file: ${portable}`);
   }
   return absolute;
 }
 function portableRelativePath(value, label) {
   const path = stringValue2(value, label);
-  if (path.length === 0 || isAbsolute4(path) || path.includes("\\") || path.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) {
+  if (path.length === 0 || isAbsolute5(path) || path.includes("\\") || path.split("/").some((segment) => segment === "" || segment === "." || segment === "..")) {
     throw new Error(`${label} must be a normalized portable relative path`);
   }
   return path;
@@ -2602,7 +3992,7 @@ function rejectMachinePaths2(bytes, label) {
     throw new Error(`${label} contains a machine-specific path`);
   }
 }
-function exactKeys(object, expected, label) {
+function exactKeys2(object, expected, label) {
   const actual = Object.keys(object).sort();
   const wanted = [...expected].sort();
   if (actual.join("\x00") !== wanted.join("\x00")) {
@@ -2667,17 +4057,17 @@ var PROMPT_POLICY_KEYS = [
   "compact_prompt"
 ];
 function createManagedTarget(context, bytes) {
-  const skizzlesDirectory = dirname7(context.managedDirectory);
-  mkdirSync7(skizzlesDirectory, { recursive: true, mode: 448 });
+  const skizzlesDirectory = dirname8(context.managedDirectory);
+  mkdirSync9(skizzlesDirectory, { recursive: true, mode: 448 });
   chmodSync6(skizzlesDirectory, 448);
   let createdDirectory = false;
   let createdTarget;
   try {
-    mkdirSync7(context.managedDirectory, { mode: 448 });
+    mkdirSync9(context.managedDirectory, { mode: 448 });
     createdDirectory = true;
     chmodSync6(context.managedDirectory, 448);
     writeFileSync6(context.managedTarget, bytes, { flag: "wx", mode: 384 });
-    createdTarget = fileIdentity3(context.managedTarget);
+    createdTarget = fileIdentity4(context.managedTarget);
     chmodSync6(context.managedTarget, 384);
     return createdTarget;
   } catch (error) {
@@ -2691,13 +4081,13 @@ function createManagedTarget(context, bytes) {
   }
 }
 function readAndValidateReceipt(context) {
-  assertPrivateDirectory(dirname7(context.receiptPath), ".skizzles directory");
+  assertPrivateDirectory(dirname8(context.receiptPath), ".skizzles directory");
   if (pathEntryExists(context.managedDirectory)) {
     assertPrivateDirectory(context.managedDirectory, "prompt-policy managed directory");
   }
   assertRegularPrivateFile(context.receiptPath, "prompt-policy receipt");
   const value = record2(readJsonFile(context.receiptPath, "Skizzles prompt-policy receipt"), "prompt-policy receipt");
-  exactKeys(value, [
+  exactKeys2(value, [
     "schema",
     "version",
     "state",
@@ -2712,21 +4102,21 @@ function readAndValidateReceipt(context) {
   }
   const state = receiptState(value["state"]);
   const codexBinary = stringValue2(value["codexBinary"], "receipt Codex binary");
-  if (!isAbsolute5(codexBinary) || resolve11(codexBinary) !== context.codexBinary) {
+  if (!isAbsolute6(codexBinary) || resolve12(codexBinary) !== context.codexBinary) {
     throw new Error(`use the Codex binary recorded by the prompt-policy receipt: ${codexBinary}`);
   }
   const configPath = stringValue2(value["configPath"], "receipt config path");
-  if (!isAbsolute5(configPath) || resolve11(configPath) !== context.configPath) {
+  if (!isAbsolute6(configPath) || resolve12(configPath) !== context.configPath) {
     throw new Error("prompt-policy receipt config path is outside selected CODEX_HOME");
   }
   const targetObject = record2(value["managedTarget"], "receipt managed target");
-  exactKeys(targetObject, ["path", "sha256", "bytes"], "receipt managed target");
+  exactKeys2(targetObject, ["path", "sha256", "bytes"], "receipt managed target");
   const target = {
     path: stringValue2(targetObject["path"], "receipt managed target path"),
     sha256: sha256Value(targetObject["sha256"], "receipt managed target sha256"),
     bytes: bytesValue(targetObject["bytes"], "receipt managed target bytes")
   };
-  if (!isAbsolute5(target.path) || resolve11(target.path) !== context.managedTarget) {
+  if (!isAbsolute6(target.path) || resolve12(target.path) !== context.managedTarget) {
     throw new Error("prompt-policy receipt managed target is escaped or swapped");
   }
   const policy = validateReceiptPolicy(value["policy"]);
@@ -2751,7 +4141,7 @@ function receiptState(value) {
 }
 function validateReceiptPolicy(value) {
   const object = record2(value, "receipt policy facts");
-  exactKeys(object, [
+  exactKeys2(object, [
     "descriptor",
     "role",
     "applied",
@@ -2783,7 +4173,7 @@ function parseReceiptValues(value, managedTarget, policy) {
   const values = [];
   for (const [index, expectedKey] of PROMPT_POLICY_KEYS.entries()) {
     const owned = record2(value[index], `receipt value ${expectedKey}`);
-    exactKeys(owned, ["keyPath", "beforePresent", "before", "after"], `receipt value ${expectedKey}`);
+    exactKeys2(owned, ["keyPath", "beforePresent", "before", "after"], `receipt value ${expectedKey}`);
     if (owned["keyPath"] !== expectedKey || typeof owned["beforePresent"] !== "boolean") {
       throw new Error(`prompt-policy receipt has invalid owned key ${expectedKey}`);
     }
@@ -2817,7 +4207,7 @@ function parseReceiptValues(value, managedTarget, policy) {
   return values;
 }
 function validateManagedTarget(context, receipt) {
-  assertPrivateDirectory(dirname7(context.managedDirectory), ".skizzles directory");
+  assertPrivateDirectory(dirname8(context.managedDirectory), ".skizzles directory");
   assertPrivateDirectory(context.managedDirectory, "prompt-policy managed directory");
   assertRegularPrivateFile(context.managedTarget, "prompt-policy managed target");
   const bytes = readFileSync9(context.managedTarget);
@@ -2832,27 +4222,27 @@ function cleanupNewPolicyFiles(context, managedIdentity, receiptIdentity) {
   const receiptPresent = receiptIdentity ? assertOwnedIdentity(context.receiptPath, receiptIdentity) : false;
   const managedPresent = assertOwnedIdentity(context.managedTarget, managedIdentity);
   if (receiptPresent) {
-    rmSync9(context.receiptPath);
+    rmSync7(context.receiptPath);
   }
   if (managedPresent) {
-    rmSync9(context.managedTarget);
+    rmSync7(context.managedTarget);
   }
   removeDirectoryIfEmpty(context.managedDirectory);
 }
 function cleanupOwnedPolicyFiles(context, receipt) {
   if (pathEntryExists(context.managedTarget)) {
     validateManagedTarget(context, receipt);
-    rmSync9(context.managedTarget);
+    rmSync7(context.managedTarget);
   }
   removeDirectoryIfEmpty(context.managedDirectory);
-  rmSync9(context.receiptPath, { force: true });
+  rmSync7(context.receiptPath, { force: true });
 }
 function removeDirectoryIfEmpty(path) {
   if (existsSync9(path) && readdirSync4(path).length === 0) {
     rmdirSync2(path);
   }
 }
-function fileIdentity3(path) {
+function fileIdentity4(path) {
   const metadata = lstatSync10(path);
   return { dev: metadata.dev, ino: metadata.ino };
 }
@@ -2860,13 +4250,13 @@ function removeOwnedIdentity(path, expected) {
   if (!assertOwnedIdentity(path, expected)) {
     return;
   }
-  rmSync9(path);
+  rmSync7(path);
 }
 function assertOwnedIdentity(path, expected) {
   if (!pathEntryExists(path)) {
     return false;
   }
-  const actual = fileIdentity3(path);
+  const actual = fileIdentity4(path);
   if (actual.dev !== expected.dev || actual.ino !== expected.ino) {
     throw new Error(`refusing to clean replaced prompt-policy owned file: ${path}`);
   }
@@ -2955,7 +4345,8 @@ async function applyPromptPolicyUnlocked(options) {
     codexHome: context.codexHome,
     codexBinary: context.codexBinary,
     dryRun: options.dryRun,
-    rpcFactory: options.rpcFactory
+    rpcFactory: options.rpcFactory,
+    workspace: options.workspace
   });
   const { rpc } = rpcSession;
   try {
@@ -2987,7 +4378,7 @@ async function applyPromptPolicyUnlocked(options) {
     let receiptIdentity;
     try {
       writePrivateJson(context.receiptPath, receipt, true);
-      receiptIdentity = fileIdentity3(context.receiptPath);
+      receiptIdentity = fileIdentity4(context.receiptPath);
     } catch (error) {
       cleanupNewPolicyFiles(context, managedIdentity);
       throw error;
@@ -3014,7 +4405,7 @@ async function applyPromptPolicyUnlocked(options) {
     try {
       await rpc.close();
     } finally {
-      rpcSession.cleanup();
+      await rpcSession.cleanup();
     }
   }
 }
@@ -3023,7 +4414,8 @@ async function resumeApply(options, context, receipt) {
     codexHome: context.codexHome,
     codexBinary: context.codexBinary,
     dryRun: options.dryRun,
-    rpcFactory: options.rpcFactory
+    rpcFactory: options.rpcFactory,
+    workspace: options.workspace
   });
   const { rpc } = rpcSession;
   try {
@@ -3065,7 +4457,7 @@ async function resumeApply(options, context, receipt) {
     try {
       await rpc.close();
     } finally {
-      rpcSession.cleanup();
+      await rpcSession.cleanup();
     }
   }
 }
@@ -3088,7 +4480,8 @@ async function restorePromptPolicyUnlocked(options) {
     codexHome: context.codexHome,
     codexBinary: context.codexBinary,
     dryRun: options.dryRun,
-    rpcFactory: options.rpcFactory
+    rpcFactory: options.rpcFactory,
+    workspace: options.workspace
   });
   const { rpc } = rpcSession;
   try {
@@ -3150,7 +4543,7 @@ async function restorePromptPolicyUnlocked(options) {
     try {
       await rpc.close();
     } finally {
-      rpcSession.cleanup();
+      await rpcSession.cleanup();
     }
   }
 }
@@ -3186,14 +4579,14 @@ function promptPolicySummary(outcome, dryRun) {
   };
 }
 function validateContext(options) {
-  if (!isAbsolute6(options.codexHome)) {
+  if (!isAbsolute7(options.codexHome)) {
     throw new Error("--codex-home must be an absolute path");
   }
   const codexHome = canonicalExistingPath(options.codexHome);
   if (!(existsSync10(codexHome) && lstatSync11(codexHome).isDirectory())) {
     throw new Error(`CODEX_HOME is missing or not a directory: ${codexHome}`);
   }
-  if (lstatSync11(resolve12(options.codexHome)).isSymbolicLink()) {
+  if (lstatSync11(resolve13(options.codexHome)).isSymbolicLink()) {
     throw new Error(`CODEX_HOME may not be a symlink: ${options.codexHome}`);
   }
   assertManagedParentsAreReal(codexHome, [
@@ -3204,10 +4597,10 @@ function validateContext(options) {
   return {
     codexHome,
     codexBinary,
-    configPath: join10(codexHome, "config.toml"),
-    receiptPath: join10(codexHome, ".skizzles", RECEIPT_NAME),
-    managedDirectory: join10(codexHome, ".skizzles", MANAGED_DIRECTORY),
-    managedTarget: join10(codexHome, ".skizzles", MANAGED_DIRECTORY, MANAGED_FILE)
+    configPath: join14(codexHome, "config.toml"),
+    receiptPath: join14(codexHome, ".skizzles", RECEIPT_NAME),
+    managedDirectory: join14(codexHome, ".skizzles", MANAGED_DIRECTORY),
+    managedTarget: join14(codexHome, ".skizzles", MANAGED_DIRECTORY, MANAGED_FILE)
   };
 }
 function policyEdits(target, source) {
@@ -3227,36 +4620,41 @@ function policyEdits(target, source) {
 }
 function descriptorPathForSourceRoot(sourceRoot) {
   const canonical = PROMPT_POLICY_DESCRIPTOR_PATHS.canonicalWorkspacePath;
-  if (existsSync10(resolve12(sourceRoot, canonical))) {
+  if (existsSync10(resolve13(sourceRoot, canonical))) {
     return canonical;
   }
   return PROMPT_POLICY_DESCRIPTOR_PATHS.packagedPath;
 }
 
 // packages/installer/src/cli.ts
-async function main(argv = process5.argv.slice(2)) {
+async function main(argv = process8.argv.slice(2)) {
   const parsed = parseInstallerCommand(argv);
+  await runInstallerOperation(async (workspace) => {
+    await execute(parsed, workspace);
+  });
+}
+async function execute(parsed, workspace) {
   switch (parsed.command) {
     case "doctor": {
-      const report = doctor(parsed.home, parsed.codexHome);
+      const report = doctor(parsed.home, parsed.codexHome, undefined, workspace);
       console.log(JSON.stringify(report));
       if (!report.ok) {
-        process5.exitCode = 1;
+        process8.exitCode = 1;
       }
       return;
     }
     case "configure": {
-      const receipt = await configureCodex(parsed);
+      const receipt = await configureCodex({ ...parsed, workspace });
       printConfigSummary(receipt, parsed.dryRun);
       return;
     }
     case "unconfigure": {
-      const receipt = await unconfigureCodex(parsed);
+      const receipt = await unconfigureCodex({ ...parsed, workspace });
       printConfigSummary(receipt, parsed.dryRun);
       return;
     }
     case "prompt-policy": {
-      const outcome = parsed.action === "apply" ? await applyPromptPolicy(parsed) : await restorePromptPolicy(parsed);
+      const outcome = parsed.action === "apply" ? await applyPromptPolicy({ ...parsed, workspace }) : await restorePromptPolicy({ ...parsed, workspace });
       console.log(JSON.stringify(promptPolicySummary(outcome, parsed.dryRun)));
       return;
     }
@@ -3314,12 +4712,24 @@ function printHarnessSummary(receipt, dryRun) {
 function assertNever(value) {
   throw new Error(`unreachable installer command: ${JSON.stringify(value)}`);
 }
+function exitCodeForError(error) {
+  if (error instanceof RunWorkspaceAbortedError) {
+    if (error.signal === "SIGHUP")
+      return 129;
+    if (error.signal === "SIGINT")
+      return 130;
+    if (error.signal === "SIGTERM")
+      return 143;
+  }
+  return 1;
+}
 if (import.meta.main) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : "installer failed");
-    process5.exit(1);
+    process8.exit(exitCodeForError(error));
   });
 }
 export {
-  main
+  main,
+  exitCodeForError
 };

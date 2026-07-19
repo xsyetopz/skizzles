@@ -26,15 +26,20 @@ function integerEnvironment(name, fallback, minimum, maximum = Number.MAX_SAFE_I
   const value = Number.parseInt(process.env[name] ?? "", 10);
   return Number.isSafeInteger(value) && value >= minimum && value <= maximum ? value : fallback;
 }
-function runRoot() {
-  if (process.env["CODEX_COMMAND_OUTPUT_DIR"]) {
-    return process.env["CODEX_COMMAND_OUTPUT_DIR"];
+function runRoot(options = {}) {
+  const environment = options.environment ?? process.env;
+  const configured = environment["CODEX_COMMAND_OUTPUT_DIR"];
+  if (configured !== undefined && configured.length > 0) {
+    return configured;
   }
-  const candidate = resolve(tmpdir());
-  const cwd = resolve(process.cwd());
+  const candidate = resolve(options.temporaryDirectory ?? tmpdir());
+  const cwd = resolve(options.workingDirectory ?? process.cwd());
   const fromWorkingTree = relative(cwd, candidate);
-  const safeTemporaryDirectory = fromWorkingTree === "" || !(fromWorkingTree.startsWith("..") || isAbsolute(fromWorkingTree)) ? "/tmp" : candidate;
-  return join(safeTemporaryDirectory, "codex-command-output");
+  const insideWorkingTree = fromWorkingTree === "" || !(fromWorkingTree.startsWith("..") || isAbsolute(fromWorkingTree));
+  if (insideWorkingTree) {
+    throw new Error("The platform temporary directory is inside the working tree; set CODEX_COMMAND_OUTPUT_DIR to a durable external path.");
+  }
+  return join(candidate, "codex-command-output");
 }
 function commandShell() {
   const candidate = process.env["SHELL"];
