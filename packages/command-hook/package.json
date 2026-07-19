@@ -7,9 +7,6 @@
     ".": "./src/index.ts",
     "./hooks.json": "./assets/hooks.json"
   },
-  "bin": {
-    "skizzles-manage-command-output": "./src/manage-command-output.ts"
-  },
   "scripts": {
     "build": "bun build src/manage-command-output.ts --target=bun --outfile=dist/manage-command-output.js",
     "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",

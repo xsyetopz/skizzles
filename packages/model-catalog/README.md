@@ -8,8 +8,9 @@ atomically, and rendering the macOS LaunchAgent template.
 
 - Package export `@skizzles/model-catalog` exposes the stable overlay,
   refresh, and LaunchAgent-rendering facade from `src/index.ts`.
-- Binary `skizzles-model-catalog` runs the same facade as a CLI with the
-  `refresh`, `service`, and `render-launch-agent` commands.
+- `bun run packages/model-catalog/src/index.ts` runs the same facade as a CLI
+  with the `refresh`, `service`, and `render-launch-agent` commands; generated
+  plugins expose the dependency-self-contained `runtime/model-catalog.ts` path.
 
 All other files under `src/` are package internals. The canonical portable
 LaunchAgent template is `assets/com.openai.skizzles-model-catalog.plist`; see

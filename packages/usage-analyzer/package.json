@@ -6,9 +6,6 @@
   "exports": {
     ".": "./src/main.ts"
   },
-  "bin": {
-    "skizzles-analyze": "./src/main.ts"
-  },
   "scripts": {
     "analyze": "bun run src/main.ts",
     "build": "bun build src/main.ts --target=bun --format=esm --outfile=dist/usage-analyzer.js",

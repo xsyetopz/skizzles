@@ -9,8 +9,13 @@ superseded source layouts. Authored TypeScript is owned by `src/` or `test/`;
 generated, vendored, dependency, and build-output directories are excluded.
 Files above 650 physical lines require a package-local
 `architecture-file-reviews.json` responsibility record, files above 800 fail,
-and executable entrypoints have a 200-line budget. Declared TypeScript
-exports and binaries are compiled in memory as package-entrypoint smoke tests.
+and executable entrypoints have a 200-line budget. Declared TypeScript exports
+and optional binaries are compiled in memory as package-entrypoint smoke tests.
+Under the pinned Bun 1.3.14 linker contract, a package consumed by another
+workspace package must not declare `bin`: install chmods the dereferenced
+target. Standalone repository-tool packages may retain intentional binaries;
+the policy rejects the hazardous dependency shape rather than imposing a
+blanket binary ban.
 TypeScript exports are then imported in isolated Bun processes with stdin held
 open. One deadline covers the importer exit and concurrent stdout/stderr EOF,
 and the first output byte, a nonzero exit, a stream failure, or a lifecycle

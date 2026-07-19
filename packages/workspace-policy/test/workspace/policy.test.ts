@@ -35,6 +35,18 @@ describe("workspace policy", () => {
     expect(await validateWorkspace(root)).toEqual([]);
   });
 
+  test("normalizes an omitted optional bin to an empty surface", async () => {
+    const root = await fixture();
+    const manifest = packageManifest();
+    const { bin: _, ...withoutBin } = manifest;
+    await writeFile(
+      join(root, "packages/example/package.json"),
+      JSON.stringify(withoutBin),
+    );
+
+    expect(await validateWorkspace(root)).toEqual([]);
+  });
+
   test("rejects ambient, escaping, root-owned, and nested-lock contracts", async () => {
     const root = await fixture();
     const packageRoot = join(root, "packages/example");
@@ -72,6 +84,21 @@ describe("workspace policy", () => {
     const codes = (await validateWorkspace(root)).map(({ code }) => code);
     expect(codes).toContain("invalid-exports-target");
     expect(codes).toContain("missing-bin-target");
+  });
+
+  test("compiles every declared optional binary entrypoint", async () => {
+    const root = await fixture();
+    const packageRoot = join(root, "packages/example");
+    const manifest = packageManifest();
+    manifest.bin = { broken: "./src/broken.ts" };
+    await writeFile(
+      join(packageRoot, "package.json"),
+      JSON.stringify(manifest),
+    );
+    await writeFile(join(packageRoot, "src/broken.ts"), "export const =;\n");
+
+    const codes = (await validateWorkspace(root)).map(({ code }) => code);
+    expect(codes).toContain("entrypoint-build-failed");
   });
 
   test("resolves TypeScript exports through the package exports map", async () => {

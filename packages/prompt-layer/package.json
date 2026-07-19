@@ -6,9 +6,6 @@
   "exports": {
     ".": "./src/cli.ts"
   },
-  "bin": {
-    "skizzles-prompt-layer": "./src/cli.ts"
-  },
   "scripts": {
     "build": "bun build src/cli.ts --target=bun --outfile=dist/prompt-layer.js",
     "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",

@@ -16,6 +16,7 @@ const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_FILE_CREATION_MASK = 0o077;
 const MAXIMUM_REDACTED_MATCH_LENGTH = 512;
+const GIT_HISTORY_PLATFORM = "github";
 const GITLEAKS_LOG_PREFIX = String.raw`\d{1,2}:\d{2}(?:AM|PM)`;
 const HUMAN_NUMBER = String.raw`\d+(?:\.\d+)?`;
 const HUMAN_BYTES = String.raw`${HUMAN_NUMBER} (?:bytes|KB|MB|GB)`;
@@ -94,21 +95,7 @@ async function invokeGitleaks(
     await chmod(reportDirectory, PRIVATE_DIRECTORY_MODE);
     await writeFile(reportPath, "", { flag: "wx", mode: PRIVATE_FILE_MODE });
     await chmod(reportPath, PRIVATE_FILE_MODE);
-    const args = [
-      invocation.mode,
-      "--no-banner",
-      "--redact=100",
-      `--exit-code=${FINDINGS_EXIT_CODE}`,
-      "--report-format=json",
-      "--report-path",
-      reportPath,
-      "--config",
-      invocation.config,
-    ];
-    for (const option of invocation.logOptions ?? []) {
-      args.push(`--log-opts=${option}`);
-    }
-    args.push(invocation.root);
+    const args = buildGitleaksArguments(invocation, reportPath);
     const result = await runBoundedCommand(invocation.executable, args, {
       label: `gitleaks ${invocation.mode}`,
       timeoutMs: GITLEAKS_TIMEOUT_MS,
@@ -132,6 +119,31 @@ async function invokeGitleaks(
   } finally {
     await rm(reportDirectory, { force: true, recursive: true });
   }
+}
+
+function buildGitleaksArguments(
+  invocation: GitleaksInvocation,
+  reportPath: string,
+): string[] {
+  const args = [
+    invocation.mode,
+    "--no-banner",
+    "--redact=100",
+    `--exit-code=${FINDINGS_EXIT_CODE}`,
+    "--report-format=json",
+    "--report-path",
+    reportPath,
+    "--config",
+    invocation.config,
+  ];
+  if (invocation.mode === "git") {
+    args.push(`--platform=${GIT_HISTORY_PLATFORM}`);
+  }
+  for (const option of invocation.logOptions ?? []) {
+    args.push(`--log-opts=${option}`);
+  }
+  args.push(invocation.root);
+  return args;
 }
 
 function classifyGitleaksResult(
@@ -322,4 +334,4 @@ export type {
   GitleaksRawResult,
   GitleaksScanner,
 };
-export { classifyGitleaksResult, invokeGitleaks };
+export { buildGitleaksArguments, classifyGitleaksResult, invokeGitleaks };

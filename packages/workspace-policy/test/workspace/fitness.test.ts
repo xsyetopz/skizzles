@@ -107,6 +107,29 @@ describe("mandatory workspace architecture fitness", () => {
     expect(codes).toContain("public-bin-budget");
   });
 
+  it("rejects binaries on packages consumed through workspace dependencies", async () => {
+    const root = await fixture();
+    await addPackage(root, "two", "@skizzles/two");
+    const consumer = packageManifest("@skizzles/example");
+    consumer.dependencies["@skizzles/two"] = "workspace:*";
+    await writeManifest(root, "example", consumer);
+
+    const findings = await validateWorkspace(root);
+    expect(findings).toContainEqual({
+      code: "workspace-dependency-bin-linker-risk",
+      path: "packages/two",
+      message:
+        "@skizzles/two is consumed by @skizzles/example and must not declare bin: Bun 1.3.14 chmods dereferenced workspace binary targets during install",
+    });
+  });
+
+  it("allows a declared binary on a package with no workspace consumers", async () => {
+    const root = await fixture();
+
+    const codes = (await validateWorkspace(root)).map(({ code }) => code);
+    expect(codes).not.toContain("workspace-dependency-bin-linker-risk");
+  });
+
   it("enforces source ownership and production-to-test direction", async () => {
     const root = await fixture();
     await writeFile(join(root, "packages/example/orphan.ts"), "export {};\n");

@@ -8,7 +8,9 @@ potentially noisy commands to the generated plugin supervisor path.
 
 - `@skizzles/command-hook` exports the import-safe `isManagedScript`
   classifier.
-- `skizzles-manage-command-output` executes `src/manage-command-output.ts`.
+- `src/manage-command-output.ts` is the canonical executable source composed by
+  the plugin builder; the generated plugin exposes it at
+  `hooks/manage-command-output.ts`.
 - `@skizzles/command-hook/hooks.json` exports the canonical descriptor stored
   at `assets/hooks.json`.
 
@@ -21,7 +23,7 @@ incomplete launch context fails closed without rewriting the original command.
 The plugin builder stages the separate command-supervisor package at
 `runtime/codex-command.ts`.
 
-The executable path is also the plugin builder's canonical staging contract.
+The source path is also the plugin builder's canonical staging contract.
 Its classifier, normalization, policy, and command contract are privately owned
 under `src/manage-command-output/`; generated hooks retain their existing path.
 

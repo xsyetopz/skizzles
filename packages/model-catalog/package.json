@@ -6,9 +6,6 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "bin": {
-    "skizzles-model-catalog": "./src/index.ts"
-  },
   "scripts": {
     "build": "bun build src/index.ts --target=bun --outfile=dist/model-catalog.js",
     "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",

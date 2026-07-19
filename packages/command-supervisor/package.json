@@ -6,9 +6,6 @@
   "exports": {
     ".": "./src/index.ts"
   },
-  "bin": {
-    "codex-command": "./src/codex-command.ts"
-  },
   "scripts": {
     "build": "bun build src/codex-command.ts --target=bun --outfile=dist/codex-command.js",
     "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",

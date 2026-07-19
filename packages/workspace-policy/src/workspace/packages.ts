@@ -51,7 +51,7 @@ export async function readPackageManifest(
     code: "invalid-package-manifest",
     path: toPortablePath(packageRoot),
     message:
-      "manifest must declare name, version, private ESM status, scripts, dependencies, exports, and bin",
+      "manifest must declare name, version, private ESM status, scripts, dependencies, and exports; bin is optional",
   });
   return undefined;
 }
@@ -277,7 +277,7 @@ function validateEntrypoints(
   entrypoints: Record<string, string>,
   findings: WorkspaceFinding[],
 ): void {
-  if (Object.keys(entrypoints).length === 0) {
+  if (kind === "exports" && Object.keys(entrypoints).length === 0) {
     addFinding(
       findings,
       `missing-${kind}`,

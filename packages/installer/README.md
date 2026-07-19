@@ -6,13 +6,16 @@ lifecycles.
 
 ## Entrypoint
 
-The package exports and installs one executable entrypoint:
+The package export and the plugin builder both use the canonical executable
+source directly:
 
 ```sh
 bun packages/installer/src/cli.ts --help
-# or, through the workspace bin
-skizzles-installer --help
 ```
+
+Generated plugins retain the stable bundled
+`packages/installer/src/cli.ts` execution path. The private workspace package
+does not publish a package-manager binary.
 
 Every stateful command requires explicit target roots. `--dry-run` uses
 disposable preview state where supported and never authorizes ambient

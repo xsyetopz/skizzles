@@ -110,7 +110,7 @@ generic upstream baseline.
 | `packages/prompt-layer/assets/upstream/LICENSE` | Checksum-locked upstream license text. |
 | `packages/prompt-layer/assets/upstream/NOTICE` | Checksum-locked upstream notice text. |
 | `packages/prompt-layer/assets/skizzles-base.patch` | Canonical one-file Git patch against the exact upstream path. |
-| `packages/prompt-layer/src/cli.ts` | Thin public package facade and CLI composition root; preserves the package export and binary surface without owning lifecycle policy. |
+| `packages/prompt-layer/src/cli.ts` | Thin public package facade and CLI composition root; preserves the package export and root-script CLI surface without owning lifecycle policy. |
 | `packages/prompt-layer/src/lifecycle/contract.ts` | Public asset paths, packaged descriptor paths, mutation options, lifecycle operation types, and exact ordered write-set contracts. |
 | `packages/prompt-layer/src/content-integrity.ts` | Shared trust-boundary rules for SHA-256 facts and non-empty LF-only text. |
 | `packages/prompt-layer/src/repository-boundary.ts` | Default repository-root topology, canonical containment, filesystem identity checks, and durable file operations. |

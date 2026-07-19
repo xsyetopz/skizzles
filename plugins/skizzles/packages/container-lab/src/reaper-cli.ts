@@ -9543,10 +9543,6 @@ var package_default = {
     ".": "./src/lab/orchestrator.ts",
     "./integration-descriptor": "./assets/integrations/container-lab.json"
   },
-  bin: {
-    "codex-container-lab": "./src/cli.ts",
-    "codex-container-lab-reaper": "./src/reaper-cli.ts"
-  },
   scripts: {
     build: "bun build ./src/cli.ts ./src/reaper-cli.ts --target=bun --outdir=dist",
     check: "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",

@@ -6,9 +6,6 @@
   "exports": {
     ".": "./src/cli.ts"
   },
-  "bin": {
-    "skizzles-installer": "./src/cli.ts"
-  },
   "scripts": {
     "build": "bun build ./src/cli.ts --target=bun --format=esm --outdir=./dist",
     "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",

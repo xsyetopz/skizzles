@@ -6,6 +6,7 @@ import { join } from "node:path";
 import process from "node:process";
 import { runGitleaksGate } from "../../src/repository-security/gitleaks/gate.ts";
 import {
+  buildGitleaksArguments,
   classifyGitleaksResult,
   type GitleaksRawResult,
   type GitleaksScanner,
@@ -28,6 +29,52 @@ afterEach(async () => {
 });
 
 describe("repository security process and output contracts", () => {
+  it("pins the Git history platform without changing directory scans", () => {
+    const common = {
+      executable: "/tmp/gitleaks",
+      config: "/workspace/.gitleaks.toml",
+      root: "/workspace",
+      reportRoot: "/reports",
+    } as const;
+
+    expect(
+      buildGitleaksArguments(
+        { ...common, mode: "git", logOptions: ["--all"] },
+        "/reports/findings.json",
+      ),
+    ).toEqual([
+      "git",
+      "--no-banner",
+      "--redact=100",
+      "--exit-code=10",
+      "--report-format=json",
+      "--report-path",
+      "/reports/findings.json",
+      "--config",
+      "/workspace/.gitleaks.toml",
+      "--platform=github",
+      "--log-opts=--all",
+      "/workspace",
+    ]);
+    expect(
+      buildGitleaksArguments(
+        { ...common, mode: "dir" },
+        "/reports/findings.json",
+      ),
+    ).toEqual([
+      "dir",
+      "--no-banner",
+      "--redact=100",
+      "--exit-code=10",
+      "--report-format=json",
+      "--report-path",
+      "/reports/findings.json",
+      "--config",
+      "/workspace/.gitleaks.toml",
+      "/workspace",
+    ]);
+  });
+
   it("bounds command output and execution time", async () => {
     await expect(
       runBoundedCommand("yes", ["probe"], {

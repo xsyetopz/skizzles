@@ -11,14 +11,16 @@ atomic within an owner-only run store.
 programmatic facade. Calling it may write command output; importing it does not
 dispatch the executable.
 
-The `codex-command` binary executes `src/codex-command.ts` and supports:
+The source workspace executes the CLI directly with
+`bun run packages/command-supervisor/src/codex-command.ts`; the generated
+plugin exposes the stable `runtime/codex-command.ts` path. Both support:
 
 ```text
-codex-command run --base64url <script>
-codex-command status <run-id>
-codex-command tail <run-id> [stdout|stderr]
-codex-command errors <run-id>
-codex-command search <text> [run-id]
+runtime/codex-command.ts run --base64url <script>
+runtime/codex-command.ts status <run-id>
+runtime/codex-command.ts tail <run-id> [stdout|stderr]
+runtime/codex-command.ts errors <run-id>
+runtime/codex-command.ts search <text> [run-id]
 ```
 
 `status` returns only documents that validate as version 1

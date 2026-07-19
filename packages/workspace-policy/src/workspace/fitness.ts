@@ -38,9 +38,46 @@ export async function validateWorkspaceFitness(
     packages.map((item) => [item.manifest.name, item]),
   );
   validatePublicSurfaceBudgets(packages, findings);
+  validateWorkspaceDependencyBins(packages, packagesByName, findings);
   validatePackageCycles(packages, packagesByName, findings);
   for (const item of packages) {
     await validateOwnedSources(item, packagesByName, findings);
+  }
+}
+
+function validateWorkspaceDependencyBins(
+  packages: readonly WorkspacePackage[],
+  packagesByName: ReadonlyMap<string, WorkspacePackage>,
+  findings: WorkspaceFinding[],
+): void {
+  const consumersByDependency = new Map<string, Set<string>>();
+  for (const { manifest } of packages) {
+    for (const dependency of [
+      ...Object.keys(manifest.dependencies),
+      ...Object.keys(manifest.devDependencies),
+    ]) {
+      if (!packagesByName.has(dependency)) {
+        continue;
+      }
+      const consumers = consumersByDependency.get(dependency) ?? new Set();
+      consumers.add(manifest.name);
+      consumersByDependency.set(dependency, consumers);
+    }
+  }
+  for (const item of packages) {
+    if (Object.keys(item.manifest.bin).length === 0) {
+      continue;
+    }
+    const consumers = consumersByDependency.get(item.manifest.name);
+    if (consumers === undefined || consumers.size === 0) {
+      continue;
+    }
+    addFinding(
+      findings,
+      "workspace-dependency-bin-linker-risk",
+      item.relativeRoot,
+      `${item.manifest.name} is consumed by ${[...consumers].sort().join(", ")} and must not declare bin: Bun 1.3.14 chmods dereferenced workspace binary targets during install`,
+    );
   }
 }
 

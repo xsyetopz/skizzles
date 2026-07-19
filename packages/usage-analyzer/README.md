@@ -2,11 +2,14 @@
 
 Private, read-only Codex rollout usage analyzer.
 
-Invoke the public command directly:
+Invoke the package-owned script from the source workspace:
 
 ```sh
-skizzles-analyze --from 2026-07-01
+bun run packages/usage-analyzer/src/main.ts --from 2026-07-01
 ```
+
+Generated plugins expose the dependency-self-contained `scripts/analyze.ts`
+runtime path.
 
 It reads rollout files in `$CODEX_HOME` (or `$HOME/.codex`) and optionally the
 newest `state_*.sqlite` title index. It does not modify those inputs. The
