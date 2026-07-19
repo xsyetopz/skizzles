@@ -98,6 +98,22 @@ describe("plugin run workspace composition", () => {
     }
   });
 
+  it("cleans only the workspace owned by each test harness", async () => {
+    const first = createTestWorkspace();
+    const second = createTestWorkspace();
+    const firstRoot = await first.temporaryRoot("first-owner");
+    const secondRoot = await second.temporaryRoot("second-owner");
+    try {
+      await first.cleanup();
+      expect(await directoryExists(firstRoot)).toBe(false);
+      expect(await directoryExists(secondRoot)).toBe(true);
+    } finally {
+      await first.cleanup();
+      await second.cleanup();
+    }
+    expect(await directoryExists(secondRoot)).toBe(false);
+  });
+
   it("waits for registered children before removing the root", async () => {
     let runRoot = "";
     let rootObserved = false;

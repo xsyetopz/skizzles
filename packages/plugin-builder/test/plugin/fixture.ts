@@ -1,6 +1,6 @@
 import { chmod, cp, mkdir, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { cleanupStale, create } from "@skizzles/run-workspace";
+import { create } from "@skizzles/run-workspace";
 import {
   adaptPluginWorkspace,
   type PluginWorkspace,
@@ -24,10 +24,6 @@ export function createTestWorkspace(): {
   let sequence = 0;
   const workspace = async (): Promise<PluginWorkspace> => {
     if (active !== undefined) return active;
-    const stale = await cleanupStale();
-    if (stale.failed.length > 0 || stale.truncated) {
-      throw new Error("Test run workspace stale cleanup did not complete.");
-    }
     active = adaptPluginWorkspace(await create());
     return active;
   };

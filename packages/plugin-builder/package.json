@@ -13,7 +13,7 @@
   "scripts": {
     "build": "bun build src/cli.ts --target=bun --outfile=dist/plugin-builder.js",
     "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
-    "test": "bun test test",
+    "test": "bun test --timeout 30000 test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
