@@ -61,9 +61,9 @@ Ask the user to choose an orchestration mode:
 Also ask whether Codex should keep its native model instructions or use the Skizzles split:
 
 - `native` is the default and does not write instruction or agent-role config.
-- `skizzles` writes the canonical root prompt to `model_instructions_file` and configures `[agents.default]` through `assets/skizzles_subagent.toml`. The root remains developer-facing; non-full-history subagents receive the compact execution prompt. This mode requires an absolute `--source-root` whose assets remain available after installation.
+- `skizzles` writes the canonical root prompt to `model_instructions_file` and configures native `default`, `triage`, `worker`, `designer`, `qa`, `review`, and `deployment` roles from `assets/agents/*.toml`. Every role shares `skizzles_subagent_instructions.md`; specialized roles add their duty through `developer_instructions`. This mode requires an absolute `--source-root` whose assets remain available after installation.
 
-With the Skizzles split, use `fork_turns="none"` or a positive integer. A positive integer larger than the available history retains all available turns without becoming full-history mode. Do not use `fork_turns="all"`: full-history spawning deliberately bypasses role application, including the default subagent prompt.
+With the Skizzles split, pass the selected `agent_type` and use `fork_turns="none"` or a positive integer. A positive integer larger than the available history retains all available turns without becoming full-history mode. Do not use `fork_turns="all"`: full-history spawning inherits the parent role and deliberately bypasses selected-role application.
 
 Preview against an explicit `CODEX_HOME` and absolute Codex binary:
 
@@ -85,7 +85,7 @@ bun run packages/installer/src/cli.ts unconfigure \
   --codex-binary /absolute/path/to/codex --dry-run
 ```
 
-Repeat restoration without `--dry-run` only after previewing it. The lifecycle launches that Codex binary's app-server against the selected home and uses native `config/read` plus atomic `config/batchWrite` with version-conflict detection. Its receipt lives at `CODEX_HOME/.skizzles/config-receipt.json`; restoration fails closed if an owned value drifted. It never edits `AGENTS.md`, `developer_instructions`, approvals, permissions, goals, model defaults, MCP registrations, or unrelated feature flags. With `--instructions skizzles`, it additionally owns only `model_instructions_file`, `agents.default.description`, and `agents.default.config_file`. Do not manually delete the receipt to bypass a conflict.
+Repeat restoration without `--dry-run` only after previewing it. The lifecycle launches that Codex binary's app-server against the selected home and uses native `config/read` plus atomic `config/batchWrite` with version-conflict detection. Its receipt lives at `CODEX_HOME/.skizzles/config-receipt.json`; restoration fails closed if an owned value drifted. It never edits `AGENTS.md`, `developer_instructions`, approvals, permissions, goals, model defaults, MCP registrations, or unrelated feature flags. With `--instructions skizzles`, it additionally owns `model_instructions_file` and the seven Skizzles role definitions. To restore configuration shape cleanly, the receipt owns the entire `agents` table when it was initially absent, an entire named-role table when that role was initially absent, or only `description` and `config_file` leaves when preserving an existing customized role. Later edits inside a structurally owned table are treated as drift and block restoration. Do not manually delete the receipt to bypass a conflict.
 
 ## Use Container Lab deliberately
 

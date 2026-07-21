@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import {
   configureCodex,
   configReceiptPath,
@@ -89,22 +89,43 @@ describe("Codex configuration lifecycle", () => {
     ]);
   });
 
-  test("Skizzles instructions configure distinct root and default-subagent prompts", () => {
-    expect(desiredConfigEdits("passive", {
+  test("Skizzles instructions configure a shared subagent base with native behavioral roles", () => {
+    const roles = ["default", "triage", "worker", "designer", "qa", "review", "deployment"] as const;
+    const agentConfigs = Object.fromEntries(
+      roles.map((role) => [role, `/skizzles/assets/agents/${role}.toml`]),
+    ) as Record<(typeof roles)[number], string>;
+    const edits = desiredConfigEdits("passive", {
       sourceRoot: "/skizzles",
       rootInstructions: "/skizzles/assets/root.md",
       subagentInstructions: "/skizzles/assets/subagent.md",
-      subagentConfig: "/skizzles/assets/subagent.toml",
-    })).toEqual([
+      agentConfigs,
+    });
+
+    expect(edits.slice(0, 2)).toEqual([
       { keyPath: "features.hooks", value: true, mergeStrategy: "replace" },
       { keyPath: "model_instructions_file", value: "/skizzles/assets/root.md", mergeStrategy: "replace" },
-      {
-        keyPath: "agents.default.description",
-        value: "Skizzles execution subagent with a compact developer-focused instruction set.",
-        mergeStrategy: "replace",
-      },
-      { keyPath: "agents.default.config_file", value: "/skizzles/assets/subagent.toml", mergeStrategy: "replace" },
     ]);
+    expect(edits.slice(2)).toEqual([{
+      keyPath: "agents",
+      value: Object.fromEntries(roles.map((role) => [role, {
+        description: expect.any(String),
+        config_file: agentConfigs[role],
+      }])),
+      mergeStrategy: "replace",
+    }]);
+  });
+
+  test("native role configs share one compact base and specialize through developer instructions", () => {
+    const roleRoot = resolve(import.meta.dir, "../../../assets/agents");
+    for (const role of ["default", "triage", "worker", "designer", "qa", "review", "deployment"]) {
+      const contents = readFileSync(join(roleRoot, `${role}.toml`), "utf8");
+      expect(contents).toContain('model_instructions_file = "../skizzles_subagent_instructions.md"');
+      const parsed = Bun.TOML.parse(contents) as { developer_instructions?: string };
+      expect(parsed.developer_instructions?.trim().length).toBeGreaterThan(0);
+      if (role !== "default") {
+        expect(contents).toContain(`You are the ${role === "qa" ? "QA" : role[0]!.toUpperCase() + role.slice(1)} role.`);
+      }
+    }
   });
 
   test("aggressive orchestration uses concise Fourth Wall hints", () => {
@@ -167,8 +188,12 @@ describe("Codex configuration lifecycle", () => {
     });
     const sourceRoot = join(f.codexHome, "skizzles");
     mkdirSync(join(sourceRoot, "assets"), { recursive: true });
-    for (const file of ["skizzles_instructions.md", "skizzles_subagent_instructions.md", "skizzles_subagent.toml"]) {
+    for (const file of ["skizzles_instructions.md", "skizzles_subagent_instructions.md"]) {
       writeFileSync(join(sourceRoot, "assets", file), file);
+    }
+    mkdirSync(join(sourceRoot, "assets", "agents"), { recursive: true });
+    for (const role of ["default", "triage", "worker", "designer", "qa", "review", "deployment"]) {
+      writeFileSync(join(sourceRoot, "assets", "agents", `${role}.toml`), role);
     }
     const canonicalSourceRoot = realpathSync(sourceRoot);
     await configureCodex({
@@ -182,8 +207,8 @@ describe("Codex configuration lifecycle", () => {
       model_instructions_file: join(canonicalSourceRoot, "assets", "skizzles_instructions.md"),
       agents: {
         default: {
-          description: "Skizzles execution subagent with a compact developer-focused instruction set.",
-          config_file: join(canonicalSourceRoot, "assets", "skizzles_subagent.toml"),
+          description: "General Skizzles subagent with a compact developer-focused execution contract.",
+          config_file: join(canonicalSourceRoot, "assets", "agents", "default.toml"),
           nickname_candidates: ["Ada"],
         },
       },
@@ -193,9 +218,36 @@ describe("Codex configuration lifecycle", () => {
     await unconfigureCodex({ ...f, rpcFactory: factory(f.rpc) });
     expect(f.rpc.config).toEqual({
       model_instructions_file: "/personal/root.md",
-      agents: { default: { description: "Personal default", config_file: "/personal/agent.toml", nickname_candidates: ["Ada"] } },
+      agents: {
+        default: { description: "Personal default", config_file: "/personal/agent.toml", nickname_candidates: ["Ada"] },
+      },
       features: {},
     });
+  });
+
+  test("restores an initially absent agents table without role tombstones", async () => {
+    const f = fixture({});
+    const sourceRoot = join(f.codexHome, "skizzles");
+    mkdirSync(join(sourceRoot, "assets", "agents"), { recursive: true });
+    for (const file of ["skizzles_instructions.md", "skizzles_subagent_instructions.md"]) {
+      writeFileSync(join(sourceRoot, "assets", file), file);
+    }
+    for (const role of ["default", "triage", "worker", "designer", "qa", "review", "deployment"]) {
+      writeFileSync(join(sourceRoot, "assets", "agents", `${role}.toml`), role);
+    }
+
+    await configureCodex({
+      ...f,
+      orchestration: "passive",
+      instructions: "skizzles",
+      sourceRoot,
+      rpcFactory: factory(f.rpc),
+    });
+    expect(f.rpc.config.agents).toBeDefined();
+
+    f.rpc.closed = false;
+    await unconfigureCodex({ ...f, rpcFactory: factory(f.rpc) });
+    expect(f.rpc.config).toEqual({ features: {} });
   });
 
   test("fails closed when a Skizzles instruction asset is missing", async () => {

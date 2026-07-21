@@ -4,7 +4,7 @@
 
 | Tool | Use | Important behavior |
 | --- | --- | --- |
-| `spawn_agent` | Create bounded work | Use `<role>__<objective>`, pass explicit model/effort, and choose the smallest useful `fork_turns` value. Below the root, only eligible Workers may dispatch one active bounded Worker. |
+| `spawn_agent` | Create bounded work | Use `<role>__<objective>`, pass explicit model/effort plus the advertised matching `agent_type`, and choose the smallest useful `fork_turns` value. Below the root, only eligible Workers may dispatch one active bounded Worker. |
 | `list_agents` | Inspect the live tree | Can filter by task-path prefix. Use before intervention or reassignment. |
 | `send_message` | Deliver context or a correction to running work | Queues the message and does not trigger a new turn. |
 | `followup_task` | Continue prior ownership | Reactivates an idle or completed child while preserving its task identity, model, reasoning effort, and accumulated context. |

@@ -40,7 +40,7 @@ Use a parent-mediated sibling replacement so the root preserves the task graph a
 
 1. The outgoing task sends the packet to the root with `send_message` and stops taking new ownership.
 2. The root inspects the packet and current tree.
-3. The root spawns a fresh sibling named `<role>__<objective>`, passes explicit model/reasoning controls, names the behavioral role resource in its handoff, and chooses the smallest useful bounded history fork.
+3. The root spawns a fresh sibling named `<role>__<objective>`, passes explicit model/reasoning controls, sets the matching native `agent_type` and names the behavioral role in its handoff, and chooses the smallest useful bounded history fork.
 4. The root confirms the successor exists and has the right ownership boundary.
 5. The predecessor returns or is interrupted only after the successor is established.
 

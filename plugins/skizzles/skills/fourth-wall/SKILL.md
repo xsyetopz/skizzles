@@ -35,7 +35,7 @@ Use Luna only when the active `spawn_agent` schema offers it and the assignment 
 
 Do not spend model turns merely polling commands or children. The owner of a long-running command uses the native bounded wait/session primitive, stores verbose output outside model context, and reports only completion state, relevant deltas, error signatures, and artifact paths. Delegate an engineering outcome only when the child can interpret and act on the result.
 
-Pass `model` and `reasoning_effort` explicitly on every spawn. Use only models advertised by the active tool schema. Do not add `agent_type` unless a configured role is intentionally required.
+Pass `model` and `reasoning_effort` explicitly on every spawn. Under the Skizzles instruction profile, also pass the matching `agent_type`; each native role shares the compact subagent base and adds role-specific developer instructions, so do not repeat that stable role contract in the message. Use only roles and models advertised by the active tool schema. If a native-instructions installation does not advertise the matching role, omit `agent_type` and include one concise duty sentence rather than inventing an unavailable role.
 
 Choose `fork_turns` deliberately:
 
@@ -43,24 +43,24 @@ Choose `fork_turns` deliberately:
 - Prefer a small positive integer string such as `"1"` or `"2"` when recent owner intent or an established plan would prevent rediscovery.
 - Do not use `"all"` when the active default or named agent role supplies child-specific configuration. Full-history forks skip role application; under the Skizzles instruction profile, that would also bypass the compact subagent base instructions. A positive number larger than the available turn count keeps every available fork turn without becoming full-history.
 
-Codex 0.145.0-alpha.18 supports explicit model/reasoning overrides with positive and full-history forks. Full-history forks still inherit the parent `agent_type` and bypass role application. Prefer a sufficiently large positive number when broad recent context is needed. Do not claim an effective model or effort merely from a successful call; use host-visible task settings or rollout evidence when verification matters.
+Codex 0.145.0-alpha.18 supports explicit model/reasoning overrides with positive and full-history forks, and exposes `agent_type` when roles are configured. Skizzles role dispatch requires `fork_turns="none"` or a positive integer because full-history forks inherit the parent `agent_type` and bypass role application. A positive integer larger than available history retains all available turns without becoming full-history mode. Do not claim an effective role, model, or effort merely from a successful call; use host-visible task settings or rollout evidence when verification matters.
 
 Choose the independent behavioral role that best matches the duty:
 
-| Role | Use | Resource |
+| Role | Native `agent_type` | Use |
 |---|---|---|
-| Triage | Focused codebase research and current-shape mapping | [resources/roles/triage.md](resources/roles/triage.md) |
-| Worker | Well-defined implementation with explicit ownership | [resources/roles/worker.md](resources/roles/worker.md) |
-| Designer | Frontend and product UI implementation | [resources/roles/designer.md](resources/roles/designer.md) |
-| QA | Runtime piloting and evidence-rich product verification | [resources/roles/qa.md](resources/roles/qa.md) |
-| Review | Independent adversarial review and final validation | [resources/roles/review.md](resources/roles/review.md) |
-| Deployment | Careful procedural deployment and production operations | [resources/roles/deployment.md](resources/roles/deployment.md) |
+| Triage | `triage` | Focused codebase research and current-shape mapping |
+| Worker | `worker` | Well-defined implementation with explicit ownership |
+| Designer | `designer` | Frontend and product UI implementation |
+| QA | `qa` | Runtime piloting and evidence-rich product verification |
+| Review | `review` | Independent adversarial review and final validation |
+| Deployment | `deployment` | Careful procedural deployment and production operations |
 
 In every spawn message:
 
-1. Name the selected route and role.
-2. Tell the child to read this skill and the linked role resource.
-3. Provide the complete objective, ownership, constraints, established decisions, relevant skill obligations, and expected proof.
+1. Name the selected route and role. Under the Skizzles profile, set the matching native `agent_type`; otherwise set it only when the active schema advertises that role.
+2. Provide the complete objective, ownership, constraints, established decisions, relevant skill obligations, and expected proof.
+3. Add only assignment-specific role constraints; the configured role already injects its stable duty through `developer_instructions`.
 4. Choose the smallest useful `fork_turns` value so the handoff remains explicit without forcing the child to rediscover recent decisions.
 
 For a long or replacement-heavy root task, keep one durable task packet under `/tmp` and give children its path plus their slice-specific instructions. Keep the packet concise and operational; do not automate reconstruction or rewriting of encrypted spawn messages. Record the overall objective, established decisions, constraints, live ownership, evidence, open gates, and routing state. Update it only at meaningful handoffs or acceptance points, not as a transcript.
@@ -69,8 +69,7 @@ Example:
 
 ```text
 You are dispatched as a Scoped Worker using gpt-5.6-luna at high effort
-(or the advertised Terra-low fallback). Read $fourth-wall and follow
-resources/roles/worker.md. You are a bounded leaf and must not spawn subagents.
+(or the advertised Terra-low fallback). The native Worker role applies.
 
 Assignment: ...
 Ownership: ...
@@ -107,7 +106,7 @@ Do not automatically cool down crash investigation, security or authentication, 
 
 ## Native Primitives
 
-- `spawn_agent`: dispatch a bounded task with a behavioral role and clear handoff; only eligible Workers may use it below the root.
+- `spawn_agent`: dispatch a bounded task with the matching native `agent_type`, explicit capability fields, and a clear handoff; only eligible Workers may use it below the root.
 - `list_agents`: inspect live task paths, statuses, and latest assignments.
 - `send_message`: queue context or corrections to running work without starting a new turn.
 - `followup_task`: reactivate an idle or completed child for another turn while preserving its task identity, model, reasoning effort, and accumulated context.
@@ -148,7 +147,7 @@ When observed behavior reveals a reusable routing or lifecycle caveat, follow [r
 ## Hard Boundaries
 
 - Triage, Designer, QA, Review, Deployment, and bounded Luna/Terra-low Workers are leaves. A depth-1 Terra/Sol Worker may have at most one active bounded Worker grandchild; all other delegation proposals return to the root.
-- Worker grandchildren must be named `worker__...`, use explicit Luna medium/high routing when available or Terra low as the bounded fallback, set `fork_turns = "none"`, own a disjoint complete implementation loop, and never spawn again. The parent and root enforce the one-active-grandchild limit through lifecycle discipline.
+- Worker grandchildren must be named `worker__...`, set `agent_type = "worker"`, use explicit Luna medium/high routing when available or Terra low as the bounded fallback, set `fork_turns = "none"`, own a disjoint complete implementation loop, and never spawn again. The parent and root enforce the one-active-grandchild limit through lifecycle discipline.
 - Reactivate a completed child only when its prior role, route, context, and ownership still fit the next action. Spawn a fresh sibling when independent review, clean context, changed ownership, or escalation is valuable.
 - Do not let two implementation tasks own overlapping files without explicit coordination.
 - The root owns Git integration, decides when parallel edits are stable, and accepts the final result. Once stable, delegate serialized project-wide verification, integration repair loops, and live proof when a leaf can own them coherently; run them at the root only when delegation overhead would exceed the work.

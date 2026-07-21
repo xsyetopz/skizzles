@@ -27,13 +27,14 @@ Encode the role and objective in the task name; carry capability explicitly:
 {
   "task_name": "worker__backend_contract",
   "fork_turns": "1",
+  "agent_type": "worker",
   "model": "gpt-5.6-terra",
   "reasoning_effort": "medium",
   "message": "You are dispatched as a Standard Worker. Implement the bounded backend contract described below..."
 }
 ```
 
-Complexity and horizon select model, effort, and fork depth; the role selects behavior. In the message, name the route and role and tell the child to read `$fourth-wall` plus the matching `resources/roles/*.md` file. Pass explicit model and reasoning overrides from the active tool schema.
+Complexity and horizon select model, effort, and fork depth; the role selects behavior. Under the Skizzles profile, set the matching native `agent_type`; under native instructions, set it only when the active schema advertises that role. Name the route and role in the message and pass explicit model and reasoning overrides from the active tool schema. The installed role config already supplies the shared subagent base plus role-specific developer instructions, so repeat only assignment-specific constraints.
 
 ## Worker Grandchildren
 

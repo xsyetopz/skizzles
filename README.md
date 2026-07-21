@@ -11,7 +11,7 @@ Skizzles is a friendly, reviewable Codex harness: reusable skills, helpful hooks
 - **Usage analyzer** — privacy-conscious, read-only rollout analysis using an explicit `CODEX_HOME`.
 - **Container Lab, batteries included** — a skill, full canonical source project, bundled CLI/reaper, compatibility descriptor, and safe doctor boundary for disposable Docker Compose labs. 🔬
 - **Luna joins the V2 party** — an opt-in model-catalog overlay and tiny launchd refresher preserve the official catalog while enabling proven Luna workers in native MultiAgentV2. 🌙
-- **Two brains, one harness** — an opt-in developer-focused root prompt keeps the conversation delightful while compact subagent instructions keep workers focused on execution. 🧠✨
+- **Two brains, six job descriptions** — an opt-in developer-focused root prompt keeps the conversation delightful, while every native Triage/Worker/Designer/QA/Review/Deployment role shares a compact execution base and receives only its specialized duty. 🧠✨
 - **A practical skill shelf** — auth semantics, Cargo optimization, completion contracts, counterfactual engineering, design proof gates, legacy cleanup, Rinf boundaries, project tooling, and a gated designer runtime.
 - **Installation help** — the public `install-skizzles` skill guides an LLM through optional host wiring after a skill-only install.
 - **A polite config handshake** — enable the hooks, then choose passive native orchestration or the full proactive Fourth Wall experience without trampling the rest of `config.toml`. 🤝
@@ -51,7 +51,7 @@ After installing the complete plugin surface, Skizzles can safely finish the Cod
 - **Passive orchestration** enables the packaged hooks and leaves Codex’s native MultiAgentV2 defaults completely alone.
 - **Aggressive orchestration** also enables MultiAgentV2, keeps seven task slots available, and adds tiny root/subagent pointers to `$fourth-wall` plus the proactive quality-and-speed trigger. 🚀
 - **Native instructions** (the default) leave Codex's model instructions untouched.
-- **Skizzles instructions** install distinct source-linked prompts for roots and default subagents. Roots keep the developer-facing personality and GUI niceties; subagents get a smaller execution-oriented contract with minimal commentary. Use numbered or context-free forks so Codex applies the subagent role—a large number safely means “up to this many turns,” not full-history mode.
+- **Skizzles instructions** install a developer-facing root prompt plus native `default`, `triage`, `worker`, `designer`, `qa`, `review`, and `deployment` roles. Every role shares the smaller execution-oriented subagent base; role-specific `developer_instructions` add only the specialized duty. Use numbered or context-free forks so Codex applies the selected role—a large number safely means “up to this many turns,” not full-history mode.
 
 Preview the full developer setup from the checkout:
 

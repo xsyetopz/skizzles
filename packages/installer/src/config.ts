@@ -71,15 +71,25 @@ const aggressiveModeHint =
   "Proactive complexity-aware delegation is active. Follow $fourth-wall whenever orchestration would materially improve speed or quality.";
 const rootHint = "Fourth Wall applies. Read and follow $fourth-wall before this task's first orchestration action.";
 const subagentHint =
-  "Fourth Wall applies. Read and follow $fourth-wall and the behavioral role resource named in your assignment.";
-const defaultAgentDescription =
-  "Skizzles execution subagent with a compact developer-focused instruction set.";
+  "Fourth Wall applies. Read and follow $fourth-wall; your native agent role defines your duty.";
+
+const agentRoles = {
+  default: "General Skizzles subagent with a compact developer-focused execution contract.",
+  triage: "Focused read-only codebase research, diagnosis, and current-shape mapping.",
+  worker: "Bounded implementation ownership through focused validation and evidence.",
+  designer: "Frontend and product UI implementation with visual and accessibility proof.",
+  qa: "Runtime piloting and evidence-rich product verification without silent fixes.",
+  review: "Independent adversarial review, verification, and acceptance assessment.",
+  deployment: "Authorized deployment and production-adjacent procedures with rollback discipline.",
+} as const;
+
+type AgentRole = keyof typeof agentRoles;
 
 interface InstructionAssets {
   sourceRoot: string;
   rootInstructions: string;
   subagentInstructions: string;
-  subagentConfig: string;
+  agentConfigs: Record<AgentRole, string>;
 }
 
 export function configReceiptPath(codexHome: string): string {
@@ -93,21 +103,26 @@ function canonicalExistingPath(path: string): string {
 
 function resolveInstructionAssets(sourceRootInput: string): InstructionAssets {
   const sourceRoot = canonicalExistingPath(sourceRootInput);
-  const assets = {
-    sourceRoot,
-    rootInstructions: join(sourceRoot, "assets", "skizzles_instructions.md"),
-    subagentInstructions: join(sourceRoot, "assets", "skizzles_subagent_instructions.md"),
-    subagentConfig: join(sourceRoot, "assets", "skizzles_subagent.toml"),
-  };
-  for (const [label, path] of Object.entries(assets).filter(([label]) => label !== "sourceRoot")) {
+  const rootInstructions = join(sourceRoot, "assets", "skizzles_instructions.md");
+  const subagentInstructions = join(sourceRoot, "assets", "skizzles_subagent_instructions.md");
+  const agentConfigs = Object.fromEntries(
+    Object.keys(agentRoles).map((role) => [role, join(sourceRoot, "assets", "agents", `${role}.toml`)]),
+  ) as Record<AgentRole, string>;
+  const requiredAssets: Array<[string, string]> = [
+    ["rootInstructions", rootInstructions],
+    ["subagentInstructions", subagentInstructions],
+    ...Object.entries(agentConfigs).map(([role, path]): [string, string] => [`agents.${role}`, path]),
+  ];
+  for (const [label, path] of requiredAssets) {
     if (!existsSync(path)) throw new Error(`Skizzles ${label} asset is missing: ${path}`);
   }
-  return assets;
+  return { sourceRoot, rootInstructions, subagentInstructions, agentConfigs };
 }
 
 export function desiredConfigEdits(
   orchestration: OrchestrationMode,
   instructionAssets?: InstructionAssets,
+  currentConfig: JsonValue = {},
 ): ConfigEdit[] {
   const edits: ConfigEdit[] = [
     { keyPath: "features.hooks", value: true, mergeStrategy: "replace" },
@@ -119,17 +134,32 @@ export function desiredConfigEdits(
         value: instructionAssets.rootInstructions,
         mergeStrategy: "replace",
       },
-      {
-        keyPath: "agents.default.description",
-        value: defaultAgentDescription,
-        mergeStrategy: "replace",
-      },
-      {
-        keyPath: "agents.default.config_file",
-        value: instructionAssets.subagentConfig,
-        mergeStrategy: "replace",
-      },
     );
+    const configuredRoles = Object.fromEntries(
+      Object.entries(agentRoles).map(([role, description]) => [role, {
+        description,
+        config_file: instructionAssets.agentConfigs[role as AgentRole],
+      }]),
+    ) as JsonValue;
+    const existingAgents = valueAt(currentConfig, "agents");
+    if (!existingAgents.present) {
+      edits.push({ keyPath: "agents", value: configuredRoles, mergeStrategy: "replace" });
+    } else {
+      for (const [role, description] of Object.entries(agentRoles)) {
+        const roleConfig = {
+          description,
+          config_file: instructionAssets.agentConfigs[role as AgentRole],
+        };
+        if (!valueAt(currentConfig, `agents.${role}`).present) {
+          edits.push({ keyPath: `agents.${role}`, value: roleConfig, mergeStrategy: "replace" });
+        } else {
+          edits.push(
+            { keyPath: `agents.${role}.description`, value: description, mergeStrategy: "replace" },
+            { keyPath: `agents.${role}.config_file`, value: roleConfig.config_file, mergeStrategy: "replace" },
+          );
+        }
+      }
+    }
   }
   if (orchestration === "aggressive") {
     edits.push(
@@ -245,7 +275,7 @@ export async function configureCodex(options: ConfigureOptions): Promise<ConfigR
   const rpc = await (options.rpcFactory ?? AppServerRpc.create)(codexHome, codexBinary);
   try {
     const layer = userLayer(await rpc.read(), configPath);
-    const edits = desiredConfigEdits(options.orchestration, instructionAssets);
+    const edits = desiredConfigEdits(options.orchestration, instructionAssets, layer.config);
     const values = edits.map(({ keyPath, value }) => {
       const before = valueAt(layer.config, keyPath);
       return { keyPath, beforePresent: before.present, before: before.value, after: value };
