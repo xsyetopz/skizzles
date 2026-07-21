@@ -6945,7 +6945,7 @@ var require_public_api = __commonJS((exports) => {
 });
 
 // packages/container-lab/src/cli.ts
-import process12 from "process";
+import process11 from "process";
 import { StringDecoder } from "string_decoder";
 
 // packages/container-lab/src/cli/arguments.ts
@@ -7125,10 +7125,10 @@ async function dispatchCliCommand(service, args, signal) {
 }
 
 // packages/container-lab/src/lab/orchestrator.ts
-import process11 from "process";
+import process10 from "process";
 
 // packages/container-lab/src/docker.ts
-import { spawn as spawn2 } from "child_process";
+import { spawn } from "child_process";
 
 // packages/container-lab/src/docker/attached-process.ts
 import { posix as posix2 } from "path";
@@ -8751,95 +8751,408 @@ async function verifyComposeResource(metadata, kind, id, ownershipLabel, runner,
 }
 
 // packages/container-lab/src/process.ts
-import process5 from "process";
-
-// packages/container-lab/src/process/execution.ts
-import { spawn } from "child_process";
 import process4 from "process";
 
-// packages/container-lab/src/process/group.ts
+// packages/container-lab/src/process/supervisor.ts
 import process3 from "process";
-var TERMINATION_GRACE_MS = 250;
-var TERMINATION_CONFIRMATION_MS = 2000;
-var GROUP_POLL_MS = 10;
-async function cleanupOwnedProcess(processGroup, command) {
-  if (processGroup === undefined) {
-    return;
-  }
-  if (!processGroupExists(processGroup, command)) {
-    return;
-  }
-  if (!signalProcessGroup(processGroup, "SIGTERM", command)) {
-    return;
-  }
-  if (await waitForProcessGroupExit(processGroup, TERMINATION_GRACE_MS, command)) {
-    return;
-  }
-  if (!signalProcessGroup(processGroup, "SIGKILL", command)) {
-    return;
-  }
-  if (await waitForProcessGroupExit(processGroup, TERMINATION_CONFIRMATION_MS, command)) {
-    return;
-  }
-  throw new Error(`${command} cleanup failed: process group ${processGroup} remains after SIGKILL`);
-}
-function signalProcessGroup(processGroup, signal, command) {
+var FORCE_EXIT_TIMEOUT_MS = 2000;
+var WORKER_SOURCE = `
+const specification = JSON.parse(Bun.argv[1]);
+const publish = (message) => {
   try {
-    process3.kill(-processGroup, signal);
-    return true;
-  } catch (error) {
-    if (isMissingProcess(error)) {
-      return false;
-    }
-    throw new Error(`${command} cleanup failed: cannot send ${signal} to process group ${processGroup}: ${asError(error).message}`, { cause: error });
-  }
-}
-function processGroupExists(processGroup, command) {
-  try {
-    process3.kill(-processGroup, 0);
-    return true;
-  } catch (error) {
-    if (isMissingProcess(error)) {
-      return false;
-    }
-    if (isPermissionDenied(error)) {
-      return true;
-    }
-    throw new Error(`${command} cleanup failed: cannot verify process group ${processGroup}: ${asError(error).message}`, { cause: error });
-  }
-}
-async function waitForProcessGroupExit(processGroup, timeoutMs, command) {
-  return await new Promise((resolve2, reject) => {
-    const deadline = Date.now() + timeoutMs;
-    const poll = () => {
-      try {
-        if (!processGroupExists(processGroup, command)) {
-          resolve2(true);
-          return;
-        }
-        if (Date.now() >= deadline) {
-          resolve2(false);
-          return;
-        }
-        setTimeout(poll, GROUP_POLL_MS);
-      } catch (error) {
-        reject(error);
-      }
-    };
-    poll();
+    process.send?.(message);
+  } catch {}
+};
+try {
+  const tool = Bun.spawn([specification.command, ...specification.args], {
+    cwd: specification.cwd,
+    env: process.env,
+    stdin: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
   });
+  publish({ type: "ready" });
+  tool.exited.then(
+    (exitCode) => publish({ type: "exited", exitCode }),
+    () => publish({ type: "tool-error" }),
+  );
+} catch {
+  publish({ type: "spawn-error" });
 }
-function isMissingProcess(error) {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ESRCH";
+`;
+var GUARDIAN_SOURCE = `
+const workerSource = ${JSON.stringify(WORKER_SOURCE)};
+const specification = Bun.argv[1];
+process.on("SIGTERM", () => undefined);
+setInterval(() => undefined, 2_147_483_647);
+const publish = (message) => {
+  try {
+    process.send?.(message);
+  } catch {}
+};
+let state = "pending";
+let final = false;
+try {
+  const worker = Bun.spawn([process.execPath, "--eval", workerSource, specification], {
+    env: process.env,
+    stdin: "ignore",
+    stdout: "inherit",
+    stderr: "inherit",
+    ipc(message) {
+      if (final) return;
+      const keys = typeof message === "object" && message !== null ? Object.keys(message) : [];
+      if (message?.type === "ready" && keys.length === 1 && state === "pending") {
+        state = "ready";
+        publish(message);
+        return;
+      }
+      if (message?.type === "spawn-error" && keys.length === 1 && state === "pending") {
+        final = true;
+        publish(message);
+        return;
+      }
+      if (message?.type === "tool-error" && keys.length === 1 && state === "ready") {
+        final = true;
+        publish(message);
+        return;
+      }
+      if (
+        message?.type === "exited" &&
+        keys.length === 2 &&
+        Number.isSafeInteger(message.exitCode) &&
+        state === "ready"
+      ) {
+        final = true;
+        publish(message);
+        return;
+      }
+      final = true;
+      publish({ type: "worker-error" });
+    },
+  });
+  worker.exited.then(
+    () => {
+      if (final) return;
+      final = true;
+      publish({ type: "worker-error" });
+    },
+    () => {
+      if (final) return;
+      final = true;
+      publish({ type: "worker-error" });
+    },
+  );
+} catch {
+  final = true;
+  publish({ type: "worker-error" });
 }
-function isPermissionDenied(error) {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "EPERM";
+`;
+function spawnCommandGuardian(command, args, options) {
+  const protocol = protocolReceiver();
+  const specification = JSON.stringify({
+    command,
+    args,
+    ...options.cwd === undefined ? {} : { cwd: options.cwd }
+  });
+  const child = Bun.spawn([process3.execPath, "--eval", GUARDIAN_SOURCE, specification], {
+    detached: true,
+    ...options.env === undefined ? {} : { env: options.env },
+    ipc: protocol.receive,
+    stderr: "pipe",
+    stdin: "ignore",
+    stdout: "pipe"
+  });
+  let forced = false;
+  let confirmed = false;
+  const signal = (value) => {
+    if (confirmed)
+      return false;
+    const sent = signalOwnedGuardian(child.exitCode !== null, child.pid, value);
+    if (sent && value === "SIGKILL")
+      forced = true;
+    return sent;
+  };
+  return {
+    child,
+    final: protocol.final,
+    requestStop: () => {
+      signal("SIGTERM");
+    },
+    forceStop: () => {
+      signal("SIGKILL");
+    },
+    waitForExit: async () => {
+      if (confirmed)
+        return;
+      if (!await exitsWithin(child.exited, FORCE_EXIT_TIMEOUT_MS)) {
+        throw cleanupError(command, "guardian did not exit after SIGKILL");
+      }
+      if (!forced) {
+        throw cleanupError(command, "guardian exited before process-group termination was confirmed");
+      }
+      confirmed = true;
+    }
+  };
+}
+async function stopCommandGuardian(guardian, command, graceMs) {
+  let gracefulFailure;
+  try {
+    guardian.requestStop();
+  } catch (error) {
+    gracefulFailure = error;
+  }
+  if (!await exitsWithin(guardian.child.exited, graceMs)) {
+    try {
+      guardian.forceStop();
+    } catch (error) {
+      const forceFailure = cleanupError(command, `cannot send SIGKILL: ${asError(error).message}`, error);
+      throw gracefulFailure === undefined ? forceFailure : new AggregateError([forceFailure, gracefulFailure], `${command} graceful and forced cleanup both failed`);
+    }
+  }
+  try {
+    await guardian.waitForExit();
+  } catch (error) {
+    if (gracefulFailure === undefined)
+      throw error;
+    throw new AggregateError([error, gracefulFailure], `${command} cleanup and graceful termination both failed`);
+  }
+  if (gracefulFailure !== undefined)
+    throw gracefulFailure;
+}
+async function finishCommandGuardian(guardian, command) {
+  try {
+    guardian.forceStop();
+  } catch (error) {
+    throw cleanupError(command, `cannot send SIGKILL: ${asError(error).message}`, error);
+  }
+  await guardian.waitForExit();
+}
+function protocolReceiver() {
+  const final = Promise.withResolvers();
+  let state = "pending";
+  const receive = (message) => {
+    if (state === "final")
+      return;
+    const parsed = protocolMessage(message, state);
+    if (parsed instanceof Error) {
+      state = "final";
+      final.reject(parsed);
+      return;
+    }
+    if (parsed.type === "ready") {
+      state = "ready";
+      return;
+    }
+    state = "final";
+    final.resolve(parsed);
+  };
+  return { final: final.promise, receive };
+}
+function protocolMessage(value, state) {
+  if (!isProtocolMessage(value))
+    return new Error("invalid guardian protocol");
+  if (value.type === "ready") {
+    return state === "pending" ? value : new Error("invalid guardian protocol");
+  }
+  if (value.type === "spawn-error") {
+    return state === "pending" ? value : new Error("invalid guardian protocol");
+  }
+  if (value.type === "worker-error")
+    return value;
+  return state === "ready" ? value : new Error("invalid guardian protocol");
+}
+function isProtocolMessage(value) {
+  if (!isRecord5(value) || typeof value["type"] !== "string")
+    return false;
+  if (value["type"] === "ready" || value["type"] === "spawn-error" || value["type"] === "tool-error" || value["type"] === "worker-error") {
+    return Object.keys(value).length === 1;
+  }
+  return value["type"] === "exited" && Object.keys(value).length === 2 && Number.isSafeInteger(value["exitCode"]);
+}
+function signalOwnedGuardian(guardianExited, pid, signal, kill = process3.kill) {
+  if (guardianExited)
+    return false;
+  try {
+    kill(-pid, signal);
+    return true;
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ESRCH")
+      return false;
+    throw error;
+  }
+}
+async function exitsWithin(exited, milliseconds) {
+  const timeout = Promise.withResolvers();
+  const timer = setTimeout(() => timeout.resolve(false), milliseconds);
+  try {
+    return await Promise.race([exited.then(() => true), timeout.promise]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function cleanupError(command, detail, cause) {
+  return new Error(`${command} cleanup failed: ${detail}`, { cause });
+}
+function isRecord5(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isNodeError(error) {
+  return error instanceof Error && "code" in error;
 }
 function asError(error) {
-  if (error instanceof Error) {
-    return error;
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+// packages/container-lab/src/process/execution.ts
+var DEFAULT_OUTPUT_BYTES = 4194304;
+var TERMINATION_GRACE_MS = 250;
+var TIMEOUT_EXIT_CODE = 124;
+async function executeCommand(command, args, options) {
+  const cap = options.maxOutputBytes ?? DEFAULT_OUTPUT_BYTES;
+  let guardian;
+  try {
+    guardian = spawnCommandGuardian(command, args, options);
+  } catch (error) {
+    throw asError2(error);
   }
-  return new Error(String(error));
+  const state = {
+    abortRequested: false,
+    failure: undefined,
+    outputLimitExceeded: undefined,
+    timedOut: false
+  };
+  const stop = Promise.withResolvers();
+  const requestExternalStop = () => stop.resolve("external-stop");
+  const outputAbort = new AbortController;
+  const stdout = collectBounded(guardian.child.stdout, cap, "stdout", options.rejectOnOutputLimit === true, state, requestExternalStop, outputAbort.signal);
+  const stderr = collectBounded(guardian.child.stderr, cap, "stderr", options.rejectOnOutputLimit === true, state, requestExternalStop, outputAbort.signal);
+  const abort = () => {
+    state.abortRequested = true;
+    requestExternalStop();
+  };
+  options.signal?.addEventListener("abort", abort, { once: true });
+  if (options.signal?.aborted)
+    abort();
+  const timer = options.timeoutMs === undefined ? undefined : setTimeout(() => {
+    state.timedOut = true;
+    requestExternalStop();
+  }, options.timeoutMs);
+  let protocol;
+  const protocolOutcome = guardian.final.then((message) => {
+    protocol = message;
+    stop.resolve("terminal");
+  }, (error) => {
+    state.failure = asError2(error);
+    requestExternalStop();
+  });
+  const guardianExit = guardian.child.exited.then(() => {
+    if (protocol === undefined && state.failure === undefined) {
+      state.failure = new Error(`${command} guardian exited unexpectedly`);
+      requestExternalStop();
+    }
+  });
+  const cleanupMode = await stop.promise;
+  let cleanupFailure;
+  try {
+    if (cleanupMode === "external-stop") {
+      await stopCommandGuardian(guardian, command, TERMINATION_GRACE_MS);
+    } else {
+      await finishCommandGuardian(guardian, command);
+    }
+  } catch (error) {
+    cleanupFailure = error;
+    outputAbort.abort();
+  }
+  clearTimeout(timer);
+  options.signal?.removeEventListener("abort", abort);
+  if (cleanupFailure === undefined) {
+    await Promise.allSettled([protocolOutcome, guardianExit]);
+  }
+  let captured;
+  try {
+    captured = await Promise.all([stdout, stderr]);
+  } catch (error) {
+    state.failure ??= asError2(error);
+    captured = [emptyOutput(), emptyOutput()];
+  } finally {
+    outputAbort.abort();
+  }
+  if (cleanupFailure !== undefined)
+    throw cleanupFailure;
+  const [capturedStdout, capturedStderr] = captured;
+  if (state.abortRequested || options.signal?.aborted) {
+    throw new Error(`${command} aborted`);
+  }
+  if (state.outputLimitExceeded !== undefined) {
+    throw new Error(`${command} ${state.outputLimitExceeded} exceeded ${cap} byte output limit`);
+  }
+  if (state.timedOut) {
+    const result2 = {
+      code: TIMEOUT_EXIT_CODE,
+      stdout: Buffer.from(capturedStdout.bytes),
+      stderr: Buffer.from(capturedStderr.bytes)
+    };
+    if (!options.allowFailure) {
+      throw new Error(`${command} ${args.join(" ")} failed (${result2.code}): ${result2.stderr.toString().trim()}`);
+    }
+    return result2;
+  }
+  if (state.failure !== undefined)
+    throw state.failure;
+  if (protocol === undefined || !("exitCode" in protocol)) {
+    throw new Error(`${command} process execution failed`);
+  }
+  const result = {
+    code: protocol.exitCode,
+    stdout: Buffer.from(capturedStdout.bytes),
+    stderr: Buffer.from(capturedStderr.bytes)
+  };
+  if (result.code !== 0 && !options.allowFailure) {
+    throw new Error(`${command} ${args.join(" ")} failed (${result.code}): ${result.stderr.toString().trim()}`);
+  }
+  return result;
+}
+async function collectBounded(stream, cap, name, rejectOnOverflow, state, stop, signal) {
+  const chunks = [];
+  let observed = 0;
+  const reader = stream.getReader();
+  const cancel = () => {
+    reader.cancel().catch(() => {
+      return;
+    });
+  };
+  signal.addEventListener("abort", cancel, { once: true });
+  try {
+    while (!signal.aborted) {
+      const { done, value } = await reader.read();
+      if (done)
+        break;
+      if (observed < cap)
+        chunks.push(value.subarray(0, cap - observed));
+      observed += value.byteLength;
+      if (observed > cap && rejectOnOverflow && state.outputLimitExceeded === undefined) {
+        state.outputLimitExceeded = name;
+        stop();
+      }
+    }
+  } finally {
+    signal.removeEventListener("abort", cancel);
+    reader.releaseLock();
+  }
+  const length = Math.min(observed, cap);
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { bytes, overflow: observed > cap };
+}
+function emptyOutput() {
+  return { bytes: new Uint8Array, overflow: false };
+}
+function asError2(error) {
+  return error instanceof Error ? error : new Error(String(error));
 }
 
 // packages/container-lab/src/process/platform.ts
@@ -8849,259 +9162,9 @@ function assertProcessPlatform(platform, command) {
   }
 }
 
-// packages/container-lab/src/process/execution.ts
-var DEFAULT_OUTPUT_BYTES = 4194304;
-var PIPE_RELEASE_GRACE_MS = 250;
-var TIMEOUT_EXIT_CODE = 124;
-
-class CommandExecution {
-  stdout = [];
-  stderr = [];
-  cap;
-  stdoutBytes = 0;
-  stderrBytes = 0;
-  outputLimitExceeded;
-  child;
-  timeout;
-  pipeRelease;
-  cleanup;
-  cleanupFinished = false;
-  resolve;
-  reject;
-  command;
-  args;
-  options;
-  state = {
-    closeCode: undefined,
-    closeObserved: false,
-    exitObserved: false,
-    pipesReleased: false,
-    timedOut: false,
-    abortRequested: false,
-    processError: undefined,
-    cleanupError: undefined
-  };
-  constructor(command, args, options) {
-    this.command = command;
-    this.args = args;
-    this.options = options;
-    this.cap = options.maxOutputBytes ?? DEFAULT_OUTPUT_BYTES;
-  }
-  execute() {
-    return new Promise((resolve2, reject) => {
-      this.resolve = resolve2;
-      this.reject = reject;
-      this.start();
-    });
-  }
-  start() {
-    this.options.signal?.addEventListener("abort", this.onAbort, {
-      once: true
-    });
-    if (this.options.signal?.aborted) {
-      this.finishBeforeSpawn(new Error(`${this.command} aborted`));
-      return;
-    }
-    try {
-      this.child = spawn(this.command, this.args, {
-        cwd: this.options.cwd,
-        env: this.options.env,
-        stdio: ["ignore", "pipe", "pipe"],
-        detached: true
-      });
-    } catch (error) {
-      this.finishBeforeSpawn(asError2(error));
-      return;
-    }
-    this.attachChild(this.child);
-    if (this.state.abortRequested || this.options.signal?.aborted) {
-      this.state.abortRequested = true;
-      this.confirmCleanup();
-    }
-    if (this.options.timeoutMs) {
-      this.timeout = setTimeout(this.onTimeout, this.options.timeoutMs);
-    }
-  }
-  attachChild(child) {
-    child.stdout.on("data", this.onStdout);
-    child.stderr.on("data", this.onStderr);
-    child.stdout.once("error", this.onStreamError);
-    child.stderr.once("error", this.onStreamError);
-    child.once("error", this.onProcessError);
-    child.once("exit", this.onExit);
-    child.once("close", this.onClose);
-  }
-  onAbort = () => {
-    this.state.abortRequested = true;
-    if (this.child !== undefined) {
-      this.confirmCleanup();
-    }
-  };
-  onTimeout = () => {
-    this.state.timedOut = true;
-    this.confirmCleanup();
-  };
-  onStdout = (chunk) => {
-    this.stdoutBytes = this.collect("stdout", this.stdout, chunk, this.stdoutBytes);
-  };
-  onStderr = (chunk) => {
-    this.stderrBytes = this.collect("stderr", this.stderr, chunk, this.stderrBytes);
-  };
-  onStreamError = (error) => {
-    this.state.processError ??= error;
-    this.confirmCleanup();
-  };
-  onProcessError = (error) => {
-    this.state.processError = error;
-    this.confirmCleanup();
-    if (this.child?.pid === undefined) {
-      this.state.closeObserved = true;
-      this.state.pipesReleased = true;
-      this.finish();
-    }
-  };
-  onExit = (code) => {
-    this.state.exitObserved = true;
-    this.state.closeCode = code;
-    this.clearTimeout();
-    this.confirmCleanup();
-  };
-  onClose = (code) => {
-    this.state.closeObserved = true;
-    this.state.closeCode = code;
-    this.clearTimeout();
-    this.confirmCleanup();
-    this.finish();
-  };
-  collect(stream, chunks, chunk, current) {
-    const remaining = this.cap - current;
-    if (remaining > 0) {
-      chunks.push(chunk.subarray(0, remaining));
-    }
-    const next = current + chunk.byteLength;
-    if (next > this.cap && this.options.rejectOnOutputLimit === true && this.outputLimitExceeded === undefined) {
-      this.outputLimitExceeded = stream;
-      this.confirmCleanup();
-    }
-    return next;
-  }
-  confirmCleanup() {
-    if (this.cleanup !== undefined) {
-      return;
-    }
-    this.cleanup = cleanupOwnedProcess(this.child?.pid, this.command);
-    this.cleanup.then(this.onCleanupSuccess, this.onCleanupFailure);
-  }
-  onCleanupSuccess = () => {
-    this.cleanupFinished = true;
-    this.releasePipesIfCloseIsHeld();
-    this.finish();
-  };
-  onCleanupFailure = (error) => {
-    this.state.cleanupError = asError2(error);
-    this.cleanupFinished = true;
-    this.releasePipes();
-    this.finish();
-  };
-  releasePipesIfCloseIsHeld() {
-    if (this.state.closeObserved || !this.state.exitObserved) {
-      return;
-    }
-    this.pipeRelease = setTimeout(() => {
-      this.releasePipes();
-      this.finish();
-    }, PIPE_RELEASE_GRACE_MS);
-  }
-  releasePipes() {
-    if (this.state.pipesReleased) {
-      return;
-    }
-    this.state.pipesReleased = true;
-    this.child?.stdout.destroy();
-    this.child?.stderr.destroy();
-  }
-  finish() {
-    if (this.resolve === undefined || this.reject === undefined || !this.cleanupFinished || !(this.state.closeObserved || this.state.pipesReleased)) {
-      return;
-    }
-    this.teardown();
-    const { resolve: resolve2, reject } = this;
-    this.resolve = undefined;
-    this.reject = undefined;
-    const result = this.commandResult();
-    const failure = this.outcomeFailure(result);
-    if (failure !== undefined) {
-      reject(failure);
-      return;
-    }
-    resolve2(result);
-  }
-  outcomeFailure(result) {
-    if (this.state.cleanupError !== undefined) {
-      this.child?.unref();
-      return this.state.cleanupError;
-    }
-    if (this.state.processError !== undefined) {
-      return this.state.processError;
-    }
-    if (this.state.abortRequested || this.options.signal?.aborted) {
-      return new Error(`${this.command} aborted`);
-    }
-    if (this.outputLimitExceeded !== undefined) {
-      return new Error(`${this.command} ${this.outputLimitExceeded} exceeded ${this.cap} byte output limit`);
-    }
-    if (result.code === 0 || this.options.allowFailure) {
-      return;
-    }
-    return new Error(`${this.command} ${this.args.join(" ")} failed (${result.code}): ${result.stderr.toString().trim()}`);
-  }
-  commandResult() {
-    let code = this.state.closeCode ?? 1;
-    if (this.state.timedOut) {
-      code = TIMEOUT_EXIT_CODE;
-    }
-    return {
-      code,
-      stdout: Buffer.concat(this.stdout),
-      stderr: Buffer.concat(this.stderr)
-    };
-  }
-  finishBeforeSpawn(error) {
-    this.options.signal?.removeEventListener("abort", this.onAbort);
-    this.reject?.(error);
-  }
-  clearTimeout() {
-    if (this.timeout !== undefined) {
-      clearTimeout(this.timeout);
-      this.timeout = undefined;
-    }
-  }
-  teardown() {
-    this.clearTimeout();
-    if (this.pipeRelease !== undefined) {
-      clearTimeout(this.pipeRelease);
-    }
-    this.options.signal?.removeEventListener("abort", this.onAbort);
-    this.child?.stdout.removeListener("data", this.onStdout);
-    this.child?.stderr.removeListener("data", this.onStderr);
-    this.child?.stdout.removeListener("error", this.onStreamError);
-    this.child?.stderr.removeListener("error", this.onStreamError);
-  }
-}
-function asError2(error) {
-  if (error instanceof Error) {
-    return error;
-  }
-  return new Error(String(error));
-}
-async function executeCommand(command, args, options) {
-  assertProcessPlatform(process4.platform, command);
-  return await new CommandExecution(command, args, options).execute();
-}
-
 // packages/container-lab/src/process.ts
 async function runCommand(command, args, options = {}) {
-  assertProcessPlatform(process5.platform, command);
+  assertProcessPlatform(process4.platform, command);
   if (options.signal?.aborted) {
     throw new Error(`${command} aborted`);
   }
@@ -9111,7 +9174,7 @@ async function runCommand(command, args, options = {}) {
 // packages/container-lab/src/docker.ts
 var defaultDockerRunner = {
   run: async (args, options) => await runCommand("docker", args, options),
-  spawn: (args, options) => spawn2("docker", args, {
+  spawn: (args, options) => spawn("docker", args, {
     env: options.env,
     stdio: ["pipe", "pipe", "pipe"]
   })
@@ -9158,7 +9221,7 @@ import {
   writeFile as writeFile2
 } from "fs/promises";
 import { dirname } from "path";
-import process6 from "process";
+import process5 from "process";
 async function withFileLock(path, operation, options = {}) {
   const attempts = options.attempts ?? 100;
   const delayMs = options.delayMs ?? 50;
@@ -9168,11 +9231,11 @@ async function withFileLock(path, operation, options = {}) {
     if (options.signal?.aborted) {
       throw new Error("operation was cancelled while waiting for a state lock");
     }
-    const candidate = `${path}.candidate-${process6.pid}-${crypto.randomUUID()}`;
+    const candidate = `${path}.candidate-${process5.pid}-${crypto.randomUUID()}`;
     let acquired = false;
     try {
       await writeFile2(candidate, JSON.stringify({
-        pid: process6.pid,
+        pid: process5.pid,
         createdAt: new Date().toISOString()
       }), { mode: 384, flag: "wx" });
       try {
@@ -9225,7 +9288,7 @@ async function removeConfirmedStaleLock(path, staleMs, processProbe) {
     try {
       const contents = info.isDirectory() ? await readFile2(`${path}/owner.json`, "utf8") : await handle.readFile({ encoding: "utf8" });
       const value = JSON.parse(contents);
-      if (isRecord5(value) && typeof value["pid"] === "number" && Number.isInteger(value["pid"]) && value["pid"] > 0 && typeof value["createdAt"] === "string") {
+      if (isRecord6(value) && typeof value["pid"] === "number" && Number.isInteger(value["pid"]) && value["pid"] > 0 && typeof value["createdAt"] === "string") {
         record = value;
       }
     } catch {}
@@ -9254,10 +9317,10 @@ async function removeConfirmedStaleLock(path, staleMs, processProbe) {
   }
 }
 async function reclaimSameLock(path, inspected, staleMs, processProbe) {
-  const candidate = `${path}.reclaim-candidate-${process6.pid}-${crypto.randomUUID()}`;
+  const candidate = `${path}.reclaim-candidate-${process5.pid}-${crypto.randomUUID()}`;
   try {
     await writeFile2(candidate, JSON.stringify({
-      pid: process6.pid,
+      pid: process5.pid,
       createdAt: new Date().toISOString()
     }), { mode: 384, flag: "wx" });
     const candidateIdentity = identity2(await lstat2(candidate, { bigint: true }));
@@ -9322,7 +9385,7 @@ async function removeConfirmedOrphanClaim(claimPath, staleMs, processProbe) {
     } catch {
       return false;
     }
-    if (!isRecord5(value) || typeof value["pid"] !== "number" || !Number.isInteger(value["pid"]) || value["pid"] <= 0 || typeof value["createdAt"] !== "string") {
+    if (!isRecord6(value) || typeof value["pid"] !== "number" || !Number.isInteger(value["pid"]) || value["pid"] <= 0 || typeof value["createdAt"] !== "string") {
       return false;
     }
     const age = Date.now() - Date.parse(value["createdAt"]);
@@ -9371,9 +9434,9 @@ function identity2(info) {
   return { dev: info.dev, ino: info.ino };
 }
 function probeProcess(pid) {
-  process6.kill(pid, 0);
+  process5.kill(pid, 0);
 }
-function isRecord5(value) {
+function isRecord6(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -9686,7 +9749,7 @@ async function removeIfPresent(file, options = {}) {
 import { createHash as createHash2 } from "crypto";
 import { homedir, tmpdir } from "os";
 import { join as join4, resolve as resolve3 } from "path";
-import process7 from "process";
+import process6 from "process";
 function defaultStateRoot() {
   return join4(homedir(), "Library", "Application Support", "OpenAI", "codex-container-lab");
 }
@@ -9695,11 +9758,11 @@ function defaultRuntimeRoot() {
 }
 function resolveRoots(options = {}) {
   return {
-    stateRoot: resolve3(options.stateRoot ?? process7.env["CODEX_CONTAINER_LAB_STATE_ROOT"] ?? defaultStateRoot()),
-    runtimeRoot: resolve3(options.runtimeRoot ?? process7.env["CODEX_CONTAINER_LAB_RUNTIME_ROOT"] ?? defaultRuntimeRoot())
+    stateRoot: resolve3(options.stateRoot ?? process6.env["CODEX_CONTAINER_LAB_STATE_ROOT"] ?? defaultStateRoot()),
+    runtimeRoot: resolve3(options.runtimeRoot ?? process6.env["CODEX_CONTAINER_LAB_RUNTIME_ROOT"] ?? defaultRuntimeRoot())
   };
 }
-function resolveOwner(explicit, environment = process7.env) {
+function resolveOwner(explicit, environment = process6.env) {
   const owner = explicit ?? environment["CODEX_THREAD_ID"];
   if (owner === undefined || owner.length === 0) {
     throw new Error("owner is required: pass --owner THREAD_ID or set CODEX_THREAD_ID");
@@ -9781,7 +9844,7 @@ function assertLabMetadata(value, roots, owner, labId) {
   try {
     safeStateName(labId, "lab id");
     resolveOwner(owner, {});
-    if (!isRecord6(value) || value["version"] !== 1 || value["id"] !== labId || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner)) {
+    if (!isRecord7(value) || value["version"] !== 1 || value["id"] !== labId || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner)) {
       throw new Error("identity mismatch");
     }
     normalizeEnvironmentMetadata(value);
@@ -9862,14 +9925,14 @@ function assertLabMetadata(value, roots, owner, labId) {
   }
 }
 function validatePersistedRuntime(lab, runtime) {
-  if (!isRecord6(runtime) || !hasOnlyKeys(runtime, [
+  if (!isRecord7(runtime) || !hasOnlyKeys(runtime, [
     "config",
     "composeArgs",
     "baseFile",
     "sourceFile",
     "overrideFile",
     "findings"
-  ]) || !isRecord6(runtime["config"])) {
+  ]) || !isRecord7(runtime["config"])) {
     throw new Error("invalid persisted runtime");
   }
   const persistedConfig = runtime["config"];
@@ -9916,7 +9979,7 @@ function validatedPersistedConfig(lab, config) {
     "forwardEnvironment",
     "composeEnvironment",
     "secretEnvironment"
-  ]) || !isRecord6(config["mode"]) || !isRecord6(config["runtime"])) {
+  ]) || !isRecord7(config["mode"]) || !isRecord7(config["runtime"])) {
     throw new Error("runtime source identity mismatch");
   }
   const mode = validatedPersistedMode(lab, sourceRoot, config["mode"]);
@@ -9990,7 +10053,7 @@ function validatedPersistedMode(lab, sourceRoot, mode) {
 function normalizeEnvironmentMetadata(lab) {
   let runtimeComposeNames;
   let runtimeSecretNames;
-  if (isRecord6(lab["runtime"]) && isRecord6(lab["runtime"]["config"])) {
+  if (isRecord7(lab["runtime"]) && isRecord7(lab["runtime"]["config"])) {
     if (lab["runtime"]["config"]["composeEnvironment"] === undefined) {
       lab["runtime"]["config"]["composeEnvironment"] = [];
     }
@@ -10021,10 +10084,10 @@ function isNormalizedAbsolute(value) {
   return typeof value === "string" && !value.includes("\x00") && isAbsolute3(value) && resolve4(value) === value;
 }
 function isEndpoint(value) {
-  return isRecord6(value) && typeof value["name"] === "string" && SERVICE_NAME.test(value["name"]) && typeof value["service"] === "string" && SERVICE_NAME.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && isBoundedString(value["url"], 2048);
+  return isRecord7(value) && typeof value["name"] === "string" && SERVICE_NAME.test(value["name"]) && typeof value["service"] === "string" && SERVICE_NAME.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && isBoundedString(value["url"], 2048);
 }
 function isDeclaredPort(value) {
-  return isRecord6(value) && hasOnlyKeys(value, ["name", "service", "target", "scheme"]) && typeof value["name"] === "string" && SERVICE_NAME.test(value["name"]) && typeof value["service"] === "string" && SERVICE_NAME.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && (value["scheme"] === undefined || typeof value["scheme"] === "string" && URL_SCHEME.test(value["scheme"]));
+  return isRecord7(value) && hasOnlyKeys(value, ["name", "service", "target", "scheme"]) && typeof value["name"] === "string" && SERVICE_NAME.test(value["name"]) && typeof value["service"] === "string" && SERVICE_NAME.test(value["service"]) && typeof value["target"] === "number" && Number.isInteger(value["target"]) && value["target"] >= 1 && value["target"] <= 65535 && (value["scheme"] === undefined || typeof value["scheme"] === "string" && URL_SCHEME.test(value["scheme"]));
 }
 function isRuntimeShell(value) {
   return Array.isArray(value) && value.length > 0 && value.length <= 64 && value.every((part) => isBoundedString(part, 4096) && !part.includes("\x00")) && posix3.isAbsolute(value[0]) && posix3.normalize(value[0]) === value[0];
@@ -10034,7 +10097,7 @@ function hasOnlyKeys(value, allowed) {
   return Object.keys(value).every((key) => allowedKeys.has(key));
 }
 function isFinding(value) {
-  return isRecord6(value) && (value["service"] === undefined || isBoundedString(value["service"], 128)) && typeof value["surface"] === "string" && FINDING_SURFACES.has(value["surface"]) && isBoundedString(value["detail"], 1024);
+  return isRecord7(value) && (value["service"] === undefined || isBoundedString(value["service"], 128)) && typeof value["surface"] === "string" && FINDING_SURFACES.has(value["surface"]) && isBoundedString(value["detail"], 1024);
 }
 function isTimestamp(value) {
   if (typeof value !== "string") {
@@ -10052,7 +10115,7 @@ function isBoundedString(value, maximum) {
 function message(error) {
   return error instanceof Error ? error.message : String(error);
 }
-function isRecord6(value) {
+function isRecord7(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -10093,7 +10156,7 @@ async function removeLabState(stateRoot, owner, labId) {
 import { randomUUID as randomUUID3 } from "crypto";
 import { lstat as lstat10, mkdir as mkdir7, rename as rename4, rm as rm8 } from "fs/promises";
 import path8 from "path";
-import process10 from "process";
+import process9 from "process";
 
 // packages/container-lab/src/sync/comparison.ts
 function sameSyncFile(a, b) {
@@ -10391,7 +10454,7 @@ async function directoryIdentity(root, relative4) {
 
 // packages/container-lab/src/sync/git-manifest.ts
 import { lstat as lstat6 } from "fs/promises";
-import process8 from "process";
+import process7 from "process";
 
 // packages/container-lab/src/process/git.ts
 import { isAbsolute as isAbsolute4 } from "path";
@@ -10440,7 +10503,7 @@ function gitProcessEnvironment(environment) {
 // packages/container-lab/src/sync/git-manifest.ts
 var MAX_SYNC_FILES = 20000;
 var MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
-async function eligibleGitPaths(root, environment = process8.env) {
+async function eligibleGitPaths(root, environment = process7.env) {
   const canonical = await canonicalRoot(root);
   const { stdout } = await runLocalGit([
     "-C",
@@ -10458,7 +10521,7 @@ async function eligibleGitPaths(root, environment = process8.env) {
   }
   return unique;
 }
-async function buildGitManifest(root, environment = process8.env) {
+async function buildGitManifest(root, environment = process7.env) {
   const canonical = await canonicalRoot(root);
   const files = Object.create(null);
   let totalBytes = 0;
@@ -10496,7 +10559,7 @@ function manifestDigest(files) {
 // packages/container-lab/src/sync/preview.ts
 import { randomBytes } from "crypto";
 import path5 from "path";
-import process9 from "process";
+import process8 from "process";
 
 // packages/container-lab/src/public/json.ts
 var PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
@@ -10504,7 +10567,7 @@ function serializePublicJson(value) {
   let candidate = value;
   let encoded = `${JSON.stringify(candidate)}
 `;
-  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET && isRecord7(value) && isRecord7(value["transcript"]) && typeof value["transcript"]["text"] === "string") {
+  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET && isRecord8(value) && isRecord8(value["transcript"]) && typeof value["transcript"]["text"] === "string") {
     const characters = Array.from(value["transcript"]["text"]);
     let low = 0;
     let high = characters.length;
@@ -10547,7 +10610,7 @@ function serializePublicJson(value) {
   }
   return encoded;
 }
-function isRecord7(value) {
+function isRecord8(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -10909,7 +10972,7 @@ function expectedDeleteParentPaths(changes) {
 var DEFAULT_TTL_MS = 5 * 60 * 1000;
 async function initializeSyncBaseline(identity3, root) {
   const state = await syncStatePaths(identity3);
-  const manifest = await buildGitManifest(root, identity3.environment ?? process9.env);
+  const manifest = await buildGitManifest(root, identity3.environment ?? process8.env);
   await writeDurableJson(state.baseline, {
     version: 1,
     files: manifest.files
@@ -10917,7 +10980,7 @@ async function initializeSyncBaseline(identity3, root) {
 }
 async function previewSync(options) {
   const state = await syncStatePaths(options);
-  const environment = options.environment ?? process9.env;
+  const environment = options.environment ?? process8.env;
   const [source, target, baselineValue] = await Promise.all([
     buildGitManifest(options.sourceRoot, environment),
     buildGitManifest(options.targetRoot, environment),
@@ -11598,7 +11661,7 @@ async function applySyncWithHooks(options, hooks = {}) {
   const state = await syncStatePaths(options);
   const previewPath = path8.join(state.previews, `${safeStateName(options.token, "preview token")}.json`);
   const preview = parseStoredPreview(await readRequiredUnknownJson(previewPath, "Unknown or already-used synchronization preview token"));
-  const environment = options.environment ?? process10.env;
+  const environment = options.environment ?? process9.env;
   const validated = await validatePreview(options, preview, state, environment);
   await claimPreview(state, previewPath, options.token);
   const transaction = await prepareTransaction(state, preview, validated);
@@ -11689,8 +11752,8 @@ async function prepareTransaction(state, preview, validated) {
     try {
       await rm8(backupDir, { recursive: true, force: true });
       await rm8(journalPath, { force: true });
-    } catch (cleanupError) {
-      throw new Error(`Synchronization preparation failed and recovery state was retained: ${cleanupError instanceof Error ? cleanupError.message : cleanupError}`, { cause: error });
+    } catch (cleanupError2) {
+      throw new Error(`Synchronization preparation failed and recovery state was retained: ${cleanupError2 instanceof Error ? cleanupError2.message : cleanupError2}`, { cause: error });
     }
     throw error;
   }
@@ -12263,7 +12326,7 @@ async function readReapedOwner(stateRoot, owner) {
     }
     throw error;
   }
-  if (!isRecord8(value) || value["version"] !== 1 || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner) || !isTimestamp2(value["reapedAt"])) {
+  if (!isRecord9(value) || value["version"] !== 1 || value["owner"] !== owner || value["ownerKey"] !== ownerKey(owner) || !isTimestamp2(value["reapedAt"])) {
     throw new Error("invalid reaped owner manifest");
   }
   return {
@@ -12308,7 +12371,7 @@ async function readOwnerManifest(path9) {
   }
   const stateRoot = resolve6(owners, "..");
   const value = await readTrustedUnknownJson(stateRoot, ["owners", key], "owner.json", "owner manifest", { canonicalMismatch: "unsafe-indirection" });
-  if (!isRecord8(value) || value["version"] !== 1 || typeof value["owner"] !== "string" || typeof value["ownerKey"] !== "string" || !isTimestamp2(value["createdAt"])) {
+  if (!isRecord9(value) || value["version"] !== 1 || typeof value["owner"] !== "string" || typeof value["ownerKey"] !== "string" || !isTimestamp2(value["createdAt"])) {
     throw new Error(`invalid owner manifest: ${path9}`);
   }
   resolveOwner(value["owner"], {});
@@ -12331,7 +12394,7 @@ function isTimestamp2(value) {
     return false;
   }
 }
-function isRecord8(value) {
+function isRecord9(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -12566,7 +12629,7 @@ class ContainerLabService {
   roots;
   docker;
   environment;
-  constructor(owner, roots = resolveRoots(), docker = defaultDockerRunner, environment = process11.env) {
+  constructor(owner, roots = resolveRoots(), docker = defaultDockerRunner, environment = process10.env) {
     this.owner = owner;
     this.roots = roots;
     this.docker = docker;
@@ -12581,7 +12644,7 @@ class ContainerLabService {
       labs: labs.length
     };
   }
-  async createLab(name = "lab", source = process11.cwd(), signal) {
+  async createLab(name = "lab", source = process10.cwd(), signal) {
     return await createProvisionedLab({
       owner: this.owner,
       roots: this.roots,
@@ -12768,10 +12831,10 @@ var CONTAINER_LAB_VERSION = package_default.version;
 
 // packages/container-lab/src/cli.ts
 var processIO = {
-  stdout: (value) => process12.stdout.write(value),
-  stderr: (value) => process12.stderr.write(value)
+  stdout: (value) => process11.stdout.write(value),
+  stderr: (value) => process11.stderr.write(value)
 };
-async function cliMain(args = process12.argv.slice(2), environment = process12.env, io = processIO) {
+async function cliMain(args = process11.argv.slice(2), environment = process11.env, io = processIO) {
   try {
     const global = parseGlobalArguments(args);
     if (global.help) {
@@ -12800,8 +12863,8 @@ async function cliMain(args = process12.argv.slice(2), environment = process12.e
         controller.abort("SIGTERM");
       }
     };
-    process12.on("SIGINT", interrupt);
-    process12.on("SIGTERM", terminate);
+    process11.on("SIGINT", interrupt);
+    process11.on("SIGTERM", terminate);
     try {
       if (global.rest[0] === "run") {
         return await runAttached(service, parseRunArguments(global.rest.slice(1)), controller.signal, io);
@@ -12809,8 +12872,8 @@ async function cliMain(args = process12.argv.slice(2), environment = process12.e
       writePublicJson(io, await dispatchCliCommand(service, global.rest, controller.signal));
       return signalExit ?? 0;
     } finally {
-      process12.removeListener("SIGINT", interrupt);
-      process12.removeListener("SIGTERM", terminate);
+      process11.removeListener("SIGINT", interrupt);
+      process11.removeListener("SIGTERM", terminate);
     }
   } catch (error) {
     const usage = error instanceof CliUsageError;
@@ -12830,7 +12893,7 @@ async function runAttached(service, run, signal, io) {
   const exitCode = await service.run(run.lab, run.argv, run.cwd, run.environment, run.timeoutSeconds, {
     stdout: (chunk) => io.stdout(stdoutDecoder.write(chunk)),
     stderr: (chunk) => io.stderr(stderrDecoder.write(chunk)),
-    stdin: process12.stdin
+    stdin: process11.stdin
   }, signal);
   const stdoutTail = stdoutDecoder.end();
   const stderrTail = stderrDecoder.end();
@@ -12849,7 +12912,7 @@ function writePublicJson(io, value) {
   io.stdout(serializePublicJson(value));
 }
 if (import.meta.main) {
-  process12.exit(await cliMain());
+  process11.exit(await cliMain());
 }
 export {
   cliMain

@@ -2,7 +2,7 @@
 // @bun
 
 // packages/model-catalog/src/index.ts
-import process6 from "process";
+import process7 from "process";
 
 // packages/model-catalog/src/catalog/refresh.ts
 import { join as join7, resolve as resolve3 } from "path";
@@ -1140,7 +1140,7 @@ function create(options = {}) {
 // packages/model-catalog/src/codex-child.ts
 import { lstat as lstat2, mkdir as mkdir2, realpath as realpath2, writeFile } from "fs/promises";
 import { isAbsolute as isAbsolute2, join as join5 } from "path";
-import process4 from "process";
+import process5 from "process";
 
 // packages/model-catalog/src/catalog/schema.ts
 var LUNA_MODEL = "gpt-5.6-luna";
@@ -1228,11 +1228,12 @@ function applyLunaV2Overlay(value) {
 
 // packages/model-catalog/src/codex-group.ts
 import process3 from "process";
-var EXIT_POLL_MS = 10;
 var FORCED_EXIT_TIMEOUT_MS = 2000;
-function signalGroup(pid, signal) {
+function signalOwnedCodexSupervisor(supervisorExited, pid, signal, kill = process3.kill) {
+  if (supervisorExited)
+    return false;
   try {
-    process3.kill(-pid, signal);
+    kill(-pid, signal);
     return true;
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ESRCH") {
@@ -1242,71 +1243,181 @@ function signalGroup(pid, signal) {
   }
 }
 async function settlesWithin(settled, milliseconds) {
-  let timer;
-  const elapsed = new Promise((resolve2) => {
-    timer = setTimeout(() => {
-      timer = undefined;
-      resolve2(false);
-    }, milliseconds);
-  });
+  const timeout = Promise.withResolvers();
+  const timer = setTimeout(() => timeout.resolve(false), milliseconds);
   try {
-    return await Promise.race([settled.then(() => true), elapsed]);
+    return await Promise.race([
+      settled.then(() => true),
+      timeout.promise
+    ]);
   } finally {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-    }
+    clearTimeout(timer);
   }
 }
-function codexProcessGroup(pid, label) {
-  let absent = false;
-  let exit;
-  const observeExit2 = async () => {
-    while (!absent) {
-      if (!signalGroup(pid, 0)) {
-        absent = true;
-        return;
-      }
-      await Bun.sleep(EXIT_POLL_MS);
+function codexSupervisorGroup(child, label, kill = process3.kill) {
+  let exitObserved = false;
+  const signal = (value) => {
+    if (exitObserved)
+      return false;
+    const supervisorExited = child.exitCode !== null;
+    if (supervisorExited) {
+      exitObserved = true;
+      return false;
     }
+    return signalOwnedCodexSupervisor(false, child.pid, value, kill);
   };
-  const waitForExit = () => {
-    exit ??= observeExit2();
-    return exit;
-  };
-  const requestStop = () => {
-    if (absent) {
+  const waitForExit = async () => {
+    if (exitObserved)
       return;
-    }
-    if (!signalGroup(pid, "SIGTERM")) {
-      absent = true;
-    }
-  };
-  const forceStop = () => {
-    if (absent) {
-      return;
-    }
-    if (!signalGroup(pid, "SIGKILL")) {
-      absent = true;
-    }
+    await child.exited;
+    exitObserved = true;
   };
   const stopWithin = async (graceMs) => {
-    requestStop();
-    if (await settlesWithin(waitForExit(), graceMs)) {
+    let gracefulError;
+    try {
+      signal("SIGTERM");
+    } catch (error) {
+      gracefulError = error;
+    }
+    if (exitObserved || gracefulError === undefined && await settlesWithin(child.exited, graceMs)) {
+      exitObserved = true;
       return;
     }
-    forceStop();
-    if (!await settlesWithin(waitForExit(), FORCED_EXIT_TIMEOUT_MS)) {
-      throw new Error("Codex process group survived forced termination");
+    try {
+      signal("SIGKILL");
+    } catch (forceError) {
+      if (gracefulError !== undefined) {
+        throw new AggregateError([gracefulError, forceError], "Codex supervisor termination signals failed");
+      }
+      throw forceError;
     }
+    if (exitObserved)
+      return;
+    if (!await settlesWithin(child.exited, FORCED_EXIT_TIMEOUT_MS)) {
+      const error = new Error("Codex supervisor survived forced termination");
+      if (gracefulError !== undefined) {
+        throw new AggregateError([gracefulError, error], "Codex supervisor cleanup failed");
+      }
+      throw error;
+    }
+    exitObserved = true;
   };
   return {
     label,
-    pid,
-    requestStop,
-    forceStop,
+    pid: child.pid,
+    requestStop: () => {
+      signal("SIGTERM");
+    },
+    forceStop: () => {
+      signal("SIGKILL");
+    },
     waitForExit,
     stopWithin
   };
+}
+
+// packages/model-catalog/src/codex-supervisor.ts
+import process4 from "process";
+var CODEX_SUPERVISOR_PROTOCOL_VERSION = 1;
+var CODEX_SUPERVISOR_SOURCE = String.raw`
+const protocolVersion = ${CODEX_SUPERVISOR_PROTOCOL_VERSION};
+process.on("SIGTERM", () => undefined);
+setInterval(() => undefined, 2_147_483_647);
+const publish = async (message) => {
+  try {
+    await process.send?.({ version: protocolVersion, ...message });
+  } catch {}
+};
+const encoded = Bun.argv[1];
+let command;
+try {
+  const parsed = JSON.parse(decodeURIComponent(encoded));
+  const keys = typeof parsed === "object" && parsed !== null ? Object.keys(parsed) : [];
+  if (
+    keys.length !== 2 ||
+    typeof parsed.binary !== "string" ||
+    !Array.isArray(parsed.args) ||
+    !parsed.args.every((value) => typeof value === "string")
+  ) {
+    throw new Error("invalid command");
+  }
+  command = parsed;
+} catch {
+  await publish({ type: "supervisor-error" });
+}
+if (command !== undefined) {
+  try {
+    const tool = Bun.spawn([command.binary, ...command.args], {
+      env: process.env,
+      stdin: "ignore",
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    await publish({ type: "ready" });
+    tool.exited.then(
+      (exitCode) => publish({ type: "exited", exitCode }),
+      () => publish({ type: "tool-error" }),
+    );
+  } catch {
+    await publish({ type: "spawn-error" });
+  }
+}
+`;
+function isRecord2(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function isCodexSupervisorMessage(value) {
+  if (!isRecord2(value) || value["version"] !== CODEX_SUPERVISOR_PROTOCOL_VERSION || typeof value["type"] !== "string") {
+    return false;
+  }
+  if (value["type"] === "ready" || value["type"] === "spawn-error" || value["type"] === "supervisor-error" || value["type"] === "tool-error") {
+    return Object.keys(value).length === 2;
+  }
+  return value["type"] === "exited" && Object.keys(value).length === 3 && Number.isSafeInteger(value["exitCode"]);
+}
+function codexSupervisorProtocol() {
+  const final = Promise.withResolvers();
+  let state = "pending";
+  const reject = () => {
+    state = "final";
+    final.reject(new Error("Codex supervisor protocol failed"));
+  };
+  const receive = (message) => {
+    if (state === "final")
+      return;
+    if (!isCodexSupervisorMessage(message)) {
+      reject();
+      return;
+    }
+    if (message.type === "ready") {
+      if (state !== "pending") {
+        reject();
+        return;
+      }
+      state = "ready";
+      return;
+    }
+    if (message.type === "spawn-error" || message.type === "supervisor-error") {
+      if (state !== "pending") {
+        reject();
+        return;
+      }
+    } else if (state !== "ready") {
+      reject();
+      return;
+    }
+    state = "final";
+    final.resolve(message);
+  };
+  return { final: final.promise, receive };
+}
+function codexSupervisorCommand(binary, args) {
+  return [
+    process4.execPath,
+    "--eval",
+    CODEX_SUPERVISOR_SOURCE,
+    encodeURIComponent(JSON.stringify({ binary, args }))
+  ];
 }
 
 // packages/model-catalog/src/codex-child.ts
@@ -1338,7 +1449,7 @@ class CodexChildError extends Error {
   }
 }
 var systemCodexRuntime = {
-  platform: process4.platform,
+  platform: process5.platform,
   spawn: (command, options) => Bun.spawn(command, options)
 };
 function requireOwnedProcessScope(platform) {
@@ -1353,7 +1464,7 @@ function commandEnvironment(home) {
     LANG: "C",
     LC_ALL: "C",
     NO_COLOR: "1",
-    PATH: process4.env["PATH"] ?? "/usr/bin:/bin",
+    PATH: process5.env["PATH"] ?? "/usr/bin:/bin",
     TMPDIR: join5(home, "tmp"),
     XDG_CACHE_HOME: join5(home, "xdg-cache"),
     XDG_CONFIG_HOME: join5(home, "xdg-config"),
@@ -1433,26 +1544,25 @@ async function runIsolatedCodex(workspace, codexBinary, argsFactory, limits, run
   const home = await isolatedHome(workspace);
   try {
     const args = typeof argsFactory === "function" ? await argsFactory(home) : argsFactory;
+    const protocol = codexSupervisorProtocol();
     let child;
     try {
-      child = runtime.spawn([codexBinary, ...args], {
+      child = runtime.spawn(codexSupervisorCommand(codexBinary, args), {
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
         env: commandEnvironment(home),
-        detached: true
+        detached: true,
+        ipc: protocol.receive
       });
     } catch {
       throw new CodexChildError("spawn");
     }
-    const group = codexProcessGroup(child.pid, `codex-${child.pid}`);
+    const group = codexSupervisorGroup(child, `codex-supervisor-${child.pid}`, runtime.kill);
     try {
       workspace.registerChild(group);
     } catch {
       await group.stopWithin(limits.terminationGraceMs).catch(() => {
-        return;
-      });
-      await child.exited.catch(() => {
         return;
       });
       throw new CodexChildError("lifecycle");
@@ -1460,10 +1570,12 @@ async function runIsolatedCodex(workspace, codexBinary, argsFactory, limits, run
     const controller = new AbortController;
     let failure;
     let cleanupFailed = false;
+    const cleanupFailure = Promise.withResolvers();
     let cleanup;
     const cleanGroup = () => {
       cleanup ??= group.stopWithin(limits.terminationGraceMs).catch(() => {
         cleanupFailed = true;
+        cleanupFailure.resolve();
       });
       return cleanup;
     };
@@ -1481,15 +1593,19 @@ async function runIsolatedCodex(workspace, codexBinary, argsFactory, limits, run
     }
     const timer = setTimeout(() => stop("timeout"), limits.timeoutMs);
     try {
-      const exited = child.exited.then(async (exitCode2) => {
+      const supervisorOutcome = Promise.race([
+        protocol.final.then((message) => ({ message, ok: true }), () => ({ ok: false })),
+        child.exited.then(() => ({ ok: false })),
+        cleanupFailure.promise.then(() => ({ ok: false }))
+      ]).then(async (outcome2) => {
         await cleanGroup();
         controller.abort();
-        return exitCode2;
+        return outcome2;
       });
-      const [stdout, , exitCode] = await Promise.all([
+      const [stdout, , outcome] = await Promise.all([
         collectBounded(child.stdout, limits.maxStdoutBytes, "stdout-limit", controller.signal, stop),
         collectBounded(child.stderr, limits.maxStderrBytes, "stderr-limit", controller.signal, stop),
-        exited
+        supervisorOutcome
       ]);
       await cleanGroup();
       if (failure !== undefined) {
@@ -1498,15 +1614,15 @@ async function runIsolatedCodex(workspace, codexBinary, argsFactory, limits, run
       if (cleanupFailed) {
         throw new CodexChildError("lifecycle");
       }
-      return { stdout, exitCode };
+      if (!outcome.ok) {
+        throw new CodexChildError("lifecycle");
+      }
+      return commandResult(stdout, outcome.message);
     } finally {
       clearTimeout(timer);
       workspace.signal.removeEventListener("abort", cancel);
       controller.abort();
       await cleanGroup();
-      await child.exited.catch(() => {
-        return;
-      });
     }
   } catch (error) {
     if (error instanceof CodexChildError) {
@@ -1514,6 +1630,15 @@ async function runIsolatedCodex(workspace, codexBinary, argsFactory, limits, run
     }
     throw new CodexChildError("lifecycle");
   }
+}
+function commandResult(stdout, message) {
+  if (message.type === "spawn-error") {
+    throw new CodexChildError("spawn");
+  }
+  if (message.type !== "exited") {
+    throw new CodexChildError("lifecycle");
+  }
+  return { stdout, exitCode: message.exitCode };
 }
 function parseJsonOutput(output, failure) {
   try {
@@ -1587,7 +1712,7 @@ import {
   resolve as resolve2,
   sep
 } from "path";
-import process5 from "process";
+import process6 from "process";
 var MODEL_CACHE_TTL_MS = 300000;
 function physicalPathKey(path) {
   return path.normalize("NFC").toLocaleLowerCase("en-US");
@@ -1674,7 +1799,7 @@ async function validatePrivateDirectoryChain(privacyRoot, directory) {
     throw new Error(`${directory} escapes its private storage root`);
   }
   await rejectSymlinkAncestors(directory);
-  const expectedUid = process5.getuid?.();
+  const expectedUid = process6.getuid?.();
   for (const component of pathComponents(directory)) {
     if (!within(privacyRoot, component)) {
       continue;
@@ -1768,7 +1893,7 @@ async function ensurePrivateFileMode(path) {
     return;
   }
   const regular = await managedFileMetadata(path);
-  const expectedUid = process5.getuid?.();
+  const expectedUid = process6.getuid?.();
   if (expectedUid !== undefined && regular.uid !== expectedUid) {
     throw new Error(`${path} must be owned by the current user`);
   }
@@ -1839,7 +1964,7 @@ async function validateCatalogTarget(paths, path) {
   if (inspection.metadata === undefined) {
     return inspection;
   }
-  const expectedUid = process5.getuid?.();
+  const expectedUid = process6.getuid?.();
   if (expectedUid !== undefined && inspection.metadata.uid !== expectedUid || (inspection.metadata.mode & 511) !== 384) {
     throw new Error(`${path} must be an owner-only mode 0600 file`);
   }
@@ -1927,7 +2052,7 @@ async function validatedAtomicParent(path) {
   if (!privateMode(metadata)) {
     throw new Error(`${parent} must have mode 0700`);
   }
-  const expectedUid = process5.getuid?.();
+  const expectedUid = process6.getuid?.();
   if (expectedUid !== undefined && metadata.uid !== expectedUid) {
     throw new Error(`${parent} must be owned by the current user`);
   }
@@ -2322,7 +2447,7 @@ function renderLaunchAgent2(template, values) {
 }
 if (import.meta.main) {
   try {
-    await runModelCatalogCli(process6.argv.slice(2));
+    await runModelCatalogCli(process7.argv.slice(2));
   } catch (error) {
     if (error instanceof Error) {
       const { message } = error;
@@ -2330,7 +2455,7 @@ if (import.meta.main) {
     } else {
       console.error("model catalog operation failed");
     }
-    process6.exit(1);
+    process7.exit(1);
   }
 }
 export {
