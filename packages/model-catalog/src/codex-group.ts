@@ -1,12 +1,19 @@
 import process from "node:process";
 import type { OwnedChild } from "@skizzles/run-workspace";
 
-const EXIT_POLL_MS = 10;
-const FORCED_EXIT_TIMEOUT_MS = 2_000;
+const FORCED_EXIT_TIMEOUT_MS = 2000;
 
-function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
+type CodexSupervisorSubprocess = Bun.Subprocess<"ignore", "pipe", "pipe">;
+
+function signalOwnedCodexSupervisor(
+  supervisorExited: boolean,
+  pid: number,
+  signal: NodeJS.Signals,
+  kill: typeof process.kill = process.kill,
+): boolean {
+  if (supervisorExited) return false;
   try {
-    process.kill(-pid, signal);
+    kill(-pid, signal);
     return true;
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ESRCH") {
@@ -17,22 +24,18 @@ function signalGroup(pid: number, signal: NodeJS.Signals | 0): boolean {
 }
 
 async function settlesWithin(
-  settled: Promise<void>,
+  settled: Promise<number>,
   milliseconds: number,
 ): Promise<boolean> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const elapsed = new Promise<false>((resolve) => {
-    timer = setTimeout(() => {
-      timer = undefined;
-      resolve(false);
-    }, milliseconds);
-  });
+  const timeout = Promise.withResolvers<false>();
+  const timer = setTimeout(() => timeout.resolve(false), milliseconds);
   try {
-    return await Promise.race([settled.then(() => true as const), elapsed]);
+    return await Promise.race([
+      settled.then(() => true as const),
+      timeout.promise,
+    ]);
   } finally {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-    }
+    clearTimeout(timer);
   }
 }
 
@@ -40,58 +43,77 @@ export interface CodexProcessGroup extends OwnedChild {
   stopWithin: (graceMs: number) => Promise<void>;
 }
 
-export function codexProcessGroup(
-  pid: number,
+function codexSupervisorGroup(
+  child: CodexSupervisorSubprocess,
   label: string,
+  kill: typeof process.kill = process.kill,
 ): CodexProcessGroup {
-  let absent = false;
-  let exit: Promise<void> | undefined;
-  const observeExit = async (): Promise<void> => {
-    while (!absent) {
-      if (!signalGroup(pid, 0)) {
-        absent = true;
-        return;
-      }
-      // biome-ignore lint/performance/noAwaitInLoops: Process-group absence is a sequential operating-system observation, not parallel work.
-      await Bun.sleep(EXIT_POLL_MS);
+  let exitObserved = false;
+  const signal = (value: NodeJS.Signals): boolean => {
+    if (exitObserved) return false;
+    const supervisorExited = child.exitCode !== null;
+    if (supervisorExited) {
+      exitObserved = true;
+      return false;
     }
+    return signalOwnedCodexSupervisor(false, child.pid, value, kill);
   };
-  const waitForExit = (): Promise<void> => {
-    exit ??= observeExit();
-    return exit;
-  };
-  const requestStop = (): void => {
-    if (absent) {
-      return;
-    }
-    if (!signalGroup(pid, "SIGTERM")) {
-      absent = true;
-    }
-  };
-  const forceStop = (): void => {
-    if (absent) {
-      return;
-    }
-    if (!signalGroup(pid, "SIGKILL")) {
-      absent = true;
-    }
+  const waitForExit = async (): Promise<void> => {
+    if (exitObserved) return;
+    await child.exited;
+    exitObserved = true;
   };
   const stopWithin = async (graceMs: number): Promise<void> => {
-    requestStop();
-    if (await settlesWithin(waitForExit(), graceMs)) {
+    let gracefulError: unknown;
+    try {
+      signal("SIGTERM");
+    } catch (error) {
+      gracefulError = error;
+    }
+    if (
+      exitObserved ||
+      (gracefulError === undefined &&
+        (await settlesWithin(child.exited, graceMs)))
+    ) {
+      exitObserved = true;
       return;
     }
-    forceStop();
-    if (!(await settlesWithin(waitForExit(), FORCED_EXIT_TIMEOUT_MS))) {
-      throw new Error("Codex process group survived forced termination");
+    try {
+      signal("SIGKILL");
+    } catch (forceError) {
+      if (gracefulError !== undefined) {
+        throw new AggregateError(
+          [gracefulError, forceError],
+          "Codex supervisor termination signals failed",
+        );
+      }
+      throw forceError;
     }
+    if (exitObserved) return;
+    if (!(await settlesWithin(child.exited, FORCED_EXIT_TIMEOUT_MS))) {
+      const error = new Error("Codex supervisor survived forced termination");
+      if (gracefulError !== undefined) {
+        throw new AggregateError(
+          [gracefulError, error],
+          "Codex supervisor cleanup failed",
+        );
+      }
+      throw error;
+    }
+    exitObserved = true;
   };
   return {
     label,
-    pid,
-    requestStop,
-    forceStop,
+    pid: child.pid,
+    requestStop: () => {
+      signal("SIGTERM");
+    },
+    forceStop: () => {
+      signal("SIGKILL");
+    },
     waitForExit,
     stopWithin,
   };
 }
+
+export { codexSupervisorGroup, signalOwnedCodexSupervisor };

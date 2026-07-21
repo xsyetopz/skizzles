@@ -8,7 +8,12 @@ import {
   LUNA_MODEL,
   parseJson,
 } from "./catalog/schema.ts";
-import { codexProcessGroup } from "./codex-group.ts";
+import { codexSupervisorGroup } from "./codex-group.ts";
+import {
+  codexSupervisorCommand,
+  codexSupervisorProtocol,
+  type FinalCodexSupervisorMessage,
+} from "./codex-supervisor.ts";
 
 const SEMANTIC_VERSION =
   /(?<![0-9A-Za-z-])((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)(?=\s|$)/;
@@ -80,10 +85,12 @@ interface CodexSpawnOptions {
   readonly stderr: "pipe";
   readonly env: Record<string, string>;
   readonly detached: true;
+  readonly ipc: (message: unknown) => void;
 }
 
 export interface CodexRuntime {
   readonly platform: NodeJS.Platform;
+  readonly kill?: typeof process.kill;
   spawn: (command: string[], options: CodexSpawnOptions) => CodexSubprocess;
 }
 
@@ -205,34 +212,41 @@ async function runIsolatedCodex(
   try {
     const args =
       typeof argsFactory === "function" ? await argsFactory(home) : argsFactory;
+    const protocol = codexSupervisorProtocol();
     let child: CodexSubprocess;
     try {
-      child = runtime.spawn([codexBinary, ...args], {
+      child = runtime.spawn(codexSupervisorCommand(codexBinary, args), {
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
         env: commandEnvironment(home),
         detached: true,
+        ipc: protocol.receive,
       });
     } catch {
       throw new CodexChildError("spawn");
     }
-    const group = codexProcessGroup(child.pid, `codex-${child.pid}`);
+    const group = codexSupervisorGroup(
+      child,
+      `codex-supervisor-${child.pid}`,
+      runtime.kill,
+    );
     try {
       workspace.registerChild(group);
     } catch {
       await group.stopWithin(limits.terminationGraceMs).catch(() => undefined);
-      await child.exited.catch(() => undefined);
       throw new CodexChildError("lifecycle");
     }
 
     const controller = new AbortController();
     let failure: ChildFailure | undefined;
     let cleanupFailed = false;
+    const cleanupFailure = Promise.withResolvers<void>();
     let cleanup: Promise<void> | undefined;
     const cleanGroup = (): Promise<void> => {
       cleanup ??= group.stopWithin(limits.terminationGraceMs).catch(() => {
         cleanupFailed = true;
+        cleanupFailure.resolve();
       });
       return cleanup;
     };
@@ -248,12 +262,19 @@ async function runIsolatedCodex(
     }
     const timer = setTimeout(() => stop("timeout"), limits.timeoutMs);
     try {
-      const exited = child.exited.then(async (exitCode) => {
+      const supervisorOutcome = Promise.race([
+        protocol.final.then(
+          (message) => ({ message, ok: true as const }),
+          () => ({ ok: false as const }),
+        ),
+        child.exited.then(() => ({ ok: false as const })),
+        cleanupFailure.promise.then(() => ({ ok: false as const })),
+      ]).then(async (outcome) => {
         await cleanGroup();
         controller.abort();
-        return exitCode;
+        return outcome;
       });
-      const [stdout, , exitCode] = await Promise.all([
+      const [stdout, , outcome] = await Promise.all([
         collectBounded(
           child.stdout,
           limits.maxStdoutBytes,
@@ -268,7 +289,7 @@ async function runIsolatedCodex(
           controller.signal,
           stop,
         ),
-        exited,
+        supervisorOutcome,
       ]);
       await cleanGroup();
       if (failure !== undefined) {
@@ -277,13 +298,15 @@ async function runIsolatedCodex(
       if (cleanupFailed) {
         throw new CodexChildError("lifecycle");
       }
-      return { stdout, exitCode };
+      if (!outcome.ok) {
+        throw new CodexChildError("lifecycle");
+      }
+      return commandResult(stdout, outcome.message);
     } finally {
       clearTimeout(timer);
       workspace.signal.removeEventListener("abort", cancel);
       controller.abort();
       await cleanGroup();
-      await child.exited.catch(() => undefined);
     }
   } catch (error) {
     if (error instanceof CodexChildError) {
@@ -291,6 +314,19 @@ async function runIsolatedCodex(
     }
     throw new CodexChildError("lifecycle");
   }
+}
+
+function commandResult(
+  stdout: Uint8Array,
+  message: FinalCodexSupervisorMessage,
+): CommandResult {
+  if (message.type === "spawn-error") {
+    throw new CodexChildError("spawn");
+  }
+  if (message.type !== "exited") {
+    throw new CodexChildError("lifecycle");
+  }
+  return { stdout, exitCode: message.exitCode };
 }
 
 function parseJsonOutput(

@@ -14,6 +14,7 @@ const fixtures: RunWorkspace[] = [];
 export type FakeCodexCommand = "bundled" | "preflight" | "version";
 
 export interface FakeChildRecord {
+  codexPid: number;
   command: FakeCodexCommand;
   pid: number;
   processGroup: number;
@@ -39,12 +40,14 @@ function parseFakeChildRecord(value: unknown): FakeChildRecord | undefined {
     return undefined;
   }
   const command = "command" in value ? value.command : undefined;
+  const codexPid = "codexPid" in value ? value.codexPid : undefined;
   const pid = "pid" in value ? value.pid : undefined;
   const processGroup = "processGroup" in value ? value.processGroup : undefined;
   const runRoot = "runRoot" in value ? value.runRoot : undefined;
   const token = "token" in value ? value.token : undefined;
   if (
     !isFakeCodexCommand(command) ||
+    !isPositiveSafeInteger(codexPid) ||
     !isPositiveSafeInteger(pid) ||
     !isPositiveSafeInteger(processGroup) ||
     typeof runRoot !== "string" ||
@@ -53,7 +56,7 @@ function parseFakeChildRecord(value: unknown): FakeChildRecord | undefined {
   ) {
     return undefined;
   }
-  return { command, pid, processGroup, runRoot, token };
+  return { codexPid, command, pid, processGroup, runRoot, token };
 }
 
 export function fakeChildRecords(root: string): FakeChildRecord[] {
@@ -328,9 +331,13 @@ if (${JSON.stringify(behavior)}.startsWith("descendant")) {
     throw new Error("fake descendant did not initialize");
   }
   const record = {
+    codexPid: process.pid,
     command,
     pid: descendant.pid,
-    processGroup: process.pid,
+    processGroup: Number(new TextDecoder().decode(Bun.spawnSync(
+      ["/bin/ps", "-o", "pgid=", "-p", String(process.pid)],
+      { stdin: "ignore", stdout: "pipe", stderr: "ignore" },
+    ).stdout).trim()),
     runRoot,
     token,
   };
@@ -358,10 +365,11 @@ if (${JSON.stringify(behavior)} === "probe") {
       JSON.stringify(process.env["HOME"] ?? null)
     },
     authPresent: await Bun.file(home + "/auth.json").exists(),
+    ipcAvailable: typeof process.send === "function",
     environmentKeys: Object.keys(process.env).sort(),
   };
   await Bun.write(observationPath, previous + JSON.stringify(observation) + "\\n");
-  if (observation.sentinel || observation.ambientHome || observation.authPresent || home !== process.env.CODEX_HOME) {
+  if (observation.sentinel || observation.ambientHome || observation.authPresent || observation.ipcAvailable || home !== process.env.CODEX_HOME) {
     console.error("raw-child-secret");
     process.exit(97);
   }

@@ -24,6 +24,8 @@ import {
   source,
 } from "./harness.ts";
 
+const DESCENDANT_TURNOVER_STRESS_TIMEOUT_MS = 30_000;
+
 afterEach(cleanupCatalogRoots);
 
 describe("model catalog refresh", () => {
@@ -159,6 +161,7 @@ describe("model catalog refresh", () => {
         ambientHome: false,
         realHome: false,
         authPresent: false,
+        ipcAvailable: false,
         markerRoot: runRoot,
         markerState: "open",
       });
@@ -343,45 +346,52 @@ describe("model catalog refresh", () => {
     expect(fakeChildRecords(path)).toEqual([]);
   });
 
-  test("bounds and reaps descendant-held pipes on success and timeout", async () => {
-    for (const behavior of ["descendant", "descendant-hang"] as const) {
-      const path = await createCatalogRoot();
-      const codex = await createFakeCodex(path, source(), behavior);
-      const started = Date.now();
-      const operation = refreshCatalog({
-        codexHome: path,
-        codexBinary: codex,
-        commandTimeoutMs: behavior === "descendant" ? 1_000 : 1_500,
-      });
-      if (behavior === "descendant") {
-        await operation;
-      } else {
-        await awaitFakeChildReadiness(path, "bundled", 1_000);
-        await expect(operation).rejects.toThrow("timed out");
+  test(
+    "bounds and reaps descendant-held pipes on success and timeout",
+    async () => {
+      for (let iteration = 0; iteration < 3; iteration += 1) {
+        for (const behavior of ["descendant", "descendant-hang"] as const) {
+          const path = await createCatalogRoot();
+          const codex = await createFakeCodex(path, source(), behavior);
+          const started = Date.now();
+          const operation = refreshCatalog({
+            codexHome: path,
+            codexBinary: codex,
+            commandTimeoutMs: behavior === "descendant" ? 1_000 : 1_500,
+          });
+          if (behavior === "descendant") {
+            await operation;
+          } else {
+            await awaitFakeChildReadiness(path, "bundled", 1_000);
+            await expect(operation).rejects.toThrow("timed out");
+          }
+          expect(Date.now() - started).toBeLessThan(4_000);
+          const records = fakeChildRecords(path);
+          expect(records.length).toBe(behavior === "descendant" ? 3 : 2);
+          expect(new Set(records.map((record) => record.runRoot)).size).toBe(1);
+          const lifecycle = readFileSync(join(path, "child-lifecycle"), "utf8")
+            .trim()
+            .split("\n");
+          expect(new Set(lifecycle)).toEqual(
+            new Set(records.map((record) => record.token)),
+          );
+          for (const record of records) {
+            expect(record.processGroup).not.toBe(record.codexPid);
+            expect(() => process.kill(record.pid, 0)).toThrow();
+            expect(() => statSync(record.runRoot)).toThrow();
+          }
+          if (behavior === "descendant-hang") {
+            const failedHome = readFileSync(
+              join(path, "failed-child-home"),
+              "utf8",
+            );
+            expect(() => statSync(failedHome)).toThrow();
+          }
+        }
       }
-      expect(Date.now() - started).toBeLessThan(4_000);
-      const records = fakeChildRecords(path);
-      expect(records.length).toBe(behavior === "descendant" ? 3 : 2);
-      expect(new Set(records.map((record) => record.runRoot)).size).toBe(1);
-      const lifecycle = readFileSync(join(path, "child-lifecycle"), "utf8")
-        .trim()
-        .split("\n");
-      expect(new Set(lifecycle)).toEqual(
-        new Set(records.map((record) => record.token)),
-      );
-      for (const record of records) {
-        expect(() => process.kill(record.pid, 0)).toThrow();
-        expect(() => statSync(record.runRoot)).toThrow();
-      }
-      if (behavior === "descendant-hang") {
-        const failedHome = readFileSync(
-          join(path, "failed-child-home"),
-          "utf8",
-        );
-        expect(() => statSync(failedHome)).toThrow();
-      }
-    }
-  });
+    },
+    DESCENDANT_TURNOVER_STRESS_TIMEOUT_MS,
+  );
 
   test("closes the shared workspace and descendants on cancellation", async () => {
     const path = await createCatalogRoot();
