@@ -4,6 +4,7 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 import { assertProcessPlatform } from "../src/process/platform.ts";
+import { signalOwnedGuardian } from "../src/process/supervisor.ts";
 import { runCommand } from "../src/process.ts";
 import {
   createProcessFixtureScope,
@@ -71,6 +72,19 @@ describe("runCommand result contracts", () => {
     expect(await observeGroupAbsence(identity)).toEqual([true, true, true]);
   });
 
+  it("does not expose supervisor IPC to the command", async () => {
+    await expect(
+      runCommand(process.execPath, [
+        "--eval",
+        'console.log(typeof process.send === "undefined" ? "closed" : "open")',
+      ]),
+    ).resolves.toEqual({
+      code: 0,
+      stdout: Buffer.from("closed\n"),
+      stderr: Buffer.alloc(0),
+    });
+  });
+
   it("rejects an already-aborted signal before spawning", async () => {
     const fixture = await fixtures.start(
       'printf created > "$TMPDIR/pre-abort-sentinel"; sleep 1',
@@ -91,6 +105,25 @@ describe("runCommand result contracts", () => {
 });
 
 describe("runCommand POSIX lifecycle", () => {
+  it("does not apply the termination grace after terminal protocol", async () => {
+    const started = performance.now();
+    for (let index = 0; index < 10; index += 1) {
+      await runCommand("/usr/bin/true", []);
+    }
+    expect(performance.now() - started).toBeLessThan(2_000);
+  });
+
+  it("retries an empty process marker until canonical publication", async () => {
+    const fixture = await fixtures.start(
+      `sleep 0.05; ${stubbornGroupScript("exit 0")}`,
+    );
+    await writeFile(fixture.marker, "", { mode: 0o600 });
+    const identity = await fixtures.captureGroup(fixture.marker);
+    await writeFile(fixture.release, "release", { mode: 0o600 });
+    await expect(fixture.completion).resolves.toMatchObject({ code: 0 });
+    expect(await observeGroupAbsence(identity)).toEqual([true, true, true]);
+  });
+
   it("timeout reaps the exact shell leader and background sleep", async () => {
     const fixture = await fixtures.start(
       'sleep 30 & descendant=$!; printf "%s %s\\n" "$$" "$descendant" > "$TEST_PROCESS_MARKER"; wait',
@@ -123,6 +156,29 @@ describe("runCommand POSIX lifecycle", () => {
     });
     expect(await observeGroupAbsence(identity)).toEqual([true, true, true]);
   });
+
+  it("keeps the guardian live when the command kills its worker parent", async () => {
+    const fixture = await fixtures.start(
+      [
+        "trap '' TERM",
+        `(/bin/sh -c 'trap "" TERM; while :; do sleep 1; done' "$0-descendant") & descendant=$!`,
+        'printf "%s %s\\n" "$$" "$descendant" > "$TEST_PROCESS_MARKER"',
+        'while [ ! -e "$TEST_PROCESS_RELEASE" ]; do sleep 0.01; done',
+        'kill -KILL "$PPID"',
+        "while :; do sleep 1; done",
+      ].join("; "),
+    );
+    const completion = fixture.completion.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    const identity = await fixtures.captureGroup(fixture.marker);
+    await writeFile(fixture.release, "release", { mode: 0o600 });
+    expect(await completion).toEqual(
+      new Error("/bin/sh process execution failed"),
+    );
+    expect(await observeGroupAbsence(identity)).toEqual([true, true, true]);
+  });
 });
 
 describe("runCommand cleanup failure", () => {
@@ -152,5 +208,15 @@ describe("runCommand cleanup failure", () => {
     } finally {
       Object.defineProperty(process, "kill", descriptor);
     }
+  });
+
+  it("never signals a reused numeric group after guardian exit is observed", () => {
+    let calls = 0;
+    const kill = (() => {
+      calls += 1;
+      throw Object.assign(new Error("reused process group"), { code: "EPERM" });
+    }) as typeof process.kill;
+    expect(signalOwnedGuardian(true, 4242, "SIGKILL", kill)).toBe(false);
+    expect(calls).toBe(0);
   });
 });

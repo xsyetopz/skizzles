@@ -65,9 +65,6 @@ function createProcessFixtureScope(): ProcessFixtureScope {
 
   async function captureGroup(marker: string): Promise<ProcessGroupIdentity> {
     const text = await readPublishedMarker(marker, PROCESS_EXIT_ATTEMPTS);
-    if (!PROCESS_MARKER_PATTERN.test(text)) {
-      throw new Error(`process fixture did not publish identities: ${marker}`);
-    }
     const [leaderText, descendantText] = text.trim().split(" ");
     const leader = Number(leaderText);
     const descendant = Number(descendantText);
@@ -75,8 +72,14 @@ function createProcessFixtureScope(): ProcessFixtureScope {
       observeProcess(leader),
       observeProcess(descendant),
     ].filter((identity): identity is ProcessIdentity => identity !== undefined);
-    groups.set(leader, identities);
-    return { processGroup: leader, leader, descendant };
+    const processGroup = identities.find(
+      (identity) => identity.pid === leader,
+    )?.processGroup;
+    if (processGroup === undefined) {
+      throw new Error(`process fixture leader was not observable: ${marker}`);
+    }
+    groups.set(processGroup, identities);
+    return { processGroup, leader, descendant };
   }
 
   async function cleanup(): Promise<void> {
@@ -224,14 +227,18 @@ async function readPublishedMarker(
   attempts: number,
 ): Promise<string> {
   try {
-    return await Bun.file(marker).text();
+    const contents = await Bun.file(marker).text();
+    if (PROCESS_MARKER_PATTERN.test(contents)) return contents;
+    if (attempts <= 0) {
+      throw new Error(`process fixture did not publish identities: ${marker}`);
+    }
   } catch (error) {
     if (attempts <= 0) {
       throw error;
     }
-    await Bun.sleep(PROCESS_EXIT_DELAY_MS);
-    return await readPublishedMarker(marker, attempts - 1);
   }
+  await Bun.sleep(PROCESS_EXIT_DELAY_MS);
+  return await readPublishedMarker(marker, attempts - 1);
 }
 
 function asError(error: unknown): Error {
