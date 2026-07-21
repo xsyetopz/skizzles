@@ -30,6 +30,7 @@ on undeclared root packages.
 | `container-lab` | Container Lab CLI, reaper, durable state, synchronization, and docs |
 | `installer` | Skills/harness install, Codex configuration, doctor, and prompt-policy lifecycle |
 | `model-catalog` | Isolated catalog refresh and LaunchAgent rendering |
+| `orchestrator` | Deterministic request policy, evidence checkpoints, and structural review contracts |
 | `plugin-builder` | Deterministic plugin staging, bundling, validation, and drift checks |
 | `prompt-layer` | Pinned upstream prompt, patch derivation, provenance, and recovery |
 | `usage-analyzer` | Read-only rollout discovery, aggregation, and reporting |

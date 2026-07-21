@@ -25,6 +25,7 @@ const SKIZZLES_PACKAGE_NAMES = [
   "@skizzles/container-lab",
   "@skizzles/installer",
   "@skizzles/model-catalog",
+  "@skizzles/orchestrator",
   "@skizzles/plugin-builder",
   "@skizzles/prompt-layer",
   "@skizzles/run-workspace",

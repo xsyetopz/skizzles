@@ -40,6 +40,12 @@ composition; it is not an eighth distributed plugin surface. The installer consu
 provider-owned Container Lab and prompt-layer descriptor locations through their
 explicit package exports; it does not traverse sibling private filesystem paths.
 
+`@skizzles/orchestrator` owns deterministic agent-request policy and execution
+contracts. Its Phase 1 surface is dependency-free and is not yet a distributed
+plugin runtime. Later lifecycle and validation phases must depend on existing
+capability owners through public package exports or injected ports; the plugin
+builder remains the only distribution composition owner.
+
 ## Run lifecycle ownership
 
 | Lifecycle role | Owner or consumers | Contract |
