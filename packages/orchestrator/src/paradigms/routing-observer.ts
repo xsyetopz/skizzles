@@ -164,7 +164,11 @@ function parseObserverConfig(
   input: unknown,
 ): Readonly<{ authorityId: string; record: RawRecorder }> | undefined {
   try {
-    if (typeof input !== "object" || input === null || !Object.isFrozen(input)) {
+    if (
+      typeof input !== "object" ||
+      input === null ||
+      !Object.isFrozen(input)
+    ) {
       return;
     }
     const entries = Reflect.ownKeys(input);

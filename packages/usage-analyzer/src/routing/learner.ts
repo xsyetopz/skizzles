@@ -117,9 +117,8 @@ export class RoutingLearner {
           samples: rows.length,
           successes,
           failures: rows.length - successes,
-          firstPassCompletions: rows.filter(
-            (item) => item.firstPassCompletion,
-          ).length,
+          firstPassCompletions: rows.filter((item) => item.firstPassCompletion)
+            .length,
           verificationRate,
           verificationLowerBound,
           workflowTokens: workflow,
