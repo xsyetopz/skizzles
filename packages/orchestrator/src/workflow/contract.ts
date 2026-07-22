@@ -1,8 +1,11 @@
-import type { CommandObservationReceipt } from "@skizzles/command-supervisor";
 import type {
-  CloseReport,
-  WorkspaceUsageLimits,
-} from "@skizzles/run-workspace";
+  TaskWorktree,
+  TaskWorktreeCleanupHandle,
+  TaskWorktreePrepareResult,
+  TaskWorktreePrepareTerminalResult,
+  TaskWorktreeReceipt,
+  TaskWorktreeSession,
+} from "@skizzles/task-worktree";
 import type {
   CrashInjectionPort,
   DestinationAuthorityPort,
@@ -12,28 +15,18 @@ import type {
   RecoveryResult,
   RepositoryLeaseAuthorityPort,
 } from "@skizzles/workspace-transaction";
-import type { Digest } from "../digest.ts";
 import type { Orchestrator } from "../runtime.ts";
 import type { ApprovalRequest } from "../state/approval.ts";
 import type { TargetBaseline } from "../state/target.ts";
+import type { TaskWorktreeApprovalBridge } from "./worktree/approval.ts";
 
-export type StderrPolicy = "evidence" | "must-be-empty";
 export type TerminalPublication =
   | Extract<PublicationResult, { readonly ok: true }>
   | PostCommitLeaseCleanupFailure;
-
-export interface CommandAuditProfile {
-  readonly id: string;
-  readonly argv: readonly string[];
-  readonly env: Readonly<Record<string, string>>;
-  readonly dependencyPackages: readonly string[];
-  readonly timeoutMilliseconds: number;
-  readonly maximumOutputBytes: number;
-  readonly drainMilliseconds: number;
-  readonly signalGraceMilliseconds: number;
-  readonly allowedExitCodes: readonly number[];
-  readonly stderr: StderrPolicy;
-}
+type TaskWorktreeSplitPlan = Extract<
+  TaskWorktreePrepareResult,
+  { readonly status: "split-required" }
+>["plan"];
 
 export interface PublicationIdentity {
   readonly repositoryId: string;
@@ -55,13 +48,13 @@ export interface CausalWorkflowConfig {
   readonly orchestrator: Orchestrator;
   readonly publicationIdentity: PublicationIdentity;
   readonly baselineAuthority: PublicationBaselineAuthorityPort;
+  readonly taskWorktree: TaskWorktree;
+  readonly taskWorktreeApproval: TaskWorktreeApprovalBridge;
   readonly transaction: {
     readonly destination: DestinationAuthorityPort;
     readonly leases: RepositoryLeaseAuthorityPort;
     readonly crashInjection?: CrashInjectionPort;
   };
-  readonly workspaceUsageLimits: WorkspaceUsageLimits;
-  readonly commandProfiles: readonly CommandAuditProfile[];
   readonly approvalContext: {
     readonly taskId: string;
     readonly principalId: string;
@@ -69,41 +62,12 @@ export interface CausalWorkflowConfig {
   };
 }
 
-export interface WorkflowCommandAudit {
-  readonly profileId: string;
-  readonly receipt: CommandObservationReceipt;
-  readonly stderrEvidence: readonly number[] | null;
-  readonly scope: CommandScopeReceipt;
-  readonly declaredTargetPaths: readonly string[];
-}
-
-export interface CommandScopeTargetReceipt {
-  readonly path: string;
-  readonly operation: "write" | "delete";
-  readonly candidateDigest: Digest | null;
-}
-
-export interface CommandScopeReceipt {
-  readonly stagedTreeDigest: Digest;
-  readonly candidateDigest: Digest;
-  readonly dependencyDigest: Digest;
-  readonly dependencies: readonly CommandDependencyReceipt[];
-  readonly targets: readonly CommandScopeTargetReceipt[];
-}
-
-export interface CommandDependencyReceipt {
-  readonly name: string;
-  readonly version: string;
-  readonly kind: "external" | "workspace";
-  readonly direct: boolean;
-  readonly packageDigest: Digest;
-}
-
 export interface WorkflowReview {
   readonly workflowId: string;
   readonly approval: ApprovalRequest;
   readonly diffDigest: string;
-  readonly commandAudits: readonly WorkflowCommandAudit[];
+  readonly taskWorktreeReceipt: TaskWorktreeReceipt;
+  readonly executedProfileIds: readonly string[];
 }
 
 export interface WorkflowCleanupHandle {
@@ -119,7 +83,12 @@ export interface WorkflowCleanupReceipt {
   readonly workflowId: string;
   readonly attempt: number;
   readonly approvalCancelled: boolean;
-  readonly workspace: CloseReport | null;
+  readonly taskWorktree: TaskWorktreeReceipt | null;
+  readonly taskWorktreeCleanup:
+    | "none"
+    | "pending"
+    | "prepare-cleaned"
+    | "session-closed";
   readonly targetReleased: boolean;
   readonly complete: boolean;
   readonly receiptDigest: string;
@@ -131,10 +100,9 @@ export type WorkflowFailureCode =
   | "TARGET_BASELINE_REJECTED"
   | "DISCOVERY_INCOMPLETE"
   | "EXECUTION_BUDGET_REJECTED"
-  | "WORKSPACE_REJECTED"
-  | "WORKSPACE_QUOTA_REJECTED"
-  | "COMMAND_PROFILE_REJECTED"
-  | "COMMAND_OBSERVATION_REJECTED"
+  | "TASK_WORKTREE_REJECTED"
+  | "TASK_WORKTREE_REVALIDATION_REJECTED"
+  | "TASK_WORKTREE_COMMIT_REJECTED"
   | "PUBLICATION_BASELINE_REJECTED"
   | "DIFF_REJECTED"
   | "ENGINEERING_EVIDENCE_REJECTED"
@@ -152,6 +120,29 @@ export type WorkflowFailureCode =
 
 export type WorkflowPrepareResult =
   | { readonly status: "awaiting-approval"; readonly review: WorkflowReview }
+  | {
+      readonly status: "split-required";
+      readonly code: "TASK_SPLIT_REQUIRED";
+      readonly plan: TaskWorktreeSplitPlan;
+      readonly cleanup: WorkflowCleanupReceipt;
+    }
+  | {
+      readonly status: "intervention-required";
+      readonly code: "TASK_INTERVENTION_REQUIRED";
+      readonly diagnostics: readonly Readonly<{
+        kind: "dependency";
+        request: Readonly<{
+          ecosystem: "npm";
+          name: string;
+          requestedRange: string;
+        }> | null;
+        outcome: "mismatch" | "rejected" | "unavailable";
+        code: string | null;
+        warning: string | null;
+        receiptDigest: string | null;
+      }>[];
+      readonly cleanup: WorkflowCleanupReceipt;
+    }
   | {
       readonly status: "rejected";
       readonly code: WorkflowFailureCode;
@@ -230,6 +221,15 @@ export type WorkflowCleanupResult =
   | {
       readonly status: "rejected";
       readonly code: "INVALID_WORKFLOW_INPUT" | "WORKFLOW_STALE";
+    }
+  | Extract<
+      WorkflowPrepareResult,
+      { readonly status: "split-required" | "intervention-required" }
+    >
+  | {
+      readonly status: "rejected";
+      readonly code: "TASK_WORKTREE_REJECTED";
+      readonly cleanup: WorkflowCleanupReceipt;
     };
 
 export type WorkflowRecoveryResult =
@@ -277,4 +277,15 @@ export interface CapturedPublicationBaseline {
     readonly path: string;
     readonly expected: ExpectedSnapshot;
   }[];
+}
+
+export interface OwnedTaskWorktreeSession {
+  readonly authority: TaskWorktree;
+  readonly session: TaskWorktreeSession;
+}
+
+export interface OwnedTaskWorktreeCleanup {
+  readonly authority: TaskWorktree;
+  readonly handle: TaskWorktreeCleanupHandle;
+  readonly outcome: TaskWorktreePrepareTerminalResult;
 }

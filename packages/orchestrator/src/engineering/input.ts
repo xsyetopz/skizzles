@@ -4,10 +4,12 @@ import {
   isChangeDeclaration,
 } from "@skizzles/change-assurance";
 import { isSourceEngineering } from "@skizzles/source-engineering";
+import { isTaskWorktree } from "@skizzles/task-worktree";
 import { nonempty } from "../codec.ts";
 import { digestValue } from "../digest.ts";
 import { isNormalizedRequest } from "../intent.ts";
 import { isRepositoryContext } from "../repository.ts";
+import { isTaskWorktreeApprovalBridge } from "../workflow/worktree/approval.ts";
 import type { ContextBudgetAuthorityPort } from "./context.ts";
 import type {
   EngineeringDeclarationKind,
@@ -67,7 +69,7 @@ export function parseEngineeringConfig(
   ) {
     return;
   }
-  const profiles = parseProfiles(value["validationProfiles"], value["causal"]);
+  const profiles = parseProfiles(value["validationProfiles"]);
   if (profiles === undefined) return;
   return Object.freeze({
     causal: value["causal"],
@@ -145,51 +147,10 @@ export function parseEngineeringInput(
 
 function parseProfiles(
   input: unknown,
-  causal: unknown,
 ): readonly EngineeringValidationProfile[] | undefined {
   const values = snapshotArray(input, maximumTargets);
-  const causalValue = snapshotRecord(causal, [
-    "orchestrator",
-    "publicationIdentity",
-    "baselineAuthority",
-    "transaction",
-    "workspaceUsageLimits",
-    "commandProfiles",
-    "approvalContext",
-  ]);
-  const causalProfiles = snapshotArray(
-    causalValue?.["commandProfiles"],
-    maximumTargets,
-  );
-  if (
-    !(
-      values !== undefined &&
-      values.length > 0 &&
-      causalValue !== undefined &&
-      causalProfiles !== undefined
-    )
-  ) {
+  if (!(values !== undefined && values.length > 0)) {
     return;
-  }
-  const available = new Set<string>();
-  for (const profile of causalProfiles) {
-    const candidate = snapshotRecord(
-      profile,
-      [
-        "id",
-        "argv",
-        "env",
-        "timeoutMilliseconds",
-        "maximumOutputBytes",
-        "drainMilliseconds",
-        "signalGraceMilliseconds",
-        "allowedExitCodes",
-        "stderr",
-      ],
-      ["cwd", "dependencyPackages"],
-    );
-    if (candidate === undefined || typeof candidate["id"] !== "string") return;
-    available.add(candidate["id"]);
   }
   const profiles: EngineeringValidationProfile[] = [];
   const ids = new Set<string>();
@@ -229,7 +190,7 @@ function parseProfiles(
     for (const id of commandProfileValues) {
       if (
         typeof id !== "string" ||
-        !available.has(id) ||
+        !validProfileId(id) ||
         commandProfileIds.includes(id)
       ) {
         return;
@@ -251,7 +212,7 @@ function parseProfiles(
       const pathValues = snapshotArray(command?.["testPaths"], maximumFaults);
       if (
         typeof profileId !== "string" ||
-        !available.has(profileId) ||
+        !validProfileId(profileId) ||
         commandProfileIds.includes(profileId) ||
         negativeProfileIds.has(profileId) ||
         pathValues === undefined ||
@@ -536,9 +497,9 @@ function hasCausalConfig(
     "orchestrator",
     "publicationIdentity",
     "baselineAuthority",
+    "taskWorktree",
+    "taskWorktreeApproval",
     "transaction",
-    "workspaceUsageLimits",
-    "commandProfiles",
     "approvalContext",
   ]);
   return (
@@ -554,22 +515,26 @@ function hasCausalConfig(
       "ownerId",
     ]) !== undefined &&
     hasMethods(config["baselineAuthority"], ["capture"]) &&
+    isTaskWorktree(config["taskWorktree"]) &&
+    isTaskWorktreeApprovalBridge(config["taskWorktreeApproval"]) &&
     snapshotRecord(
       config["transaction"],
       ["destination", "leases"],
       ["crashInjection"],
     ) !== undefined &&
-    snapshotRecord(config["workspaceUsageLimits"], [
-      "byteLimit",
-      "entryLimit",
-      "scanLimit",
-    ]) !== undefined &&
-    snapshotArray(config["commandProfiles"], maximumTargets) !== undefined &&
     snapshotRecord(config["approvalContext"], [
       "taskId",
       "principalId",
       "operation",
     ]) !== undefined
+  );
+}
+
+function validProfileId(value: string): boolean {
+  return (
+    value.length > 0 &&
+    value.length <= 128 &&
+    /^[A-Za-z0-9][A-Za-z0-9._:@/-]*$/u.test(value)
   );
 }
 

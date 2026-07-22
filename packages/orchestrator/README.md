@@ -100,40 +100,33 @@ The internal causal state control enforces these publication properties:
   attempts fail closed.
 
 The internal causal workflow composes those state machines with the intentional
-public APIs of `@skizzles/command-supervisor`, `@skizzles/run-workspace`, and
+public APIs of `@skizzles/task-worktree` and
 `@skizzles/workspace-transaction`:
 
 1. reserve a clean target baseline and require complete bounded discovery;
-2. start the host-owned execution budget, create an isolated run workspace, and
-   check its byte, entry, and scan quotas before and after every operation;
-3. materialize source-derived candidate artifacts at their declared relative
-   paths in a bounded repository-shaped command scope using exclusive no-follow
-   handles, and execute only host-registered absolute direct-argv command
-   profiles there. Caller-selected commands and working directories are not
-   accepted. A profile may register the package names it needs; the workflow
-   resolves their required, optional, and peer closure from the trusted
-   workspace topology, copies package bytes into the private scope, and creates
-   only measured internal resolution links. Package versions, content digests,
-   dependency topology, candidates, and the complete staged tree are bound into
-   the command audit and approval diff;
-4. require an allowed exit, complete stdout/stderr evidence, complete stream
-   drain, confirmed process-tree cleanup, and unchanged regular single-link
-   candidate identities and contents before binding the complete immutable diff
-   to approval;
-5. leave the canonical destination unchanged while approval is pending, then
-   revalidate workspace quota, authorization expiry, and target state
-   immediately before consuming the single-use promotion permit through the
-   transaction package. Authorization is checked again after asynchronous
-   target revalidation;
-6. on uncertain publication, retain the exact transaction bindings, workspace,
+2. capture exact publication baselines, then ask the authentic task-worktree
+   authority to allocate an isolated Git branch and worktree from the captured
+   repository identity and exact candidate bytes. Oversized diffs return an
+   explicit split plan; unresolved dependencies return intervention diagnostics,
+   and neither outcome creates approval state;
+3. run only the task-worktree authority's host-admitted sandbox profiles. Bind
+   its authentic candidate, declared-path, dependency, sandbox, diff, phase,
+   and commit-message digests plus the exact executed profile IDs into the
+   immutable approval diff;
+4. leave the canonical destination unchanged while approval is pending, then
+   revalidate target state, engineering evidence, and the same authentic task
+   session before consuming the single-use promotion permit;
+5. create exactly one permit-bound commit on the isolated task branch, verify
+   its authentic receipt against the approved task receipt, and only then
+   publish the approved bytes through the transaction package;
+6. on uncertain publication, retain the exact transaction bindings, task session,
    and target lease behind a single-use recovery handle and call the transaction
    package's public recovery entrypoint; and
-7. cancel still-owned approval state, close the exact run workspace, and release
+7. cancel still-owned approval state, close the exact task worktree, and release
    the target lease in reverse acquisition order. Cleanup is single-flight;
    retries revisit only the failed cleanup stage.
 
-Timeouts, signals, output overflow, incomplete drain, forced process-tree kill,
-unknown or exceeded workspace usage, incomplete discovery, approval drift or
+Sandbox rejection, candidate drift, incomplete discovery, approval drift or
 replay, transaction uncertainty, and cleanup failure cannot produce a completed
 result. The transaction approval bridge is coordinator-owned, so callers cannot
 construct a publication authority or replay a permit through the workflow.

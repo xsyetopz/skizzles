@@ -1,4 +1,10 @@
-import type { RunWorkspace } from "@skizzles/run-workspace";
+import {
+  isTaskWorktreeReceipt,
+  type TaskWorktree,
+  type TaskWorktreeCleanupHandle,
+  type TaskWorktreeReceipt,
+  type TaskWorktreeSession,
+} from "@skizzles/task-worktree";
 import { digestValue } from "../digest.ts";
 import type { Orchestrator } from "../runtime.ts";
 import type { ApprovalRequest } from "../state/approval.ts";
@@ -27,11 +33,24 @@ export class WorkflowLifecycle {
   readonly handle: WorkflowCleanupHandle;
   private readonly orchestrator: Orchestrator;
   private readonly baseline: TargetBaseline;
-  private workspace: RunWorkspace | undefined;
+  private taskWorktree:
+    | Readonly<{
+        kind: "session";
+        authority: TaskWorktree;
+        session: TaskWorktreeSession;
+      }>
+    | Readonly<{
+        kind: "cleanup";
+        authority: TaskWorktree;
+        handle: TaskWorktreeCleanupHandle;
+      }>
+    | undefined;
   private approval: ApprovalRequest | undefined;
   private approvalTerminal = true;
-  private workspaceDone = false;
-  private workspaceReport: WorkflowCleanupReceipt["workspace"] = null;
+  private taskWorktreeDone = false;
+  private taskWorktreeReceipt: TaskWorktreeReceipt | null = null;
+  private taskWorktreeCleanup: WorkflowCleanupReceipt["taskWorktreeCleanup"] =
+    "none";
   private targetDone = false;
   private attempt = 0;
   private closePromise: Promise<WorkflowCleanupReceipt> | undefined;
@@ -48,11 +67,31 @@ export class WorkflowLifecycle {
     handles.add(this.handle);
   }
 
-  ownWorkspace(workspace: RunWorkspace): void {
-    if (this.workspace !== undefined) {
-      throw new Error("workflow already owns a run workspace");
+  ownTaskWorktree(authority: TaskWorktree, session: TaskWorktreeSession): void {
+    if (this.taskWorktree !== undefined) {
+      throw new Error("workflow already owns a task worktree session");
     }
-    this.workspace = workspace;
+    this.taskWorktree = Object.freeze({
+      kind: "session" as const,
+      authority,
+      session,
+    });
+    this.taskWorktreeCleanup = "pending";
+  }
+
+  ownTaskWorktreeCleanup(
+    authority: TaskWorktree,
+    handle: TaskWorktreeCleanupHandle,
+  ): void {
+    if (this.taskWorktree !== undefined) {
+      throw new Error("workflow already owns task worktree cleanup");
+    }
+    this.taskWorktree = Object.freeze({
+      kind: "cleanup" as const,
+      authority,
+      handle,
+    });
+    this.taskWorktreeCleanup = "pending";
   }
 
   ownApproval(approval: ApprovalRequest): void {
@@ -111,28 +150,58 @@ export class WorkflowLifecycle {
 
     if (
       this.approvalTerminal &&
-      !this.workspaceDone &&
-      this.workspace !== undefined
+      !this.taskWorktreeDone &&
+      this.taskWorktree !== undefined
     ) {
-      this.workspaceReport = await this.workspace.close().catch(() => null);
-      this.workspaceDone = this.workspaceReport?.state === "deleted";
-    } else if (this.workspace === undefined) {
-      this.workspaceDone = true;
+      if (this.taskWorktree.kind === "session") {
+        const closed = await this.taskWorktree.authority
+          .close(
+            Object.freeze({
+              version: 1 as const,
+              session: this.taskWorktree.session,
+            }),
+          )
+          .catch(() => undefined);
+        if (
+          closed?.status === "closed" &&
+          isTaskWorktreeReceipt(closed.receipt)
+        ) {
+          this.taskWorktreeReceipt = closed.receipt;
+          this.taskWorktreeCleanup = "session-closed";
+          this.taskWorktreeDone = true;
+        }
+      } else {
+        const cleaned = await this.taskWorktree.authority
+          .retryCleanup(
+            Object.freeze({
+              version: 1 as const,
+              handle: this.taskWorktree.handle,
+            }),
+          )
+          .catch(() => undefined);
+        if (cleaned?.status === "cleaned") {
+          this.taskWorktreeCleanup = "prepare-cleaned";
+          this.taskWorktreeDone = true;
+        }
+      }
+    } else if (this.taskWorktree === undefined) {
+      this.taskWorktreeDone = true;
     }
 
-    if (this.approvalTerminal && this.workspaceDone && !this.targetDone) {
+    if (this.approvalTerminal && this.taskWorktreeDone && !this.targetDone) {
       const release = this.orchestrator.releaseTargetBaseline(this.baseline);
       this.targetDone = release.status === "released";
     }
 
     const complete =
-      this.approvalTerminal && this.workspaceDone && this.targetDone;
+      this.approvalTerminal && this.taskWorktreeDone && this.targetDone;
     const material = {
       workflowId: this.handle.workflowId,
       attempt: this.attempt,
       approvalCancelled: this.approvalTerminal,
-      workspaceState: this.workspaceReport?.state ?? "none",
-      workspaceRunId: this.workspaceReport?.runId ?? "none",
+      taskWorktreeReceiptDigest:
+        this.taskWorktreeReceipt?.receiptDigest ?? "none",
+      taskWorktreeCleanup: this.taskWorktreeCleanup,
       targetReleased: this.targetDone,
       complete,
     };
@@ -140,7 +209,8 @@ export class WorkflowLifecycle {
       workflowId: this.handle.workflowId,
       attempt: this.attempt,
       approvalCancelled: this.approvalTerminal,
-      workspace: this.workspaceReport,
+      taskWorktree: this.taskWorktreeReceipt,
+      taskWorktreeCleanup: this.taskWorktreeCleanup,
       targetReleased: this.targetDone,
       complete,
       receiptDigest: digestValue(material),

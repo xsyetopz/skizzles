@@ -1,7 +1,9 @@
 import { posix } from "node:path";
+import {
+  isTaskWorktreeReceipt,
+  type TaskWorktreeReceipt,
+} from "@skizzles/task-worktree";
 import type {
-  ApprovalBindings,
-  ApprovalDecision,
   ExpectedSnapshot,
   PostCommitLeaseCleanupFailure,
   PublicationResult,
@@ -9,15 +11,14 @@ import type {
 import { exactKeys, isRecord } from "../codec.ts";
 import { digestValue } from "../digest.ts";
 import type { RepositoryContext } from "../repository.ts";
-import type { PromotionPermit } from "../state/approval.ts";
 import type { TargetBaseline } from "../state/target.ts";
 import type {
   CapturedPublicationBaseline,
   PublicationBaselineAuthorityPort,
   PublicationIdentity,
-  WorkflowCommandAudit,
 } from "./contract.ts";
 import type { WorkflowEngineeringEvidence } from "./evidence.ts";
+import { createWorktreeMaterial } from "./worktree/receipt.ts";
 
 const rawDigest = /^[0-9a-f]{64}$/u;
 const maximumCandidateBytes = 1_500_000;
@@ -35,76 +36,7 @@ export interface PreparedPublication {
   readonly request: unknown;
   readonly diffBytes: readonly number[];
   readonly targetCount: number;
-}
-
-interface ActivePermit {
-  readonly permit: PromotionPermit;
-  readonly identity: PublicationIdentity;
-  consumed: boolean;
-}
-
-export interface TransactionApprovalReceipt {
-  readonly reference: string;
-  readonly approvalDigest: string;
-  readonly bindings: ApprovalBindings;
-}
-
-export class TransactionApprovalBridge {
-  private readonly permits = new Map<string, ActivePermit>();
-  private readonly receipts = new Map<string, TransactionApprovalReceipt>();
-
-  activate(
-    reference: string,
-    permit: PromotionPermit,
-    identity: PublicationIdentity,
-  ): void {
-    if (this.permits.has(reference)) {
-      throw new Error("transaction approval reference already activated");
-    }
-    this.permits.set(reference, { permit, identity, consumed: false });
-  }
-
-  deactivate(reference: string): void {
-    this.permits.delete(reference);
-  }
-
-  takeReceipt(reference: string): TransactionApprovalReceipt | undefined {
-    const receipt = this.receipts.get(reference);
-    this.receipts.delete(reference);
-    return receipt;
-  }
-
-  verifyAndConsume(bindings: ApprovalBindings): Promise<ApprovalDecision> {
-    const active = this.permits.get(bindings.approvalReference);
-    if (active === undefined) return Promise.resolve({ status: "unknown" });
-    if (active.consumed) return Promise.resolve({ status: "already-consumed" });
-    if (
-      bindings.repositoryId !== active.identity.repositoryId ||
-      bindings.rootIdentity !== active.identity.rootIdentity ||
-      bindings.ownerId !== active.identity.ownerId ||
-      !rawDigest.test(bindings.requestDigest) ||
-      !rawDigest.test(bindings.targetSetDigest) ||
-      !rawDigest.test(bindings.baselineDigest)
-    ) {
-      return Promise.resolve({ status: "rejected" });
-    }
-    const approvalDigest = active.permit.permitDigest.replace(/^sha256:/u, "");
-    if (!rawDigest.test(approvalDigest)) {
-      return Promise.resolve({ status: "rejected" });
-    }
-    active.consumed = true;
-    const receipt = Object.freeze({
-      reference: bindings.approvalReference,
-      approvalDigest,
-      bindings: Object.freeze({ ...bindings }),
-    });
-    this.receipts.set(bindings.approvalReference, receipt);
-    return Promise.resolve({
-      status: "approved",
-      approvalDigest,
-      bindings,
-    });
-  }
+  readonly taskWorktreeReceipt: TaskWorktreeReceipt;
 }
 
 export function parseWorkflowTargets(
@@ -215,10 +147,15 @@ export async function preparePublication(
   baseline: TargetBaseline,
   captured: CapturedPublicationBaseline,
   targets: readonly WorkflowTarget[],
-  commandAudits: readonly WorkflowCommandAudit[],
+  taskWorktreeReceipt: TaskWorktreeReceipt,
+  executedProfileIds: readonly string[],
   engineeringEvidence: WorkflowEngineeringEvidence | null = null,
 ): Promise<PreparedPublication | undefined> {
-  if (repository.repositoryId !== identity.repositoryId) return;
+  if (
+    repository.repositoryId !== identity.repositoryId ||
+    !isTaskWorktreeReceipt(taskWorktreeReceipt)
+  )
+    return;
   const transactionTargets: unknown[] = [];
   const diffTargets: unknown[] = [];
   let totalBytes = 0;
@@ -256,16 +193,9 @@ export async function preparePublication(
       }),
     );
   }
-  const auditMaterial = Object.freeze(
-    commandAudits.map((audit) =>
-      Object.freeze({
-        profileId: audit.profileId,
-        receipt: audit.receipt,
-        scope: audit.scope,
-        declaredTargetPaths: audit.declaredTargetPaths,
-        stderrEvidenceDigest: digestValue(audit.stderrEvidence),
-      }),
-    ),
+  const worktreeMaterial = createWorktreeMaterial(
+    taskWorktreeReceipt,
+    executedProfileIds,
   );
   const reference = digestValue({
     repositoryId: identity.repositoryId,
@@ -273,7 +203,7 @@ export async function preparePublication(
     ownerId: identity.ownerId,
     baselineDigest: baseline.baselineDigest,
     engineeringEvidenceDigest: engineeringEvidence?.evidenceDigest ?? null,
-    commandAudits: auditMaterial,
+    taskWorktree: worktreeMaterial,
     targets: diffTargets,
   });
   const request = Object.freeze({
@@ -288,7 +218,7 @@ export async function preparePublication(
     JSON.stringify(
       Object.freeze({
         version: 1,
-        commandAudits: auditMaterial,
+        taskWorktree: worktreeMaterial,
         engineeringEvidence:
           engineeringEvidence === null
             ? null
@@ -309,6 +239,7 @@ export async function preparePublication(
     request,
     diffBytes: Object.freeze(Array.from(diff)),
     targetCount: targets.length,
+    taskWorktreeReceipt,
   });
 }
 

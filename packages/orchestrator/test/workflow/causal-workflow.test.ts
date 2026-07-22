@@ -1,496 +1,575 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
-import { describe, expect, it } from "bun:test";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { afterEach, describe, expect, it } from "bun:test";
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
+import {
+  createTaskWorktree,
+  isTaskWorktreeReceipt,
+  type TaskWorktreeApprovalAuthorityRequest,
+} from "@skizzles/task-worktree";
 import {
   createLocalRepositoryLeaseAuthority,
   type RepositoryLeaseAuthorityPort,
 } from "@skizzles/workspace-transaction";
 import { createCausalWorkflow } from "../../src/workflow/causal-workflow.ts";
-import type { CausalWorkflow } from "../../src/workflow/contract.ts";
+import type {
+  CausalWorkflow,
+  CausalWorkflowConfig,
+} from "../../src/workflow/contract.ts";
+import { TaskWorktreeApprovalBridge } from "../../src/workflow/worktree/approval.ts";
 import { createHarness, repositoryContext } from "../support.ts";
 import { IsolatedDestination } from "./isolated-destination.ts";
 
+const git = Bun.which("git");
+const fixtureRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    fixtureRoots.splice(0).map(async (root) => {
+      await rm(root, { force: true, recursive: true });
+    }),
+  );
+});
+
 interface FixtureOptions {
-  readonly advanceBeforePromoteMs?: number;
-  readonly commandScript?: string;
+  readonly approvalBridge?: TaskWorktreeApprovalBridge;
   readonly crashStep?: string;
-  readonly failLeaseReleaseAfterCommit?: boolean;
-  readonly legacyCwd?: readonly string[];
-  readonly commandArgv?: readonly string[];
-  readonly dependencyPackages?: readonly string[];
-  readonly workspaceUsageLimits?: Readonly<{
-    byteLimit: number;
-    entryLimit: number;
-    scanLimit: number;
-  }>;
-  readonly stderr?: "evidence" | "must-be-empty";
+  readonly cleanupFault?: boolean;
+  readonly drift?: boolean;
+  readonly intervention?: boolean;
+  readonly split?: boolean;
 }
 
-function createFixture(options: FixtureOptions = {}): {
+interface Fixture {
   readonly workflow: CausalWorkflow;
+  readonly config: CausalWorkflowConfig;
   readonly destination: IsolatedDestination;
   readonly orchestrator: ReturnType<typeof createHarness>["orchestrator"];
-} {
-  let advanceClock = (): void => undefined;
-  let revalidationCount = 0;
+  readonly repository: string;
+  readonly worktreeParent: string;
+}
+
+async function createFixture(options: FixtureOptions = {}): Promise<Fixture> {
+  if (git === null) throw new Error("Git is required for workflow tests");
+  const root = await realpath(
+    await mkdtemp(join(tmpdir(), "skizzles-causal-worktree-")),
+  );
+  fixtureRoots.push(root);
+  const repository = join(root, "repository");
+  const worktreeParent = join(root, "worktrees");
+  await mkdir(repository);
+  await mkdir(worktreeParent);
+  runGit(repository, ["init", "-b", "main"]);
+  runGit(repository, ["config", "user.name", "Skizzles Test"]);
+  runGit(repository, ["config", "user.email", "test@skizzles.invalid"]);
+  await Bun.write(join(repository, "README.md"), "fixture\n");
+  runGit(repository, ["add", "README.md"]);
+  runGit(repository, ["commit", "-m", "chore: baseline"]);
+
   const harness = createHarness({
-    targetRevalidate(input) {
-      revalidationCount += 1;
-      if (
-        revalidationCount === 1 &&
-        options.advanceBeforePromoteMs !== undefined
-      ) {
-        advanceClock();
-      }
-      return {
-        reservationId: input.reservationId,
-        repositoryId: input.repositoryId,
-        requestDigest: input.requestDigest,
-        treeDigest: input.treeDigest,
-        targets: input.targets,
-        headDigest: input.headDigest,
-        indexDigest: input.indexDigest,
-        worktreeDigest: input.worktreeDigest,
-        statusDigest: input.statusDigest,
-        unchanged: true,
-      };
-    },
-  });
-  const { orchestrator } = harness;
-  advanceClock = () =>
-    harness.clock.advance(options.advanceBeforePromoteMs ?? 0);
-  const destination = new IsolatedDestination();
-  const localLeases = createLocalRepositoryLeaseAuthority([
-    { repositoryId: "repo-a", rootIdentity: "root-a", ownerId: "worker-a" },
-  ]);
-  const leases: RepositoryLeaseAuthorityPort =
-    options.failLeaseReleaseAfterCommit
+    ...(options.drift
       ? {
-          async acquirePublication(input: {
-            readonly repositoryId: string;
-            readonly rootIdentity: string;
-            readonly ownerId: string;
-          }) {
-            const decision = await localLeases.acquirePublication(input);
-            if (decision.status !== "acquired") return decision;
+          targetRevalidate(input) {
             return {
-              status: "acquired",
-              lease: {
-                ...decision.lease,
-                async release(): Promise<void> {
-                  await decision.lease.release();
-                  throw new Error("injected post-commit lease cleanup failure");
-                },
-              },
+              reservationId: input.reservationId,
+              repositoryId: input.repositoryId,
+              requestDigest: input.requestDigest,
+              treeDigest: input.treeDigest,
+              targets: input.targets,
+              headDigest: input.headDigest,
+              indexDigest: input.indexDigest,
+              worktreeDigest: input.worktreeDigest,
+              statusDigest: input.statusDigest,
+              unchanged: false,
             };
           },
         }
-      : localLeases;
-  const result = createCausalWorkflow({
-    orchestrator,
-    publicationIdentity: {
+      : {}),
+  });
+  const destination = new IsolatedDestination();
+  const taskWorktreeApproval =
+    options.approvalBridge ?? new TaskWorktreeApprovalBridge("causal-approval");
+  const taskCreated = createTaskWorktree(
+    Object.freeze({
+      authorityId: "causal-task-worktree",
+      approvalAuthority: Object.freeze({
+        id: "causal-approval",
+        authorize: (request: TaskWorktreeApprovalAuthorityRequest) =>
+          taskWorktreeApproval.authorize(request),
+      }),
+      repositoryRoot: repository,
+      worktreeParent,
+      repositoryId: "repo-a",
+      rootIdentity: "root-a",
+      diffCeilings: Object.freeze({
+        maxChangedFiles: options.split ? 1 : 8,
+        maxAddedLines: 100,
+        maxDeletedLines: 100,
+        maxChangedBytes: 10_000,
+      }),
+      commitPolicy: Object.freeze({
+        maxSubjectLength: 72,
+        ownedPackagePaths: Object.freeze([
+          Object.freeze({ path: "src/file.ts", scope: "fixture" }),
+          Object.freeze({ path: "src/second.ts", scope: "fixture" }),
+        ]),
+      }),
+      sandbox: Object.freeze({
+        id: "causal-sandbox",
+        attest: async (paths: readonly string[]) => {
+          if (options.cleanupFault) {
+            const allocation = worktreePaths(repository).find(
+              (path) => path !== repository,
+            );
+            if (allocation === undefined) {
+              throw new Error("task worktree allocation missing");
+            }
+            runGit(repository, [
+              "worktree",
+              "lock",
+              "--reason",
+              "orchestrator-cleanup-test",
+              allocation,
+            ]);
+          }
+          return Object.freeze({
+            mechanism: "seatbelt" as const,
+            writePaths: paths,
+            deniesUndeclaredWrites: true as const,
+            deniesSystemControl: true as const,
+            readOnlyWorktree: true as const,
+            networkDisabled: true as const,
+            boundedProcessTree: true as const,
+            evidence: "causal-fixture-attestation",
+          });
+        },
+        execute: async (request: { readonly bindingDigest: string }) =>
+          Object.freeze({
+            exitCode: 0,
+            stdoutDigest: "0".repeat(64),
+            stderrDigest: "0".repeat(64),
+            stdoutBytes: 0,
+            stderrBytes: 0,
+            bindingDigest: request.bindingDigest,
+          }),
+      }),
+      sandboxWritePaths: Object.freeze([".skizzles-cache"]),
+      dependencyResolver: Object.freeze({
+        id: "causal-resolver",
+        resolve: async (request: {
+          readonly ecosystem: "npm";
+          readonly name: string;
+          readonly requestedRange: string;
+        }) =>
+          Object.freeze({
+            ...request,
+            resolvedVersion: options.intervention ? null : "1.0.0",
+            registry: "fixture",
+          }),
+      }),
+      dependencyRequests: Object.freeze(
+        options.intervention
+          ? [
+              Object.freeze({
+                ecosystem: "npm" as const,
+                name: "fixture-package",
+                requestedRange: "1",
+              }),
+            ]
+          : [],
+      ),
+      commandProfiles: Object.freeze([
+        Object.freeze({
+          id: "validate",
+          profile: "read-only" as const,
+          executable: "git" as const,
+          arguments: Object.freeze(["status"]),
+          cwd: ".",
+          timeoutMilliseconds: 10_000,
+          maximumOutputBytes: 1024 * 1024,
+          drainMilliseconds: 1000,
+          signalGraceMilliseconds: 1000,
+        }),
+      ]),
+    }),
+  );
+  if (taskCreated.status !== "created") {
+    throw new Error("task worktree fixture rejected");
+  }
+  const leases: RepositoryLeaseAuthorityPort =
+    createLocalRepositoryLeaseAuthority([
+      { repositoryId: "repo-a", rootIdentity: "root-a", ownerId: "worker-a" },
+    ]);
+  const config: CausalWorkflowConfig = Object.freeze({
+    orchestrator: harness.orchestrator,
+    publicationIdentity: Object.freeze({
       repositoryId: "repo-a",
       rootIdentity: "root-a",
       ownerId: "worker-a",
-    },
-    baselineAuthority: {
+    }),
+    baselineAuthority: Object.freeze({
       capture(input: {
         readonly baseline: { readonly baselineDigest: string };
         readonly targets: readonly { readonly path: string }[];
       }) {
-        return {
+        return Object.freeze({
           baselineDigest: input.baseline.baselineDigest,
-          targets: input.targets.map((target) => ({
-            path: target.path,
-            expected: { state: "missing" },
-          })),
-        };
+          targets: Object.freeze(
+            input.targets.map((target) =>
+              Object.freeze({
+                path: target.path,
+                expected: Object.freeze({ state: "missing" as const }),
+              }),
+            ),
+          ),
+        });
       },
-    },
-    transaction: {
+    }),
+    taskWorktree: taskCreated.taskWorktree,
+    taskWorktreeApproval,
+    transaction: Object.freeze({
       destination,
       leases,
       ...(options.crashStep === undefined
         ? {}
         : {
-            crashInjection: {
-              checkpoint(input: { readonly step: string }): boolean {
+            crashInjection: Object.freeze({
+              async checkpoint(input: { readonly step: string }) {
                 return input.step === options.crashStep;
               },
-            },
+            }),
           }),
-    },
-    workspaceUsageLimits: options.workspaceUsageLimits ?? {
-      byteLimit: 1_000_000,
-      entryLimit: 200,
-      scanLimit: 200,
-    },
-    commandProfiles: [
-      {
-        id: "write-candidate",
-        ...(options.legacyCwd === undefined ? {} : { cwd: options.legacyCwd }),
-        argv: options.commandArgv ?? [
-          process.execPath,
-          "-e",
-          options.commandScript ??
-            "if (await Bun.file('src/file.ts').text() !== 'new-content') process.exit(9)",
-          "src/file.ts",
-        ],
-        env: {},
-        dependencyPackages: options.dependencyPackages ?? [],
-        timeoutMilliseconds: 5000,
-        maximumOutputBytes: 10_000,
-        drainMilliseconds: 1000,
-        signalGraceMilliseconds: 1000,
-        allowedExitCodes: [0],
-        stderr: options.stderr ?? "must-be-empty",
-      },
-    ],
-    approvalContext: {
+    }),
+    approvalContext: Object.freeze({
       taskId: "task-a",
       principalId: "maintainer-a",
       operation: "publish",
-    },
+    }),
   });
-  if (result.status !== "accepted") {
+  const created = createCausalWorkflow(config);
+  if (created.status !== "accepted") {
     throw new Error("valid causal workflow rejected");
   }
-  return { workflow: result.workflow, destination, orchestrator };
-}
-
-async function prepare(fixture: ReturnType<typeof createFixture>) {
-  const context = await repositoryContext(fixture.orchestrator);
-  const result = await fixture.workflow.prepare({
-    ...context,
-    targets: [
-      {
-        path: "src/file.ts",
-        operation: "write",
-        candidateBytes: Array.from(new TextEncoder().encode("new-content")),
-      },
-    ],
-    discoveryRoot: "packages/orchestrator",
-    commands: ["write-candidate"],
+  return Object.freeze({
+    workflow: created.workflow,
+    config,
+    destination,
+    orchestrator: harness.orchestrator,
+    repository,
+    worktreeParent,
   });
-  if (result.status !== "awaiting-approval") {
-    throw new Error(`workflow preparation failed: ${result.code}`);
-  }
-  return result.review;
 }
 
-describe("causal Phase 2 workflow", () => {
-  it("compiles and tests a candidate against external and workspace dependencies inside the private scope", async () => {
-    const candidatePath = "test/dependency-candidate.test.ts";
-    const candidateSource = [
-      'import { expect, test } from "bun:test";',
-      'import { create } from "@skizzles/run-workspace";',
-      'import { z } from "zod";',
-      'test("staged dependency closure", () => {',
-      '  expect(z.literal("validated").parse("validated")).toBe("validated");',
-      '  expect(typeof create).toBe("function");',
-      "});",
-      "",
-    ].join("\n");
-    const fixture = createFixture({
-      commandArgv: [process.execPath, "test", candidatePath],
-      dependencyPackages: ["zod", "@skizzles/run-workspace"],
-      workspaceUsageLimits: {
-        byteLimit: 15_000_000,
-        entryLimit: 2_000,
-        scanLimit: 2_000,
-      },
-      stderr: "evidence",
-    });
-    const context = await repositoryContext(fixture.orchestrator);
-    const result = await fixture.workflow.prepare({
-      ...context,
-      targets: [
-        {
-          path: candidatePath,
-          operation: "write",
-          candidateBytes: Array.from(new TextEncoder().encode(candidateSource)),
-        },
-      ],
-      discoveryRoot: "packages/orchestrator",
-      commands: ["write-candidate"],
-    });
+async function prepare(
+  fixture: Fixture,
+  paths: readonly string[] = ["src/file.ts"],
+) {
+  const context = await repositoryContext(fixture.orchestrator);
+  return await fixture.workflow.prepare({
+    ...context,
+    targets: paths.map((path, index) => ({
+      path,
+      operation: "write",
+      candidateBytes: Array.from(
+        new TextEncoder().encode(`export const value = ${index + 1};\n`),
+      ),
+    })),
+    discoveryRoot: "packages/orchestrator",
+    profileIds: ["validate"],
+  });
+}
+
+describe("causal task-worktree workflow", () => {
+  it("binds the authentic task receipt and executed profiles into review and approval diff", async () => {
+    const fixture = await createFixture();
+    const result = await prepare(fixture);
     if (result.status !== "awaiting-approval") {
-      throw new Error(`dependency-backed workflow failed: ${result.code}`);
+      throw new Error(`workflow preparation failed: ${result.code}`);
     }
-    expect(result.review.commandAudits[0]?.declaredTargetPaths).toEqual([
-      candidatePath,
-    ]);
-    expect(result.review.commandAudits[0]?.scope.dependencies).toEqual([
-      expect.objectContaining({
-        name: "@skizzles/run-workspace",
-        kind: "workspace",
-        direct: true,
-        packageDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
-      }),
-      expect.objectContaining({
-        name: "zod",
-        kind: "external",
-        direct: true,
-        packageDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
-      }),
-    ]);
-    expect(result.review.commandAudits[0]?.scope.dependencyDigest).toMatch(
-      /^sha256:[0-9a-f]{64}$/u,
+    expect(isTaskWorktreeReceipt(result.review.taskWorktreeReceipt)).toBe(true);
+    expect(result.review.executedProfileIds).toEqual(["validate"]);
+    const diff = JSON.parse(
+      new TextDecoder().decode(
+        Uint8Array.from(result.review.approval.diffBytes),
+      ),
     );
+    expect(diff.taskWorktree).toEqual({
+      receiptDigest: result.review.taskWorktreeReceipt.receiptDigest,
+      candidateDigest: result.review.taskWorktreeReceipt.candidateDigest,
+      declaredPathDigest: result.review.taskWorktreeReceipt.declaredPathDigest,
+      commitMessageDigest:
+        result.review.taskWorktreeReceipt.commitPlan.messageDigest,
+      executedProfileIds: ["validate"],
+    });
     await expect(
       fixture.workflow.reject({ review: result.review }),
     ).resolves.toMatchObject({
       status: "rejected",
-      cleanup: { complete: true, workspace: { state: "deleted" } },
+      cleanup: { complete: true, taskWorktree: { taskId: "task-a" } },
     });
-  }, 20_000);
+  });
 
-  it("keeps the canonical target unchanged until single-use approval and publication", async () => {
-    const fixture = createFixture();
-    const review = await prepare(fixture);
-    expect(fixture.destination.currentText("src/file.ts")).toBeUndefined();
-    expect(review.commandAudits).toHaveLength(1);
-    expect(review.commandAudits[0]?.receipt.lifecycle.drain).toBe("complete");
-    expect(review.commandAudits[0]?.declaredTargetPaths).toEqual([
-      "src/file.ts",
-    ]);
-    expect(review.commandAudits[0]?.scope).toMatchObject({
-      stagedTreeDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
-      candidateDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
-      targets: [
-        {
-          path: "src/file.ts",
-          operation: "write",
-          candidateDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
-        },
-      ],
-    });
+  it("revalidates approval state and closes without committing on drift", async () => {
+    const fixture = await createFixture({ drift: true });
+    const prepared = await prepare(fixture);
+    if (prepared.status !== "awaiting-approval") {
+      throw new Error("workflow preparation failed");
+    }
     const result = await fixture.workflow.approveAndPromote({
-      review,
+      review: prepared.review,
       token: "approve",
     });
-    expect(result.status).toBe("completed");
-    expect(fixture.destination.currentText("src/file.ts")).toBe("new-content");
-    if (result.status !== "completed") {
-      throw new Error("approved workflow did not complete");
+    expect(result).toMatchObject({
+      status: "rejected",
+      code: "APPROVAL_DRIFTED",
+      cleanup: { complete: true },
+    });
+    expect(
+      gitOutput(fixture.repository, ["rev-list", "--all", "--count"]),
+    ).toBe("1\n");
+  });
+
+  it("creates exactly one isolated commit, preserves it through uncertainty, then cleans after recovery", async () => {
+    const fixture = await createFixture({ crashStep: "target-published" });
+    const prepared = await prepare(fixture);
+    if (prepared.status !== "awaiting-approval") {
+      throw new Error("workflow preparation failed");
     }
-    expect(result.cleanup).toMatchObject({
-      complete: true,
-      targetReleased: true,
-      workspace: { state: "deleted" },
-    });
-    await expect(
-      fixture.workflow.approveAndPromote({ review, token: "approve" }),
-    ).resolves.toMatchObject({ status: "rejected" });
-  });
-
-  it("cleans its exact workspace and releases the target on rejection", async () => {
-    const fixture = createFixture();
-    const review = await prepare(fixture);
-    const result = await fixture.workflow.reject({ review });
-    expect(result).toMatchObject({
-      status: "rejected",
-      code: "APPROVAL_REJECTED",
-      cleanup: {
-        complete: true,
-        targetReleased: true,
-        workspace: { state: "deleted" },
-      },
-    });
-    expect(fixture.destination.currentText("src/file.ts")).toBeUndefined();
-  });
-
-  it("fails closed and cleans up when a registered command exits unsuccessfully", async () => {
-    const fixture = createFixture({ commandScript: "process.exit(7)" });
-    const context = await repositoryContext(fixture.orchestrator);
-    const result = await fixture.workflow.prepare({
-      ...context,
-      targets: [
-        {
-          path: "src/file.ts",
-          operation: "write",
-          candidateBytes: Array.from(new TextEncoder().encode("new-content")),
-        },
-      ],
-      discoveryRoot: "packages/orchestrator",
-      commands: ["write-candidate"],
-    });
-    expect(result).toMatchObject({
-      status: "rejected",
-      code: "COMMAND_OBSERVATION_REJECTED",
-      cleanup: {
-        complete: true,
-        targetReleased: true,
-        workspace: { state: "deleted" },
-      },
-    });
-    expect(fixture.destination.currentText("src/file.ts")).toBeUndefined();
-  });
-
-  it("releases execution dedupe after failure until the retained budget is exhausted", async () => {
-    const fixture = createFixture({ commandScript: "process.exit(7)" });
-    const context = await repositoryContext(fixture.orchestrator);
-    const input = {
-      ...context,
-      targets: [
-        {
-          path: "src/file.ts",
-          operation: "write",
-          candidateBytes: Array.from(new TextEncoder().encode("new-content")),
-        },
-      ],
-      discoveryRoot: "packages/orchestrator",
-      commands: ["write-candidate"],
-    };
-    await expect(fixture.workflow.prepare(input)).resolves.toMatchObject({
-      status: "rejected",
-      code: "COMMAND_OBSERVATION_REJECTED",
-    });
-    await expect(fixture.workflow.prepare(input)).resolves.toMatchObject({
-      status: "rejected",
-      code: "COMMAND_OBSERVATION_REJECTED",
-    });
-    await expect(fixture.workflow.prepare(input)).resolves.toMatchObject({
-      status: "rejected",
-      code: "EXECUTION_BUDGET_REJECTED",
-    });
-  });
-
-  it("never follows a command-created candidate symlink outside its owned cwd", async () => {
-    const outside = await mkdtemp(join(tmpdir(), "skizzles-containment-"));
-    const sentinel = join(outside, "sentinel.txt");
-    await writeFile(sentinel, "outside-safe", { mode: 0o600 });
-    const script = [
-      "const fs = await import('node:fs/promises')",
-      "await fs.unlink('src/file.ts')",
-      `await fs.symlink(${JSON.stringify(sentinel)}, 'src/file.ts')`,
-    ].join(";");
-    const fixture = createFixture({ commandScript: script });
-    const context = await repositoryContext(fixture.orchestrator);
-    const result = await fixture.workflow.prepare({
-      ...context,
-      targets: [
-        {
-          path: "src/file.ts",
-          operation: "write",
-          candidateBytes: Array.from(new TextEncoder().encode("new-content")),
-        },
-      ],
-      discoveryRoot: "packages/orchestrator",
-      commands: ["write-candidate"],
-    });
-    expect(result).toMatchObject({
-      status: "rejected",
-      code: "COMMAND_OBSERVATION_REJECTED",
-      cleanup: { complete: true, workspace: { state: "deleted" } },
-    });
-    expect(await readFile(sentinel, "utf8")).toBe("outside-safe");
-    expect(fixture.destination.currentText("src/file.ts")).toBeUndefined();
-  });
-
-  it("rejects caller-selected command and candidate paths before filesystem use", async () => {
-    const outside = await mkdtemp(join(tmpdir(), "skizzles-path-input-"));
-    expect(() => createFixture({ legacyCwd: [outside] })).toThrow(
-      "valid causal workflow rejected",
-    );
-    const fixture = createFixture();
-    const context = await repositoryContext(fixture.orchestrator);
-    const result = await fixture.workflow.prepare({
-      ...context,
-      targets: [
-        {
-          path: "src/file.ts",
-          operation: "write",
-          workspacePath: [outside, "sentinel.txt"],
-        },
-      ],
-      discoveryRoot: "packages/orchestrator",
-      commands: ["write-candidate"],
-    });
-    expect(result).toEqual({
-      status: "rejected",
-      code: "INVALID_WORKFLOW_INPUT",
-      cleanup: null,
-    });
-  });
-
-  it("recovers a crash-injected publication through a single-use bound handle", async () => {
-    const fixture = createFixture({ crashStep: "target-published" });
-    const review = await prepare(fixture);
     const promotion = await fixture.workflow.approveAndPromote({
-      review,
+      review: prepared.review,
       token: "approve",
     });
-    expect(promotion.status).toBe("recovery-required");
     if (promotion.status !== "recovery-required") {
-      throw new Error("crash did not retain recovery authority");
+      throw new Error("publication uncertainty was not retained");
     }
-    expect(fixture.destination.currentText("src/file.ts")).toBe("new-content");
+    const branch = prepared.review.taskWorktreeReceipt.branchName;
+    expect(gitOutput(fixture.repository, ["rev-list", "--count", branch])).toBe(
+      "2\n",
+    );
+    expect(worktreePaths(fixture.repository)).toHaveLength(2);
+    expect(fixture.destination.currentText("src/file.ts")).toContain("value");
     const recovered = await fixture.workflow.recover({
       handle: promotion.handle,
     });
     expect(recovered).toMatchObject({
       status: "completed",
-      recovery: { ok: true, status: "recovered-new" },
+      cleanup: { complete: true, taskWorktree: { taskId: "task-a" } },
+    });
+    expect(worktreePaths(fixture.repository)).toEqual([fixture.repository]);
+    expect(await readdir(fixture.worktreeParent)).toEqual([]);
+  });
+
+  it("cleans the exact uncommitted task session on rejection", async () => {
+    const fixture = await createFixture();
+    const prepared = await prepare(fixture);
+    if (prepared.status !== "awaiting-approval") {
+      throw new Error("workflow preparation failed");
+    }
+    const rejected = await fixture.workflow.reject({ review: prepared.review });
+    expect(rejected).toMatchObject({
+      status: "rejected",
+      code: "APPROVAL_REJECTED",
+      cleanup: { complete: true, targetReleased: true },
+    });
+    expect(worktreePaths(fixture.repository)).toEqual([fixture.repository]);
+  });
+
+  it("retries partial task-worktree cleanup without releasing the target early", async () => {
+    const fixture = await createFixture();
+    const prepared = await prepare(fixture);
+    if (prepared.status !== "awaiting-approval") {
+      throw new Error("workflow preparation failed");
+    }
+    const writableName = (await readdir(fixture.worktreeParent)).find((name) =>
+      name.endsWith("-writable"),
+    );
+    if (writableName === undefined) throw new Error("writable root missing");
+    const writableRoot = join(fixture.worktreeParent, writableName);
+    const redirect = join(fixture.worktreeParent, "redirect");
+    await rm(writableRoot, { recursive: true });
+    await mkdir(redirect);
+    await symlink(redirect, writableRoot);
+    const rejected = await fixture.workflow.reject({ review: prepared.review });
+    if (rejected.status !== "cleanup-pending") {
+      throw new Error("partial cleanup was not retained");
+    }
+    expect(rejected.cleanup).toMatchObject({
+      complete: false,
+      targetReleased: false,
+      taskWorktree: null,
+    });
+    await rm(writableRoot);
+    await mkdir(writableRoot);
+    await expect(
+      fixture.workflow.retryCleanup({ handle: rejected.handle }),
+    ).resolves.toMatchObject({
+      status: "cleaned",
       cleanup: {
         complete: true,
         targetReleased: true,
-        workspace: { state: "deleted" },
+        taskWorktree: { taskId: "task-a" },
       },
     });
-    await expect(
-      fixture.workflow.recover({ handle: promotion.handle }),
-    ).resolves.toEqual({ status: "rejected", code: "WORKFLOW_STALE" });
   });
 
-  it("reports committed truth without recovery when only transaction lease cleanup fails", async () => {
-    const fixture = createFixture({ failLeaseReleaseAfterCommit: true });
-    const review = await prepare(fixture);
-    const result = await fixture.workflow.approveAndPromote({
-      review,
-      token: "approve",
-    });
+  it("returns a split plan before approval and leaves no task allocation", async () => {
+    const fixture = await createFixture({ split: true });
+    const result = await prepare(fixture, ["src/file.ts", "src/second.ts"]);
     expect(result).toMatchObject({
-      status: "publication-committed-cleanup-failed",
-      code: "PUBLICATION_CLEANUP_FAILED",
-      publication: {
-        publicationCommitted: true,
-        recoveryRequired: false,
-        status: "committed-no-recovery-lease-cleanup-failed",
-      },
+      status: "split-required",
+      code: "TASK_SPLIT_REQUIRED",
+      plan: { slices: [{ id: "slice-1" }, { id: "slice-2" }] },
       cleanup: { complete: true, targetReleased: true },
     });
-    expect(fixture.destination.currentText("src/file.ts")).toBe("new-content");
-  });
-
-  it("allows the exact approval deadline and publishes", async () => {
-    const fixture = createFixture({ advanceBeforePromoteMs: 200 });
-    const review = await prepare(fixture);
-    const result = await fixture.workflow.approveAndPromote({
-      review,
-      token: "approve",
-    });
-    expect(result.status).toBe("completed");
-    expect(fixture.destination.currentText("src/file.ts")).toBe("new-content");
-    expect(fixture.destination.captureCount).toBeGreaterThan(0);
-  });
-
-  it("rejects an approval advanced beyond expiry before publisher invocation", async () => {
-    const fixture = createFixture({ advanceBeforePromoteMs: 201 });
-    const review = await prepare(fixture);
-    const result = await fixture.workflow.approveAndPromote({
-      review,
-      token: "approve",
-    });
-    expect(result).toMatchObject({
-      status: "rejected",
-      code: "APPROVAL_EXPIRED",
-      cleanup: { complete: true, targetReleased: true },
-    });
+    expect(worktreePaths(fixture.repository)).toEqual([fixture.repository]);
     expect(fixture.destination.captureCount).toBe(0);
-    expect(fixture.destination.currentText("src/file.ts")).toBeUndefined();
+  });
+
+  it("owns failed-prepare cleanup and surfaces the split outcome after retry", async () => {
+    const fixture = await createFixture({ split: true, cleanupFault: true });
+    const result = await prepare(fixture, ["src/file.ts", "src/second.ts"]);
+    if (result.status !== "cleanup-pending") {
+      throw new Error(`expected cleanup-pending, received ${result.status}`);
+    }
+    expect(result.cleanup).toMatchObject({
+      complete: false,
+      targetReleased: false,
+      taskWorktree: null,
+      taskWorktreeCleanup: "pending",
+    });
+    const allocation = worktreePaths(fixture.repository).find(
+      (path) => path !== fixture.repository,
+    );
+    if (allocation === undefined) throw new Error("allocation missing");
+    runGit(fixture.repository, ["worktree", "unlock", allocation]);
+    await expect(
+      fixture.workflow.retryCleanup({ handle: result.handle }),
+    ).resolves.toMatchObject({
+      status: "split-required",
+      code: "TASK_SPLIT_REQUIRED",
+      plan: { slices: [{ id: "slice-1" }, { id: "slice-2" }] },
+      cleanup: {
+        complete: true,
+        targetReleased: true,
+        taskWorktree: null,
+        taskWorktreeCleanup: "prepare-cleaned",
+      },
+    });
+    expect(worktreePaths(fixture.repository)).toEqual([fixture.repository]);
+    expect(await readdir(fixture.worktreeParent)).toEqual([]);
+  });
+
+  it("returns dependency intervention diagnostics before approval", async () => {
+    const fixture = await createFixture({ intervention: true });
+    const result = await prepare(fixture);
+    expect(result).toMatchObject({
+      status: "intervention-required",
+      code: "TASK_INTERVENTION_REQUIRED",
+      diagnostics: [{ kind: "dependency", outcome: "unavailable" }],
+      cleanup: { complete: true, targetReleased: true },
+    });
+    expect(worktreePaths(fixture.repository)).toEqual([fixture.repository]);
+    expect(fixture.destination.captureCount).toBe(0);
+  });
+
+  it("rejects hostile and lookalike task-worktree facades", async () => {
+    const fixture = await createFixture();
+    const fake = Object.freeze({
+      prepare: fixture.config.taskWorktree.prepare,
+      run: fixture.config.taskWorktree.run,
+      revalidate: fixture.config.taskWorktree.revalidate,
+      authorize: fixture.config.taskWorktree.authorize,
+      commit: fixture.config.taskWorktree.commit,
+      close: fixture.config.taskWorktree.close,
+      retryCleanup: fixture.config.taskWorktree.retryCleanup,
+    });
+    expect(
+      createCausalWorkflow(
+        Object.freeze({ ...fixture.config, taskWorktree: fake }),
+      ),
+    ).toEqual({ status: "rejected", code: "INVALID_WORKFLOW_CONFIG" });
+    expect(
+      createCausalWorkflow(
+        Object.freeze({
+          ...fixture.config,
+          taskWorktreeApproval: Object.freeze({
+            authorityId: fixture.config.taskWorktreeApproval.authorityId,
+            register: fixture.config.taskWorktreeApproval.register,
+            authorize: fixture.config.taskWorktreeApproval.authorize,
+          }),
+        }),
+      ),
+    ).toEqual({ status: "rejected", code: "INVALID_WORKFLOW_CONFIG" });
+    expect(
+      createCausalWorkflow(
+        Object.freeze({
+          ...fixture.config,
+          taskWorktreeApproval: new Proxy(
+            fixture.config.taskWorktreeApproval,
+            {},
+          ),
+        }),
+      ),
+    ).toEqual({ status: "rejected", code: "INVALID_WORKFLOW_CONFIG" });
+    expect(
+      createCausalWorkflow(
+        Object.freeze({
+          ...fixture.config,
+          taskWorktree: new Proxy(fixture.config.taskWorktree, {}),
+        }),
+      ),
+    ).toEqual({ status: "rejected", code: "INVALID_WORKFLOW_CONFIG" });
+  });
+
+  it("unregisters an unconsumed approval record before the same identity is reused", async () => {
+    const bridge = new TaskWorktreeApprovalBridge("causal-approval");
+    const first = await createFixture({ approvalBridge: bridge });
+    const firstPrepared = await prepare(first);
+    if (firstPrepared.status !== "awaiting-approval") {
+      throw new Error("first workflow did not prepare");
+    }
+    expect(
+      await first.workflow.reject({ review: firstPrepared.review }),
+    ).toMatchObject({ status: "rejected" });
+    const second = await createFixture({ approvalBridge: bridge });
+    expect(await prepare(second)).toMatchObject({
+      status: "awaiting-approval",
+    });
   });
 });
+
+function worktreePaths(repository: string): readonly string[] {
+  return gitOutput(repository, ["worktree", "list", "--porcelain"])
+    .split("\n")
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => line.slice("worktree ".length));
+}
+
+function runGit(cwd: string, arguments_: readonly string[]): void {
+  const result = Bun.spawnSync([git ?? "git", ...arguments_], {
+    cwd,
+    env: { ...process.env, GIT_CONFIG_NOSYSTEM: "1", GIT_TERMINAL_PROMPT: "0" },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+}
+
+function gitOutput(cwd: string, arguments_: readonly string[]): string {
+  const result = Bun.spawnSync([git ?? "git", ...arguments_], {
+    cwd,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) throw new Error(result.stderr.toString());
+  return result.stdout.toString();
+}

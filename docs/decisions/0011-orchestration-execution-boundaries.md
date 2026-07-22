@@ -1,6 +1,11 @@
 # 0011: Separate orchestration execution capabilities
 
-Status: Accepted
+Status: Superseded by [ADR 0014](0014-task-worktree-boundary.md)
+
+The durable publication boundary remains current. ADR 0014 replaced the
+orchestrator-owned command-profile and disposable-run composition described
+below with the authenticated task-worktree lifecycle; the old copy-staging
+execution path has no compatibility route.
 
 ## Context
 

@@ -2,6 +2,7 @@ import {
   createWorkspaceTransaction,
   type WorkspaceTransaction,
 } from "@skizzles/workspace-transaction";
+import { TransactionApprovalBridge } from "./approval/bridge.ts";
 import { parseWorkflowConfig } from "./configuration.ts";
 import type {
   CausalWorkflow,
@@ -9,7 +10,6 @@ import type {
   CausalWorkflowResult,
 } from "./contract.ts";
 import { WorkflowCoordinator } from "./coordinator.ts";
-import { TransactionApprovalBridge } from "./publication.ts";
 
 const invalidWorkflowInput = Object.freeze({
   status: "rejected" as const,

@@ -3,7 +3,6 @@ import { isNormalizedRequest, type NormalizedRequest } from "../intent.ts";
 import { isRepositoryContext, type RepositoryContext } from "../repository.ts";
 import type { Orchestrator } from "../runtime.ts";
 import { isTargetBaseline, type TargetBaseline } from "../state/target.ts";
-import type { CommandAuditProfile } from "./contract.ts";
 import {
   isWorkflowEvidence,
   type WorkflowEngineeringEvidence,
@@ -15,21 +14,18 @@ export interface PrepareInput {
   readonly repository: RepositoryContext;
   readonly targets: readonly WorkflowTarget[];
   readonly discoveryRoot: string;
-  readonly commands: readonly string[];
+  readonly profileIds: readonly string[];
   readonly engineeringEvidence: WorkflowEngineeringEvidence | null;
   readonly baseline: TargetBaseline | null;
 }
 
-export function parsePrepareInput(
-  input: unknown,
-  profiles: readonly CommandAuditProfile[],
-): PrepareInput | undefined {
+export function parsePrepareInput(input: unknown): PrepareInput | undefined {
   if (
     !(
       isRecord(input) &&
       exactKeys(
         input,
-        ["request", "repository", "targets", "discoveryRoot", "commands"],
+        ["request", "repository", "targets", "discoveryRoot", "profileIds"],
         ["baseline", "engineeringEvidence"],
       ) &&
       isNormalizedRequest(input["request"]) &&
@@ -45,31 +41,34 @@ export function parsePrepareInput(
   const baseline = input["baseline"];
   if (
     targets === undefined ||
-    !Array.isArray(input["commands"]) ||
-    input["commands"].length === 0 ||
-    input["commands"].length > 64 ||
+    !Array.isArray(input["profileIds"]) ||
+    input["profileIds"].length === 0 ||
+    input["profileIds"].length > 64 ||
     (engineeringEvidence !== undefined &&
       !isWorkflowEvidence(engineeringEvidence)) ||
     (baseline !== undefined && !isTargetBaseline(baseline))
   ) {
     return;
   }
-  const commands: string[] = [];
-  for (const command of input["commands"]) {
+  const profileIds: string[] = [];
+  for (const profileId of input["profileIds"]) {
     if (
-      typeof command !== "string" ||
-      !profiles.some((profile) => profile.id === command)
+      typeof profileId !== "string" ||
+      profileId.length === 0 ||
+      profileId.length > 128 ||
+      !/^[A-Za-z0-9][A-Za-z0-9._:@/-]*$/u.test(profileId) ||
+      profileIds.includes(profileId)
     ) {
       return;
     }
-    commands.push(command);
+    profileIds.push(profileId);
   }
   return {
     request: input["request"],
     repository: input["repository"],
     targets,
     discoveryRoot: input["discoveryRoot"],
-    commands: Object.freeze(commands),
+    profileIds: Object.freeze(profileIds),
     engineeringEvidence: engineeringEvidence ?? null,
     baseline: baseline ?? null,
   };

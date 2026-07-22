@@ -487,7 +487,7 @@ export class EngineeringCoordinator implements EngineeringWorkflow {
         candidateBytes: prepared.candidateBytes[index],
       })),
       discoveryRoot: this.config.discoveryRoot,
-      commands: Object.freeze([
+      profileIds: Object.freeze([
         ...state.input.profile.commandProfileIds,
         ...state.input.profile.negativeTestCommands.map(
           ({ profileId }) => profileId,
@@ -497,7 +497,7 @@ export class EngineeringCoordinator implements EngineeringWorkflow {
       engineeringEvidence: evidence,
     });
     if (result.status !== "awaiting-approval") return result;
-    if (!negativeTestEvidenceMatches(state, result.review.commandAudits)) {
+    if (!negativeTestEvidenceMatches(state, result.review)) {
       const cleanup = await this.causal.reject({ review: result.review });
       if (cleanup.status === "cleanup-pending") return cleanup;
       return {

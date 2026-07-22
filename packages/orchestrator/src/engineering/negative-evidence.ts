@@ -1,11 +1,20 @@
-import type { EngineeringReview } from "./contract.ts";
+import {
+  digestTaskWorktreeValue,
+  isTaskWorktreeReceipt,
+} from "@skizzles/task-worktree";
+import type { WorkflowReview } from "../workflow/contract.ts";
 import type { PreparationState } from "./state.ts";
 
 export function negativeTestEvidenceMatches(
   state: PreparationState,
-  audits: EngineeringReview["commandAudits"],
+  review: WorkflowReview,
 ): boolean {
-  if (state.prepared === null) return false;
+  if (
+    state.prepared === null ||
+    !isTaskWorktreeReceipt(review.taskWorktreeReceipt)
+  ) {
+    return false;
+  }
   const bindings = state.input.profile.negativeTestCommands;
   const expectedPaths = bindings
     .flatMap(({ testPaths }) => testPaths)
@@ -15,41 +24,27 @@ export function negativeTestEvidenceMatches(
     .sort((left, right) => left.localeCompare(right));
   if (
     expectedPaths.length !== observedPaths.length ||
-    expectedPaths.some((path, index) => path !== observedPaths[index])
+    expectedPaths.some((path, index) => path !== observedPaths[index]) ||
+    !bindings.every(({ profileId }) =>
+      review.executedProfileIds.includes(profileId),
+    )
   ) {
     return false;
   }
-  return bindings.every(({ profileId, testPaths }) => {
-    const audit = audits.find((candidate) => candidate.profileId === profileId);
-    return (
-      audit !== undefined &&
-      commandScopeMatchesPrepared(state, audit) &&
-      testPaths.every((path) => audit.declaredTargetPaths.includes(path))
-    );
-  });
-}
-
-function commandScopeMatchesPrepared(
-  state: PreparationState,
-  audit: EngineeringReview["commandAudits"][number],
-): boolean {
-  if (state.prepared === null) return false;
-  const expected = [...state.prepared.receipt.targetReceipts].sort(
-    (left, right) => left.path.localeCompare(right.path),
+  const declaredPathDigest = digestTaskWorktreeValue(
+    state.prepared.artifacts.map(({ path }) => ({
+      path,
+      operation: "write",
+    })),
   );
-  const actual = [...audit.scope.targets].sort((left, right) =>
-    left.path.localeCompare(right.path),
+  const candidateDigest = digestTaskWorktreeValue(
+    state.prepared.artifacts.map((artifact, index) => ({
+      path: artifact.path,
+      bytes: [...(state.prepared?.candidateBytes[index] ?? [])],
+    })),
   );
   return (
-    actual.length === expected.length &&
-    actual.every((target, index) => {
-      const receipt = expected[index];
-      return (
-        receipt !== undefined &&
-        target.path === receipt.path &&
-        target.operation === "write" &&
-        target.candidateDigest === receipt.candidateDigest
-      );
-    })
+    review.taskWorktreeReceipt.declaredPathDigest === declaredPathDigest &&
+    review.taskWorktreeReceipt.candidateDigest === candidateDigest
   );
 }

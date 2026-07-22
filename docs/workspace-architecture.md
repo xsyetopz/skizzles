@@ -22,9 +22,8 @@ The current workspace dependency edges are:
 @skizzles/installer -> @skizzles/run-workspace
 @skizzles/model-catalog -> @skizzles/run-workspace
 @skizzles/orchestrator -> @skizzles/change-assurance
-@skizzles/orchestrator -> @skizzles/command-supervisor
-@skizzles/orchestrator -> @skizzles/run-workspace
 @skizzles/orchestrator -> @skizzles/source-engineering
+@skizzles/orchestrator -> @skizzles/task-worktree
 @skizzles/orchestrator -> @skizzles/workspace-transaction
 @skizzles/plugin-builder -> @skizzles/command-hook
 @skizzles/plugin-builder -> @skizzles/command-supervisor
@@ -36,6 +35,7 @@ The current workspace dependency edges are:
 @skizzles/plugin-builder -> @skizzles/usage-analyzer
 @skizzles/prompt-layer -> @skizzles/run-workspace
 @skizzles/source-engineering -> @skizzles/run-workspace
+@skizzles/task-worktree -> @skizzles/command-supervisor
 @skizzles/workspace-policy -> @skizzles/run-workspace
 ```
 <!-- workspace-policy:dependency-edges:end -->
@@ -57,8 +57,10 @@ builder remains the only distribution composition owner.
 destination-owned same-filesystem siblings, durable multi-file journals, and
 deterministic recovery. It provides serialized per-file atomic publication and
 recoverable file-set semantics; it does not claim portable multi-file atomicity.
-The orchestrator owns policy and approval, while command-supervisor owns process
-observation and run-workspace owns disposable-root lifecycle and quota evidence.
+The orchestrator owns workflow policy and approval. Task-worktree composes
+command-supervisor's process observation behind its sandbox broker;
+run-workspace retains disposable-root lifecycle and quota evidence for its
+remaining consumers. Neither capability is a direct orchestrator dependency.
 
 `@skizzles/source-engineering` owns language-specific source transformation and
 validation. It derives immutable candidates through compiler AST nodes, keeps
@@ -74,11 +76,20 @@ domain authorities assess exact baseline and candidate bytes and produce one
 digest-only receipt. The orchestrator runs this boundary after source
 preparation and before physical integration or approval.
 
+`@skizzles/task-worktree` owns task-scoped Git branch and worktree lifecycle,
+exact declared-path candidate writes, host-owned diff ceilings, sandbox
+capability negotiation and execution, dependency intervention evidence, and
+deterministic Conventional Commit synthesis. It creates one approved commit in
+the isolated branch; `@skizzles/workspace-transaction` remains the only owner of
+canonical destination publication. Unsupported OS sandbox enforcement fails
+closed instead of degrading to unsandboxed execution.
+
 ## Run lifecycle ownership
 
 | Lifecycle role | Owner or consumers | Contract |
 | --- | --- | --- |
 | Disposable creator | `@skizzles/run-workspace` | Sole authority for creating, claiming, preserving, closing, and stale-reaping one-run temporary roots. |
+| Task Git isolation | `@skizzles/task-worktree` | Owns deterministic task branches, isolated worktrees, sibling writable roots, sandboxed validation, approved isolated commits, and exact cleanup. These roots are not generic disposable workspaces. |
 | Injected consumers | `@skizzles/installer`, `@skizzles/model-catalog`, `@skizzles/plugin-builder`, `@skizzles/prompt-layer`, `@skizzles/workspace-policy` | Allocate run-local homes, previews, comparison staging, downloads, reports, and validation artifacts only through an injected or composition-root-created `RunWorkspace`. Same-filesystem destination transactions and their atomic siblings remain destination-owned rather than run-workspace staging. |
 | Child-scope owners | Installer Codex app-server, model-catalog Codex probes, plugin-builder runtime smokes, and workspace-policy security tools | Register the complete owned process scope before awaiting it; workspace close requests stop, waits, escalation, and only then root deletion. |
 | Durable exclusions | Canonical repository inputs, `plugins/skizzles/`, selected-home config/receipts and model-catalog output/status, installer prompt-policy locks, command-supervisor retained output, Container Lab durable manifests, same-filesystem destination transactions and atomic siblings, and separately owned shared caches | Never place durable authority in a disposable run root. Each surface retains its canonical package or host-state owner and separate retention policy. |

@@ -35,6 +35,7 @@ on undeclared root packages.
 | `plugin-builder` | Deterministic plugin staging, bundling, validation, and drift checks |
 | `prompt-layer` | Pinned upstream prompt, patch derivation, provenance, and recovery |
 | `source-engineering` | TypeScript AST edits, source-policy validation, compiler evidence, and semantic previews |
+| `task-worktree` | Task-scoped Git isolation, sandboxed validation, diff ceilings, and approved commit synthesis |
 | `usage-analyzer` | Read-only rollout discovery, aggregation, and reporting |
 | `workspace-transaction` | Recoverable, lease-serialized publication of approved workspace file sets |
 | `workspace-policy` | Package, dependency, export, lockfile, and source-ownership enforcement |

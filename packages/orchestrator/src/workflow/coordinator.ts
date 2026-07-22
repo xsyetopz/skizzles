@@ -1,92 +1,37 @@
-import {
-  create as createRunWorkspace,
-  type RunWorkspace,
-} from "@skizzles/run-workspace";
 import type {
   PublicationResult,
-  RecoveryResult,
   WorkspaceTransaction,
 } from "@skizzles/workspace-transaction";
 import { exactKeys, isRecord } from "../codec.ts";
 import { digestValue } from "../digest.ts";
-import type { NormalizedRequest } from "../intent.ts";
-import type { RepositoryContext } from "../repository.ts";
-import type { ExecutionSession } from "../state/execution.ts";
 import type { TargetBaseline } from "../state/target.ts";
-import {
-  runWorkflowCommands,
-  workspaceWithinQuota,
-} from "./candidate-runner.ts";
+import type { TransactionApprovalBridge } from "./approval/bridge.ts";
+import { prepareWorkflowApproval } from "./approval/prepare.ts";
+import { WorkflowCompletion } from "./completion.ts";
 import type {
   CausalWorkflow,
   CausalWorkflowConfig,
-  TerminalPublication,
-  WorkflowCleanupResult,
   WorkflowFailureCode,
   WorkflowPrepareResult,
   WorkflowPromotionResult,
-  WorkflowRecoveryResult,
   WorkflowRejectionResult,
   WorkflowReview,
 } from "./contract.ts";
-import type { WorkflowEngineeringEvidence } from "./evidence.ts";
-import { isWorkflowCleanupHandle, WorkflowLifecycle } from "./lifecycle.ts";
+import { WorkflowLifecycle } from "./lifecycle.ts";
 import { acceptPreparedBaseline, parsePrepareInput } from "./prepare-input.ts";
-import { revalidatePromotionState } from "./promotion.ts";
 import {
   capturePublicationBaseline,
   exactCommittedCleanupFailure,
   exactPublicationSuccess,
-  type PreparedPublication,
   preparePublication,
-  type TransactionApprovalBridge,
 } from "./publication.ts";
+import type { WorkflowRecord } from "./record.ts";
+import { prepareWorkflowTask } from "./worktree/prepare.ts";
 import {
-  createRecoveryHandle,
-  createRecoveryRequest,
-  exactRecoverySuccess,
-  isWorkflowRecoveryHandle,
-  type RecoveryRequestMaterial,
-  recoveryRequestInput,
-} from "./recovery.ts";
-
-interface WorkflowRecord {
-  readonly lifecycle: WorkflowLifecycle;
-  readonly workspace: RunWorkspace;
-  readonly baseline: TargetBaseline;
-  readonly request: NormalizedRequest;
-  readonly repository: RepositoryContext;
-  readonly prepared: PreparedPublication;
-  readonly engineeringEvidence: WorkflowEngineeringEvidence | null;
-  review: WorkflowReview;
-  state:
-    | "awaiting"
-    | "approving"
-    | "publishing"
-    | "recovery"
-    | "cleanup-pending"
-    | "closed";
-  publication: TerminalPublication | null;
-  recovery: Extract<RecoveryResult, { readonly ok: true }> | null;
-}
-
-interface CleanupRecord {
-  readonly lifecycle: WorkflowLifecycle;
-  state:
-    | "awaiting"
-    | "approving"
-    | "publishing"
-    | "recovery"
-    | "cleanup-pending"
-    | "closed";
-  publication: TerminalPublication | null;
-  recovery: Extract<RecoveryResult, { readonly ok: true }> | null;
-}
-
-interface ActiveRecovery {
-  readonly record: WorkflowRecord;
-  readonly request: RecoveryRequestMaterial;
-}
+  commitWorkflowTask,
+  revalidatePromotionState,
+} from "./worktree/promotion.ts";
+import { runWorkflowTask } from "./worktree/run.ts";
 
 const reviews = new WeakMap<object, WorkflowRecord>();
 
@@ -95,9 +40,7 @@ export class WorkflowCoordinator implements CausalWorkflow {
   private readonly config: CausalWorkflowConfig;
   private readonly transaction: WorkspaceTransaction;
   private readonly bridge: TransactionApprovalBridge;
-  private readonly cleanup = new Map<string, CleanupRecord>();
-  private readonly recoveries = new WeakMap<object, ActiveRecovery>();
-  private recoverySequence = 0;
+  private readonly completion: WorkflowCompletion;
 
   constructor(
     config: CausalWorkflowConfig,
@@ -107,10 +50,11 @@ export class WorkflowCoordinator implements CausalWorkflow {
     this.config = config;
     this.transaction = transaction;
     this.bridge = bridge;
+    this.completion = new WorkflowCompletion(config, transaction);
   }
 
   async prepare(input: unknown): Promise<WorkflowPrepareResult> {
-    const parsed = parsePrepareInput(input, this.config.commandProfiles);
+    const parsed = parsePrepareInput(input);
     if (
       parsed === undefined ||
       parsed.repository.repositoryId !==
@@ -156,141 +100,137 @@ export class WorkflowCoordinator implements CausalWorkflow {
       root: parsed.discoveryRoot,
     });
     if (discovery.status !== "accepted" || !discovery.discovery.complete) {
-      return this.rejectPreparation("DISCOVERY_INCOMPLETE", lifecycle);
-    }
-    const started = this.config.orchestrator.startExecution({
-      request: parsed.request,
-      repository: parsed.repository,
-    });
-    if (started.status !== "accepted")
-      return this.rejectPreparation("EXECUTION_BUDGET_REJECTED", lifecycle);
-    let workspace: RunWorkspace;
-    try {
-      workspace = await createRunWorkspace();
-      lifecycle.ownWorkspace(workspace);
-    } catch {
-      return this.failStartedPreparation(
-        "WORKSPACE_REJECTED",
+      return this.completion.rejectPreparation(
+        "DISCOVERY_INCOMPLETE",
         lifecycle,
-        started.execution,
       );
     }
-    const operationResult = await runWorkflowCommands({
-      orchestrator: this.config.orchestrator,
-      profiles: this.config.commandProfiles,
-      workspace,
-      limits: this.config.workspaceUsageLimits,
-      repositoryRoot: parsed.discoveryRoot,
-      targets: parsed.targets,
-      commands: parsed.commands,
-      execution: started.execution,
-    });
-    if (operationResult.audits === null)
-      return this.failStartedPreparation(
-        "COMMAND_OBSERVATION_REJECTED",
-        lifecycle,
-        operationResult.execution,
-      );
     const captured = await capturePublicationBaseline(
       this.config.baselineAuthority,
       baselineResult.baseline,
       parsed.targets,
     );
-    if (captured === undefined)
-      return this.failStartedPreparation(
+    if (captured === undefined) {
+      return this.completion.rejectPreparation(
         "PUBLICATION_BASELINE_REJECTED",
         lifecycle,
-        operationResult.execution,
       );
+    }
+    const taskPreparation = await prepareWorkflowTask(
+      this.config,
+      parsed,
+      baselineResult.baseline,
+      captured,
+      lifecycle,
+    );
+    if (taskPreparation.status === "terminal") {
+      return this.completion.finishPreparation(
+        taskPreparation.outcome,
+        lifecycle,
+      );
+    }
+    if (taskPreparation.status === "rejected") {
+      return this.completion.rejectPreparation(
+        "TASK_WORKTREE_REJECTED",
+        lifecycle,
+      );
+    }
+    const started = this.config.orchestrator.startExecution({
+      request: parsed.request,
+      repository: parsed.repository,
+    });
+    if (started.status !== "accepted") {
+      return this.completion.rejectPreparation(
+        "EXECUTION_BUDGET_REJECTED",
+        lifecycle,
+      );
+    }
+    const run = await runWorkflowTask(
+      this.config,
+      taskPreparation.session,
+      parsed.profileIds,
+      started.execution,
+    );
+    if (run.status !== "ran") {
+      return this.completion.failStartedPreparation(
+        run.code,
+        lifecycle,
+        run.execution,
+      );
+    }
+    const execution = run.execution;
     const prepared = await preparePublication(
       this.config.publicationIdentity,
       parsed.repository,
       baselineResult.baseline,
       captured,
       parsed.targets,
-      operationResult.audits,
+      run.receipt,
+      parsed.profileIds,
       parsed.engineeringEvidence,
     );
-    if (prepared === undefined)
-      return this.failStartedPreparation(
+    if (prepared === undefined) {
+      return this.completion.failStartedPreparation(
         "DIFF_REJECTED",
         lifecycle,
-        operationResult.execution,
+        execution,
       );
-    if (
-      !(await workspaceWithinQuota(workspace, this.config.workspaceUsageLimits))
-    )
-      return this.failStartedPreparation(
-        "WORKSPACE_QUOTA_REJECTED",
+    }
+    const approval = await prepareWorkflowApproval(
+      this.config,
+      parsed,
+      baselineResult.baseline,
+      discovery.discovery,
+      prepared,
+      execution,
+      lifecycle,
+    );
+    if (approval.status === "rejected") {
+      return this.completion.failStartedPreparation(
+        approval.code,
         lifecycle,
-        operationResult.execution,
+        execution,
       );
-    const planned = this.config.orchestrator.planApproval({
-      ...this.config.approvalContext,
-      request: parsed.request,
-      repository: parsed.repository,
-      baseline: baselineResult.baseline,
-      discovery: discovery.discovery,
-      transactionDigest: prepared.transactionDigest,
-      diffBytes: prepared.diffBytes,
-    });
-    if (planned.status !== "accepted")
-      return this.failStartedPreparation(
-        "APPROVAL_REJECTED",
-        lifecycle,
-        operationResult.execution,
-      );
-    lifecycle.ownApproval(planned.approval);
-    const reviewed = this.config.orchestrator.reviewApproval({
-      approval: planned.approval,
-    });
-    if (reviewed.status !== "accepted")
-      return this.failStartedPreparation(
-        "APPROVAL_REJECTED",
-        lifecycle,
-        operationResult.execution,
-      );
-    lifecycle.updateApproval(reviewed.approval);
-    const awaiting = this.config.orchestrator.awaitApproval({
-      approval: reviewed.approval,
-    });
-    if (awaiting.status !== "accepted")
-      return this.failStartedPreparation(
-        "APPROVAL_REJECTED",
-        lifecycle,
-        operationResult.execution,
-      );
-    lifecycle.updateApproval(awaiting.approval);
-    const completion = await this.config.orchestrator.completeExecution({
-      execution: operationResult.execution,
-    });
-    if (completion.status !== "completed")
-      return this.failStartedPreparation(
-        "COMPLETION_CONTRACT_REJECTED",
-        lifecycle,
-        operationResult.execution,
-      );
+    }
     const review: WorkflowReview = Object.freeze({
       workflowId,
-      approval: awaiting.approval,
-      diffDigest: awaiting.approval.diffDigest,
-      commandAudits: Object.freeze(operationResult.audits),
+      approval: approval.approval,
+      diffDigest: approval.approval.diffDigest,
+      taskWorktreeReceipt: run.receipt,
+      executedProfileIds: parsed.profileIds,
     });
+    const taskApprovalRegistration = this.config.taskWorktreeApproval.register({
+      approval: approval.approval,
+      receipt: run.receipt,
+      profileIds: parsed.profileIds,
+      repositoryId: parsed.repository.repositoryId,
+      rootIdentity: this.config.publicationIdentity.rootIdentity,
+    });
+    if (taskApprovalRegistration === undefined) {
+      return this.completion.failStartedPreparation(
+        "APPROVAL_REJECTED",
+        lifecycle,
+        execution,
+      );
+    }
     const record: WorkflowRecord = {
       lifecycle,
-      workspace,
+      taskSession: taskPreparation.session,
+      taskApprovalRegistration,
       baseline: baselineResult.baseline,
       request: parsed.request,
       repository: parsed.repository,
       prepared,
       engineeringEvidence: parsed.engineeringEvidence,
+      preparedTaskReceipt: run.receipt,
+      commitReceipt: null,
       review,
       state: "awaiting",
       publication: null,
       recovery: null,
     };
     reviews.set(review, record);
-    this.cleanup.set(workflowId, record);
+    this.completion.track(record);
     return { status: "awaiting-approval", review };
   }
 
@@ -312,22 +252,42 @@ export class WorkflowCoordinator implements CausalWorkflow {
       token: input["token"],
     });
     if (approved.status !== "accepted")
-      return this.rejectPromotion(record, approvalCode(approved.code));
+      return this.completion.rejectPromotion(
+        record,
+        approvalCode(approved.code),
+      );
     record.lifecycle.updateApproval(approved.approval);
     const revalidation = await revalidatePromotionState(
       this.config,
-      record.workspace,
+      record.taskSession,
+      record.preparedTaskReceipt,
       record.baseline,
       record.engineeringEvidence,
     );
     if (revalidation !== null)
-      return this.rejectPromotion(record, revalidation);
+      return this.completion.rejectPromotion(record, revalidation);
     const promotion = await this.config.orchestrator.promote({
       approval: approved.approval,
     });
     if (promotion.status !== "promoting")
-      return this.rejectPromotion(record, approvalCode(promotion.code));
+      return this.completion.rejectPromotion(
+        record,
+        approvalCode(promotion.code),
+      );
     record.lifecycle.markApprovalTerminal();
+    const committed = await commitWorkflowTask(
+      this.config,
+      record.taskSession,
+      record.preparedTaskReceipt,
+      promotion.permit,
+    );
+    if (committed === undefined) {
+      return this.completion.rejectPromotion(
+        record,
+        "TASK_WORKTREE_COMMIT_REJECTED",
+      );
+    }
+    record.commitReceipt = committed;
     record.state = "publishing";
     this.bridge.activate(
       record.prepared.reference,
@@ -344,20 +304,22 @@ export class WorkflowCoordinator implements CausalWorkflow {
     }
     const receipt = this.bridge.takeReceipt(record.prepared.reference);
     if (publication === undefined) {
-      return this.retainRecovery(record, receipt);
+      return this.completion.retainRecovery(record, receipt);
     }
     if (
       exactCommittedCleanupFailure(publication, record.prepared.targetCount)
     ) {
       record.publication = publication;
-      return this.finishCommittedCleanupFailure(record, publication);
+      return this.completion.finishCommittedCleanupFailure(record, publication);
     }
     if (!exactPublicationSuccess(publication, record.prepared.targetCount)) {
-      if (receipt !== undefined) return this.retainRecovery(record, receipt);
-      return this.rejectPromotion(record, "PUBLICATION_REJECTED");
+      if (receipt !== undefined) {
+        return this.completion.retainRecovery(record, receipt);
+      }
+      return this.completion.rejectPromotion(record, "PUBLICATION_REJECTED");
     }
     record.publication = publication;
-    return this.finishPromotion(record, publication);
+    return this.completion.finishPromotion(record, publication);
   }
 
   async reject(input: unknown): Promise<WorkflowRejectionResult> {
@@ -372,255 +334,15 @@ export class WorkflowCoordinator implements CausalWorkflow {
       return { status: "rejected", code: "WORKFLOW_STALE", cleanup: null };
     if (record.state !== "awaiting")
       return { status: "rejected", code: "WORKFLOW_BUSY", cleanup: null };
-    record.state = "cleanup-pending";
-    const cancelled = this.config.orchestrator.cancelApproval({
-      approval: record.review.approval,
-    });
-    if (
-      cancelled.status === "cancelled" ||
-      cancelled.code === "APPROVAL_CANCELLED"
-    )
-      record.lifecycle.markApprovalTerminal();
-    const cleanup = await record.lifecycle.close();
-    if (!cleanup.complete)
-      return {
-        status: "cleanup-pending",
-        code: "CLEANUP_FAILED",
-        handle: record.lifecycle.handle,
-        cleanup,
-      };
-    record.state = "closed";
-    this.cleanup.delete(record.review.workflowId);
-    return { status: "rejected", code: "APPROVAL_REJECTED", cleanup };
+    return this.completion.reject(record);
   }
 
-  async recover(input: unknown): Promise<WorkflowRecoveryResult> {
-    if (
-      !(
-        isRecord(input) &&
-        exactKeys(input, ["handle"]) &&
-        isWorkflowRecoveryHandle(input["handle"])
-      )
-    ) {
-      return { status: "rejected", code: "INVALID_WORKFLOW_INPUT" };
-    }
-    const active = this.recoveries.get(input["handle"]);
-    if (
-      active === undefined ||
-      active.record.state !== "recovery" ||
-      active.record.review.workflowId !== input["handle"].workflowId
-    ) {
-      return { status: "rejected", code: "WORKFLOW_STALE" };
-    }
-    this.recoveries.delete(input["handle"]);
-    active.record.state = "publishing";
-    let raw: RecoveryResult | undefined;
-    try {
-      raw = await this.transaction.recover(
-        recoveryRequestInput(active.request),
-      );
-    } catch {
-      raw = undefined;
-    }
-    if (raw === undefined || !exactRecoverySuccess(raw, active.request)) {
-      active.record.state = "recovery";
-      return {
-        status: "recovery-required",
-        code: "RECOVERY_REJECTED",
-        handle: this.nextRecoveryHandle(active.record, active.request),
-      };
-    }
-    active.record.recovery = raw;
-    active.record.state = "cleanup-pending";
-    const cleanup = await active.record.lifecycle.close();
-    if (!cleanup.complete) {
-      return {
-        status: "cleanup-pending",
-        code: "CLEANUP_FAILED",
-        handle: active.record.lifecycle.handle,
-        cleanup,
-      };
-    }
-    active.record.state = "closed";
-    this.cleanup.delete(active.record.review.workflowId);
-    if (raw.status === "recovered-new") {
-      return { status: "completed", recovery: raw, cleanup };
-    }
-    return { status: "recovered-without-publication", recovery: raw, cleanup };
+  recover(input: unknown) {
+    return this.completion.recover(input);
   }
 
-  async retryCleanup(input: unknown): Promise<WorkflowCleanupResult> {
-    if (
-      !(
-        isRecord(input) &&
-        exactKeys(input, ["handle"]) &&
-        isWorkflowCleanupHandle(input["handle"])
-      )
-    )
-      return { status: "rejected", code: "INVALID_WORKFLOW_INPUT" };
-    const record = this.cleanup.get(input["handle"].workflowId);
-    if (
-      record === undefined ||
-      record.lifecycle.handle !== input["handle"] ||
-      record.state !== "cleanup-pending"
-    )
-      return { status: "rejected", code: "WORKFLOW_STALE" };
-    const cleanup = await record.lifecycle.close();
-    if (!cleanup.complete)
-      return {
-        status: "cleanup-pending",
-        code: "CLEANUP_FAILED",
-        handle: record.lifecycle.handle,
-        cleanup,
-      };
-    record.state = "closed";
-    this.cleanup.delete(input["handle"].workflowId);
-    return {
-      status: "cleaned",
-      cleanup,
-      publication: record.publication,
-      recovery: record.recovery,
-    };
-  }
-
-  private async rejectPreparation(
-    code: WorkflowFailureCode,
-    lifecycle: WorkflowLifecycle,
-  ): Promise<WorkflowPrepareResult> {
-    const cleanup = await lifecycle.close();
-    if (cleanup.complete) return { status: "rejected", code, cleanup };
-    this.cleanup.set(lifecycle.handle.workflowId, {
-      lifecycle,
-      state: "cleanup-pending",
-      publication: null,
-      recovery: null,
-    });
-    return {
-      status: "cleanup-pending",
-      code: "CLEANUP_FAILED",
-      handle: lifecycle.handle,
-      cleanup,
-    };
-  }
-
-  private failStartedPreparation(
-    code: WorkflowFailureCode,
-    lifecycle: WorkflowLifecycle,
-    execution: ExecutionSession,
-  ): Promise<WorkflowPrepareResult> {
-    this.config.orchestrator.terminateExecution({
-      execution,
-      kind: "failed",
-    });
-    return this.rejectPreparation(code, lifecycle);
-  }
-
-  private async rejectPromotion(
-    record: WorkflowRecord,
-    code: WorkflowFailureCode,
-  ): Promise<WorkflowPromotionResult> {
-    record.state = "cleanup-pending";
-    const cleanup = await record.lifecycle.close();
-    if (!cleanup.complete)
-      return {
-        status: "cleanup-pending",
-        code: "CLEANUP_FAILED",
-        handle: record.lifecycle.handle,
-        cleanup,
-      };
-    record.state = "closed";
-    this.cleanup.delete(record.review.workflowId);
-    return { status: "rejected", code, cleanup };
-  }
-
-  private async finishPromotion(
-    record: WorkflowRecord,
-    publication: Extract<PublicationResult, { readonly ok: true }>,
-  ): Promise<WorkflowPromotionResult> {
-    record.state = "cleanup-pending";
-    const cleanup = await record.lifecycle.close();
-    if (!cleanup.complete)
-      return {
-        status: "cleanup-pending",
-        code: "CLEANUP_FAILED",
-        handle: record.lifecycle.handle,
-        cleanup,
-      };
-    record.state = "closed";
-    this.cleanup.delete(record.review.workflowId);
-    return { status: "completed", publication, cleanup };
-  }
-
-  private async finishCommittedCleanupFailure(
-    record: WorkflowRecord,
-    publication: TerminalPublication & {
-      readonly status: "committed-no-recovery-lease-cleanup-failed";
-      readonly recoveryRequired: false;
-    },
-  ): Promise<WorkflowPromotionResult> {
-    record.state = "cleanup-pending";
-    const cleanup = await record.lifecycle.close();
-    if (!cleanup.complete) {
-      return {
-        status: "cleanup-pending",
-        code: "CLEANUP_FAILED",
-        handle: record.lifecycle.handle,
-        cleanup,
-      };
-    }
-    record.state = "closed";
-    this.cleanup.delete(record.review.workflowId);
-    return {
-      status: "publication-committed-cleanup-failed",
-      code: "PUBLICATION_CLEANUP_FAILED",
-      publication,
-      cleanup,
-    };
-  }
-
-  private retainRecovery(
-    record: WorkflowRecord,
-    receipt: ReturnType<TransactionApprovalBridge["takeReceipt"]>,
-  ): WorkflowPromotionResult {
-    if (receipt === undefined) {
-      return {
-        status: "rejected",
-        code: "PUBLICATION_REJECTED",
-        cleanup: null,
-      };
-    }
-    const request = createRecoveryRequest(
-      this.config.publicationIdentity,
-      receipt,
-      record.prepared.targetCount,
-    );
-    if (request === undefined) {
-      return {
-        status: "rejected",
-        code: "PUBLICATION_UNCERTAIN",
-        cleanup: null,
-      };
-    }
-    record.state = "recovery";
-    return {
-      status: "recovery-required",
-      code: "PUBLICATION_UNCERTAIN",
-      handle: this.nextRecoveryHandle(record, request),
-    };
-  }
-
-  private nextRecoveryHandle(
-    record: WorkflowRecord,
-    request: RecoveryRequestMaterial,
-  ) {
-    this.recoverySequence += 1;
-    const handle = createRecoveryHandle(
-      record.review.workflowId,
-      request,
-      this.recoverySequence,
-    );
-    this.recoveries.set(handle, { record, request });
-    return handle;
+  retryCleanup(input: unknown) {
+    return this.completion.retryCleanup(input);
   }
 
   private nextWorkflowId(baseline: TargetBaseline): string {

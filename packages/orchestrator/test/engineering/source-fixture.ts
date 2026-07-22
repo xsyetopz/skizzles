@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import process from "node:process";
 import {
   createLiteralRegistry,
   createSourceEngineering,
@@ -23,6 +22,7 @@ import { createEngineeringWorkflow } from "../../src/engineering/workflow.ts";
 import { createHarness, repositoryContext } from "../support.ts";
 import { IsolatedDestination } from "../workflow/isolated-destination.ts";
 import { createTestChangeAssurance } from "./assurance-fixture.ts";
+import { createTestTaskWorktree } from "./worktree/fixture.ts";
 
 export const targetPath = "test/value.test.ts";
 const baseline = "export function value(): number { return 1; }\n";
@@ -34,6 +34,7 @@ export async function createFixture() {
   const harness = createHarness();
   const repository = await repositoryContext(harness.orchestrator);
   const compiler = createCompilerProject(repository);
+  const taskFixture = createTestTaskWorktree();
   const sourceEngineering = createRealSourceEngineering(compiler.authority);
   const destination = new IsolatedDestination();
   const operations: ContextOperation[] = [];
@@ -64,6 +65,8 @@ export async function createFixture() {
           });
         },
       }),
+      taskWorktree: taskFixture.taskWorktree,
+      taskWorktreeApproval: taskFixture.taskWorktreeApproval,
       transaction: Object.freeze({
         destination,
         leases: createLocalRepositoryLeaseAuthority([
@@ -74,29 +77,6 @@ export async function createFixture() {
           }),
         ]),
       }),
-      workspaceUsageLimits: Object.freeze({
-        byteLimit: 2_000_000,
-        entryLimit: 500,
-        scanLimit: 500,
-      }),
-      commandProfiles: Object.freeze([
-        Object.freeze({
-          id: "validate",
-          argv: Object.freeze([
-            process.execPath,
-            "-e",
-            "const candidate = await import('./test/value.test.ts'); if (candidate.value() !== 2) process.exit(9)",
-            targetPath,
-          ]),
-          env: Object.freeze({}),
-          timeoutMilliseconds: 5000,
-          maximumOutputBytes: 10_000,
-          drainMilliseconds: 1000,
-          signalGraceMilliseconds: 1000,
-          allowedExitCodes: Object.freeze([0]),
-          stderr: "must-be-empty",
-        }),
-      ]),
       approvalContext: Object.freeze({
         taskId: "task-a",
         principalId: "maintainer-a",
@@ -145,6 +125,7 @@ export async function createFixture() {
   const created = createEngineeringWorkflow(config);
   if (created.status !== "accepted") {
     compiler.cleanup();
+    taskFixture.cleanup();
     throw new Error(`workflow setup failed: ${created.code}`);
   }
   return Object.freeze({
@@ -154,7 +135,10 @@ export async function createFixture() {
     destination,
     config,
     repository,
-    cleanup: compiler.cleanup,
+    cleanup: () => {
+      compiler.cleanup();
+      taskFixture.cleanup();
+    },
   });
 }
 

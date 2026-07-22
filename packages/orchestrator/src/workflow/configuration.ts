@@ -1,3 +1,4 @@
+import { isTaskWorktree } from "@skizzles/task-worktree";
 import type {
   CrashInjectionPort,
   DestinationAuthorityPort,
@@ -7,10 +8,10 @@ import { exactKeys, isRecord, nonempty } from "../codec.ts";
 import type { Orchestrator } from "../runtime.ts";
 import type {
   CausalWorkflowConfig,
-  CommandAuditProfile,
   PublicationBaselineAuthorityPort,
   PublicationIdentity,
 } from "./contract.ts";
+import { isTaskWorktreeApprovalBridge } from "./worktree/approval.ts";
 
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:@/-]*$/u;
 
@@ -24,13 +25,15 @@ export function parseWorkflowConfig(
         "orchestrator",
         "publicationIdentity",
         "baselineAuthority",
+        "taskWorktree",
+        "taskWorktreeApproval",
         "transaction",
-        "workspaceUsageLimits",
-        "commandProfiles",
         "approvalContext",
       ]) &&
       isWorkflowOrchestrator(value["orchestrator"]) &&
       isBaselineAuthority(value["baselineAuthority"]) &&
+      isTaskWorktree(value["taskWorktree"]) &&
+      isTaskWorktreeApprovalBridge(value["taskWorktreeApproval"]) &&
       isRecord(value["transaction"]) &&
       exactKeys(
         value["transaction"],
@@ -46,15 +49,8 @@ export function parseWorkflowConfig(
     return;
   }
   const publicationIdentity = parseIdentity(value["publicationIdentity"]);
-  const workspaceUsageLimits = parseUsageLimits(value["workspaceUsageLimits"]);
-  const commandProfiles = parseProfiles(value["commandProfiles"]);
   const approvalContext = parseApprovalContext(value["approvalContext"]);
-  if (
-    publicationIdentity === undefined ||
-    workspaceUsageLimits === undefined ||
-    commandProfiles === undefined ||
-    approvalContext === undefined
-  ) {
+  if (publicationIdentity === undefined || approvalContext === undefined) {
     return;
   }
   const transaction = value["transaction"];
@@ -71,109 +67,15 @@ export function parseWorkflowConfig(
     orchestrator: value["orchestrator"],
     publicationIdentity,
     baselineAuthority: value["baselineAuthority"],
+    taskWorktree: value["taskWorktree"],
+    taskWorktreeApproval: value["taskWorktreeApproval"],
     transaction: Object.freeze({
       destination,
       leases,
       ...(crashInjection === undefined ? {} : { crashInjection }),
     }),
-    workspaceUsageLimits,
-    commandProfiles,
     approvalContext,
   });
-}
-
-function parseProfiles(
-  value: unknown,
-): readonly CommandAuditProfile[] | undefined {
-  if (!Array.isArray(value) || value.length === 0 || value.length > 64) return;
-  const profiles: CommandAuditProfile[] = [];
-  const ids = new Set<string>();
-  for (const candidate of value) {
-    const parsed = parseProfile(candidate);
-    if (parsed === undefined || ids.has(parsed.id)) return;
-    ids.add(parsed.id);
-    profiles.push(parsed);
-  }
-  return Object.freeze(profiles);
-}
-
-function parseProfile(value: unknown): CommandAuditProfile | undefined {
-  if (
-    !(
-      isRecord(value) &&
-      exactKeys(
-        value,
-        [
-          "id",
-          "argv",
-          "env",
-          "timeoutMilliseconds",
-          "maximumOutputBytes",
-          "drainMilliseconds",
-          "signalGraceMilliseconds",
-          "allowedExitCodes",
-          "stderr",
-        ],
-        ["dependencyPackages"],
-      ) &&
-      validId(value["id"], 128) &&
-      value["stderr"] !== undefined &&
-      (value["stderr"] === "evidence" || value["stderr"] === "must-be-empty")
-    )
-  ) {
-    return;
-  }
-  const argv = stringList(value["argv"], 1, 256);
-  const env = environment(value["env"]);
-  const allowedExitCodes = integerList(value["allowedExitCodes"], 0, 255);
-  const dependencyPackages =
-    value["dependencyPackages"] === undefined
-      ? Object.freeze([])
-      : packageList(value["dependencyPackages"]);
-  if (
-    argv === undefined ||
-    env === undefined ||
-    allowedExitCodes === undefined ||
-    dependencyPackages === undefined ||
-    !boundedInteger(value["timeoutMilliseconds"], 1, 3_600_000) ||
-    !boundedInteger(value["maximumOutputBytes"], 1, 64 * 1024 * 1024) ||
-    !boundedInteger(value["drainMilliseconds"], 0, 60_000) ||
-    !boundedInteger(value["signalGraceMilliseconds"], 0, 60_000)
-  ) {
-    return;
-  }
-  return Object.freeze({
-    id: value["id"],
-    argv,
-    env,
-    dependencyPackages,
-    timeoutMilliseconds: value["timeoutMilliseconds"],
-    maximumOutputBytes: value["maximumOutputBytes"],
-    drainMilliseconds: value["drainMilliseconds"],
-    signalGraceMilliseconds: value["signalGraceMilliseconds"],
-    allowedExitCodes,
-    stderr: value["stderr"],
-  });
-}
-
-function packageList(value: unknown): readonly string[] | undefined {
-  const values = stringList(value, 0, 256);
-  if (values === undefined) return;
-  const names = new Set<string>();
-  for (const name of values) {
-    if (
-      !/^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/u.test(
-        name,
-      ) ||
-      names.has(name)
-    ) {
-      return;
-    }
-    names.add(name);
-  }
-  return Object.freeze(
-    [...names].sort((left, right) => left.localeCompare(right)),
-  );
 }
 
 function parseIdentity(value: unknown): PublicationIdentity | undefined {
@@ -224,100 +126,8 @@ function parseApprovalContext(
   });
 }
 
-function parseUsageLimits(
-  value: unknown,
-): CausalWorkflowConfig["workspaceUsageLimits"] | undefined {
-  if (
-    !(
-      isRecord(value) &&
-      exactKeys(value, ["byteLimit", "entryLimit", "scanLimit"])
-    )
-  )
-    return;
-  if (
-    !(
-      boundedInteger(value["byteLimit"], 1, Number.MAX_SAFE_INTEGER) &&
-      boundedInteger(value["entryLimit"], 1, Number.MAX_SAFE_INTEGER) &&
-      boundedInteger(value["scanLimit"], 1, 1_000_000)
-    )
-  )
-    return;
-  return Object.freeze({
-    byteLimit: value["byteLimit"],
-    entryLimit: value["entryLimit"],
-    scanLimit: value["scanLimit"],
-  });
-}
-
-function stringList(
-  value: unknown,
-  minimum: number,
-  maximum: number,
-): readonly string[] | undefined {
-  if (!Array.isArray(value) || value.length < minimum || value.length > maximum)
-    return;
-  const result: string[] = [];
-  for (const item of value) {
-    if (
-      typeof item !== "string" ||
-      item.length === 0 ||
-      item.length > 32_768 ||
-      item.includes("\0")
-    )
-      return;
-    result.push(item);
-  }
-  return Object.freeze(result);
-}
-
-function integerList(
-  value: unknown,
-  minimum: number,
-  maximum: number,
-): readonly number[] | undefined {
-  if (!Array.isArray(value) || value.length === 0 || value.length > 256) return;
-  const result: number[] = [];
-  for (const item of value) {
-    if (!boundedInteger(item, minimum, maximum) || result.includes(item))
-      return;
-    result.push(item);
-  }
-  return Object.freeze(result.sort((left, right) => left - right));
-}
-
-function environment(
-  value: unknown,
-): Readonly<Record<string, string>> | undefined {
-  if (!isRecord(value) || Object.keys(value).length > 256) return;
-  const result: Record<string, string> = Object.create(null);
-  for (const key of Object.keys(value).sort()) {
-    const entry = value[key];
-    if (
-      !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) ||
-      typeof entry !== "string" ||
-      entry.includes("\0")
-    )
-      return;
-    result[key] = entry;
-  }
-  return Object.freeze(result);
-}
-
 function validId(value: unknown, maximum: number): value is string {
   return nonempty(value, maximum) && idPattern.test(value);
-}
-
-function boundedInteger(
-  value: unknown,
-  minimum: number,
-  maximum: number,
-): value is number {
-  return (
-    typeof value === "number" &&
-    Number.isSafeInteger(value) &&
-    value >= minimum &&
-    value <= maximum
-  );
 }
 
 function isWorkflowOrchestrator(value: unknown): value is Orchestrator {

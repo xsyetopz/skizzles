@@ -18,9 +18,10 @@ rewriting its rationale.
 | [0008](0008-typescript-source-parser.md) | Accepted | Parse static TypeScript dependency forms with one lifecycle-bounded compiler AST snapshot. |
 | [0009](0009-owned-run-workspaces.md) | Accepted | Own disposable run roots, child shutdown, preservation, signals, and stale cleanup in one capability package. |
 | [0010](0010-orchestration-runtime.md) | Accepted | Own deterministic orchestration policy in one modular runtime package with fail-closed trust boundaries. |
-| [0011](0011-orchestration-execution-boundaries.md) | Accepted | Separate durable publication, command observation, disposable-run quotas, and orchestration state while composing one gated execution path. |
+| [0011](0011-orchestration-execution-boundaries.md) | Superseded by 0014 | Retain the durable publication boundary; replace orchestrator-owned copy staging and command execution with authenticated task worktrees. |
 | [0012](0012-source-engineering-pipeline.md) | Accepted | Derive candidate bytes through a TypeScript-first source-engineering capability and bind validation provenance into the gated publication path. |
 | [0013](0013-change-assurance-boundary.md) | Accepted | Assess exact source candidates through independently owned security, migration, performance, and supply-chain authorities before integration or approval. |
+| [0014](0014-task-worktree-boundary.md) | Accepted | Isolate each task in an authenticated Git worktree with exact write scope, sandboxed commands, bounded diffs, and one approved commit. |
 
 ## Record contract
 

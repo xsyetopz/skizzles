@@ -16,8 +16,12 @@ describe("package facade and fail-closed controller", () => {
     expect(Object.keys(facade).sort()).toEqual(
       [
         "ANCHOR_PRECEDENCE",
+        // biome-ignore lint/security/noSecrets: public exported symbol name
+        "TaskWorktreeApprovalBridge",
         "createEngineeringWorkflow",
         "createOrchestrator",
+        // biome-ignore lint/security/noSecrets: public exported symbol name
+        "isTaskWorktreeApprovalBridge",
         "recoverDiagnosticBytes",
         "recoverRequestBytes",
       ].sort(),

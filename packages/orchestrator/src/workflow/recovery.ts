@@ -2,11 +2,11 @@ import { createHash } from "node:crypto";
 import type { RecoveryResult } from "@skizzles/workspace-transaction";
 import { exactKeys, isRecord } from "../codec.ts";
 import { digestValue } from "../digest.ts";
+import type { TransactionApprovalReceipt } from "./approval/bridge.ts";
 import type {
   PublicationIdentity,
   WorkflowRecoveryHandle,
 } from "./contract.ts";
-import type { TransactionApprovalReceipt } from "./publication.ts";
 
 const rawDigest = /^[0-9a-f]{64}$/u;
 const handles = new WeakSet<object>();

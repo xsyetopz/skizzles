@@ -1,9 +1,9 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { expect, it } from "bun:test";
-import process from "node:process";
 import { createLocalRepositoryLeaseAuthority } from "@skizzles/workspace-transaction";
 import { createCausalWorkflow } from "../../src/workflow/causal-workflow.ts";
 import type { CausalWorkflow } from "../../src/workflow/contract.ts";
+import { createTestTaskWorktree } from "../engineering/worktree/fixture.ts";
 import { createHarness } from "../support.ts";
 import { IsolatedDestination } from "./isolated-destination.ts";
 
@@ -28,16 +28,20 @@ const operations = Object.freeze([
 ] satisfies readonly WorkflowOperation[]);
 
 const inputKeys: Readonly<Record<WorkflowOperation, readonly string[]>> = {
-  prepare: ["request", "repository", "targets", "discoveryRoot", "commands"],
+  prepare: ["request", "repository", "targets", "discoveryRoot", "profileIds"],
   approveAndPromote: ["review", "token"],
   reject: ["review"],
   recover: ["handle"],
   retryCleanup: ["handle"],
 };
 
-function createWorkflow(): CausalWorkflow {
+function createWorkflow(): Readonly<{
+  workflow: CausalWorkflow;
+  cleanup: () => void;
+}> {
   const { orchestrator } = createHarness();
   const destination = new IsolatedDestination();
+  const taskFixture = createTestTaskWorktree();
   const created = createCausalWorkflow({
     orchestrator,
     publicationIdentity: {
@@ -52,6 +56,8 @@ function createWorkflow(): CausalWorkflow {
         );
       },
     },
+    taskWorktree: taskFixture.taskWorktree,
+    taskWorktreeApproval: taskFixture.taskWorktreeApproval,
     transaction: {
       destination,
       leases: createLocalRepositoryLeaseAuthority([
@@ -62,24 +68,6 @@ function createWorkflow(): CausalWorkflow {
         },
       ]),
     },
-    workspaceUsageLimits: {
-      byteLimit: 1000,
-      entryLimit: 10,
-      scanLimit: 10,
-    },
-    commandProfiles: [
-      {
-        id: "validate",
-        argv: [process.execPath, "-e", "process.exit(0)"],
-        env: {},
-        timeoutMilliseconds: 1000,
-        maximumOutputBytes: 1000,
-        drainMilliseconds: 100,
-        signalGraceMilliseconds: 100,
-        allowedExitCodes: [0],
-        stderr: "must-be-empty",
-      },
-    ],
     approvalContext: {
       taskId: "hostile-input",
       principalId: "maintainer-a",
@@ -87,9 +75,13 @@ function createWorkflow(): CausalWorkflow {
     },
   });
   if (created.status !== "accepted") {
+    taskFixture.cleanup();
     throw new Error("valid hostile-input workflow fixture rejected");
   }
-  return created.workflow;
+  return Object.freeze({
+    workflow: created.workflow,
+    cleanup: taskFixture.cleanup,
+  });
 }
 
 function getterInput(operation: WorkflowOperation): Record<string, unknown> {
@@ -138,20 +130,24 @@ function expected(operation: WorkflowOperation): InvalidWorkflowResult {
 }
 
 it("rejects hostile inputs at every public workflow operation", async () => {
-  const workflow = createWorkflow();
-  expect(Object.keys(workflow)).toEqual([...operations]);
-  const calls = operations.flatMap((operation) =>
-    [
-      trappingProxy(),
-      revokedProxy(),
-      getterInput(operation),
-      Symbol(operation),
-    ].map(async (input) => ({
-      operation,
-      result: await workflow[operation](input),
-    })),
-  );
-  for (const { operation, result } of await Promise.all(calls)) {
-    expect(result).toEqual(expected(operation));
+  const fixture = createWorkflow();
+  try {
+    expect(Object.keys(fixture.workflow)).toEqual([...operations]);
+    const calls = operations.flatMap((operation) =>
+      [
+        trappingProxy(),
+        revokedProxy(),
+        getterInput(operation),
+        Symbol(operation),
+      ].map(async (input) => ({
+        operation,
+        result: await fixture.workflow[operation](input),
+      })),
+    );
+    for (const { operation, result } of await Promise.all(calls)) {
+      expect(result).toEqual(expected(operation));
+    }
+  } finally {
+    fixture.cleanup();
   }
 });

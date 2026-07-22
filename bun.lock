@@ -83,9 +83,8 @@
       "version": "0.1.0",
       "dependencies": {
         "@skizzles/change-assurance": "workspace:*",
-        "@skizzles/command-supervisor": "workspace:*",
-        "@skizzles/run-workspace": "workspace:*",
         "@skizzles/source-engineering": "workspace:*",
+        "@skizzles/task-worktree": "workspace:*",
         "@skizzles/workspace-transaction": "workspace:*",
       },
       "devDependencies": {
@@ -148,6 +147,18 @@
       "devDependencies": {
         "@types/bun": "^1.3.14",
         "@types/node": "^26.1.1",
+      },
+    },
+    "packages/task-worktree": {
+      "name": "@skizzles/task-worktree",
+      "version": "0.1.0",
+      "dependencies": {
+        "@skizzles/command-supervisor": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
       },
     },
     "packages/usage-analyzer": {
@@ -233,6 +244,8 @@
     "@skizzles/run-workspace": ["@skizzles/run-workspace@workspace:packages/run-workspace"],
 
     "@skizzles/source-engineering": ["@skizzles/source-engineering@workspace:packages/source-engineering"],
+
+    "@skizzles/task-worktree": ["@skizzles/task-worktree@workspace:packages/task-worktree"],
 
     "@skizzles/usage-analyzer": ["@skizzles/usage-analyzer@workspace:packages/usage-analyzer"],
 

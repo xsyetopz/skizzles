@@ -92,7 +92,7 @@ describe("engineering workflow with the real source engine", () => {
             Uint8Array.from(prepared.review.approval.diffBytes),
           ),
         ),
-        ["version", "commandAudits", "engineeringEvidence", "targets"],
+        ["version", "taskWorktree", "engineeringEvidence", "targets"],
       );
       const engineeringEvidence = snapshotRecord(
         diff?.["engineeringEvidence"],

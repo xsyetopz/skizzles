@@ -157,3 +157,7 @@ export type {
   TargetState,
   TargetStatus,
 } from "./state/target.ts";
+export {
+  isTaskWorktreeApprovalBridge,
+  TaskWorktreeApprovalBridge,
+} from "./workflow/worktree/approval.ts";

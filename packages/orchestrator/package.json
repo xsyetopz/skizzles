@@ -14,9 +14,8 @@
   },
   "dependencies": {
     "@skizzles/change-assurance": "workspace:*",
-    "@skizzles/command-supervisor": "workspace:*",
-    "@skizzles/run-workspace": "workspace:*",
     "@skizzles/source-engineering": "workspace:*",
+    "@skizzles/task-worktree": "workspace:*",
     "@skizzles/workspace-transaction": "workspace:*"
   },
   "devDependencies": {
