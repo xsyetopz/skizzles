@@ -2,8 +2,13 @@ import type { CommitSynthesisPolicy } from "./commit/contract.ts";
 import type { DependencyResolutionRequest } from "./dependency/resolution.ts";
 import type { DiffCeilings, TaskWorktreeSplitPlan } from "./diff/contract.ts";
 import type { TaskWorktreeDigest } from "./digest.ts";
+import type { TaskWorktreeProtectedPathPolicy } from "./protection/public-contract.ts";
 import type { SandboxAuthorityExecutionRequest } from "./sandbox/capabilities.ts";
 import type { CommandProfile } from "./sandbox/command-policy.ts";
+import type {
+  TaskWorktreeVerificationProfile,
+  TaskWorktreeVerificationReceipt,
+} from "./verification/contract.ts";
 
 export type { TaskWorktreeDigest } from "./digest.ts";
 export { digestTaskWorktreeBytes, digestTaskWorktreeValue } from "./digest.ts";
@@ -19,6 +24,7 @@ export interface TaskWorktreeChange {
 
 export interface TaskWorktreePrepareInput {
   readonly taskId: string;
+  readonly taskEpochDigest: TaskWorktreeDigest;
   readonly requestDigest: TaskWorktreeDigest;
   readonly repositoryId: string;
   readonly rootIdentity: string;
@@ -38,6 +44,7 @@ export interface TaskWorktreeConfig {
   readonly worktreeParent: string;
   readonly repositoryId: string;
   readonly rootIdentity: string;
+  readonly protectedPaths: TaskWorktreeProtectedPathPolicy;
   readonly approvalAuthority: Readonly<{
     id: string;
     authorize: (
@@ -62,6 +69,7 @@ export interface TaskWorktreeConfig {
   }>;
   readonly dependencyRequests: readonly DependencyResolutionRequest[];
   readonly commandProfiles: readonly TaskWorktreeCommandProfile[];
+  readonly verificationProfiles: readonly TaskWorktreeVerificationProfile[];
 }
 
 export interface TaskWorktreeCommandProfile {
@@ -80,10 +88,15 @@ export interface TaskWorktreeReceipt {
   readonly schema: "skizzles.task-worktree/receipt";
   readonly authorityId: string;
   readonly taskId: string;
+  readonly taskEpochDigest: TaskWorktreeDigest;
   readonly branchName: string;
   readonly baseCommitDigest: TaskWorktreeDigest;
   readonly declaredPathDigest: TaskWorktreeDigest;
   readonly candidateDigest: TaskWorktreeDigest;
+  readonly candidateManifestDigest: TaskWorktreeDigest;
+  readonly baselineTestManifestDigest: TaskWorktreeDigest;
+  readonly candidateTestManifestDigest: TaskWorktreeDigest;
+  readonly specificationLockDigest: TaskWorktreeDigest;
   readonly diff: Readonly<{
     digest: TaskWorktreeDigest;
     changedFiles: number;
@@ -127,6 +140,10 @@ export interface TaskWorktree {
   readonly prepare: (input: unknown) => Promise<TaskWorktreePrepareResult>;
   readonly retryCleanup: (input: unknown) => Promise<TaskWorktreeCleanupResult>;
   readonly run: (input: unknown) => Promise<TaskWorktreeRunResult>;
+  readonly executeVerification: (
+    input: unknown,
+  ) => Promise<TaskWorktreeVerificationResult>;
+  readonly verifyVerificationReceipt: (input: unknown) => Promise<boolean>;
   readonly revalidate: (
     input: unknown,
   ) => Promise<TaskWorktreeRevalidationResult>;
@@ -140,6 +157,7 @@ export interface TaskWorktree {
 export interface TaskWorktreeApprovalBinding {
   readonly authorityId: string;
   readonly taskId: string;
+  readonly taskEpochDigest: TaskWorktreeDigest;
   readonly requestDigest: TaskWorktreeDigest;
   readonly repositoryId: string;
   readonly rootIdentity: string;
@@ -147,6 +165,7 @@ export interface TaskWorktreeApprovalBinding {
   readonly baselineDigest: TaskWorktreeDigest;
   readonly preparationDigest: TaskWorktreeDigest;
   readonly candidateDigest: TaskWorktreeDigest;
+  readonly candidateManifestDigest: TaskWorktreeDigest;
   readonly diffDigest: TaskWorktreeDigest;
   readonly revalidationDigest: TaskWorktreeDigest;
   readonly commitPlanDigest: TaskWorktreeDigest;
@@ -154,6 +173,8 @@ export interface TaskWorktreeApprovalBinding {
   readonly runProfileIds: readonly string[];
   readonly runOutcomeDigests: readonly string[];
   readonly runReceiptDigest: TaskWorktreeDigest;
+  readonly verificationProfileIds: readonly string[];
+  readonly verificationReceiptDigests: readonly TaskWorktreeDigest[];
   readonly bindingDigest: TaskWorktreeDigest;
 }
 
@@ -191,7 +212,15 @@ export type TaskWorktreeFailureCode =
   | "SANDBOX_REJECTED"
   | "SYMLINK_REJECTED"
   | "TREE_MISMATCH"
+  | "VERIFICATION_REJECTED"
   | "WORKTREE_COLLISION";
+
+export type TaskWorktreeVerificationResult =
+  | Readonly<{
+      status: "verified";
+      receipt: TaskWorktreeVerificationReceipt;
+    }>
+  | Readonly<{ status: "rejected"; code: TaskWorktreeFailureCode }>;
 
 export type TaskWorktreeCreationResult =
   | Readonly<{ status: "created"; taskWorktree: TaskWorktree }>

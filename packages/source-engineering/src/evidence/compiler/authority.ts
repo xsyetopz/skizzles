@@ -12,6 +12,11 @@ import { parseCompilerInput } from "./input.ts";
 import { runTypeScriptCompiler } from "./typescript.ts";
 
 const authorities = new WeakMap<object, TrustedCompilerState>();
+const issuedReceipts = new WeakMap<
+  CompilerEvidenceReceipt,
+  Readonly<{ authority: TypeScriptCompilerAuthority }>
+>();
+const advancedReceipts = new WeakSet<CompilerEvidenceReceipt>();
 
 export function createTypeScriptCompilerAuthority(
   input: unknown,
@@ -48,6 +53,10 @@ export async function captureCompilerEvidence(
   if (input === "stale") return rejected("STALE_COMPILER_BINDINGS");
   if (input === "candidate-stale") return rejected("STALE_CANDIDATE");
   if (!currentConfigMatches(state)) return rejected("STALE_COMPILER_BINDINGS");
+  if (!validPredecessor(authority, input)) {
+    return rejected("COMPILER_CHAIN_REJECTED");
+  }
+  if (input.predecessor !== null) advancedReceipts.add(input.predecessor);
   try {
     const compiler = await runTypeScriptCompiler(state, input);
     if (!compiler.allTargetsIncluded) {
@@ -79,6 +88,7 @@ export async function captureCompilerEvidence(
     });
     const material = {
       ...input.bindings,
+      predecessorReceiptDigest: input.predecessor?.receiptDigest ?? null,
       targets,
       strictFlags,
       compiler: compilerReceipt,
@@ -88,10 +98,34 @@ export async function captureCompilerEvidence(
       ...material,
       receiptDigest: digestText(JSON.stringify(material)),
     });
+    issuedReceipts.set(receipt, Object.freeze({ authority }));
     return Object.freeze({ status: "accepted", receipt });
   } catch {
     return rejected("COMPILER_AUTHORITY_REJECTED");
   }
+}
+
+function validPredecessor(
+  authority: TypeScriptCompilerAuthority,
+  input: import("./authority-state.ts").ParsedCompilerInput,
+): boolean {
+  const predecessor = input.predecessor;
+  if (predecessor === null) return input.bindings.epoch === 1;
+  const issued = issuedReceipts.get(predecessor);
+  return (
+    issued?.authority === authority &&
+    !advancedReceipts.has(predecessor) &&
+    predecessor.epochKind !== "format" &&
+    input.bindings.epoch === predecessor.epoch + 1 &&
+    input.bindings.predecessorCandidateSetDigest ===
+      predecessor.candidateSetDigest &&
+    input.bindings.targetSetDigest === predecessor.targetSetDigest &&
+    input.bindings.requestDigest === predecessor.requestDigest &&
+    input.bindings.repositoryId === predecessor.repositoryId &&
+    input.bindings.rootIdentity === predecessor.rootIdentity &&
+    input.bindings.treeDigest === predecessor.treeDigest &&
+    input.bindings.configDigest === predecessor.configDigest
+  );
 }
 
 function rejected(

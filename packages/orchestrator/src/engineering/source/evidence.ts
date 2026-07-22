@@ -1,9 +1,8 @@
 import type { ChangeAssuranceReceipt } from "@skizzles/change-assurance";
 import { digestValue } from "../../digest.ts";
-import type {
-  EngineeringPreview,
-  EngineeringWorkflowConfig,
-} from "../contract.ts";
+import type { WorkflowEvidenceCompletion } from "../../workflow/evidence.ts";
+import type { SecurityEvidence } from "../assurance/contract.ts";
+import type { EngineeringPreview } from "../contract.ts";
 import type { PhysicalIntegrationReceipt } from "../physical.ts";
 import {
   readSourceArtifact,
@@ -11,7 +10,6 @@ import {
   type SourceArtifact,
   type SourceReceipt,
   type startSourceEngineering,
-  verifySourceEngineering,
 } from "./adapter.ts";
 
 export interface PreparedBatch {
@@ -68,10 +66,19 @@ export function createPreview(
   receipt: SourceReceipt,
   assurance: ChangeAssuranceReceipt,
   integrations: readonly PhysicalIntegrationReceipt[],
+  security: SecurityEvidence,
+  completion: WorkflowEvidenceCompletion,
 ): EngineeringPreview {
   const sourceEvidence = sourceEvidenceSummary(receipt);
   return Object.freeze({
-    evidenceDigest: digestValue({ sourceEvidence, assurance, integrations }),
+    evidenceDigest: digestValue({
+      sourceEvidence,
+      assurance,
+      security,
+      integrations,
+      taskVerificationReceipts: completion.taskVerification.ordered,
+      verificationGateReceipt: completion.verification.receipt,
+    }),
     candidateDigest: receipt.candidateDigest,
     provenanceDigest: receipt.provenanceDigest,
     validationDigest: receipt.validationDigest,
@@ -90,7 +97,33 @@ export function createPreview(
     ),
     integrations,
     assurance,
+    security,
+    taskVerificationReceipts: completion.taskVerification.ordered,
+    verificationGateReceipt: completion.verification.receipt,
   });
+}
+
+export function createPreGateEvidenceBytes(input: {
+  readonly contextReceiptDigest: string;
+  readonly baselineDigest: string;
+  readonly sourceReceipt: SourceReceipt;
+  readonly assuranceReceiptDigest: string;
+  readonly lintReceiptDigest: string;
+  readonly reviewReceiptDigest: string;
+  readonly physicalReceiptDigests: readonly string[];
+}): Uint8Array | undefined {
+  try {
+    return new TextEncoder().encode(
+      JSON.stringify({
+        version: 1,
+        stage: "pre-gate",
+        ...input,
+        sourceReceipt: sourceEvidenceSummary(input.sourceReceipt),
+      }),
+    );
+  } catch {
+    return void 0;
+  }
 }
 
 export function createEvidenceBytes(input: {
@@ -110,7 +143,8 @@ export function createEvidenceBytes(input: {
   try {
     return new TextEncoder().encode(
       JSON.stringify({
-        version: 1,
+        version: 2,
+        stage: "finalized",
         contextReceiptDigest: input.contextReceiptDigest,
         baselineDigest: input.baselineDigest,
         preview: input.preview,
@@ -119,7 +153,7 @@ export function createEvidenceBytes(input: {
       }),
     );
   } catch {
-    return undefined;
+    return void 0;
   }
 }
 
@@ -146,10 +180,7 @@ function sourceEvidenceSummary(receipt: SourceReceipt) {
   });
 }
 
-export async function verifyPrepared(
-  config: EngineeringWorkflowConfig,
-  prepared: PreparedBatch,
-): Promise<boolean> {
+export function verifyPreparedSnapshot(prepared: PreparedBatch): boolean {
   if (
     prepared.artifacts.some(
       (artifact, index) =>
@@ -161,12 +192,7 @@ export async function verifyPrepared(
   ) {
     return false;
   }
-  return await verifySourceEngineering(
-    config.sourceEngineering,
-    prepared.artifactReferences,
-    prepared.receiptReference,
-    prepared.receipt,
-  );
+  return true;
 }
 
 function sameBytes(

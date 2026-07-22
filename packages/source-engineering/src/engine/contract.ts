@@ -2,6 +2,7 @@ import type { Digest } from "../digest.ts";
 import type { CompilerEvidenceReceipt } from "../evidence/compiler.ts";
 import type { FormatterProvenanceReceipt } from "../evidence/contract.ts";
 import type { TemplateEvidenceReceipt } from "../evidence/source.ts";
+import type { StructuralEvidenceReceipt } from "../evidence/structural-contract.ts";
 
 export interface SourceEngineeringContextTemplate {
   readonly templateId: string;
@@ -54,7 +55,7 @@ export interface SourceEngineeringCursor {
 export interface SourceEngineeringNextStep {
   readonly kind: "edit" | "format" | "validate";
   readonly ordinal: number;
-  readonly operationIndex?: number;
+  readonly epoch?: number;
 }
 
 export interface SourceEngineeringArtifact {
@@ -73,7 +74,6 @@ export interface SourceEngineeringTargetReceipt {
   readonly candidateDigest: Digest;
   readonly baselineSemanticDigest: Digest;
   readonly candidateSemanticDigest: Digest;
-  readonly changedDeclarations: readonly Digest[];
   readonly templateReceipts: readonly TemplateEvidenceReceipt[];
   readonly formatterReceipt: FormatterProvenanceReceipt;
 }
@@ -109,9 +109,11 @@ export interface SourceEngineeringTaskReceipt {
   readonly contextReceiptDigest: Digest;
   readonly baselineDigest: Digest;
   readonly candidateDigest: Digest;
+  readonly candidateManifestDigest: Digest;
   readonly targetReceipts: readonly SourceEngineeringTargetReceipt[];
   readonly indexReceipt: SourceEngineeringIndexReceipt;
   readonly compilerReceipt: SourceEngineeringCompilerReceipt;
+  readonly structuralReceipt: StructuralEvidenceReceipt;
   readonly policyReceipt: SourceEngineeringPolicyReceipt;
   readonly provenanceDigest: Digest;
   readonly validationDigest: Digest;

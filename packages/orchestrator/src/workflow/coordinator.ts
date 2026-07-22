@@ -17,6 +17,11 @@ import type {
   WorkflowRejectionResult,
   WorkflowReview,
 } from "./contract.ts";
+import {
+  finalizeWorkflowEvidence,
+  revalidateWorkflowEvidenceDraft,
+  workflowVerificationMaterial,
+} from "./evidence.ts";
 import { WorkflowLifecycle } from "./lifecycle.ts";
 import { acceptPreparedBaseline, parsePrepareInput } from "./prepare-input.ts";
 import {
@@ -26,12 +31,17 @@ import {
   preparePublication,
 } from "./publication.ts";
 import type { WorkflowRecord } from "./record.ts";
+import type { WorkflowTaskVerificationBindings } from "./verification/task-contract.ts";
 import { prepareWorkflowTask } from "./worktree/prepare.ts";
 import {
   commitWorkflowTask,
   revalidatePromotionState,
 } from "./worktree/promotion.ts";
 import { runWorkflowTask } from "./worktree/run.ts";
+import {
+  executeWorkflowTaskVerification,
+  revalidateWorkflowTaskVerification,
+} from "./worktree/verification.ts";
 
 const reviews = new WeakMap<object, WorkflowRecord>();
 
@@ -89,6 +99,13 @@ export class WorkflowCoordinator implements CausalWorkflow {
       };
     }
     const workflowId = this.nextWorkflowId(baselineResult.baseline);
+    const taskEpochDigest =
+      parsed.taskEpochDigest ??
+      digestValue({
+        workflowId,
+        taskId: this.config.approvalContext.taskId,
+        repositoryId: parsed.repository.repositoryId,
+      });
     const lifecycle = new WorkflowLifecycle(
       workflowId,
       this.config.orchestrator,
@@ -116,12 +133,25 @@ export class WorkflowCoordinator implements CausalWorkflow {
         lifecycle,
       );
     }
+    const verificationMaterial = workflowVerificationMaterial(
+      parsed.engineeringEvidenceDraft,
+    );
+    if (
+      verificationMaterial === undefined ||
+      !(await revalidateWorkflowEvidenceDraft(parsed.engineeringEvidenceDraft))
+    ) {
+      return this.completion.rejectPreparation(
+        "ENGINEERING_EVIDENCE_REJECTED",
+        lifecycle,
+      );
+    }
     const taskPreparation = await prepareWorkflowTask(
       this.config,
       parsed,
       baselineResult.baseline,
       captured,
       lifecycle,
+      taskEpochDigest,
     );
     if (taskPreparation.status === "terminal") {
       return this.completion.finishPreparation(
@@ -159,6 +189,87 @@ export class WorkflowCoordinator implements CausalWorkflow {
       );
     }
     const execution = run.execution;
+    const verificationBindings: WorkflowTaskVerificationBindings =
+      Object.freeze({
+        taskId: this.config.approvalContext.taskId,
+        taskEpochDigest,
+        requestDigest: parsed.request.intentDigest,
+        repositoryId: parsed.repository.repositoryId,
+        rootIdentity: this.config.publicationIdentity.rootIdentity,
+        treeDigest: parsed.repository.treeDigest,
+        baselineDigest: baselineResult.baseline.baselineDigest,
+      });
+    const verificationObjectives =
+      this.config.verificationAuthority.deriveObjectives(verificationMaterial);
+    if (verificationObjectives === undefined) {
+      return this.completion.failStartedPreparation(
+        "VERIFICATION_GATE_REJECTED",
+        lifecycle,
+        execution,
+      );
+    }
+    const taskVerification = await executeWorkflowTaskVerification({
+      taskWorktree: this.config.taskWorktree,
+      orchestrator: this.config.orchestrator,
+      session: taskPreparation.session,
+      taskReceipt: run.receipt,
+      bindings: verificationBindings,
+      profileIds: this.config.verificationProfiles,
+      execution,
+      objectives: verificationObjectives,
+    });
+    if (taskVerification.status !== "verified") {
+      return this.completion.failStartedPreparation(
+        taskVerification.code,
+        lifecycle,
+        taskVerification.execution,
+      );
+    }
+    const gate = await this.config.verificationAuthority.evaluate({
+      bindings: Object.freeze({
+        ...verificationBindings,
+        candidateDigest: run.receipt.candidateDigest,
+        candidateManifestDigest: run.receipt.candidateManifestDigest,
+        specLockDigest: run.receipt.specificationLockDigest,
+        baselineManifestDigest: run.receipt.baselineTestManifestDigest,
+      }),
+      material: verificationMaterial,
+      taskWorktree: this.config.taskWorktree,
+      session: taskPreparation.session,
+      receipts: taskVerification.receipts,
+    });
+    if (gate.status !== "accepted") {
+      return this.completion.failStartedPreparation(
+        "VERIFICATION_GATE_REJECTED",
+        lifecycle,
+        taskVerification.execution,
+      );
+    }
+    const engineeringEvidence = await finalizeWorkflowEvidence(
+      parsed.engineeringEvidenceDraft,
+      Object.freeze({
+        verification: gate.evidence,
+        taskVerification: taskVerification.receipts,
+      }),
+      async () =>
+        (await revalidateWorkflowTaskVerification({
+          taskWorktree: this.config.taskWorktree,
+          session: taskPreparation.session,
+          taskReceipt: run.receipt,
+          bindings: verificationBindings,
+          profileIds: this.config.verificationProfiles,
+          receipts: taskVerification.receipts,
+        })) &&
+        (await this.config.verificationAuthority.verify(gate.evidence))
+          .status === "valid",
+    );
+    if (engineeringEvidence === undefined) {
+      return this.completion.failStartedPreparation(
+        "ENGINEERING_EVIDENCE_REJECTED",
+        lifecycle,
+        taskVerification.execution,
+      );
+    }
     const prepared = await preparePublication(
       this.config.publicationIdentity,
       parsed.repository,
@@ -167,7 +278,7 @@ export class WorkflowCoordinator implements CausalWorkflow {
       parsed.targets,
       run.receipt,
       parsed.profileIds,
-      parsed.engineeringEvidence,
+      engineeringEvidence,
     );
     if (prepared === undefined) {
       return this.completion.failStartedPreparation(
@@ -182,7 +293,7 @@ export class WorkflowCoordinator implements CausalWorkflow {
       baselineResult.baseline,
       discovery.discovery,
       prepared,
-      execution,
+      taskVerification.execution,
       lifecycle,
     );
     if (approval.status === "rejected") {
@@ -198,11 +309,15 @@ export class WorkflowCoordinator implements CausalWorkflow {
       diffDigest: approval.approval.diffDigest,
       taskWorktreeReceipt: run.receipt,
       executedProfileIds: parsed.profileIds,
+      taskVerificationReceipts: taskVerification.receipts.ordered,
+      verificationGateReceipt: gate.evidence.receipt,
+      engineeringEvidence,
     });
     const taskApprovalRegistration = this.config.taskWorktreeApproval.register({
       approval: approval.approval,
       receipt: run.receipt,
       profileIds: parsed.profileIds,
+      verificationReceipts: taskVerification.receipts.ordered,
       repositoryId: parsed.repository.repositoryId,
       rootIdentity: this.config.publicationIdentity.rootIdentity,
     });
@@ -221,8 +336,10 @@ export class WorkflowCoordinator implements CausalWorkflow {
       request: parsed.request,
       repository: parsed.repository,
       prepared,
-      engineeringEvidence: parsed.engineeringEvidence,
+      engineeringEvidence,
       preparedTaskReceipt: run.receipt,
+      taskVerification: taskVerification.receipts,
+      verification: gate.evidence,
       commitReceipt: null,
       review,
       state: "awaiting",
@@ -263,6 +380,18 @@ export class WorkflowCoordinator implements CausalWorkflow {
       record.preparedTaskReceipt,
       record.baseline,
       record.engineeringEvidence,
+      Object.freeze({
+        taskId: this.config.approvalContext.taskId,
+        taskEpochDigest: record.preparedTaskReceipt.taskEpochDigest,
+        requestDigest: record.request.intentDigest,
+        repositoryId: record.repository.repositoryId,
+        rootIdentity: this.config.publicationIdentity.rootIdentity,
+        treeDigest: record.repository.treeDigest,
+        baselineDigest: record.baseline.baselineDigest,
+      }),
+      this.config.verificationProfiles,
+      record.taskVerification,
+      record.verification,
     );
     if (revalidation !== null)
       return this.completion.rejectPromotion(record, revalidation);

@@ -1,3 +1,7 @@
+import {
+  isStructuralEvidenceReceipt,
+  type StructuralEvidenceReceipt,
+} from "@skizzles/source-engineering";
 import { type Digest, digestBytes, digestValue } from "../../digest.ts";
 import type { SourceEngineeringPort } from "../contract.ts";
 import { isFrozenOpaque, snapshotArray, snapshotRecord } from "../snapshot.ts";
@@ -18,7 +22,7 @@ export interface SourceCursor {
 export interface SourceNextOperation {
   readonly kind: "edit" | "format" | "validate";
   readonly ordinal: number;
-  readonly operationIndex?: number;
+  readonly epoch?: number;
 }
 
 export interface SourceArtifact {
@@ -37,10 +41,13 @@ export interface SourceReceipt {
   readonly contextReceiptDigest: Digest;
   readonly baselineDigest: Digest;
   readonly candidateDigest: Digest;
+  readonly candidateManifestDigest: Digest;
   readonly targetReceipts: readonly SourceTargetReceipt[];
   readonly observedNegativeTests: readonly SourceObservedNegativeTest[];
   readonly provenanceDigest: Digest;
   readonly validationDigest: Digest;
+  readonly compilerReceipt: Readonly<{ readonly receiptDigest: Digest }>;
+  readonly structuralReceipt: StructuralEvidenceReceipt;
 }
 
 export interface SourceObservedNegativeTest {
@@ -285,7 +292,7 @@ function parseCursor(input: unknown): SourceCursor | undefined {
 }
 
 function parseNext(input: unknown): SourceNextOperation | undefined {
-  const value = snapshotRecord(input, ["kind", "ordinal"], ["operationIndex"]);
+  const value = snapshotRecord(input, ["kind", "ordinal"], ["epoch"]);
   if (
     !(
       value !== undefined &&
@@ -294,8 +301,7 @@ function parseNext(input: unknown): SourceNextOperation | undefined {
         value["kind"] === "validate") &&
       nonnegativeInteger(value["ordinal"]) &&
       value["ordinal"] <= maximumSteps &&
-      (value["operationIndex"] === undefined ||
-        nonnegativeInteger(value["operationIndex"]))
+      (value["epoch"] === undefined || positiveInteger(value["epoch"]))
     )
   ) {
     return;
@@ -303,9 +309,7 @@ function parseNext(input: unknown): SourceNextOperation | undefined {
   return Object.freeze({
     kind: value["kind"],
     ordinal: value["ordinal"],
-    ...(value["operationIndex"] === undefined
-      ? {}
-      : { operationIndex: value["operationIndex"] }),
+    ...(value["epoch"] === undefined ? {} : { epoch: value["epoch"] }),
   });
 }
 
@@ -368,9 +372,11 @@ function parseReceipt(input: unknown): SourceReceipt | undefined {
     "contextReceiptDigest",
     "baselineDigest",
     "candidateDigest",
+    "candidateManifestDigest",
     "targetReceipts",
     "indexReceipt",
     "compilerReceipt",
+    "structuralReceipt",
     "policyReceipt",
     "provenanceDigest",
     "validationDigest",
@@ -378,6 +384,10 @@ function parseReceipt(input: unknown): SourceReceipt | undefined {
   const targetValues = snapshotArray(value?.["targetReceipts"], maximumSteps);
   const targetReceipts = targetValues?.map(parseTargetReceipt);
   const policy = parsePolicyReceipt(value?.["policyReceipt"]);
+  const compilerReceipt = snapshotRecord(value?.["compilerReceipt"], [
+    "receipts",
+    "receiptDigest",
+  ]);
   if (
     !(
       value !== undefined &&
@@ -386,12 +396,16 @@ function parseReceipt(input: unknown): SourceReceipt | undefined {
       validDigest(value["contextReceiptDigest"]) &&
       validDigest(value["baselineDigest"]) &&
       validDigest(value["candidateDigest"]) &&
+      validDigest(value["candidateManifestDigest"]) &&
       targetValues !== undefined &&
       targetValues.length > 0 &&
       targetReceipts !== undefined &&
       targetReceipts.every((receipt) => receipt !== undefined) &&
       isFrozenOpaque(value["indexReceipt"]) &&
+      compilerReceipt !== undefined &&
+      validDigest(compilerReceipt["receiptDigest"]) &&
       isFrozenOpaque(value["compilerReceipt"]) &&
+      isStructuralEvidenceReceipt(value["structuralReceipt"]) &&
       policy !== undefined &&
       validDigest(value["provenanceDigest"]) &&
       validDigest(value["validationDigest"])
@@ -405,6 +419,7 @@ function parseReceipt(input: unknown): SourceReceipt | undefined {
     contextReceiptDigest: value["contextReceiptDigest"],
     baselineDigest: value["baselineDigest"],
     candidateDigest: value["candidateDigest"],
+    candidateManifestDigest: value["candidateManifestDigest"],
     targetReceipts: Object.freeze(
       targetReceipts.filter(
         (receipt): receipt is SourceTargetReceipt => receipt !== undefined,
@@ -413,6 +428,10 @@ function parseReceipt(input: unknown): SourceReceipt | undefined {
     observedNegativeTests: policy.observedNegativeTests,
     provenanceDigest: value["provenanceDigest"],
     validationDigest: value["validationDigest"],
+    compilerReceipt: Object.freeze({
+      receiptDigest: compilerReceipt["receiptDigest"],
+    }),
+    structuralReceipt: value["structuralReceipt"],
   });
 }
 
@@ -491,14 +510,9 @@ function parseTargetReceipt(input: unknown): SourceTargetReceipt | undefined {
     "candidateDigest",
     "baselineSemanticDigest",
     "candidateSemanticDigest",
-    "changedDeclarations",
     "templateReceipts",
     "formatterReceipt",
   ]);
-  const changedDeclarations = snapshotArray(
-    value?.["changedDeclarations"],
-    maximumSteps,
-  );
   const templateReceipts = snapshotArray(
     value?.["templateReceipts"],
     maximumSteps,
@@ -512,8 +526,6 @@ function parseTargetReceipt(input: unknown): SourceTargetReceipt | undefined {
       validDigest(value["candidateDigest"]) &&
       validDigest(value["baselineSemanticDigest"]) &&
       validDigest(value["candidateSemanticDigest"]) &&
-      changedDeclarations !== undefined &&
-      changedDeclarations.every(validDigest) &&
       templateReceipts !== undefined &&
       templateReceipts.every(isFrozenOpaque) &&
       isFrozenOpaque(value["formatterReceipt"])

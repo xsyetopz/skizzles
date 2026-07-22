@@ -13,9 +13,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@skizzles/candidate-manifest": "workspace:*",
     "@skizzles/change-assurance": "workspace:*",
     "@skizzles/source-engineering": "workspace:*",
     "@skizzles/task-worktree": "workspace:*",
+    "@skizzles/verification-gate": "workspace:*",
     "@skizzles/workspace-transaction": "workspace:*"
   },
   "devDependencies": {

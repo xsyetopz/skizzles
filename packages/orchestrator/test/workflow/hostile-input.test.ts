@@ -5,6 +5,7 @@ import { createCausalWorkflow } from "../../src/workflow/causal-workflow.ts";
 import type { CausalWorkflow } from "../../src/workflow/contract.ts";
 import { createTestTaskWorktree } from "../engineering/worktree/fixture.ts";
 import { createHarness } from "../support.ts";
+import { createTestWorkflowVerificationAuthority } from "../verification-fixture.ts";
 import { IsolatedDestination } from "./isolated-destination.ts";
 
 type WorkflowOperation = keyof CausalWorkflow;
@@ -58,6 +59,13 @@ function createWorkflow(): Readonly<{
     },
     taskWorktree: taskFixture.taskWorktree,
     taskWorktreeApproval: taskFixture.taskWorktreeApproval,
+    verificationAuthority: createTestWorkflowVerificationAuthority(),
+    verificationProfiles: {
+      originalTests: "verify-original-tests",
+      mutation: "verify-mutation",
+      property: "verify-property",
+      coverage: "verify-coverage",
+    },
     transaction: {
       destination,
       leases: createLocalRepositoryLeaseAuthority([

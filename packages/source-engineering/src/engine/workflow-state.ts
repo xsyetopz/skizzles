@@ -1,4 +1,5 @@
 import type { Digest } from "../digest.ts";
+import type { CompilerEvidenceReceipt } from "../evidence/compiler.ts";
 import type {
   SourceCaptureReceipt,
   SourceEvidenceAuthority,
@@ -10,6 +11,7 @@ import type {
   TypeScriptAstSymbolIndex,
 } from "../language/typescript-contract.ts";
 import type { LiteralRegistry } from "../policy/literal/contract.ts";
+import type { TypeScriptAstChange } from "../typescript/contract.ts";
 import type {
   SourceEngineeringArtifact,
   SourceEngineeringContext,
@@ -34,6 +36,14 @@ export interface EngineConfig {
   readonly languageAdapters: ReadonlyMap<string, SourceLanguageAdapterBindings>;
   readonly literalRegistry: LiteralRegistry;
   readonly templates: ReadonlyMap<string, EngineTemplate>;
+  readonly structuralPolicy: StructuralPolicy;
+}
+
+export interface StructuralPolicy {
+  readonly metricVersion: "cyclomatic-v1";
+  readonly maxFunctionComplexity: number;
+  readonly maxFunctionIncrease: number;
+  readonly maxAggregateIncrease: number;
 }
 
 export interface RepositoryBinding {
@@ -60,19 +70,21 @@ export interface EngineSelector {
 
 export type EngineOperation =
   | Readonly<{
+      epoch: number;
       kind: "replace";
       selector: EngineSelector;
       templateId: string;
       nodeSource: string;
     }>
   | Readonly<{
+      epoch: number;
       kind: "insert";
       anchor: EngineSelector;
       position: "before" | "after";
       templateId: string;
       nodeSource: string;
     }>
-  | Readonly<{ kind: "delete"; selector: EngineSelector }>;
+  | Readonly<{ epoch: number; kind: "delete"; selector: EngineSelector }>;
 
 export interface BatchTarget {
   readonly path: string;
@@ -119,7 +131,7 @@ export interface BatchTargetState {
   readonly baseline: TypeScriptAstDocument;
   readonly operations: readonly EngineOperation[];
   candidate: TypeScriptAstDocument;
-  changedDeclarations: Digest[];
+  astChanges: Readonly<{ epoch: number; change: TypeScriptAstChange }>[];
   templateReceipts: TemplateEvidenceReceipt[];
   formatterReceipt:
     | import("../evidence/contract.ts").FormatterProvenanceReceipt
@@ -129,7 +141,7 @@ export interface BatchTargetState {
 export interface BatchStep {
   readonly kind: "edit" | "format" | "validate";
   readonly ordinal: number;
-  readonly operationIndex?: number;
+  readonly epoch?: number;
 }
 
 export interface BatchState {
@@ -137,6 +149,10 @@ export interface BatchState {
   readonly targets: BatchTargetState[];
   readonly steps: readonly BatchStep[];
   readonly context: ContextState;
+  readonly compilerReceipts: CompilerEvidenceReceipt[];
+  readonly targetSetDigest: Digest;
+  readonly baselineCandidateSetDigest: Digest;
+  candidateSetDigest: Digest;
   step: number;
 }
 

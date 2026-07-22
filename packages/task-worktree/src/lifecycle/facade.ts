@@ -10,6 +10,10 @@ import {
   createPortableSandboxBroker,
   createSandboxCapabilityAuthority,
 } from "../sandbox/capabilities.ts";
+import {
+  executeVerification,
+  verifyVerificationReceipt,
+} from "../verification/execution.ts";
 import { close } from "./close.ts";
 import { parseConfig } from "./configuration/config.ts";
 import {
@@ -60,6 +64,10 @@ export function createTaskWorktree(input: unknown): TaskWorktreeCreationResult {
     retryCleanup: async (cleanupInput: unknown) =>
       await retryCleanup(owner, cleanupInput),
     run: async (runInput: unknown) => await runSession(owner, runInput),
+    executeVerification: async (verificationInput: unknown) =>
+      await executeVerification(owner, verificationInput),
+    verifyVerificationReceipt: async (verificationInput: unknown) =>
+      await verifyVerificationReceipt(owner, verificationInput),
     revalidate: async (revalidationInput: unknown) =>
       await revalidateSession(owner, revalidationInput),
     authorize: async (authorizationInput: unknown) =>

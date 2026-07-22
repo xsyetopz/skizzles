@@ -48,6 +48,7 @@ export function parseBatchRequest(value: unknown): BatchRequest | undefined {
   const contextDigest = record.get("contextDigest");
   if (
     targets === undefined ||
+    !validEpochPlan(targets) ||
     faultCases === undefined ||
     context === undefined ||
     !isDigest(contextDigest)
@@ -101,13 +102,21 @@ function parseOperations(
   for (const item of value) {
     const record = snapshotRecord(item);
     const kind = record?.get("kind");
-    if (kind === "delete" && exactKeys(record, ["kind", "selector"])) {
+    const epoch = record?.get("epoch");
+    if (!positiveEpoch(epoch)) return;
+    if (kind === "delete" && exactKeys(record, ["epoch", "kind", "selector"])) {
       const selector = parseSelector(record.get("selector"));
       if (selector === undefined) return;
-      result.push(Object.freeze({ kind, selector }));
+      result.push(Object.freeze({ epoch, kind, selector }));
     } else if (
       kind === "replace" &&
-      exactKeys(record, ["kind", "selector", "templateId", "nodeSource"])
+      exactKeys(record, [
+        "epoch",
+        "kind",
+        "selector",
+        "templateId",
+        "nodeSource",
+      ])
     ) {
       const selector = parseSelector(record.get("selector"));
       const templateId = record.get("templateId");
@@ -118,10 +127,13 @@ function parseOperations(
         !boundedText(nodeSource, 262_144)
       )
         return;
-      result.push(Object.freeze({ kind, selector, templateId, nodeSource }));
+      result.push(
+        Object.freeze({ epoch, kind, selector, templateId, nodeSource }),
+      );
     } else if (
       kind === "insert" &&
       exactKeys(record, [
+        "epoch",
         "kind",
         "anchor",
         "position",
@@ -141,11 +153,49 @@ function parseOperations(
       )
         return;
       result.push(
-        Object.freeze({ kind, anchor, position, templateId, nodeSource }),
+        Object.freeze({
+          epoch,
+          kind,
+          anchor,
+          position,
+          templateId,
+          nodeSource,
+        }),
       );
     } else return;
   }
   return Object.freeze(result);
+}
+
+function validEpochPlan(targets: readonly BatchTarget[]): boolean {
+  const epochs = new Set<number>();
+  for (const target of targets) {
+    let predecessor = 0;
+    const seenNodes = new Set<string>();
+    for (const operation of target.operations) {
+      if (operation.epoch < predecessor) return false;
+      predecessor = operation.epoch;
+      epochs.add(operation.epoch);
+      const selector =
+        operation.kind === "insert" ? operation.anchor : operation.selector;
+      const nodeKey = `${selector.declarationKind}\0${selector.name}`;
+      if (seenNodes.has(nodeKey)) return false;
+      seenNodes.add(nodeKey);
+    }
+  }
+  const sorted = [...epochs].sort((left, right) => left - right);
+  return (
+    sorted.length > 0 && sorted.every((epoch, index) => epoch === index + 1)
+  );
+}
+
+function positiveEpoch(value: unknown): value is number {
+  return (
+    Number.isSafeInteger(value) &&
+    typeof value === "number" &&
+    value > 0 &&
+    value <= 256
+  );
 }
 
 function parseSelector(value: unknown): EngineSelector | undefined {

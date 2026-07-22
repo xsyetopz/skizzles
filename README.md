@@ -25,6 +25,7 @@ on undeclared root packages.
 
 | Package | Responsibility |
 | --- | --- |
+| `candidate-manifest` | Canonical versioned identity for exact candidate file paths, operations, and content digests |
 | `change-assurance` | Authentic pre-publication security, migration, performance, and supply-chain evidence |
 | `command-hook` | Hook event validation and command classification |
 | `command-supervisor` | Bounded process execution, artifacts, retention, and queries |
@@ -37,6 +38,7 @@ on undeclared root packages.
 | `source-engineering` | TypeScript AST edits, source-policy validation, compiler evidence, and semantic previews |
 | `task-worktree` | Task-scoped Git isolation, sandboxed validation, diff ceilings, and approved commit synthesis |
 | `usage-analyzer` | Read-only rollout discovery, aggregation, and reporting |
+| `verification-gate` | Mutation, property, modified-coverage, original-test, and independent-review acceptance |
 | `workspace-transaction` | Recoverable, lease-serialized publication of approved workspace file sets |
 | `workspace-policy` | Package, dependency, export, lockfile, and source-ownership enforcement |
 

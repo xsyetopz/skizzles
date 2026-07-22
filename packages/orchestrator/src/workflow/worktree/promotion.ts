@@ -10,7 +10,14 @@ import {
   revalidateWorkflowEvidence,
   type WorkflowEngineeringEvidence,
 } from "../evidence.ts";
+import type { WorkflowVerificationEvidence } from "../verification/contract.ts";
+import type {
+  WorkflowTaskVerificationBindings,
+  WorkflowTaskVerificationReceipts,
+  WorkflowVerificationProfileIds,
+} from "../verification/task-contract.ts";
 import { sameTaskWorktreeBinding } from "./receipt.ts";
+import { revalidateWorkflowTaskVerification } from "./verification.ts";
 
 export async function revalidatePromotionState(
   config: CausalWorkflowConfig,
@@ -18,6 +25,10 @@ export async function revalidatePromotionState(
   receipt: TaskWorktreeReceipt,
   baseline: TargetBaseline,
   evidence: WorkflowEngineeringEvidence | null,
+  verificationBindings: WorkflowTaskVerificationBindings,
+  verificationProfiles: WorkflowVerificationProfileIds,
+  taskVerification: WorkflowTaskVerificationReceipts,
+  verification: WorkflowVerificationEvidence,
 ): Promise<
   | "TASK_WORKTREE_REVALIDATION_REJECTED"
   | "APPROVAL_DRIFTED"
@@ -28,6 +39,19 @@ export async function revalidatePromotionState(
   if (target.status !== "unchanged") return "APPROVAL_DRIFTED";
   if (evidence !== null && !(await revalidateWorkflowEvidence(evidence))) {
     return "ENGINEERING_EVIDENCE_REJECTED";
+  }
+  if (
+    !(await revalidateWorkflowTaskVerification({
+      taskWorktree: config.taskWorktree,
+      session,
+      taskReceipt: receipt,
+      bindings: verificationBindings,
+      profileIds: verificationProfiles,
+      receipts: taskVerification,
+    })) ||
+    (await config.verificationAuthority.verify(verification)).status !== "valid"
+  ) {
+    return "TASK_WORKTREE_REVALIDATION_REJECTED";
   }
   const worktree = await config.taskWorktree.revalidate(
     Object.freeze({ version: 1 as const, session }),

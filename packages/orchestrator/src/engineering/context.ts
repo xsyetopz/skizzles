@@ -9,6 +9,7 @@ export type ContextOperation =
   | "source-start"
   | "source-advance"
   | "change-assurance"
+  | "security-review"
   | "physical-integration"
   | "phase2-prepare";
 
@@ -218,6 +219,7 @@ function validOperation(value: unknown): value is ContextOperation {
     value === "source-describe" ||
     value === "source-advance" ||
     value === "change-assurance" ||
+    value === "security-review" ||
     value === "physical-integration" ||
     value === "phase2-prepare"
   );

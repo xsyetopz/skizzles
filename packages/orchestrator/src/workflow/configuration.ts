@@ -11,6 +11,8 @@ import type {
   PublicationBaselineAuthorityPort,
   PublicationIdentity,
 } from "./contract.ts";
+import { isWorkflowVerificationAuthority } from "./verification/authority.ts";
+import type { WorkflowVerificationProfileIds } from "./verification/task-contract.ts";
 import { isTaskWorktreeApprovalBridge } from "./worktree/approval.ts";
 
 const idPattern = /^[A-Za-z0-9][A-Za-z0-9._:@/-]*$/u;
@@ -27,6 +29,8 @@ export function parseWorkflowConfig(
         "baselineAuthority",
         "taskWorktree",
         "taskWorktreeApproval",
+        "verificationAuthority",
+        "verificationProfiles",
         "transaction",
         "approvalContext",
       ]) &&
@@ -34,6 +38,7 @@ export function parseWorkflowConfig(
       isBaselineAuthority(value["baselineAuthority"]) &&
       isTaskWorktree(value["taskWorktree"]) &&
       isTaskWorktreeApprovalBridge(value["taskWorktreeApproval"]) &&
+      isWorkflowVerificationAuthority(value["verificationAuthority"]) &&
       isRecord(value["transaction"]) &&
       exactKeys(
         value["transaction"],
@@ -50,7 +55,14 @@ export function parseWorkflowConfig(
   }
   const publicationIdentity = parseIdentity(value["publicationIdentity"]);
   const approvalContext = parseApprovalContext(value["approvalContext"]);
-  if (publicationIdentity === undefined || approvalContext === undefined) {
+  const verificationProfiles = parseVerificationProfiles(
+    value["verificationProfiles"],
+  );
+  if (
+    publicationIdentity === undefined ||
+    approvalContext === undefined ||
+    verificationProfiles === undefined
+  ) {
     return;
   }
   const transaction = value["transaction"];
@@ -69,12 +81,45 @@ export function parseWorkflowConfig(
     baselineAuthority: value["baselineAuthority"],
     taskWorktree: value["taskWorktree"],
     taskWorktreeApproval: value["taskWorktreeApproval"],
+    verificationAuthority: value["verificationAuthority"],
+    verificationProfiles,
     transaction: Object.freeze({
       destination,
       leases,
       ...(crashInjection === undefined ? {} : { crashInjection }),
     }),
     approvalContext,
+  });
+}
+
+function parseVerificationProfiles(
+  value: unknown,
+): WorkflowVerificationProfileIds | undefined {
+  if (
+    !(
+      isRecord(value) &&
+      exactKeys(value, ["originalTests", "mutation", "property", "coverage"])
+    )
+  ) {
+    return;
+  }
+  const profiles = [
+    value["originalTests"],
+    value["mutation"],
+    value["property"],
+    value["coverage"],
+  ];
+  if (
+    profiles.some((profile) => !validId(profile, 128)) ||
+    new Set(profiles).size !== profiles.length
+  ) {
+    return;
+  }
+  return Object.freeze({
+    originalTests: value["originalTests"] as string,
+    mutation: value["mutation"] as string,
+    property: value["property"] as string,
+    coverage: value["coverage"] as string,
   });
 }
 

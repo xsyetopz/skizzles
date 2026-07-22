@@ -1,17 +1,17 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import type { SourceEngineering } from "@skizzles/source-engineering";
-import { digestBytes } from "../../src/digest.ts";
+import { digestBytes } from "../../../src/digest.ts";
 import {
   advanceSourceEngineering,
   readSourceArtifact,
-} from "../../src/engineering/source/adapter.ts";
+} from "../../../src/engineering/source/adapter.ts";
 
 const bytes = new TextEncoder().encode("export const ready = true;\n");
 const digest = digestBytes(bytes);
 
 describe("source-engineering adapter", () => {
-  it("accepts an authentic prepared batch and reads copied candidate bytes", async () => {
+  it("rejects caller-authored structural evidence and reads copied artifact bytes", async () => {
     const artifact = Object.freeze({
       path: "src/example.ts",
       baselineDigest: digest,
@@ -27,6 +27,7 @@ describe("source-engineering adapter", () => {
       contextReceiptDigest: digest,
       baselineDigest: digest,
       candidateDigest: digest,
+      candidateManifestDigest: digest,
       targetReceipts: Object.freeze([
         Object.freeze({
           path: "src/example.ts",
@@ -62,6 +63,36 @@ describe("source-engineering adapter", () => {
       }),
       compilerReceipt: Object.freeze({
         receipts: Object.freeze([]),
+        receiptDigest: digest,
+      }),
+      structuralReceipt: Object.freeze({
+        requestDigest: digest,
+        repositoryId: "repo-a",
+        rootIdentity: "root-a",
+        treeDigest: digest,
+        configDigest: digest,
+        targetSetDigest: digest,
+        baselineCandidateSetDigest: digest,
+        candidateSetDigest: digest,
+        policy: Object.freeze({
+          metricVersion: "cyclomatic-v1" as const,
+          maxFunctionComplexity: 64,
+          maxFunctionIncrease: 64,
+          maxAggregateIncrease: 64,
+          policyDigest: digest,
+        }),
+        astChanges: Object.freeze([]),
+        modifiedNodes: Object.freeze([]),
+        baselineAggregateComplexity: 0,
+        candidateAggregateComplexity: 0,
+        aggregateIncrease: 0,
+        compilerChain: Object.freeze({
+          targetSetDigest: digest,
+          baselineCandidateSetDigest: digest,
+          finalCandidateSetDigest: digest,
+          links: Object.freeze([]),
+          receiptDigest: digest,
+        }),
         receiptDigest: digest,
       }),
       policyReceipt: Object.freeze({
@@ -114,18 +145,10 @@ describe("source-engineering adapter", () => {
       engine,
       Object.freeze({ cursor: "opaque" }),
     );
-    expect(result.status).toBe("prepared");
-    if (result.status !== "prepared") return;
-    expect(result.artifacts).toHaveLength(1);
-    expect(result.receipt.observedNegativeTests).toEqual([
-      {
-        productionPath: "src/example.ts",
-        testPath: "test/example.test.ts",
-        failureCodes: ["INVALID_INPUT"],
-      },
-    ]);
-    const preparedArtifact = result.artifacts[0];
-    if (preparedArtifact === undefined) throw new Error("artifact missing");
-    expect(readSourceArtifact(preparedArtifact)).toEqual(Array.from(bytes));
+    expect(result).toEqual({
+      status: "rejected",
+      code: "SOURCE_ENGINEERING_REJECTED",
+    });
+    expect(readSourceArtifact(artifact)).toEqual(Array.from(bytes));
   });
 });

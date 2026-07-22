@@ -26,6 +26,8 @@ export interface DiscoveryAuthorityPort {
     readonly root: string;
     readonly exclusions: readonly string[];
     readonly bounds: DiscoveryBounds;
+    readonly taskId?: string;
+    readonly taskEpochDigest?: Digest;
   }): unknown | Promise<unknown>;
   reviewExpansion(input: {
     readonly discoveryDigest: Digest;
@@ -66,6 +68,8 @@ export interface DiscoverySnapshot {
   readonly elapsedMs: number;
   readonly expansion: number;
   readonly reviewId: string | null;
+  readonly taskId: string | null;
+  readonly taskEpochDigest: Digest | null;
   readonly discoveryDigest: Digest;
 }
 
@@ -112,7 +116,29 @@ export class DiscoveryController {
     const root = normalizePath(parsed.root);
     if (root === undefined || !this.inScope(root))
       return { status: "rejected", code: "DISCOVERY_OUT_OF_SCOPE" };
-    return this.scan(parsed.request, parsed.repository, root, 0, null);
+    return this.scan(parsed.request, parsed.repository, root, 0, null, null);
+  }
+
+  async discoverTask(input: unknown): Promise<DiscoveryResult> {
+    const parsed = parseTaskInput(input);
+    if (parsed === undefined) {
+      return { status: "rejected", code: "INVALID_DISCOVERY_INPUT" };
+    }
+    const root = normalizePath(parsed.root);
+    if (root === undefined || !this.inScope(root)) {
+      return { status: "rejected", code: "DISCOVERY_OUT_OF_SCOPE" };
+    }
+    return this.scan(
+      parsed.request,
+      parsed.repository,
+      root,
+      0,
+      null,
+      Object.freeze({
+        taskId: parsed.taskId,
+        taskEpochDigest: parsed.taskEpochDigest,
+      }),
+    );
   }
 
   async expand(input: unknown): Promise<DiscoveryResult> {
@@ -167,7 +193,22 @@ export class DiscoveryController {
       return { status: "rejected", code: "DISCOVERY_EXPANSION_REJECTED" };
     const request = snapshotRequest(input.discovery);
     const repository = snapshotRepository(input.discovery);
-    return this.scan(request, repository, root, expansion, raw.reviewId);
+    const taskScope =
+      input.discovery.taskId === null ||
+      input.discovery.taskEpochDigest === null
+        ? null
+        : Object.freeze({
+            taskId: input.discovery.taskId,
+            taskEpochDigest: input.discovery.taskEpochDigest,
+          });
+    return this.scan(
+      request,
+      repository,
+      root,
+      expansion,
+      raw.reviewId,
+      taskScope,
+    );
   }
 
   private async scan(
@@ -179,6 +220,10 @@ export class DiscoveryController {
     root: string,
     expansion: number,
     reviewId: string | null,
+    taskScope: Readonly<{
+      taskId: string;
+      taskEpochDigest: Digest;
+    }> | null,
   ): Promise<DiscoveryResult> {
     const started = readClock(this.clock);
     if (started === undefined)
@@ -193,6 +238,7 @@ export class DiscoveryController {
           root,
           exclusions: this.policy.exclusions,
           bounds: this.policy.bounds,
+          ...(taskScope === null ? {} : taskScope),
         }),
       );
     } catch {
@@ -212,6 +258,7 @@ export class DiscoveryController {
       elapsedMs,
       expansion,
       reviewId,
+      taskScope,
       this.policy,
     );
     if (snapshot === undefined)
@@ -225,6 +272,44 @@ export class DiscoveryController {
       !this.policy.exclusions.some((excluded) => contains(excluded, path))
     );
   }
+}
+
+function parseTaskInput(input: unknown):
+  | {
+      readonly request: NormalizedRequest;
+      readonly repository: RepositoryContext;
+      readonly root: string;
+      readonly taskId: string;
+      readonly taskEpochDigest: Digest;
+    }
+  | undefined {
+  if (
+    !(
+      isRecord(input) &&
+      exactKeys(input, [
+        "request",
+        "repository",
+        "root",
+        "taskId",
+        "taskEpochDigest",
+      ]) &&
+      isNormalizedRequest(input.request) &&
+      isRepositoryContext(input.repository) &&
+      input.request.intentDigest === input.repository.requestDigest &&
+      typeof input.root === "string" &&
+      nonempty(input.taskId, 128) &&
+      isDigest(input["taskEpochDigest"])
+    )
+  ) {
+    return;
+  }
+  return {
+    request: input.request,
+    repository: input.repository,
+    root: input.root,
+    taskId: input.taskId,
+    taskEpochDigest: input["taskEpochDigest"],
+  };
 }
 
 export function parseDiscoveryPolicy(
@@ -334,28 +419,37 @@ function parseScan(
   elapsedMs: number,
   expansion: number,
   reviewId: string | null,
+  taskScope: Readonly<{
+    taskId: string;
+    taskEpochDigest: Digest;
+  }> | null,
   policy: DiscoveryPolicy,
 ): DiscoverySnapshot | undefined {
   if (
     !(
       isRecord(raw) &&
-      exactKeys(raw, [
-        "repositoryId",
-        "requestDigest",
-        "treeDigest",
-        "root",
-        "entries",
-        "skippedSymlinks",
-        "complete",
-        "stoppedBy",
-      ])
+      exactKeys(
+        raw,
+        [
+          "repositoryId",
+          "requestDigest",
+          "treeDigest",
+          "root",
+          "entries",
+          "skippedSymlinks",
+          "complete",
+          "stoppedBy",
+        ],
+        ["taskId", "taskEpochDigest"],
+      )
     ) ||
     raw.repositoryId !== repository.repositoryId ||
     raw.requestDigest !== requestDigest ||
     raw.treeDigest !== repository.treeDigest ||
     raw.root !== root ||
     typeof raw.complete !== "boolean" ||
-    !isStopReason(raw.stoppedBy, raw.complete)
+    !isStopReason(raw.stoppedBy, raw.complete) ||
+    !matchesTaskScope(raw, taskScope)
   )
     return;
   const symlinks = normalizePaths(raw.skippedSymlinks);
@@ -415,6 +509,8 @@ function parseScan(
     elapsedMs,
     expansion,
     reviewId,
+    taskId: taskScope?.taskId ?? null,
+    taskEpochDigest: taskScope?.taskEpochDigest ?? null,
   };
   const snapshot = Object.freeze({
     ...material,
@@ -422,6 +518,25 @@ function parseScan(
   });
   snapshots.add(snapshot);
   return snapshot;
+}
+
+function matchesTaskScope(
+  raw: Readonly<Record<string, unknown>>,
+  scope: Readonly<{ taskId: string; taskEpochDigest: Digest }> | null,
+): boolean {
+  if (scope === null) {
+    return (
+      !Object.hasOwn(raw, "taskId") && !Object.hasOwn(raw, "taskEpochDigest")
+    );
+  }
+  return (
+    raw["taskId"] === scope.taskId &&
+    raw["taskEpochDigest"] === scope.taskEpochDigest
+  );
+}
+
+function isDigest(value: unknown): value is Digest {
+  return typeof value === "string" && /^sha256:[0-9a-f]{64}$/u.test(value);
 }
 
 function normalizePaths(value: unknown): readonly string[] | undefined {

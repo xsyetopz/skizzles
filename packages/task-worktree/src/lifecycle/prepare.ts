@@ -51,7 +51,7 @@ export async function prepare(
     input = undefined;
   }
   if (input === undefined) return rejected("INVALID_INPUT");
-  const taskKey = `${input.repositoryId}\0${input.rootIdentity}\0${input.taskId}`;
+  const taskKey = `${input.repositoryId}\0${input.rootIdentity}\0${input.taskId}\0${input.taskEpochDigest}`;
   if (state.active.has(taskKey) || state.used.has(taskKey))
     return rejected("ALREADY_PREPARED");
   if (
@@ -172,7 +172,10 @@ export async function prepare(
   }
   const preparedCandidate = await prepareCandidate({
     root: worktreeRoot,
+    authorityId: state.config.authorityId,
     declaration: input,
+    protectedPaths: state.config.protectedPaths,
+    verificationProfiles: state.config.verificationProfiles,
     diffAuthority: state.diffAuthority,
     commitAuthority: state.commitAuthority,
     sandbox: state.sandbox,
@@ -244,14 +247,21 @@ export async function prepare(
     diffAuthority: state.diffAuthority,
     commitAuthority: state.commitAuthority,
     commandProfiles: state.config.commandProfiles,
+    verificationProfiles: state.config.verificationProfiles,
+    protectedPaths: state.config.protectedPaths,
     sandbox: state.sandbox,
     sandboxWritePaths: state.config.sandboxWritePaths,
     approvalAuthority: state.config.approvalAuthority,
     summary,
     latestRun: null,
+    verification: {
+      baselineViewRoot: null,
+      receipts: [],
+    },
     cleanup: {
       worktreeRemoved: false,
       writableRemoved: false,
+      baselineViewRemoved: false,
       branchRemoved: false,
       finalHead: null,
     },

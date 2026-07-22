@@ -85,6 +85,7 @@ function run(label: string): RawRun {
 }
 
 interface HarnessOptions {
+  readonly repositoryCapture?: OrchestratorConfig["repositoryAuthority"]["capture"];
   readonly effect?: EffectKind;
   readonly effectClassification?: OrchestratorConfig["effectClassificationAuthority"]["classify"];
   readonly graphState?: "satisfied" | "violated" | "approval-required";
@@ -106,6 +107,7 @@ interface HarnessOptions {
   readonly discoveryScan?: OrchestratorConfig["discoveryAuthority"]["scan"];
   readonly reviewExpansion?: OrchestratorConfig["discoveryAuthority"]["reviewExpansion"];
   readonly authenticate?: OrchestratorConfig["approvalAuthority"]["authenticate"];
+  readonly executionActions?: number;
 }
 
 export function createHarness(options: HarnessOptions = {}): {
@@ -164,6 +166,9 @@ export function createHarness(options: HarnessOptions = {}): {
     repositoryAuthority: {
       capture(input) {
         counts.repository += 1;
+        if (options.repositoryCapture !== undefined) {
+          return options.repositoryCapture(input);
+        }
         return {
           repositoryId: input.repositoryId,
           requestDigest: input.requestDigest,
@@ -317,19 +322,19 @@ export function createHarness(options: HarnessOptions = {}): {
     },
     executionBudgets: {
       low: {
-        actions: 4,
+        actions: options.executionActions ?? 4,
         retries: 2,
         repeatedCausalFailures: 2,
         wallClockMs: 1000,
       },
       medium: {
-        actions: 3,
+        actions: options.executionActions ?? 3,
         retries: 2,
         repeatedCausalFailures: 2,
         wallClockMs: 800,
       },
       high: {
-        actions: 2,
+        actions: options.executionActions ?? 2,
         retries: 1,
         repeatedCausalFailures: 1,
         wallClockMs: 500,
@@ -356,6 +361,12 @@ export function createHarness(options: HarnessOptions = {}): {
           skippedSymlinks: [`${input.root}/vendor-link`],
           complete: true,
           stoppedBy: null,
+          ...(input.taskId === undefined
+            ? {}
+            : {
+                taskId: input.taskId,
+                taskEpochDigest: input.taskEpochDigest,
+              }),
         };
       },
       reviewExpansion(input) {

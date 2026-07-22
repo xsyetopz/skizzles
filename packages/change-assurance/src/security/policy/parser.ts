@@ -5,19 +5,12 @@ import { create as createRunWorkspace } from "@skizzles/run-workspace";
 import {
   type BinaryExpression,
   type CallExpression,
-  type ImportDeclaration,
-  type ImportEqualsDeclaration,
   isBinaryExpression,
   isCallExpression,
   isExportDeclaration,
   isFunctionDeclaration,
   isIdentifier,
-  isImportDeclaration,
-  isImportEqualsDeclaration,
-  isImportSpecifier,
   isNamedExports,
-  isNamedImports,
-  isNamespaceImport,
   isNumericLiteral,
   isObjectLiteralExpression,
   isPropertyAccessExpression,
@@ -31,6 +24,7 @@ import {
 } from "typescript/unstable/ast";
 import { API, type Diagnostic } from "typescript/unstable/async";
 import type { ParsedSecuritySource, SecurityCallSite } from "../contract.ts";
+import { collectSecurityImport } from "./imports.ts";
 
 const maximumCandidateBytes = 4 * 1024 * 1024;
 const middlewareNames = new Set([
@@ -168,15 +162,16 @@ function parsed(
 ): SecurityParseResult {
   const imports = new Map<string, readonly string[]>();
   const importAliases = new Map<string, string>();
+  const importBindings = new Map<
+    string,
+    Readonly<{ readonly module: string; readonly imported: string }>
+  >();
   const declaredNames = new Set<string>();
   const exportedNames = new Set<string>();
   const middleware = new Set<string>();
   const callSites: SecurityCallSite[] = [];
   sourceFile.statements.forEach((statement) => {
-    if (isImportDeclaration(statement))
-      collectImport(statement, imports, importAliases);
-    if (isImportEqualsDeclaration(statement))
-      collectImportEquals(statement, imports, importAliases);
+    collectSecurityImport(statement, imports, importAliases, importBindings);
     collectDeclarationName(statement, declaredNames);
     collectExportedName(statement, exportedNames);
   });
@@ -225,58 +220,13 @@ function parsed(
       sourceFile,
       imports,
       importAliases,
+      importBindings,
       declaredNames,
       exportedNames,
       middlewareNames: middleware,
       callSites: Object.freeze(callSites),
     }),
   };
-}
-
-function collectImport(
-  node: ImportDeclaration,
-  imports: Map<string, readonly string[]>,
-  aliases: Map<string, string>,
-): void {
-  if (!isStringLiteral(node.moduleSpecifier)) return;
-  const moduleName = node.moduleSpecifier.text;
-  const names: string[] = [];
-  const clause = node.importClause;
-  if (clause?.name !== undefined) {
-    names.push("default");
-    aliases.set(clause.name.text, "default");
-  }
-  const bindings = clause?.namedBindings;
-  if (bindings === undefined) {
-    imports.set(moduleName, Object.freeze(names));
-    return;
-  }
-  if (isNamespaceImport(bindings)) {
-    names.push("*");
-    aliases.set(bindings.name.text, "*");
-  }
-  if (isNamedImports(bindings)) {
-    bindings.elements.forEach((element) => {
-      if (isImportSpecifier(element)) {
-        const imported = element.propertyName?.text ?? element.name.text;
-        names.push(imported);
-        aliases.set(element.name.text, imported);
-      }
-    });
-  }
-  imports.set(moduleName, Object.freeze(names));
-}
-
-function collectImportEquals(
-  node: ImportEqualsDeclaration,
-  imports: Map<string, readonly string[]>,
-  aliases: Map<string, string>,
-): void {
-  if (node.moduleReference.kind !== SyntaxKind.ExternalModuleReference) return;
-  const expression = node.moduleReference.expression;
-  if (!isStringLiteral(expression)) return;
-  imports.set(expression.text, Object.freeze([node.name.text]));
-  aliases.set(node.name.text, node.name.text);
 }
 
 function collectDeclarationName(node: Node, names: Set<string>): void {

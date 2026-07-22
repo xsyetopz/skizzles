@@ -1,11 +1,12 @@
 import { types } from "node:util";
+import { createCandidateManifest } from "@skizzles/candidate-manifest";
 import { type Digest, digestBytes, digestText } from "../digest.ts";
-import type { CompilerEvidenceReceipt } from "../evidence/compiler.ts";
 import type {
   FaultFirstInspection,
   ParsedPolicyChange,
 } from "../policy/contract.ts";
 import { analyzeSourcePolicy, inspectFaultFirst } from "../policy/index.ts";
+import { analyzeModifiedExecutables } from "../typescript/structural.ts";
 import type {
   SourceEngineeringAdvanceResult,
   SourceEngineeringArtifact,
@@ -16,6 +17,7 @@ import type {
   SourceEngineeringVerifyResult,
 } from "./contract.ts";
 import { SourceEngineeringState } from "./cursor.ts";
+import { assembleStructuralEvidence } from "./structural.ts";
 import type {
   BatchState,
   BatchTargetState,
@@ -93,17 +95,7 @@ export function verifyPrepared(
         return rejectedVerify("ARTIFACT_REJECTED");
       }
     }
-    if (
-      aggregateTargetDigest(
-        prepared.receipt.targetReceipts,
-        "baselineDigest",
-      ) !== prepared.receipt.baselineDigest ||
-      aggregateTargetDigest(
-        prepared.receipt.targetReceipts,
-        "candidateDigest",
-      ) !== prepared.receipt.candidateDigest ||
-      validationDigestOf(prepared.receipt) !== prepared.receipt.validationDigest
-    ) {
+    if (!validPreparedReceiptDigests(prepared.receipt)) {
       return rejectedVerify("RECEIPT_FORGED");
     }
     return Object.freeze({
@@ -159,31 +151,43 @@ async function validate(
   const findings = analyzeSourcePolicy(policyInput);
   if (findings.length !== 0) return rejected("POLICY_REJECTED");
 
-  const compilerTargets = Object.freeze(
-    preparedTargets.map((prepared) =>
-      Object.freeze({
-        path: prepared.target.path,
-        candidateDigest: prepared.candidateDigest,
-        semanticDigest: prepared.candidateSemanticDigest,
-        candidateBytes: prepared.formatterReceipt.formattedBytes,
-      }),
+  const structuralAnalysis = analyzeModifiedExecutables({
+    baseline: preparedTargets.map(({ target, baseline }) =>
+      Object.freeze({ path: target.path, sourceFile: baseline.sourceFile }),
     ),
+    candidate: preparedTargets.map(({ target, candidate }) =>
+      Object.freeze({ path: target.path, sourceFile: candidate.sourceFile }),
+    ),
+    policy: config.structuralPolicy,
+  });
+  if (structuralAnalysis.status !== "accepted") {
+    return rejected("POLICY_REJECTED");
+  }
+  const astChanges = Object.freeze(
+    preparedTargets
+      .flatMap(({ target }) => target.astChanges)
+      .sort(
+        (left, right) =>
+          left.epoch - right.epoch ||
+          left.change.path.localeCompare(right.change.path) ||
+          left.change.changeDigest.localeCompare(right.change.changeDigest),
+      ),
   );
-  const compilerReceipts: CompilerEvidenceReceipt[] = [];
-  for (const prepared of preparedTargets) {
-    const compiler = await batch.context.adapter.adapter.validateCandidate({
-      requestDigest: batch.request.requestDigest,
-      repositoryId: batch.request.repository.id,
-      rootIdentity: batch.request.repository.rootIdentity,
-      treeDigest: batch.request.repository.treeDigest,
-      configDigest: batch.request.repository.configDigest,
-      targetPath: prepared.target.path,
-      candidateDigest: prepared.candidateDigest,
-      semanticDigest: prepared.candidateSemanticDigest,
-      targets: compilerTargets,
-    });
-    if (compiler.status !== "accepted") return rejected("COMPILER_REJECTED");
-    compilerReceipts.push(compiler.receipt);
+  const structuralReceipt = assembleStructuralEvidence({
+    config,
+    batch,
+    astChanges,
+    modifiedNodes: structuralAnalysis.modifiedNodes,
+    baselineAggregateComplexity: structuralAnalysis.baselineAggregateComplexity,
+    candidateAggregateComplexity:
+      structuralAnalysis.candidateAggregateComplexity,
+    aggregateIncrease: structuralAnalysis.aggregateIncrease,
+  });
+  if (structuralReceipt === "compiler-rejected") {
+    return rejected("COMPILER_REJECTED");
+  }
+  if (structuralReceipt === "structural-rejected") {
+    return rejected("POLICY_REJECTED");
   }
 
   const targetReceipts = Object.freeze(
@@ -202,9 +206,6 @@ async function validate(
           candidateDigest,
           baselineSemanticDigest,
           candidateSemanticDigest,
-          changedDeclarations: Object.freeze(
-            [...target.changedDeclarations].sort(compareText),
-          ),
           templateReceipts: Object.freeze([...target.templateReceipts]),
           formatterReceipt,
         }) satisfies SourceEngineeringTargetReceipt,
@@ -216,10 +217,10 @@ async function validate(
     literalRegistry.registryDigest,
   );
   const compilerReceipt = Object.freeze({
-    receipts: Object.freeze(compilerReceipts),
+    receipts: Object.freeze([...batch.compilerReceipts]),
     receiptDigest: digestText(
       JSON.stringify(
-        compilerReceipts.map(({ receiptDigest }) => receiptDigest),
+        batch.compilerReceipts.map(({ receiptDigest }) => receiptDigest),
       ),
     ),
   });
@@ -237,11 +238,21 @@ async function validate(
     targetReceipts,
     "candidateDigest",
   );
+  const candidateManifestDigest = createCandidateManifest(
+    preparedTargets.map(({ target, candidateBytes }) =>
+      Object.freeze({
+        path: target.path,
+        operation: "write" as const,
+        contentDigest: digestBytes(candidateBytes),
+      }),
+    ),
+  ).manifestDigest;
   const provenanceDigest = digestText(
     JSON.stringify({
       context: batch.context.receipt.receiptDigest,
       index: indexReceipt.indexDigest,
       compiler: compilerReceipt.receiptDigest,
+      structural: structuralReceipt.receiptDigest,
       policy: policyReceipt.receiptDigest,
       targets: targetReceipts.map((receipt) => ({
         path: receipt.path,
@@ -258,9 +269,11 @@ async function validate(
     contextReceiptDigest: batch.context.receipt.receiptDigest,
     baselineDigest,
     candidateDigest,
+    candidateManifestDigest,
     targetReceipts,
     indexReceipt,
     compilerReceipt,
+    structuralReceipt,
     policyReceipt,
     provenanceDigest,
   };
@@ -467,7 +480,11 @@ function createPolicyReceipt(
 }
 
 function aggregateTargetDigest(
-  receipts: readonly SourceEngineeringTargetReceipt[],
+  receipts: readonly Readonly<{
+    path: string;
+    baselineDigest: Digest;
+    candidateDigest: Digest;
+  }>[],
   key: "baselineDigest" | "candidateDigest",
 ): Digest {
   return digestText(
@@ -475,9 +492,56 @@ function aggregateTargetDigest(
   );
 }
 
+function candidateManifestDigestOf(
+  receipts: readonly Readonly<{ path: string; candidateDigest: Digest }>[],
+): Digest {
+  return createCandidateManifest(
+    receipts.map(({ path, candidateDigest }) =>
+      Object.freeze({
+        path,
+        operation: "write" as const,
+        contentDigest: candidateDigest,
+      }),
+    ),
+  ).manifestDigest;
+}
+
 function validationDigestOf(receipt: SourceEngineeringTaskReceipt): Digest {
   const { validationDigest: _validationDigest, ...material } = receipt;
   return digestText(JSON.stringify(material));
+}
+
+export function validPreparedReceiptDigests(
+  receipt: SourceEngineeringTaskReceipt,
+): boolean {
+  return (
+    validCandidateReceiptBindings(receipt) &&
+    validationDigestOf(receipt) === receipt.validationDigest
+  );
+}
+
+export function validCandidateReceiptBindings(input: {
+  readonly baselineDigest: Digest;
+  readonly candidateDigest: Digest;
+  readonly candidateManifestDigest: Digest;
+  readonly targetReceipts: readonly Readonly<{
+    path: string;
+    baselineDigest: Digest;
+    candidateDigest: Digest;
+  }>[];
+}): boolean {
+  const targets = input.targetReceipts;
+  return (
+    targets.length > 0 &&
+    targets.every(
+      ({ path }, index) =>
+        index === 0 || path > (targets[index - 1]?.path ?? path),
+    ) &&
+    aggregateTargetDigest(targets, "baselineDigest") === input.baselineDigest &&
+    aggregateTargetDigest(targets, "candidateDigest") ===
+      input.candidateDigest &&
+    candidateManifestDigestOf(targets) === input.candidateManifestDigest
+  );
 }
 
 function parseVerifyInput(value: unknown):

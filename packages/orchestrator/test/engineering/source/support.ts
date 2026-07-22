@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,139 +14,27 @@ import {
   type TypeScriptCompilerAuthority,
   type TypeScriptSymbolIndexAuthorityPort,
 } from "@skizzles/source-engineering";
-import { createLocalRepositoryLeaseAuthority } from "@skizzles/workspace-transaction";
-import { digestValue } from "../../src/digest.ts";
-import type { ContextOperation } from "../../src/engineering/context.ts";
-import { createEngineeringWorkflow } from "../../src/engineering/workflow.ts";
-import { createHarness, repositoryContext } from "../support.ts";
-import { IsolatedDestination } from "../workflow/isolated-destination.ts";
-import { createTestChangeAssurance } from "./assurance-fixture.ts";
-import { createTestTaskWorktree } from "./worktree/fixture.ts";
+import type { repositoryContext } from "../../support.ts";
+import { baselineFor, digest, schemaText } from "./data.ts";
 
-export const targetPath = "test/value.test.ts";
-const baseline = "export function value(): number { return 1; }\n";
-export const replacement = "export function value(): number { return 2; }";
-export const candidate = `${replacement}\n`;
-const schemaText = "A complete TypeScript function declaration.";
 const formatterConfigDigest = digest("formatter-config");
-export async function createFixture() {
-  const harness = createHarness();
-  const repository = await repositoryContext(harness.orchestrator);
-  const compiler = createCompilerProject(repository);
-  const taskFixture = createTestTaskWorktree();
-  const sourceEngineering = createRealSourceEngineering(compiler.authority);
-  const destination = new IsolatedDestination();
-  const operations: ContextOperation[] = [];
-  let reservation = 0;
-  const config = Object.freeze({
-    causal: Object.freeze({
-      orchestrator: harness.orchestrator,
-      publicationIdentity: Object.freeze({
-        repositoryId: "repo-a",
-        rootIdentity: "root-a",
-        ownerId: "worker-a",
-      }),
-      baselineAuthority: Object.freeze({
-        capture(input: {
-          readonly baseline: { readonly baselineDigest: string };
-          readonly targets: readonly { readonly path: string }[];
-        }) {
-          return Object.freeze({
-            baselineDigest: input.baseline.baselineDigest,
-            targets: Object.freeze(
-              input.targets.map((target) =>
-                Object.freeze({
-                  path: target.path,
-                  expected: Object.freeze({ state: "missing" }),
-                }),
-              ),
-            ),
-          });
-        },
-      }),
-      taskWorktree: taskFixture.taskWorktree,
-      taskWorktreeApproval: taskFixture.taskWorktreeApproval,
-      transaction: Object.freeze({
-        destination,
-        leases: createLocalRepositoryLeaseAuthority([
-          Object.freeze({
-            repositoryId: "repo-a",
-            rootIdentity: "root-a",
-            ownerId: "worker-a",
-          }),
-        ]),
-      }),
-      approvalContext: Object.freeze({
-        taskId: "task-a",
-        principalId: "maintainer-a",
-        operation: "publish",
-      }),
-    }),
-    sourceEngineering,
-    changeAssurance: createTestChangeAssurance(),
-    contextBudget: Object.freeze({
-      reserve(
-        input: Parameters<
-          import("../../src/engineering/context.ts").ContextBudgetAuthorityPort["reserve"]
-        >[0],
-      ) {
-        operations.push(input.operation);
-        reservation += 1;
-        return Object.freeze({
-          status: "reserved",
-          epoch: "epoch-a",
-          reservationId: `reservation-${reservation}`,
-          requestDigest: digestValue(input),
-          usedUnits: 0,
-          limitUnits: 100,
-          completionReserveUnits: 10,
-          requiredUnits: 10,
-        });
-      },
-    }),
-    physicalIntegration: Object.freeze({
-      attest(): unknown {
-        return Object.freeze({ status: "rejected", code: "unused" });
-      },
-    }),
-    validationProfiles: Object.freeze([
-      Object.freeze({
-        id: "strict",
-        language: "typescript",
-        objective: "behavioral",
-        formatterId: "formatter",
-        commandProfileIds: Object.freeze(["validate"]),
-        negativeTestCommands: Object.freeze([]),
-      }),
-    ]),
-    discoveryRoot: "packages/orchestrator",
-  });
-  const created = createEngineeringWorkflow(config);
-  if (created.status !== "accepted") {
-    compiler.cleanup();
-    taskFixture.cleanup();
-    throw new Error(`workflow setup failed: ${created.code}`);
-  }
-  return Object.freeze({
-    workflow: created.workflow,
-    orchestrator: harness.orchestrator,
-    operations,
-    destination,
-    config,
-    repository,
-    cleanup: () => {
-      compiler.cleanup();
-      taskFixture.cleanup();
-    },
-  });
+
+interface SourceFixtureFormatterOptions {
+  readonly onAdvanceBlocked?: () => void;
+  readonly advanceBarrier?: Promise<void>;
 }
 
+type Repository = Awaited<ReturnType<typeof repositoryContext>>;
+
 function createCompilerProject(
-  repository: Awaited<ReturnType<typeof repositoryContext>>,
+  repository: Repository,
+  targetPaths: readonly string[],
 ) {
   const root = mkdtempSync(join(tmpdir(), "skizzles-orchestrator-source-"));
   mkdirSync(join(root, "test"));
-  writeFileSync(join(root, targetPath), baseline);
+  for (const path of targetPaths) {
+    writeFileSync(join(root, path), baselineFor(path));
+  }
   writeFileSync(
     join(root, "tsconfig.json"),
     JSON.stringify({
@@ -196,9 +83,11 @@ function createCompilerProject(
 
 function createRealSourceEngineering(
   compilerAuthority: TypeScriptCompilerAuthority,
+  targetPaths: readonly string[],
+  options: SourceFixtureFormatterOptions,
 ) {
-  const sourceEvidence = createEvidence();
-  const formatter = registerFormatter();
+  const sourceEvidence = createEvidence(targetPaths);
+  const formatter = registerFormatter(options);
   const symbolIndexAuthority: TypeScriptSymbolIndexAuthorityPort =
     Object.freeze({
       capture: (
@@ -211,13 +100,15 @@ function createRealSourceEngineering(
           configDigest: input.configDigest,
           complete: true,
           packages: Object.freeze([]),
-          documents: Object.freeze([
-            Object.freeze({
-              path: targetPath,
-              text: baseline,
-              digest: digest(baseline),
-            }),
-          ]),
+          documents: Object.freeze(
+            targetPaths.map((path) =>
+              Object.freeze({
+                path,
+                text: baselineFor(path),
+                digest: digest(baselineFor(path)),
+              }),
+            ),
+          ),
         }),
     });
   const adapter = createTypeScriptAstLanguageAdapter(
@@ -241,6 +132,12 @@ function createRealSourceEngineering(
       sourceEvidence,
       languageAdapters: Object.freeze([adapter.adapter]),
       literalRegistry: sourceLiteralRegistry(),
+      structuralPolicy: Object.freeze({
+        metricVersion: "cyclomatic-v1" as const,
+        maxFunctionComplexity: 64,
+        maxFunctionIncrease: 16,
+        maxAggregateIncrease: 64,
+      }),
       templates: Object.freeze([
         Object.freeze({
           templateId: "typescript-function",
@@ -274,7 +171,7 @@ function sourceLiteralRegistry() {
   return created.registry;
 }
 
-function createEvidence() {
+function createEvidence(targetPaths: readonly string[]) {
   const sourceCaptureAuthority: SourceCaptureAuthorityPort = Object.freeze({
     capture(input: unknown): unknown {
       const bindings = dataRecord(input, [
@@ -286,13 +183,16 @@ function createEvidence() {
         "path",
         "language",
       ]);
-      if (bindings.get("path") !== targetPath) {
+      const path = bindings.get("path");
+      if (typeof path !== "string" || !targetPaths.includes(path)) {
         throw new Error("unexpected source capture path");
       }
       return Object.freeze({
         ...Object.fromEntries(bindings),
-        baselineDigest: digest(baseline),
-        baselineBytes: Object.freeze([...new TextEncoder().encode(baseline)]),
+        baselineDigest: digest(baselineFor(path)),
+        baselineBytes: Object.freeze([
+          ...new TextEncoder().encode(baselineFor(path)),
+        ]),
       });
     },
   });
@@ -341,9 +241,11 @@ function createEvidence() {
   return result.evidence;
 }
 
-function registerFormatter() {
+function registerFormatter(options: SourceFixtureFormatterOptions) {
   const authority: FormatterAuthorityPort = Object.freeze({
-    format(request: Parameters<FormatterAuthorityPort["format"]>[0]) {
+    async format(request: Parameters<FormatterAuthorityPort["format"]>[0]) {
+      options.onAdvanceBlocked?.();
+      await options.advanceBarrier;
       const { sourceText, ...bindings } = request;
       return Object.freeze({ ...bindings, formattedText: sourceText });
     },
@@ -389,6 +291,4 @@ function dataRecord(
   return result;
 }
 
-export function digest(value: string): string {
-  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
-}
+export { createCompilerProject, createRealSourceEngineering };

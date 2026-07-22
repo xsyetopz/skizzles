@@ -11,6 +11,8 @@ import type { TerminalPublication, WorkflowReview } from "./contract.ts";
 import type { WorkflowEngineeringEvidence } from "./evidence.ts";
 import type { WorkflowLifecycle } from "./lifecycle.ts";
 import type { PreparedPublication } from "./publication.ts";
+import type { WorkflowVerificationEvidence } from "./verification/contract.ts";
+import type { WorkflowTaskVerificationReceipts } from "./verification/task-contract.ts";
 import type { TaskWorktreeApprovalRegistration } from "./worktree/approval.ts";
 
 export type WorkflowRecordState =
@@ -31,6 +33,8 @@ export interface WorkflowRecord {
   readonly prepared: PreparedPublication;
   readonly engineeringEvidence: WorkflowEngineeringEvidence | null;
   readonly preparedTaskReceipt: TaskWorktreeReceipt;
+  readonly taskVerification: WorkflowTaskVerificationReceipts;
+  readonly verification: WorkflowVerificationEvidence;
   commitReceipt: TaskWorktreeReceipt | null;
   review: WorkflowReview;
   state: WorkflowRecordState;

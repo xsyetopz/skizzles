@@ -4,10 +4,10 @@ import type {
   TaskWorktreePrepareInput,
 } from "../../contract.ts";
 import type { TaskWorktreeDigest } from "../../digest.ts";
+import { isSafeRelativePath } from "../../policy/value.ts";
 
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
 const taskPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
-const pathSegmentPattern = /^(?!\.\.?$)[^/\0]+$/u;
 
 export function parsePrepareInput(
   input: unknown,
@@ -19,10 +19,12 @@ export function parsePrepareInput(
     "requestDigest",
     "rootIdentity",
     "taskId",
+    "taskEpochDigest",
     "treeDigest",
   ]);
   if (values === undefined || !Object.isFrozen(input)) return;
   const taskId = values.get("taskId");
+  const taskEpochDigest = values.get("taskEpochDigest");
   const requestDigest = values.get("requestDigest");
   const repositoryId = values.get("repositoryId");
   const rootIdentity = values.get("rootIdentity");
@@ -32,6 +34,7 @@ export function parsePrepareInput(
   if (
     typeof taskId !== "string" ||
     !taskPattern.test(taskId) ||
+    !isDigest(taskEpochDigest) ||
     !isDigest(requestDigest) ||
     !identity(repositoryId) ||
     !identity(rootIdentity) ||
@@ -43,6 +46,7 @@ export function parsePrepareInput(
   }
   return Object.freeze({
     taskId,
+    taskEpochDigest,
     requestDigest,
     repositoryId,
     rootIdentity,
@@ -62,6 +66,7 @@ function parseChanges(
     return;
   }
   const changes: TaskWorktreeChange[] = [];
+  const canonicalPaths = new Set<string>();
   let previous = "";
   for (const raw of value) {
     const values = exactRecord(raw, [
@@ -77,7 +82,8 @@ function parseChanges(
     const candidateBytes = parseBytes(values.get("candidateBytes"));
     if (
       typeof path !== "string" ||
-      !relativePath(path) ||
+      !isSafeRelativePath(path) ||
+      path !== path.normalize("NFC") ||
       path <= previous ||
       (operation !== "write" && operation !== "delete") ||
       (baselineDigest !== null && !isDigest(baselineDigest)) ||
@@ -86,6 +92,9 @@ function parseChanges(
     ) {
       return;
     }
+    const canonicalPath = path.toLowerCase();
+    if (canonicalPaths.has(canonicalPath)) return;
+    canonicalPaths.add(canonicalPath);
     previous = path;
     changes.push(
       Object.freeze({
@@ -150,11 +159,4 @@ function identity(value: unknown): value is string {
 
 function isDigest(value: unknown): value is TaskWorktreeDigest {
   return typeof value === "string" && digestPattern.test(value);
-}
-
-function relativePath(value: string): boolean {
-  return (
-    value.length <= 4096 &&
-    value.split("/").every((segment) => pathSegmentPattern.test(segment))
-  );
 }

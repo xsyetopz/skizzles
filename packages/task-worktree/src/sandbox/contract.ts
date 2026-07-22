@@ -1,5 +1,47 @@
 import type { StructuredCommandRequest } from "./command-policy.ts";
 
+export type SandboxVerificationObjective =
+  | Readonly<{
+      readonly kind: "original-tests";
+      readonly structuralReceiptDigest: `sha256:${string}`;
+      readonly baselineTestManifestDigest: `sha256:${string}`;
+      readonly productionOverlayDigest: `sha256:${string}`;
+      readonly containerImageDigest: `sha256:${string}`;
+      readonly containerEvidenceDigest: `sha256:${string}`;
+    }>
+  | Readonly<{
+      readonly kind: "mutation";
+      readonly structuralReceiptDigest: `sha256:${string}`;
+      readonly inventoryDigest: `sha256:${string}`;
+      readonly mutantIds: readonly `sha256:${string}`[];
+    }>
+  | Readonly<{
+      readonly kind: "property";
+      readonly structuralReceiptDigest: `sha256:${string}`;
+      readonly seedScheduleDigest: `sha256:${string}`;
+      readonly requiredRandomFuzzCaseCount: number;
+      readonly requiredExtremeVectorCount: number;
+      readonly requiredCaseCount: number;
+      readonly requiredExtremeVectorDigests: readonly `sha256:${string}`[];
+      readonly extremeVectorInventoryDigest: `sha256:${string}`;
+      readonly nodeIds: readonly `sha256:${string}`[];
+      readonly branchIds: readonly `sha256:${string}`[];
+    }>
+  | Readonly<{
+      readonly kind: "coverage";
+      readonly structuralReceiptDigest: `sha256:${string}`;
+      readonly modifiedNodes: readonly Readonly<{
+        readonly nodeId: `sha256:${string}`;
+        readonly lineIds: readonly `sha256:${string}`[];
+        readonly branchIds: readonly `sha256:${string}`[];
+      }>[];
+      readonly thresholds: Readonly<{
+        readonly minimumNodeHits: number;
+        readonly minimumLineHits: number;
+        readonly minimumBranchHits: number;
+      }>;
+    }>;
+
 export type PortableSandboxMechanism =
   | "landlock"
   | "apparmor"
@@ -42,6 +84,8 @@ export interface SandboxAuthorityExecutionRequest {
   readonly command: StructuredCommandRequest;
   readonly worktreeRoot: string;
   readonly writeRoot: string;
+  readonly verificationObjective?: SandboxVerificationObjective;
+  readonly objectiveDigest?: `sha256:${string}`;
   readonly bindingDigest: string;
   readonly timeoutMilliseconds: number;
   readonly maximumOutputBytes: number;

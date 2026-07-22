@@ -7,11 +7,12 @@ import type {
 } from "../contract.ts";
 import type { DependencyResolutionService } from "../dependency/resolution.ts";
 import type { TaskWorktreeDiffAuthority } from "../diff/contract.ts";
-import { digestTaskWorktreeValue } from "../digest.ts";
+import type { digestTaskWorktreeValue } from "../digest.ts";
 import type { GitCommandAuthority } from "../git/command.ts";
 import type { RepositorySnapshot } from "../git/repository.ts";
 import { branchHead, isClean, listWorktrees } from "../git/repository.ts";
 import type { PortableSandboxBroker } from "../sandbox/capabilities.ts";
+import type { TaskWorktreeVerificationReceipt } from "../verification/contract.ts";
 import type { PreparedCandidate } from "./candidate/contract.ts";
 import type { parseConfig } from "./configuration/config.ts";
 
@@ -29,6 +30,8 @@ export interface TaskWorktreeSessionBindings {
   readonly diffAuthority: TaskWorktreeDiffAuthority;
   readonly commitAuthority: TaskWorktreeCommitAuthority;
   readonly commandProfiles: AuthorityState["config"]["commandProfiles"];
+  readonly verificationProfiles: AuthorityState["config"]["verificationProfiles"];
+  readonly protectedPaths: AuthorityState["config"]["protectedPaths"];
   readonly sandbox: PortableSandboxBroker;
   readonly sandboxWritePaths: readonly string[];
   readonly approvalAuthority: AuthorityState["config"]["approvalAuthority"];
@@ -39,9 +42,14 @@ export interface TaskWorktreeSessionBindings {
     outcomeDigests: readonly string[];
     receiptDigest: ReturnType<typeof digestTaskWorktreeValue>;
   }> | null;
+  readonly verification: {
+    baselineViewRoot: string | null;
+    readonly receipts: TaskWorktreeVerificationReceipt[];
+  };
   readonly cleanup: {
     worktreeRemoved: boolean;
     writableRemoved: boolean;
+    baselineViewRemoved: boolean;
     branchRemoved: boolean;
     finalHead: string | null;
   };
@@ -98,7 +106,7 @@ export function bindSession(
 }
 
 export function taskKeyFor(input: TaskWorktreePrepareInput): string {
-  return `${input.repositoryId}\0${input.rootIdentity}\0${input.taskId}`;
+  return `${input.repositoryId}\0${input.rootIdentity}\0${input.taskId}\0${input.taskEpochDigest}`;
 }
 
 export async function inspectAllocation(
@@ -106,7 +114,9 @@ export async function inspectAllocation(
 ): Promise<
   Readonly<{ clean: boolean; head: string; registered: boolean }> | undefined
 > {
-  if (bindings.closed) return;
+  if (bindings.closed) {
+    return;
+  }
   const entries = await listWorktrees(bindings.git, bindings.repository.root);
   const clean = await isClean(bindings.git, bindings.root);
   const head = await branchHead(
@@ -119,8 +129,9 @@ export async function inspectAllocation(
     clean === undefined ||
     head === undefined ||
     head === null
-  )
+  ) {
     return;
+  }
   const matching = entries.filter((entry) => entry.root === bindings.root);
   return Object.freeze({
     clean,

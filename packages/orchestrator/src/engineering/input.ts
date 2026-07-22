@@ -2,6 +2,8 @@ import { posix } from "node:path";
 import {
   isChangeAssurance,
   isChangeDeclaration,
+  isIndependentSecurityReviewAuthority,
+  isSecurityPolicyLinter,
 } from "@skizzles/change-assurance";
 import { isSourceEngineering } from "@skizzles/source-engineering";
 import { isTaskWorktree } from "@skizzles/task-worktree";
@@ -9,6 +11,7 @@ import { nonempty } from "../codec.ts";
 import { digestValue } from "../digest.ts";
 import { isNormalizedRequest } from "../intent.ts";
 import { isRepositoryContext } from "../repository.ts";
+import { isWorkflowVerificationAuthority } from "../workflow/verification/authority.ts";
 import { isTaskWorktreeApprovalBridge } from "../workflow/worktree/approval.ts";
 import type { ContextBudgetAuthorityPort } from "./context.ts";
 import type {
@@ -23,6 +26,7 @@ import type {
   EngineeringWorkflowConfig,
 } from "./contract.ts";
 import type { PhysicalIntegrationAuthorityPort } from "./physical.ts";
+import type { TaskRuntimeInterruptAuthorityPort } from "./reset/contract.ts";
 import {
   hasOwnDataMethods,
   isFrozenOpaque,
@@ -51,8 +55,11 @@ export function parseEngineeringConfig(
     "causal",
     "sourceEngineering",
     "changeAssurance",
+    "securityPolicyLinter",
+    "independentSecurityReview",
     "contextBudget",
     "physicalIntegration",
+    "taskRuntime",
     "validationProfiles",
     "discoveryRoot",
   ]);
@@ -62,8 +69,13 @@ export function parseEngineeringConfig(
       hasCausalConfig(value["causal"]) &&
       isSourceEngineering(value["sourceEngineering"]) &&
       isChangeAssurance(value["changeAssurance"]) &&
+      isSecurityPolicyLinter(value["securityPolicyLinter"]) &&
+      isIndependentSecurityReviewAuthority(
+        value["independentSecurityReview"],
+      ) &&
       isContextBudget(value["contextBudget"]) &&
       isPhysicalIntegration(value["physicalIntegration"]) &&
+      isTaskRuntime(value["taskRuntime"]) &&
       nonempty(value["discoveryRoot"], 1024)
     )
   ) {
@@ -75,8 +87,11 @@ export function parseEngineeringConfig(
     causal: value["causal"],
     sourceEngineering: value["sourceEngineering"],
     changeAssurance: value["changeAssurance"],
+    securityPolicyLinter: value["securityPolicyLinter"],
+    independentSecurityReview: value["independentSecurityReview"],
     contextBudget: value["contextBudget"],
     physicalIntegration: value["physicalIntegration"],
+    taskRuntime: value["taskRuntime"],
     validationProfiles: profiles,
     discoveryRoot: value["discoveryRoot"],
   });
@@ -499,6 +514,8 @@ function hasCausalConfig(
     "baselineAuthority",
     "taskWorktree",
     "taskWorktreeApproval",
+    "verificationAuthority",
+    "verificationProfiles",
     "transaction",
     "approvalContext",
   ]);
@@ -506,8 +523,10 @@ function hasCausalConfig(
     config !== undefined &&
     hasOwnDataMethods(config["orchestrator"], [
       "captureTargetBaseline",
+      "discoverTask",
       "releaseTargetBaseline",
       "revalidateTargetBaseline",
+      "restoreTaskCheckpoint",
     ]) &&
     snapshotRecord(config["publicationIdentity"], [
       "repositoryId",
@@ -517,6 +536,13 @@ function hasCausalConfig(
     hasMethods(config["baselineAuthority"], ["capture"]) &&
     isTaskWorktree(config["taskWorktree"]) &&
     isTaskWorktreeApprovalBridge(config["taskWorktreeApproval"]) &&
+    isWorkflowVerificationAuthority(config["verificationAuthority"]) &&
+    snapshotRecord(config["verificationProfiles"], [
+      "originalTests",
+      "mutation",
+      "property",
+      "coverage",
+    ]) !== undefined &&
     snapshotRecord(
       config["transaction"],
       ["destination", "leases"],
@@ -554,4 +580,18 @@ function isPhysicalIntegration(
   value: unknown,
 ): value is PhysicalIntegrationAuthorityPort {
   return hasMethods(value, ["attest"]);
+}
+
+function isTaskRuntime(
+  value: unknown,
+): value is TaskRuntimeInterruptAuthorityPort {
+  const runtime = snapshotRecord(value, ["interrupt", "timeoutMilliseconds"]);
+  return (
+    runtime !== undefined &&
+    typeof runtime["interrupt"] === "function" &&
+    typeof runtime["timeoutMilliseconds"] === "number" &&
+    Number.isSafeInteger(runtime["timeoutMilliseconds"]) &&
+    runtime["timeoutMilliseconds"] > 0 &&
+    runtime["timeoutMilliseconds"] <= 60_000
+  );
 }

@@ -11,17 +11,16 @@ import type {
   TaskWorktreeRevalidationResult,
   TaskWorktreeRunResult,
 } from "../contract.ts";
-import type { TaskWorktreeDigest } from "../digest.ts";
 import { digestTaskWorktreeValue } from "../digest.ts";
+import { verifyVerificationReceipt } from "../verification/execution.ts";
 import {
   consumePromotionPermit,
   createApprovalBinding,
   issuePromotionPermit,
 } from "./approval.ts";
-import { currentCandidateInput } from "./candidate.ts";
+import { validateSessionBindings } from "./candidate/validation.ts";
 import { createLifecycleReceipt } from "./receipt.ts";
 import {
-  inspectAllocation,
   type TaskWorktreeSessionBindings,
   taskWorktreeSessionBindings,
 } from "./state.ts";
@@ -34,18 +33,36 @@ export async function revalidateSession(
   const bindings =
     parsed === undefined ? undefined : ownedBindings(owner, parsed.session);
   if (bindings === undefined) return rejected("SESSION_MISMATCH");
-  const digest = await validate(bindings);
-  return digest === undefined
-    ? rejected("CANDIDATE_REJECTED")
-    : Object.freeze({
-        status: "valid",
-        receipt: createLifecycleReceipt(
-          owner,
-          digest,
-          "revalidate",
-          bindings.summary,
-        ),
-      });
+  const digest = await validateSessionBindings(bindings);
+  if (digest === undefined) return rejected("CANDIDATE_REJECTED");
+  for (const receipt of bindings.verification.receipts) {
+    if (
+      !(await verifyVerificationReceipt(
+        owner,
+        Object.freeze({
+          version: 1 as const,
+          session: bindings.session,
+          receipt,
+        }),
+      ))
+    )
+      return rejected("VERIFICATION_REJECTED");
+  }
+  const revalidationDigest = digestTaskWorktreeValue({
+    candidate: digest,
+    verificationReceipts: bindings.verification.receipts.map(
+      ({ receiptDigest }) => receiptDigest,
+    ),
+  });
+  return Object.freeze({
+    status: "valid",
+    receipt: createLifecycleReceipt(
+      owner,
+      revalidationDigest,
+      "revalidate",
+      bindings.summary,
+    ),
+  });
 }
 
 export async function runSession(
@@ -61,7 +78,7 @@ export async function runSession(
       : parseIds(parsed.values.get("profileIds"));
   if (bindings === undefined || profileIds === undefined)
     return rejected("INVALID_INPUT");
-  if ((await validate(bindings)) === undefined)
+  if ((await validateSessionBindings(bindings)) === undefined)
     return rejected("CANDIDATE_REJECTED");
   const invocationDigests: string[] = [];
   for (const id of profileIds) {
@@ -95,7 +112,7 @@ export async function runSession(
       return rejected("COMMAND_FAILED");
     }
     invocationDigests.push(execution.receipt.outcomeDigest);
-    if ((await validate(bindings)) === undefined)
+    if ((await validateSessionBindings(bindings)) === undefined)
       return rejected("CANDIDATE_REJECTED");
   }
   const digest = digestTaskWorktreeValue({
@@ -132,8 +149,10 @@ export async function commitSession(
   if (bindings === undefined) return rejected("INVALID_INPUT");
   if (bindings.candidate.committedHead !== null)
     return rejected("COMMIT_REJECTED");
-  const revalidationDigest = await validate(bindings);
+  const revalidationDigest = await validateSessionBindings(bindings);
   if (revalidationDigest === undefined) return rejected("CANDIDATE_REJECTED");
+  if (!(await verificationReady(owner, bindings)))
+    return rejected("VERIFICATION_REJECTED");
   const approvalBinding = createApprovalBinding(bindings, revalidationDigest);
   if (approvalBinding === undefined) return rejected("APPROVAL_REJECTED");
   const approvalDigest = consumePromotionPermit(
@@ -204,7 +223,7 @@ export async function commitSession(
   )
     return rejected("COMMIT_REJECTED");
   bindings.candidate.committedHead = head;
-  if ((await validate(bindings)) === undefined)
+  if ((await validateSessionBindings(bindings)) === undefined)
     return rejected("COMMIT_REJECTED");
   const digest = digestTaskWorktreeValue({
     authorization: authorization.approval.authorizationDigest,
@@ -229,8 +248,10 @@ export async function authorizeSession(
   if (bindings === undefined) return rejected("INVALID_INPUT");
   if (bindings.candidate.committedHead !== null)
     return rejected("COMMIT_REJECTED");
-  const revalidationDigest = await validate(bindings);
+  const revalidationDigest = await validateSessionBindings(bindings);
   if (revalidationDigest === undefined) return rejected("CANDIDATE_REJECTED");
+  if (!(await verificationReady(owner, bindings)))
+    return rejected("VERIFICATION_REJECTED");
   const approvalBinding = createApprovalBinding(bindings, revalidationDigest);
   if (approvalBinding === undefined) return rejected("APPROVAL_REJECTED");
   const permit = await issuePromotionPermit(
@@ -249,6 +270,30 @@ function shellQuote(value: string): string {
   return value.replaceAll("'", "'\\''");
 }
 
+async function verificationReady(
+  owner: object,
+  bindings: TaskWorktreeSessionBindings,
+): Promise<boolean> {
+  for (const profile of bindings.verificationProfiles) {
+    const receipt = bindings.verification.receipts.findLast(
+      ({ profileId }) => profileId === profile.id,
+    );
+    if (
+      receipt === undefined ||
+      !(await verifyVerificationReceipt(
+        owner,
+        Object.freeze({
+          version: 1 as const,
+          session: bindings.session,
+          receipt,
+        }),
+      ))
+    )
+      return false;
+  }
+  return true;
+}
+
 async function commitMessage(
   bindings: TaskWorktreeSessionBindings,
 ): Promise<string | undefined> {
@@ -260,54 +305,6 @@ async function commitMessage(
   if (result === undefined) return;
   const value = result.stdout.replace(/\n+$/u, "");
   return value.length > 0 ? value : undefined;
-}
-
-async function validate(
-  bindings: TaskWorktreeSessionBindings,
-): Promise<TaskWorktreeDigest | undefined> {
-  const allocation = await inspectAllocation(bindings);
-  if (allocation === undefined || !allocation.registered) return;
-  const current = await currentCandidateInput(
-    bindings.root,
-    bindings.input,
-    bindings.candidate.diffInput.baseline,
-  );
-  if (
-    current === undefined ||
-    !bindings.diffAuthority.verify(
-      Object.freeze({
-        input: current,
-        receipt: bindings.candidate.diffReceipt,
-      }),
-    )
-  )
-    return;
-  const status = await bindings.git.run(bindings.root, [
-    "status",
-    "--porcelain=v1",
-    "-z",
-    "--untracked-files=all",
-  ]);
-  if (status === undefined) return;
-  const allowed = new Set(bindings.input.changes.map(({ path }) => path));
-  for (const entry of status.stdout
-    .split("\0")
-    .filter((value) => value.length > 0)) {
-    const path = entry.slice(3);
-    if (!allowed.has(path)) return;
-  }
-  if (
-    bindings.candidate.committedHead !== null &&
-    (status.stdout.length !== 0 ||
-      allocation.head !== bindings.candidate.committedHead)
-  )
-    return;
-  return digestTaskWorktreeValue({
-    prepare: bindings.prepareDigest,
-    candidate: bindings.candidate.candidateDigest,
-    head: allocation.head,
-    status: status.stdout,
-  });
 }
 
 async function output(

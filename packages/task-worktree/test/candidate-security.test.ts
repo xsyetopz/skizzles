@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import {
   link,
   lstat,
+  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -206,6 +207,8 @@ function bytes(value: string): Uint8Array {
 async function fixture(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "skizzles-candidate-security-"));
   fixtures.push(root);
+  await mkdir(join(root, "spec"));
+  await writeFile(join(root, "spec/rules.md"), "normative\n");
   return root;
 }
 
@@ -217,6 +220,7 @@ function declaration(
 ): TaskWorktreePrepareInput {
   return Object.freeze({
     taskId: "candidate-security",
+    taskEpochDigest: digestTaskWorktreeValue("epoch"),
     requestDigest: digestTaskWorktreeValue("request"),
     repositoryId: "repo-a",
     rootIdentity: "root-a",
@@ -286,7 +290,24 @@ async function prepareWithAuthorities(
 ) {
   return await prepareCandidate({
     root,
+    authorityId: "candidate-security-authority",
     declaration: input,
+    protectedPaths: Object.freeze({
+      policyId: "candidate-security-protection",
+      testRoots: Object.freeze([]),
+      specificationRoots: Object.freeze(["spec"]),
+      authorize: async (request: {
+        readonly requestDigestOfThisMaterial: string;
+      }) =>
+        Object.freeze({
+          status: "authorized" as const,
+          requestDigest: request.requestDigestOfThisMaterial,
+          mode: "implementation" as const,
+          authorizedTestPaths: Object.freeze([]),
+          authorizationDigest: digestTaskWorktreeValue("authorization"),
+        }),
+    }),
+    verificationProfiles: Object.freeze([]),
     diffAuthority,
     commitAuthority,
     sandbox,

@@ -41,6 +41,18 @@ export type {
   TemplateAuthorityPort,
 } from "./evidence/source.ts";
 export { createSourceEvidence } from "./evidence/source.ts";
+export { isStructuralEvidenceReceipt } from "./evidence/structural.ts";
+export type {
+  CompilerChainLink,
+  CompilerChainReceipt,
+  ExecutableVersionEvidence,
+  ModifiedExecutableNodeEvidence,
+  MutationSiteEvidence,
+  MutationVariantEvidence,
+  StructuralAstChangeEvidence,
+  StructuralEvidenceReceipt,
+  StructuralPolicyReceipt,
+} from "./evidence/structural-contract.ts";
 export {
   createTypeScriptAstLanguageAdapter,
   isSourceLanguageAdapter,

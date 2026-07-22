@@ -31,6 +31,13 @@ export type SecurityFindingCode =
   | "RAW_EXECUTION_PRIMITIVE"
   | "RAW_DATABASE_PRIMITIVE"
   | "RAW_NETWORK_PRIMITIVE"
+  | "TAINTED_EXECUTION_FLOW"
+  | "TAINTED_DATABASE_FLOW"
+  | "TAINTED_NETWORK_FLOW"
+  | "UNKNOWN_SECURITY_FLOW"
+  | "DYNAMIC_SECURITY_DISPATCH"
+  | "MIDDLEWARE_NOT_DOMINANT"
+  | "UNRESOLVED_SECURITY_SYMBOL"
   | "SESSION_BOUNDARY_REJECTED"
   | "SESSION_BOUNDARY_FORGED";
 
@@ -89,6 +96,10 @@ export interface SecurityPolicyConfig {
 
 export interface SecurityFinding {
   readonly code: SecurityFindingCode;
+  readonly severity: "high" | "critical";
+  readonly confidence: "high" | "medium";
+  readonly fingerprint: SecurityDigest;
+  readonly traceDigest: SecurityDigest;
   readonly path: string;
   readonly message: string;
   readonly line: number;
@@ -120,6 +131,10 @@ export interface ParsedSecuritySource {
   readonly sourceFile: SourceFile;
   readonly imports: ReadonlyMap<string, readonly string[]>;
   readonly importAliases: ReadonlyMap<string, string>;
+  readonly importBindings: ReadonlyMap<
+    string,
+    Readonly<{ readonly module: string; readonly imported: string }>
+  >;
   readonly declaredNames: ReadonlySet<string>;
   readonly exportedNames: ReadonlySet<string>;
   readonly middlewareNames: ReadonlySet<string>;

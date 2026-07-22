@@ -2,8 +2,14 @@ import type {
   ChangeAssurance,
   ChangeAssuranceReceipt,
   ChangeDeclaration,
+  IndependentSecurityReviewAuthority,
+  SecurityPolicyLinterAuthority,
+  SecurityPolicyLintReceipt,
+  SecurityReviewReceipt,
 } from "@skizzles/change-assurance";
 import type { SourceEngineering } from "@skizzles/source-engineering";
+import type { TaskWorktreeVerificationReceipt } from "@skizzles/task-worktree";
+import type { VerificationGateReceipt } from "@skizzles/verification-gate";
 import type { NormalizedRequest } from "../intent.ts";
 import type { RepositoryContext } from "../repository.ts";
 import type {
@@ -21,6 +27,11 @@ import type {
   PhysicalIntegrationAuthorityPort,
   PhysicalIntegrationReceipt,
 } from "./physical.ts";
+import type {
+  TaskContext,
+  TaskContextResetResult,
+  TaskRuntimeInterruptAuthorityPort,
+} from "./reset/contract.ts";
 
 export type EngineeringObjective = "behavioral" | "format-only";
 export type EngineeringDeclarationKind =
@@ -131,8 +142,11 @@ export interface EngineeringWorkflowConfig {
   readonly causal: CausalWorkflowConfig;
   readonly sourceEngineering: SourceEngineeringPort;
   readonly changeAssurance: ChangeAssurance;
+  readonly securityPolicyLinter: SecurityPolicyLinterAuthority;
+  readonly independentSecurityReview: IndependentSecurityReviewAuthority;
   readonly contextBudget: ContextBudgetAuthorityPort;
   readonly physicalIntegration: PhysicalIntegrationAuthorityPort;
+  readonly taskRuntime: TaskRuntimeInterruptAuthorityPort;
   readonly validationProfiles: readonly EngineeringValidationProfile[];
   readonly discoveryRoot: string;
 }
@@ -159,6 +173,12 @@ export interface EngineeringPreview {
   readonly targets: readonly EngineeringPreviewTarget[];
   readonly integrations: readonly PhysicalIntegrationReceipt[];
   readonly assurance: ChangeAssuranceReceipt;
+  readonly security: Readonly<{
+    readonly lintReceipt: SecurityPolicyLintReceipt;
+    readonly reviewReceipt: SecurityReviewReceipt;
+  }>;
+  readonly taskVerificationReceipts: readonly TaskWorktreeVerificationReceipt[];
+  readonly verificationGateReceipt: VerificationGateReceipt;
 }
 
 export interface EngineeringReview extends WorkflowReview {
@@ -169,10 +189,12 @@ export type EngineeringFailureCode =
   | WorkflowFailureCode
   | "SOURCE_ENGINEERING_REJECTED"
   | "CHANGE_ASSURANCE_REJECTED"
+  | "SECURITY_REVIEW_REJECTED"
   | "CONTEXT_BUDGET_REJECTED"
   | "CONTEXT_BUDGET_DRIFTED"
   | "CONTINUATION_REJECTED"
   | "CONTINUATION_DRIFTED"
+  | "TASK_CONTEXT_STALE"
   | "INTEGRATION_REJECTED";
 
 export type EngineeringPrepareResult =
@@ -206,13 +228,15 @@ export type EngineeringDescribeResult =
   | {
       readonly status: "described";
       readonly context: EngineeringContext;
+      readonly taskContext: TaskContext;
     }
   | {
       readonly status: "rejected";
       readonly code:
         | "INVALID_WORKFLOW_INPUT"
         | "SOURCE_ENGINEERING_REJECTED"
-        | "CONTEXT_BUDGET_REJECTED";
+        | "CONTEXT_BUDGET_REJECTED"
+        | "TASK_CONTEXT_STALE";
     };
 
 export interface EngineeringWorkflow {
@@ -228,6 +252,10 @@ export interface EngineeringWorkflow {
   readonly reject: (input: unknown) => Promise<WorkflowRejectionResult>;
   readonly recover: (input: unknown) => Promise<WorkflowRecoveryResult>;
   readonly retryCleanup: (input: unknown) => Promise<WorkflowCleanupResult>;
+  readonly resetContext: (input: unknown) => Promise<TaskContextResetResult>;
+  readonly resumeContextReset: (
+    input: unknown,
+  ) => Promise<TaskContextResetResult>;
 }
 
 export type EngineeringWorkflowResult =

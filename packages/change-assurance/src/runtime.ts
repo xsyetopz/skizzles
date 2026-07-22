@@ -1,3 +1,4 @@
+import { createCandidateManifest } from "@skizzles/candidate-manifest";
 import type {
   ChangeAssurance,
   ChangeAssuranceCreationResult,
@@ -134,6 +135,17 @@ async function assess(
         candidateDigest,
       })),
     ),
+    candidateManifestDigest: createCandidateManifest(
+      Object.freeze(
+        targetMaterial.map(({ path, operation, candidateDigest }) =>
+          Object.freeze({
+            path,
+            operation,
+            contentDigest: operation === "delete" ? null : candidateDigest,
+          }),
+        ),
+      ),
+    ).manifestDigest,
     declarationDigest: declaration.declarationDigest,
     extensionReceipts: Object.freeze(extensionReceipts),
   });

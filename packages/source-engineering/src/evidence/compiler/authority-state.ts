@@ -1,6 +1,7 @@
 import type { Digest } from "../../digest.ts";
 import type {
   CompilerEvidenceBindings,
+  CompilerEvidenceReceipt,
   CompilerSymbolAuthorityPort,
 } from "./contract.ts";
 
@@ -23,6 +24,7 @@ export interface TrustedCompilerState {
 export interface ParsedCompilerInput {
   readonly bindings: CompilerEvidenceBindings;
   readonly targets: readonly ParsedCandidateOverlay[];
+  readonly predecessor: CompilerEvidenceReceipt | null;
 }
 
 export interface ParsedCandidateOverlay {

@@ -25,9 +25,54 @@ export function finding(
   message: string,
   line = 1,
   column = 1,
+  trace: readonly Readonly<{
+    readonly path: string;
+    readonly line: number;
+    readonly column: number;
+    readonly kind: string;
+  }>[] = Object.freeze([{ path, line, column, kind: "finding" }]),
 ): SecurityFinding {
-  return Object.freeze({ code, path, message, line, column });
+  const severity = criticalCodes.has(code) ? "critical" : "high";
+  const confidence = uncertainCodes.has(code) ? "medium" : "high";
+  const traceDigest = digestValue({ version: "security-trace-v1", trace });
+  const fingerprint = digestValue({
+    version: "security-finding-v1",
+    code,
+    severity,
+    path,
+    line,
+    column,
+    traceDigest,
+  });
+  return Object.freeze({
+    code,
+    severity,
+    confidence,
+    fingerprint,
+    traceDigest,
+    path,
+    message,
+    line,
+    column,
+  });
 }
+
+const criticalCodes = new Set<SecurityFinding["code"]>([
+  "CANDIDATE_DIGEST_MISMATCH",
+  "INVALID_CANDIDATE",
+  "INVALID_CONFIG",
+  "SYNTAX_ERROR",
+  "CUSTOM_CRYPTOGRAPHY",
+  "RAW_EXECUTION_PRIMITIVE",
+  "TAINTED_EXECUTION_FLOW",
+  "DYNAMIC_SECURITY_DISPATCH",
+  "SESSION_BOUNDARY_FORGED",
+]);
+
+const uncertainCodes = new Set<SecurityFinding["code"]>([
+  "UNKNOWN_SECURITY_FLOW",
+  "UNRESOLVED_SECURITY_SYMBOL",
+]);
 
 export function sortFindings(
   findings: readonly SecurityFinding[],

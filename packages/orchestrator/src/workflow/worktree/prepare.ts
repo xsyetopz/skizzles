@@ -4,6 +4,7 @@ import {
   type TaskWorktreeReceipt,
   type TaskWorktreeSession,
 } from "@skizzles/task-worktree";
+import type { Digest } from "../../digest.ts";
 import type { TargetBaseline } from "../../state/target.ts";
 import type {
   CapturedPublicationBaseline,
@@ -30,10 +31,12 @@ export async function prepareWorkflowTask(
   baseline: TargetBaseline,
   captured: CapturedPublicationBaseline,
   lifecycle: WorkflowLifecycle,
+  taskEpochDigest: Digest,
 ): Promise<WorkflowTaskPreparation> {
   const preparation = await config.taskWorktree.prepare(
     Object.freeze({
       taskId: config.approvalContext.taskId,
+      taskEpochDigest,
       requestDigest: parsed.request.intentDigest,
       repositoryId: parsed.repository.repositoryId,
       rootIdentity: config.publicationIdentity.rootIdentity,

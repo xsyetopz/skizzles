@@ -1,5 +1,6 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Bun provides its test module at runtime.
 import { describe, expect, it } from "bun:test";
+import { digestTaskWorktreeValue } from "../../src/digest.ts";
 import {
   createPortableSandboxBroker,
   createSandboxCapabilityAuthority,
@@ -8,6 +9,76 @@ import {
 import { broker, defaultLimits, fullAttestation } from "./support.ts";
 
 describe("portable OS sandbox execution", () => {
+  it("binds exact digest-addressed verification objectives", async () => {
+    let observed: SandboxAuthorityExecutionRequest | undefined;
+    const sandbox = broker(fullAttestation, (request) => {
+      observed = request;
+      return {
+        bindingDigest: request.bindingDigest,
+        exitCode: 0,
+        stdoutDigest: "0".repeat(64),
+        stderrDigest: "0".repeat(64),
+        stdoutBytes: 0,
+        stderrBytes: 0,
+      };
+    });
+    const negotiated = await sandbox.negotiate(["src/a.ts"]);
+    if (negotiated.status !== "accepted")
+      throw new Error("negotiation rejected");
+    const objective = Object.freeze({
+      kind: "coverage" as const,
+      structuralReceiptDigest: digestTaskWorktreeValue("structural"),
+      modifiedNodes: Object.freeze([
+        Object.freeze({
+          nodeId: digestTaskWorktreeValue("node-a"),
+          lineIds: Object.freeze([digestTaskWorktreeValue("line-a")]),
+          branchIds: Object.freeze([digestTaskWorktreeValue("branch-a")]),
+        }),
+      ]),
+      thresholds: Object.freeze({
+        minimumNodeHits: 2,
+        minimumLineHits: 2,
+        minimumBranchHits: 2,
+      }),
+    });
+    const base = {
+      ...defaultLimits,
+      attestation: negotiated.receipt,
+      command: {
+        profile: "test",
+        executable: "bun",
+        arguments: ["test"],
+        cwd: ".",
+      },
+      worktreeRoot: "/tmp/task-roots/worktree",
+      writeRoot: "/tmp/task-roots/write",
+    };
+    expect(
+      await sandbox.execute({
+        ...base,
+        verificationObjective: objective,
+        objectiveDigest: digestTaskWorktreeValue(objective),
+      }),
+    ).toMatchObject({ status: "executed" });
+    expect(observed?.verificationObjective).toEqual(objective);
+    expect(observed?.objectiveDigest).toBe(digestTaskWorktreeValue(objective));
+    expect(
+      await sandbox.execute({
+        ...base,
+        verificationObjective: Object.freeze({
+          ...objective,
+          modifiedNodes: Object.freeze([
+            Object.freeze({
+              ...objective.modifiedNodes[0],
+              lineIds: Object.freeze(["line-a"]),
+            }),
+          ]),
+        }),
+        objectiveDigest: digestTaskWorktreeValue(objective),
+      }),
+    ).toEqual({ status: "rejected", code: "INVALID_EXECUTION_REQUEST" });
+  });
+
   it("executes only through the authority bound to the exact attestation and request", async () => {
     const sandbox = broker(fullAttestation);
     const negotiated = await sandbox.negotiate(["src/a.ts"]);
@@ -212,8 +283,8 @@ describe("portable OS sandbox execution", () => {
     const limits = Object.freeze({
       timeoutMilliseconds: 120_000,
       maximumOutputBytes: 2_000_000,
-      drainMilliseconds: 2_000,
-      signalGraceMilliseconds: 3_000,
+      drainMilliseconds: 2000,
+      signalGraceMilliseconds: 3000,
     });
     const result = await sandbox.execute({
       ...limits,

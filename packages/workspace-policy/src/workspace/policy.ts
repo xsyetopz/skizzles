@@ -20,6 +20,7 @@ import {
 const PATH_SEPARATOR_PATTERN = /[\\/]/u;
 
 const SKIZZLES_PACKAGE_NAMES = [
+  "@skizzles/candidate-manifest",
   "@skizzles/change-assurance",
   "@skizzles/command-hook",
   "@skizzles/command-supervisor",
@@ -33,6 +34,7 @@ const SKIZZLES_PACKAGE_NAMES = [
   "@skizzles/source-engineering",
   "@skizzles/task-worktree",
   "@skizzles/usage-analyzer",
+  "@skizzles/verification-gate",
   "@skizzles/workspace-transaction",
   "@skizzles/workspace-policy",
   "codex-fastmcp-template",

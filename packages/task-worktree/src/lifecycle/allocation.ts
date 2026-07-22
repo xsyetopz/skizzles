@@ -22,6 +22,7 @@ export function allocationFor(
     .slice(0, 48);
   const digest = digestTaskWorktreeValue({
     taskId: input.taskId,
+    taskEpochDigest: input.taskEpochDigest,
     repositoryId: input.repositoryId,
     rootIdentity: input.rootIdentity,
   }).slice("sha256:".length, "sha256:".length + 16);
@@ -35,12 +36,14 @@ export async function validateAllocationParent(
   configuredParent: string,
   repositoryRoot: string,
 ): Promise<string | undefined> {
-  if (!(await plainDirectory(configuredParent))) return;
+  if (!(await plainDirectory(configuredParent))) {
+    return;
+  }
   try {
     const parent = await realpath(configuredParent);
     return isOutside(parent, repositoryRoot) ? parent : undefined;
   } catch {
-    return undefined;
+    return;
   }
 }
 
@@ -51,9 +54,13 @@ export async function verifyAllocation(
   branch: string,
   expectedHead: string,
 ): Promise<boolean> {
-  if (!(await plainDirectory(worktreeRoot))) return false;
+  if (!(await plainDirectory(worktreeRoot))) {
+    return false;
+  }
   try {
-    if ((await realpath(worktreeRoot)) !== worktreeRoot) return false;
+    if ((await realpath(worktreeRoot)) !== worktreeRoot) {
+      return false;
+    }
   } catch {
     return false;
   }
@@ -77,7 +84,9 @@ export async function removeWritableRoot(
 ): Promise<boolean> {
   try {
     const canonicalParent = await realpath(parent);
-    if (!exactChild(canonicalParent, writableRoot)) return false;
+    if (!exactChild(canonicalParent, writableRoot)) {
+      return false;
+    }
     const metadata = await lstat(writableRoot);
     if (
       !metadata.isDirectory() ||

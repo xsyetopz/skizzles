@@ -1,5 +1,6 @@
 import type { TaskWorktreeCommitAuthority } from "../../commit/contract.ts";
 import type {
+  TaskWorktreeConfig,
   TaskWorktreeFailureCode,
   TaskWorktreePrepareInput,
 } from "../../contract.ts";
@@ -10,18 +11,27 @@ import {
   createCandidateMutationGateway,
   createPathInspectionAuthority,
 } from "../../policy/path-scope.ts";
+import { captureProtectedManifest } from "../../protection/manifest.ts";
+import {
+  authorizeProtectedCandidate,
+  captureAuthorizedCandidateManifest,
+} from "../../protection/policy.ts";
 import type { PortableSandboxBroker } from "../../sandbox/capabilities.ts";
 import { captureBaseline, captureCandidate } from "./capture.ts";
 import type {
   CandidateDependencyInterventionDiagnostic,
   CandidatePreparationResult,
 } from "./contract.ts";
+import { candidateManifestDigest } from "./manifest.ts";
 import { inspectTarget, mutate } from "./mutation.ts";
 
 export async function prepareCandidate(
   input: Readonly<{
     root: string;
+    authorityId: string;
     declaration: TaskWorktreePrepareInput;
+    protectedPaths: TaskWorktreeConfig["protectedPaths"];
+    verificationProfiles: TaskWorktreeConfig["verificationProfiles"];
     diffAuthority: TaskWorktreeDiffAuthority;
     commitAuthority: TaskWorktreeCommitAuthority;
     sandbox: PortableSandboxBroker;
@@ -30,6 +40,34 @@ export async function prepareCandidate(
     dependencyRequests: readonly unknown[];
   }>,
 ): Promise<CandidatePreparationResult> {
+  if (
+    input.protectedPaths.specificationRoots.length === 0 ||
+    (input.verificationProfiles.length > 0 &&
+      input.protectedPaths.testRoots.length === 0)
+  )
+    return rejected("CANDIDATE_REJECTED");
+  const authorizedProtection = await authorizeProtectedCandidate(
+    input.root,
+    input.authorityId,
+    input.declaration,
+    input.protectedPaths,
+  );
+  if (authorizedProtection === undefined) return rejected("CANDIDATE_REJECTED");
+  if (
+    (input.verificationProfiles.some(({ kind }) => kind === "original-tests") &&
+      !authorizedProtection.baselineManifest.entries.some(({ path }) =>
+        input.protectedPaths.testRoots.some(
+          (root) => path === root || path.startsWith(`${root}/`),
+        ),
+      )) ||
+    (input.protectedPaths.specificationRoots.length > 0 &&
+      !authorizedProtection.baselineManifest.entries.some(({ path }) =>
+        input.protectedPaths.specificationRoots.some(
+          (root) => path === root || path.startsWith(`${root}/`),
+        ),
+      ))
+  )
+    return rejected("CANDIDATE_REJECTED");
   // The candidate declaration is never used as a sandbox capability request.
   // Only the host configuration's relative writable roots cross this boundary.
   const sandbox = await input.sandbox.negotiate(input.sandboxWritePaths);
@@ -103,6 +141,15 @@ export async function prepareCandidate(
     }),
   );
   if (gateway.status !== "created") return rejected("CANDIDATE_REJECTED");
+  const preMutationManifest = await captureProtectedManifest(
+    input.root,
+    input.protectedPaths,
+  );
+  if (
+    preMutationManifest === undefined ||
+    preMutationManifest.digest !== authorizedProtection.baselineManifest.digest
+  )
+    return rejected("CANDIDATE_REJECTED");
   for (const change of input.declaration.changes) {
     const authorization = await gateway.gateway.authorize(
       Object.freeze({
@@ -120,6 +167,14 @@ export async function prepareCandidate(
   }
   const candidate = await captureCandidate(input.root, input.declaration);
   if (candidate === undefined) return rejected("CANDIDATE_REJECTED");
+  const manifestDigest = candidateManifestDigest(input.declaration, candidate);
+  if (manifestDigest === undefined) return rejected("CANDIDATE_REJECTED");
+  const protection = await captureAuthorizedCandidateManifest(
+    input.root,
+    input.protectedPaths,
+    authorizedProtection,
+  );
+  if (protection === undefined) return rejected("CANDIDATE_REJECTED");
   const diffInput = Object.freeze({ baseline, candidate });
   const diff = input.diffAuthority.inspect(diffInput);
   if (diff.status === "rejected") return rejected("DIFF_REJECTED");
@@ -156,15 +211,21 @@ export async function prepareCandidate(
       diffReceipt: diff.receipt,
       commitReceipt: commit.receipt,
       candidateDigest: diff.receipt.candidateDigest,
+      candidateManifestDigest: manifestDigest,
       assuranceDigest: digestTaskWorktreeValue({
         sandbox: sandbox.receipt.receiptDigest,
         dependencies: dependencyDigests,
         diff: diff.receipt.receiptDigest,
+        candidateManifest: manifestDigest,
         commit: commit.receipt.receiptDigest,
+        protection: protection.policyDigest,
+        protectedBaseline: protection.baselineManifest.digest,
+        protectedCandidate: protection.candidateManifest.digest,
       }),
       sandboxReceipt: sandbox.receipt,
       dependencyDigest: digestTaskWorktreeValue(dependencyDigests),
       phasePlanDigest: diff.plan.planDigest,
+      protection,
       committedHead: null,
     },
   });

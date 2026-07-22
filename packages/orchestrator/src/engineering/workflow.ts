@@ -71,6 +71,16 @@ function publicWorkflow(
         status: "rejected" as const,
         code: "INVALID_WORKFLOW_INPUT" as const,
       }),
+    resetContext: (input: unknown) =>
+      safeCall(() => coordinator.resetContext(input), {
+        status: "rejected" as const,
+        code: "INVALID_CONTEXT_RESET_INPUT" as const,
+      }),
+    resumeContextReset: (input: unknown) =>
+      safeCall(() => coordinator.resumeContextReset(input), {
+        status: "rejected" as const,
+        code: "INVALID_CONTEXT_RESET_INPUT" as const,
+      }),
   });
 }
 

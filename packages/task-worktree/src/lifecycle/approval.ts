@@ -26,9 +26,20 @@ export function createApprovalBinding(
 ): TaskWorktreeApprovalBinding | undefined {
   const run = bindings.latestRun;
   if (run === null) return;
+  const verificationReceipts = bindings.verificationProfiles.flatMap(
+    ({ id }) => {
+      const receipt = bindings.verification.receipts.findLast(
+        ({ profileId }) => profileId === id,
+      );
+      return receipt === undefined ? [] : [receipt];
+    },
+  );
+  if (verificationReceipts.length !== bindings.verificationProfiles.length)
+    return;
   const material = Object.freeze({
     authorityId: bindings.summary.authorityId,
     taskId: bindings.input.taskId,
+    taskEpochDigest: bindings.input.taskEpochDigest,
     requestDigest: bindings.input.requestDigest,
     repositoryId: bindings.input.repositoryId,
     rootIdentity: bindings.input.rootIdentity,
@@ -36,13 +47,20 @@ export function createApprovalBinding(
     baselineDigest: bindings.input.baselineDigest,
     preparationDigest: bindings.prepareDigest,
     candidateDigest: bindings.candidate.candidateDigest,
+    candidateManifestDigest: bindings.candidate.candidateManifestDigest,
     diffDigest: bindings.candidate.diffReceipt.diffDigest,
     revalidationDigest,
     commitPlanDigest: bindings.candidate.commitReceipt.plan.planDigest,
     runDigest: run.digest,
-    runProfileIds: run.profileIds,
-    runOutcomeDigests: run.outcomeDigests,
+    runProfileIds: Object.freeze([...run.profileIds]),
+    runOutcomeDigests: Object.freeze([...run.outcomeDigests]),
     runReceiptDigest: run.receiptDigest,
+    verificationProfileIds: Object.freeze(
+      bindings.verificationProfiles.map(({ id }) => id),
+    ),
+    verificationReceiptDigests: Object.freeze(
+      verificationReceipts.map((receipt) => receipt.receiptDigest),
+    ),
   });
   return Object.freeze({
     ...material,

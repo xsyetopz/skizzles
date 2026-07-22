@@ -6,6 +6,7 @@ import type {
   TaskWorktreeSplitPlan,
 } from "../../diff/contract.ts";
 import type { TaskWorktreeDigest } from "../../digest.ts";
+import type { ProtectedCandidateState } from "../../protection/contract.ts";
 import type { PortableSandboxReceipt } from "../../sandbox/capabilities.ts";
 
 export interface PreparedCandidate {
@@ -13,10 +14,12 @@ export interface PreparedCandidate {
   readonly diffReceipt: TaskWorktreeDiffReceipt;
   readonly commitReceipt: AtomicTaskSliceCommitReceipt;
   readonly candidateDigest: TaskWorktreeDigest;
+  readonly candidateManifestDigest: TaskWorktreeDigest;
   readonly assuranceDigest: TaskWorktreeDigest;
   readonly sandboxReceipt: PortableSandboxReceipt;
   readonly dependencyDigest: TaskWorktreeDigest;
   readonly phasePlanDigest: TaskWorktreeDigest;
+  readonly protection: ProtectedCandidateState;
   committedHead: string | null;
 }
 

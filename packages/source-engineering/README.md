@@ -23,6 +23,24 @@ language returns `UNSUPPORTED_LANGUAGE`. There is no regex or raw-text fallback.
 The local symbol index remains advisory; the adapter's authority-issued
 compiler result is final.
 
+Every edit operation carries a required positive `epoch`. Operations with the
+same epoch across different targets are staged against one predecessor
+snapshot and committed together only after one authoritative compiler run over
+the complete sorted candidate overlay. Epochs are contiguous and ordered;
+duplicate target-node operations, gaps, reordering, and partial overlays are
+rejected. One terminal all-target formatter epoch is followed by the same
+full-overlay compiler boundary.
+
+Host configuration includes a required `structuralPolicy` with
+`metricVersion: "cyclomatic-v1"`, `maxFunctionComplexity`,
+`maxFunctionIncrease`, and `maxAggregateIncrease`. The prepared task receipt
+contains an authenticated `structuralReceipt`: exact AST operation identities
+and spans, complete modified executable-node and branch maps, versioned
+per-function complexity, mutation-site descriptors, and a predecessor-bound
+compiler receipt chain. It contains digests and structural metadata, never
+candidate source bytes. Missing or ambiguous executable maps and complexity
+limit evasion fail closed.
+
 The package facade exposes the language-neutral high-level engine, the
 authenticated adapter contract, and the authority factories needed to
 configure installed adapters. Parser, editor, policy, and evidence-composition

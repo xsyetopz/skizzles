@@ -9,6 +9,11 @@ export interface CompilerEvidenceBindings {
   readonly targetPath: string;
   readonly candidateDigest: Digest;
   readonly semanticDigest: Digest;
+  readonly epoch: number;
+  readonly epochKind: "edit" | "format";
+  readonly predecessorCandidateSetDigest: Digest;
+  readonly candidateSetDigest: Digest;
+  readonly targetSetDigest: Digest;
   readonly profileId: string;
   readonly toolId: "typescript";
   readonly toolVersion: "7.0.2";
@@ -23,6 +28,7 @@ export interface CompilerCandidateOverlay {
 
 export interface CompilerEvidenceInput extends CompilerEvidenceBindings {
   readonly targets: readonly CompilerCandidateOverlay[];
+  readonly predecessor: CompilerEvidenceReceipt | null;
 }
 
 export interface CompilerDiagnosticEvidence {
@@ -35,6 +41,7 @@ export interface CompilerDiagnosticEvidence {
 }
 
 export interface CompilerEvidenceReceipt extends CompilerEvidenceBindings {
+  readonly predecessorReceiptDigest: Digest | null;
   readonly targets: readonly Readonly<{
     path: string;
     candidateDigest: Digest;
@@ -69,6 +76,7 @@ export type CompilerEvidenceFailureCode =
   | "STALE_COMPILER_BINDINGS"
   | "STALE_CANDIDATE"
   | "STRICT_FLAGS_REJECTED"
+  | "COMPILER_CHAIN_REJECTED"
   | "COMPILER_AUTHORITY_REJECTED"
   | "COMPILER_REJECTED";
 

@@ -20,8 +20,11 @@ describe("package facade and fail-closed controller", () => {
         "TaskWorktreeApprovalBridge",
         "createEngineeringWorkflow",
         "createOrchestrator",
+        "createWorkflowVerificationAuthority",
         // biome-ignore lint/security/noSecrets: public exported symbol name
         "isTaskWorktreeApprovalBridge",
+        // biome-ignore lint/security/noSecrets: public exported symbol name
+        "isWorkflowVerificationAuthority",
         "recoverDiagnosticBytes",
         "recoverRequestBytes",
       ].sort(),
@@ -57,11 +60,17 @@ describe("package facade and fail-closed controller", () => {
     expect((await orchestrator.createDiagnostic(null)).status).toBe("rejected");
     expect(orchestrator.createFilePayload(null).status).toBe("rejected");
     expect((await orchestrator.createCheckpoint(null)).status).toBe("rejected");
+    expect((await orchestrator.createTaskCheckpoint(null)).status).toBe(
+      "rejected",
+    );
     expect((await orchestrator.supersedeCheckpoint(null)).status).toBe(
       "rejected",
     );
     expect((await orchestrator.validateCheckpoint(null)).status).toBe(
       "invalid",
+    );
+    expect((await orchestrator.restoreTaskCheckpoint(null)).status).toBe(
+      "rejected",
     );
     expect(orchestrator.proposeChange(null).status).toBe("rejected");
     expect((await orchestrator.reviewChange(null)).status).toBe("rejected");
@@ -79,6 +88,7 @@ describe("package facade and fail-closed controller", () => {
       "rejected",
     );
     expect((await orchestrator.discover(null)).status).toBe("rejected");
+    expect((await orchestrator.discoverTask(null)).status).toBe("rejected");
     expect((await orchestrator.expandDiscovery(null)).status).toBe("rejected");
     expect(orchestrator.planApproval(null).status).toBe("rejected");
     expect(orchestrator.reviewApproval(null).status).toBe("rejected");

@@ -1,9 +1,11 @@
-import type { Digest } from "../../digest.ts";
+import { type Digest, digestValue } from "../../digest.ts";
 import type {
   EngineeringContext,
   EngineeringDeclarationKind,
+  EngineeringWorkflowConfig,
   SourceEngineeringPort,
 } from "../contract.ts";
+import type { ParsedDescribeInput } from "../describe-input.ts";
 import { isFrozenOpaque, snapshotArray, snapshotRecord } from "../snapshot.ts";
 
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
@@ -32,6 +34,42 @@ export type SourceDescribeResult =
       readonly status: "rejected";
       readonly code: "SOURCE_ENGINEERING_REJECTED";
     };
+
+export function sourceRepository(
+  config: EngineeringWorkflowConfig,
+  repository: ParsedDescribeInput["repository"],
+) {
+  return Object.freeze({
+    id: repository.repositoryId,
+    rootIdentity: config.causal.publicationIdentity.rootIdentity,
+    treeDigest: repository.treeDigest,
+    configDigest: repository.contextDigest,
+  });
+}
+
+export function sourceContextMatches(
+  result: Extract<SourceDescribeResult, { status: "described" }>,
+  input: ParsedDescribeInput,
+  config: EngineeringWorkflowConfig,
+): boolean {
+  const expectedTargetSet = digestValue(input.targets);
+  return (
+    result.receipt.requestDigest === input.request.intentDigest &&
+    result.receipt.repositoryId === input.repository.repositoryId &&
+    result.receipt.rootIdentity ===
+      config.causal.publicationIdentity.rootIdentity &&
+    result.receipt.treeDigest === input.repository.treeDigest &&
+    result.receipt.configDigest === input.repository.contextDigest &&
+    result.receipt.targetSetDigest === expectedTargetSet &&
+    result.context.templates.every(
+      ({ language }) => language === input.profile.language,
+    ) &&
+    result.context.targets.length === input.targets.length &&
+    result.context.targets.every(
+      (target, index) => target.path === input.targets[index],
+    )
+  );
+}
 
 export async function describeSourceEngineering(
   engine: SourceEngineeringPort,

@@ -3,12 +3,14 @@ import {
   type ChangeDeclaration,
   createChangeAssurance,
   createChangeDeclaration,
+  createIndependentSecurityReviewAuthority,
   createLicensePolicyAuthority,
   createMigrationConfigurationSecretsExtension,
   createPerformanceAssuranceExtension,
   createPerformanceBenchmarkAuthority,
   createRegistryMetadataAuthority,
   createSecurityAssuranceExtension,
+  createSecurityPolicyLinter,
   createSessionBoundaryRuntime,
   createSupplyChainAssuranceExtension,
   createSupplyChainAuthority,
@@ -181,9 +183,11 @@ export function createTestChangeAssurance(): ChangeAssurance {
     }),
   );
   const extensions = [security, migration, performance, supply].map(
-    (created) => {
+    (created, index) => {
       if (created.status !== "created") {
-        throw new Error("assurance extension fixture rejected");
+        throw new Error(
+          `assurance extension ${index} fixture rejected: ${JSON.stringify(created)}`,
+        );
       }
       return created.extension;
     },
@@ -195,6 +199,33 @@ export function createTestChangeAssurance(): ChangeAssurance {
     throw new Error("change assurance fixture rejected");
   }
   return assurance.changeAssurance;
+}
+
+export function createTestSecurityReview(assurance: ChangeAssurance) {
+  const linter = createSecurityPolicyLinter(
+    Object.freeze({
+      authorityId: "fixture-security-linter",
+      assurance,
+      policy: securityPolicy(),
+    }),
+  );
+  if (linter.status !== "created") {
+    throw new Error("security linter fixture rejected");
+  }
+  const reviewer = createIndependentSecurityReviewAuthority(
+    Object.freeze({
+      authorityId: "fixture-security-reviewer",
+      assurance,
+      linter: linter.authority,
+    }),
+  );
+  if (reviewer.status !== "created") {
+    throw new Error("security reviewer fixture rejected");
+  }
+  return Object.freeze({
+    linter: linter.authority,
+    reviewer: reviewer.authority,
+  });
 }
 
 export function createTestChangeDeclaration(
@@ -288,6 +319,14 @@ function securityPolicy() {
         imports: Object.freeze(["sessionBoundary"]),
         capability: "session" as const,
       }),
+      ...(["execution", "database", "network"] as const).map((capability) =>
+        Object.freeze({
+          interfaceId: `${capability}-interface`,
+          module: `@app/${capability}`,
+          imports: Object.freeze([`${capability}Boundary`]),
+          capability,
+        }),
+      ),
     ]),
     benchmarks: Object.freeze([
       Object.freeze({
@@ -309,7 +348,7 @@ function securityPolicy() {
                 ? "query"
                 : "fetch",
           ]),
-          secureInterfaceIds: Object.freeze(["session-interface"]),
+          secureInterfaceIds: Object.freeze([`${capability}-interface`]),
         }),
       ),
     ),

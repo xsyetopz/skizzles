@@ -24,6 +24,30 @@ describe("source engineering runtime", () => {
       status: "rejected",
       code: "INVALID_CONFIG",
     });
+    const valid = validConfig();
+    const { structuralPolicy: _structuralPolicy, ...missingPolicy } = valid;
+    expect(createSourceEngineering(Object.freeze(missingPolicy))).toEqual({
+      status: "rejected",
+      code: "INVALID_CONFIG",
+    });
+    for (const structuralPolicy of [
+      Object.freeze({
+        ...valid.structuralPolicy,
+        metricVersion: "caller-complexity",
+      }),
+      Object.freeze({
+        ...valid.structuralPolicy,
+        maxFunctionIncrease: 1.5,
+      }),
+      Object.freeze({
+        ...valid.structuralPolicy,
+        maxAggregateIncrease: -1,
+      }),
+    ]) {
+      expect(
+        createSourceEngineering(Object.freeze({ ...valid, structuralPolicy })),
+      ).toEqual({ status: "rejected", code: "INVALID_CONFIG" });
+    }
   });
 
   it("exposes one frozen facade and contains invalid public inputs", async () => {
@@ -239,6 +263,7 @@ function validConfig(throwCapture = false) {
     sourceEvidence,
     languageAdapters: Object.freeze([adapter.adapter]),
     literalRegistry: literalRegistry(),
+    structuralPolicy: policy(),
     templates: Object.freeze([
       Object.freeze({
         templateId: "typescript-node",
@@ -341,6 +366,7 @@ function describedConfig(
     sourceEvidence: source.evidence,
     languageAdapters: Object.freeze([adapter.adapter]),
     literalRegistry: literalRegistry(),
+    structuralPolicy: policy(),
     templates: Object.freeze([
       Object.freeze({
         templateId: "declaration",
@@ -352,6 +378,15 @@ function describedConfig(
         version: "1.0.0",
       }),
     ]),
+  });
+}
+
+function policy() {
+  return Object.freeze({
+    metricVersion: "cyclomatic-v1" as const,
+    maxFunctionComplexity: 64,
+    maxFunctionIncrease: 64,
+    maxAggregateIncrease: 128,
   });
 }
 

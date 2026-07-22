@@ -1,11 +1,12 @@
 import { exactKeys, isRecord } from "../codec.ts";
+import type { Digest } from "../digest.ts";
 import { isNormalizedRequest, type NormalizedRequest } from "../intent.ts";
 import { isRepositoryContext, type RepositoryContext } from "../repository.ts";
 import type { Orchestrator } from "../runtime.ts";
 import { isTargetBaseline, type TargetBaseline } from "../state/target.ts";
 import {
-  isWorkflowEvidence,
-  type WorkflowEngineeringEvidence,
+  isWorkflowEvidenceDraft,
+  type WorkflowEngineeringEvidenceDraft,
 } from "./evidence.ts";
 import { parseWorkflowTargets, type WorkflowTarget } from "./publication.ts";
 
@@ -15,8 +16,9 @@ export interface PrepareInput {
   readonly targets: readonly WorkflowTarget[];
   readonly discoveryRoot: string;
   readonly profileIds: readonly string[];
-  readonly engineeringEvidence: WorkflowEngineeringEvidence | null;
+  readonly engineeringEvidenceDraft: WorkflowEngineeringEvidenceDraft;
   readonly baseline: TargetBaseline | null;
+  readonly taskEpochDigest: Digest | null;
 }
 
 export function parsePrepareInput(input: unknown): PrepareInput | undefined {
@@ -25,8 +27,15 @@ export function parsePrepareInput(input: unknown): PrepareInput | undefined {
       isRecord(input) &&
       exactKeys(
         input,
-        ["request", "repository", "targets", "discoveryRoot", "profileIds"],
-        ["baseline", "engineeringEvidence"],
+        [
+          "request",
+          "repository",
+          "targets",
+          "discoveryRoot",
+          "profileIds",
+          "engineeringEvidenceDraft",
+        ],
+        ["baseline", "taskEpochDigest"],
       ) &&
       isNormalizedRequest(input["request"]) &&
       isRepositoryContext(input["repository"]) &&
@@ -37,16 +46,17 @@ export function parsePrepareInput(input: unknown): PrepareInput | undefined {
     return;
   }
   const targets = parseWorkflowTargets(input["targets"]);
-  const engineeringEvidence = input["engineeringEvidence"];
+  const engineeringEvidenceDraft = input["engineeringEvidenceDraft"];
   const baseline = input["baseline"];
+  const taskEpochDigest = input["taskEpochDigest"];
   if (
     targets === undefined ||
     !Array.isArray(input["profileIds"]) ||
     input["profileIds"].length === 0 ||
     input["profileIds"].length > 64 ||
-    (engineeringEvidence !== undefined &&
-      !isWorkflowEvidence(engineeringEvidence)) ||
-    (baseline !== undefined && !isTargetBaseline(baseline))
+    !isWorkflowEvidenceDraft(engineeringEvidenceDraft) ||
+    (baseline !== undefined && !isTargetBaseline(baseline)) ||
+    (taskEpochDigest !== undefined && !isDigest(taskEpochDigest))
   ) {
     return;
   }
@@ -69,9 +79,14 @@ export function parsePrepareInput(input: unknown): PrepareInput | undefined {
     targets,
     discoveryRoot: input["discoveryRoot"],
     profileIds: Object.freeze(profileIds),
-    engineeringEvidence: engineeringEvidence ?? null,
+    engineeringEvidenceDraft,
     baseline: baseline ?? null,
+    taskEpochDigest: taskEpochDigest ?? null,
   };
+}
+
+function isDigest(value: unknown): value is Digest {
+  return typeof value === "string" && /^sha256:[0-9a-f]{64}$/u.test(value);
 }
 
 export async function acceptPreparedBaseline(

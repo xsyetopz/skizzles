@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
@@ -47,13 +47,26 @@ export async function createFixture(): Promise<Fixture> {
   runGit(repository, ["init", "-b", "main"]);
   runGit(repository, ["config", "user.name", "Skizzles Test"]);
   runGit(repository, ["config", "user.email", "test@skizzles.invalid"]);
+  await mkdir(join(repository, "spec"));
+  await writeFile(join(repository, "spec/rules.md"), "normative\n");
   await writeFile(join(repository, "tracked.txt"), "baseline\n");
-  runGit(repository, ["add", "tracked.txt"]);
+  runGit(repository, ["add", "spec", "tracked.txt"]);
   runGit(repository, ["commit", "-m", "chore: baseline"]);
   return Object.freeze({ root, repository, worktreeParent });
 }
 
 export function createAuthority(fixture: Fixture) {
+  return createAuthorityWithApproval(fixture, policyConfig().approvalAuthority);
+}
+
+export function createAuthorityWithApproval(
+  fixture: Fixture,
+  approvalAuthority: Readonly<{
+    id: string;
+    authorize: (request: TaskWorktreeApprovalAuthorityRequest) => unknown;
+  }>,
+) {
+  const base = policyConfig();
   const created = createTaskWorktree(
     Object.freeze({
       authorityId: "task-worktree-a",
@@ -61,7 +74,8 @@ export function createAuthority(fixture: Fixture) {
       worktreeParent: fixture.worktreeParent,
       repositoryId: "repo-a",
       rootIdentity: "root-a",
-      ...policyConfig(),
+      ...base,
+      approvalAuthority,
     }),
   );
   if (created.status !== "created") throw new Error("authority setup failed");
@@ -75,6 +89,7 @@ export function prepareInput(taskId: string) {
   );
   return Object.freeze({
     taskId,
+    taskEpochDigest: digest,
     requestDigest: digest,
     repositoryId: "repo-a",
     rootIdentity: "root-a",
@@ -95,6 +110,21 @@ export function prepareInput(taskId: string) {
 
 export function policyConfig() {
   return {
+    protectedPaths: Object.freeze({
+      policyId: "protected-a",
+      testRoots: Object.freeze([]),
+      specificationRoots: Object.freeze(["spec"]),
+      authorize: async (request: {
+        readonly requestDigestOfThisMaterial: string;
+      }) =>
+        Object.freeze({
+          status: "authorized" as const,
+          requestDigest: request.requestDigestOfThisMaterial,
+          mode: "implementation" as const,
+          authorizedTestPaths: Object.freeze([]),
+          authorizationDigest: `sha256:${"c".repeat(64)}` as const,
+        }),
+    }),
     approvalAuthority: Object.freeze({
       id: "approval-a",
       authorize: async (request: TaskWorktreeApprovalAuthorityRequest) => {
@@ -173,6 +203,7 @@ export function policyConfig() {
         signalGraceMilliseconds: 1000,
       }),
     ]),
+    verificationProfiles: Object.freeze([]),
   };
 }
 

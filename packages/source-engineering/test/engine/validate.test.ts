@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { createCandidateManifest } from "@skizzles/candidate-manifest";
 import { digestBytes, digestText } from "../../src/digest.ts";
 import type { SourceEngineeringContextReceipt } from "../../src/engine/contract.ts";
 import { SourceEngineeringState } from "../../src/engine/cursor.ts";
@@ -22,7 +23,10 @@ import {
   resolveSourceLanguageAdapter,
 } from "../../src/language/adapter.ts";
 import { createLiteralRegistry } from "../../src/policy/literal/registry.ts";
-import { semanticDigest } from "../../src/typescript/editor.ts";
+import {
+  listTypeScriptDeclarations,
+  semanticDigest,
+} from "../../src/typescript/editor.ts";
 import { parseTypeScriptSource } from "../../src/typescript/parser.ts";
 import {
   buildLocalTypeScriptSymbolIndex,
@@ -72,6 +76,17 @@ describe("engine validation", () => {
     expect(result.receipt.policyReceipt.findingCount).toBe(0);
     expect(result.receipt.policyReceipt.literalRegistryDigest).toBe(
       fixture.config.literalRegistry.snapshot().registryDigest,
+    );
+    expect(result.receipt.candidateManifestDigest).toBe(
+      createCandidateManifest(
+        result.receipt.targetReceipts.map(({ path, candidateDigest }) =>
+          Object.freeze({
+            path,
+            operation: "write" as const,
+            contentDigest: candidateDigest,
+          }),
+        ),
+      ).manifestDigest,
     );
 
     const first = result.artifacts[0]?.readBytes();
@@ -266,6 +281,12 @@ async function createFixture(options: FixtureOptions = {}): Promise<Fixture> {
     languageAdapters: new Map([[adapter.language, adapter]]),
     literalRegistry: literalRegistry(),
     templates: new Map(),
+    structuralPolicy: Object.freeze({
+      metricVersion: "cyclomatic-v1",
+      maxFunctionComplexity: 64,
+      maxFunctionIncrease: 64,
+      maxAggregateIncrease: 128,
+    }),
   });
   const contextReceipt: SourceEngineeringContextReceipt = Object.freeze({
     receiptDigest: digestText("context-receipt"),
@@ -304,6 +325,7 @@ async function createFixture(options: FixtureOptions = {}): Promise<Fixture> {
     baseline: baselineParsed,
     operations: Object.freeze([
       Object.freeze({
+        epoch: 1,
         kind: "delete",
         selector: Object.freeze({
           declarationKind: "function",
@@ -313,10 +335,62 @@ async function createFixture(options: FixtureOptions = {}): Promise<Fixture> {
       }),
     ]),
     candidate: candidateParsed,
-    changedDeclarations: [digestText("node")],
+    astChanges: [
+      Object.freeze({
+        epoch: 1,
+        change: astDeletion(path, baselineParsed),
+      }),
+    ],
     templateReceipts: [],
     formatterReceipt,
   };
+  const targetSetDigest = digestText(JSON.stringify([path]));
+  const baselineCandidateSetDigest = digestText(
+    JSON.stringify([
+      {
+        path,
+        candidateDigest: digestText(baseline),
+        semanticDigest: semanticDigest(baselineParsed.sourceFile),
+      },
+    ]),
+  );
+  const candidateSetDigest = digestText(
+    JSON.stringify([
+      {
+        path,
+        candidateDigest: digestText(candidate),
+        semanticDigest: semanticDigest(candidateParsed.sourceFile),
+      },
+    ]),
+  );
+  const compiler = await adapter.adapter.validateCandidate(
+    Object.freeze({
+      requestDigest,
+      repositoryId: repository.id,
+      rootIdentity: repository.rootIdentity,
+      treeDigest,
+      configDigest,
+      targetPath: path,
+      candidateDigest: digestText(candidate),
+      semanticDigest: semanticDigest(candidateParsed.sourceFile),
+      epoch: 1,
+      epochKind: "format",
+      predecessorCandidateSetDigest: baselineCandidateSetDigest,
+      candidateSetDigest,
+      targetSetDigest,
+      targets: Object.freeze([
+        Object.freeze({
+          path,
+          candidateDigest: digestText(candidate),
+          semanticDigest: semanticDigest(candidateParsed.sourceFile),
+          candidateBytes: Object.freeze([
+            ...new TextEncoder().encode(candidate),
+          ]),
+        }),
+      ]),
+      predecessor: null,
+    }),
+  );
   const batch: BatchState = {
     request: Object.freeze({
       ...context.request,
@@ -331,9 +405,16 @@ async function createFixture(options: FixtureOptions = {}): Promise<Fixture> {
       }),
     }),
     targets: [target],
-    steps: Object.freeze([Object.freeze({ kind: "validate", ordinal: 0 })]),
+    steps: Object.freeze([
+      Object.freeze({ kind: "format", ordinal: 0, epoch: 1 }),
+      Object.freeze({ kind: "validate", ordinal: 1 }),
+    ]),
     context,
-    step: 0,
+    compilerReceipts: compiler.status === "accepted" ? [compiler.receipt] : [],
+    targetSetDigest,
+    baselineCandidateSetDigest,
+    candidateSetDigest,
+    step: 1,
   };
   return {
     state: new SourceEngineeringState(),
@@ -419,6 +500,48 @@ function formatter(
     formattedSemanticDigest: semantic,
     provenanceDigest: digestText("formatter-provenance"),
     formattedBytes: Object.freeze([...new TextEncoder().encode(candidate)]),
+  });
+}
+
+function astDeletion(
+  path: string,
+  baseline: Awaited<ReturnType<typeof parsed>>,
+) {
+  const declaration = listTypeScriptDeclarations(baseline)[0];
+  if (declaration === undefined)
+    throw new Error("baseline declaration missing");
+  const span = Object.freeze({
+    start: declaration.start,
+    end: declaration.end,
+  });
+  const nodeId = digestText(
+    JSON.stringify({
+      path,
+      declarationKind: declaration.kind,
+      name: declaration.name,
+    }),
+  );
+  const identityMaterial = {
+    nodeId,
+    declarationKind: declaration.kind,
+    name: declaration.name,
+    nodeDigest: declaration.nodeDigest,
+    span,
+  };
+  const anchor = Object.freeze({
+    ...identityMaterial,
+    identityDigest: digestText(JSON.stringify(identityMaterial)),
+  });
+  const material = {
+    path,
+    operation: "delete" as const,
+    anchor,
+    baselineNode: anchor,
+    candidateNode: null,
+  };
+  return Object.freeze({
+    ...material,
+    changeDigest: digestText(JSON.stringify(material)),
   });
 }
 

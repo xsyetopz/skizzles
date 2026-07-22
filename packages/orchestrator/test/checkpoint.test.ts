@@ -1,6 +1,10 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
-import { createHarness, verificationEvidence } from "./support.ts";
+import {
+  createHarness,
+  repositoryContext,
+  verificationEvidence,
+} from "./support.ts";
 
 describe("authority-captured checkpoints", () => {
   it("captures command, output, compiler, test, verifier, and tree bytes", async () => {
@@ -177,6 +181,123 @@ describe("authority-captured checkpoints", () => {
     expect((await orchestrator.supersedeCheckpoint(input)).status).toBe(
       "accepted",
     );
+  });
+
+  it("logically restores only an exact task-bound checkpoint", async () => {
+    const { orchestrator } = createHarness({
+      verification: [
+        verificationEvidence("task"),
+        verificationEvidence("task"),
+      ],
+    });
+    const bindings = await repositoryContext(orchestrator);
+    const scope = {
+      id: "task-checkpoint",
+      taskId: "task-a",
+      rootIdentity: "root-a",
+      request: bindings.request,
+      repository: bindings.repository,
+    };
+    expect((await orchestrator.createTaskCheckpoint(scope)).status).toBe(
+      "accepted",
+    );
+    await expect(
+      orchestrator.restoreTaskCheckpoint(scope),
+    ).resolves.toMatchObject({
+      status: "restored",
+      receipt: { checkpointId: "task-checkpoint", taskId: "task-a" },
+    });
+    await expect(
+      orchestrator.restoreTaskCheckpoint({ ...scope, taskId: "task-b" }),
+    ).resolves.toEqual({
+      status: "rejected",
+      code: "CHECKPOINT_SCOPE_MISMATCH",
+    });
+  });
+
+  it("rejects restoration when its checkpoint is superseded during capture", async () => {
+    const restoration = deferred<unknown>();
+    const { orchestrator } = createHarness({
+      verification: [
+        verificationEvidence("initial"),
+        restoration.promise,
+        verificationEvidence("successor"),
+      ],
+    });
+    const bindings = await repositoryContext(orchestrator);
+    const scope = {
+      id: "task-checkpoint",
+      taskId: "task-a",
+      rootIdentity: "root-a",
+      request: bindings.request,
+      repository: bindings.repository,
+    };
+    expect((await orchestrator.createTaskCheckpoint(scope)).status).toBe(
+      "accepted",
+    );
+    const restoring = orchestrator.restoreTaskCheckpoint(scope);
+    await Promise.resolve();
+    const superseding = orchestrator.supersedeCheckpoint({
+      previousId: scope.id,
+      id: "task-checkpoint-next",
+      rationale: "Fresh successor while restoration evidence is in flight.",
+    });
+    expect((await superseding).status).toBe("accepted");
+    restoration.resolve(verificationEvidence("initial"));
+    await expect(restoring).resolves.toEqual({
+      status: "rejected",
+      code: "CHECKPOINT_SUPERSEDED",
+    });
+  });
+
+  it("binds task checkpoints to the authentic repository context digest", async () => {
+    let captures = 0;
+    const { orchestrator } = createHarness({
+      verification: [verificationEvidence("context")],
+      repositoryCapture: (input) => {
+        captures += 1;
+        return {
+          repositoryId: input.repositoryId,
+          requestDigest: input.requestDigest,
+          treeBytes: Array.from(new TextEncoder().encode("same-tree")),
+          anchors: [
+            {
+              id: "runtime",
+              precedence: "language-runtime",
+              contentBytes: Array.from(
+                new TextEncoder().encode(`runtime-context-${captures}`),
+              ),
+            },
+          ],
+        };
+      },
+    });
+    const first = await repositoryContext(orchestrator);
+    const second = await repositoryContext(orchestrator);
+    expect(first.repository.treeDigest).toBe(second.repository.treeDigest);
+    expect(first.repository.contextDigest).not.toBe(
+      second.repository.contextDigest,
+    );
+    const scope = {
+      id: "context-checkpoint",
+      taskId: "task-a",
+      rootIdentity: "root-a",
+      request: first.request,
+      repository: first.repository,
+    };
+    expect((await orchestrator.createTaskCheckpoint(scope)).status).toBe(
+      "accepted",
+    );
+    await expect(
+      orchestrator.restoreTaskCheckpoint({
+        ...scope,
+        request: second.request,
+        repository: second.repository,
+      }),
+    ).resolves.toEqual({
+      status: "rejected",
+      code: "CHECKPOINT_SCOPE_MISMATCH",
+    });
   });
 });
 

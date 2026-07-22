@@ -13,6 +13,8 @@ import type {
   DeclarationKind,
   LocatedDeclaration,
   ParsedTypeScriptSource,
+  TypeScriptAstChange,
+  TypeScriptAstNodeIdentity,
   TypeScriptDeclaration,
   TypeScriptEditReceipt,
   TypeScriptEditResult,
@@ -65,7 +67,7 @@ async function edit(input: {
   }
   let text = input.parsed.text;
   let parsed = input.parsed;
-  const changedNodeDigests: Digest[] = [];
+  const changes: TypeScriptAstChange[] = [];
   for (const operation of input.operations) {
     if (!validOperation(operation)) return rejected("INVALID_EDIT");
     const matches = locateDeclarations(parsed.sourceFile).filter(
@@ -82,7 +84,6 @@ async function edit(input: {
     ) {
       return rejected("NODE_DRIFTED");
     }
-    changedNodeDigests.push(selected.nodeDigest);
     const replacement = operation.kind === "delete" ? "" : operation.source;
     const [start, end] = operationSpan(operation.kind, selected);
     text = `${text.slice(0, start)}${replacement}${text.slice(end)}`;
@@ -90,6 +91,34 @@ async function edit(input: {
     if (!validParsed(parsed) || parsed.text !== text) {
       return rejected("INVALID_EDIT");
     }
+    const candidateNode = candidateIdentity(
+      parsed,
+      operation,
+      start,
+      replacement.length,
+    );
+    if (candidateNode === "ambiguous") return rejected("NODE_AMBIGUOUS");
+    if (candidateNode === undefined && operation.kind !== "delete") {
+      return rejected("INVALID_EDIT");
+    }
+    const anchor = nodeIdentity(input.parsed.path, selected);
+    const baselineNode =
+      operation.kind === "insert-before" || operation.kind === "insert-after"
+        ? null
+        : anchor;
+    const material = {
+      path: input.parsed.path,
+      operation: operation.kind,
+      anchor,
+      baselineNode,
+      candidateNode: candidateNode ?? null,
+    };
+    changes.push(
+      Object.freeze({
+        ...material,
+        changeDigest: digestText(JSON.stringify(material)),
+      }),
+    );
   }
   const baselineSemanticDigest = semanticDigest(input.parsed.sourceFile);
   const candidateSemanticDigest = semanticDigest(parsed.sourceFile);
@@ -114,9 +143,56 @@ async function edit(input: {
     candidateDigest: digestText(text),
     candidateSemanticDigest,
     candidateBytes: Object.freeze([...candidateBytes]),
-    changedNodeDigests: Object.freeze(changedNodeDigests),
+    changes: Object.freeze(changes),
   });
   return { status: "edited", receipt };
+}
+
+function candidateIdentity(
+  parsed: ParsedTypeScriptSource,
+  operation: TypeScriptNodeOperation,
+  start: number,
+  replacementLength: number,
+): TypeScriptAstNodeIdentity | "ambiguous" | undefined {
+  if (operation.kind === "delete") return;
+  const end = start + replacementLength;
+  const matches = locateDeclarations(parsed.sourceFile).filter(
+    (declaration) => declaration.start >= start && declaration.end <= end,
+  );
+  if (matches.length !== 1)
+    return matches.length === 0 ? undefined : "ambiguous";
+  const candidate = matches[0];
+  return candidate === undefined
+    ? undefined
+    : nodeIdentity(parsed.path, candidate);
+}
+
+function nodeIdentity(
+  path: string,
+  declaration: TypeScriptDeclaration,
+): TypeScriptAstNodeIdentity {
+  const span = Object.freeze({
+    start: declaration.start,
+    end: declaration.end,
+  });
+  const nodeId = digestText(
+    JSON.stringify({
+      path,
+      declarationKind: declaration.kind,
+      name: declaration.name,
+    }),
+  );
+  const material = {
+    nodeId,
+    declarationKind: declaration.kind,
+    name: declaration.name,
+    nodeDigest: declaration.nodeDigest,
+    span,
+  };
+  return Object.freeze({
+    ...material,
+    identityDigest: digestText(JSON.stringify(material)),
+  });
 }
 
 function locateDeclarations(sourceFile: SourceFile): LocatedDeclaration[] {

@@ -12,6 +12,10 @@ import {
   parseExecutionOutcome,
   rootsAreOwnedSiblings,
 } from "./execution.ts";
+import {
+  parseSandboxVerificationObjective,
+  sandboxVerificationObjectiveDigest,
+} from "./objective.ts";
 
 export function createPortableSandboxBroker(
   input: unknown,
@@ -52,6 +56,8 @@ export function createPortableSandboxBroker(
               "signalGraceMilliseconds",
               "worktreeRoot",
               "writeRoot",
+              "verificationObjective",
+              "objectiveDigest",
             ])
           )
         ) {
@@ -103,12 +109,20 @@ export function createPortableSandboxBroker(
             code: "COMMAND_REJECTED",
           });
         }
+        const objectiveBinding = parseObjectiveBinding(executionInput);
+        if (objectiveBinding === null) {
+          return Object.freeze({
+            status: "rejected",
+            code: "INVALID_EXECUTION_REQUEST",
+          });
+        }
         const bindingBody = {
           attestationDigest: state.attestationDigest,
           writePaths: state.writePaths,
           command: commandResult.command,
           worktreeRoot,
           writeRoot,
+          ...(objectiveBinding ?? {}),
           ...limits,
         } as const;
         const bindingDigest = digestJson(bindingBody);
@@ -148,4 +162,28 @@ export function createPortableSandboxBroker(
       },
     }),
   });
+}
+
+function parseObjectiveBinding(input: Record<string, unknown>):
+  | Readonly<{
+      verificationObjective: NonNullable<
+        ReturnType<typeof parseSandboxVerificationObjective>
+      >;
+      objectiveDigest: `sha256:${string}`;
+    }>
+  | null
+  | undefined {
+  const hasObjective = Object.hasOwn(input, "verificationObjective");
+  const hasDigest = Object.hasOwn(input, "objectiveDigest");
+  if (!hasObjective && !hasDigest) return;
+  if (!hasObjective || !hasDigest) return null;
+  const verificationObjective = parseSandboxVerificationObjective(
+    input["verificationObjective"],
+  );
+  if (verificationObjective === undefined) return null;
+  const objectiveDigest = sandboxVerificationObjectiveDigest(
+    verificationObjective,
+  );
+  if (input["objectiveDigest"] !== objectiveDigest) return null;
+  return Object.freeze({ verificationObjective, objectiveDigest });
 }

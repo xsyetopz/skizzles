@@ -20,12 +20,20 @@ export function createReceiptSummary(
   return Object.freeze({
     authorityId,
     taskId: input.taskId,
+    taskEpochDigest: input.taskEpochDigest,
     branchName,
     baseCommitDigest: digestTaskWorktreeValue(repository.head),
     declaredPathDigest: digestTaskWorktreeValue(
       input.changes.map(({ path, operation }) => ({ path, operation })),
     ),
     candidateDigest: candidate.candidateDigest,
+    candidateManifestDigest: candidate.candidateManifestDigest,
+    baselineTestManifestDigest:
+      candidate.protection.baselineManifest.testDigest,
+    candidateTestManifestDigest:
+      candidate.protection.candidateManifest.testDigest,
+    specificationLockDigest:
+      candidate.protection.candidateManifest.specificationDigest,
     diff: Object.freeze({
       digest: candidate.diffReceipt.diffDigest,
       changedFiles: metrics.changedFiles,

@@ -1,3 +1,4 @@
+import type { CandidateManifestDigest } from "@skizzles/candidate-manifest";
 import type { Digest } from "./digest.ts";
 
 export type ChangeAssuranceDomain =
@@ -107,6 +108,7 @@ export interface ChangeAssuranceReceipt {
   readonly baselineDigest: Digest;
   readonly targetSetDigest: Digest;
   readonly candidateDigest: Digest;
+  readonly candidateManifestDigest: CandidateManifestDigest;
   readonly declarationDigest: Digest;
   readonly extensionReceipts: readonly ChangeAssuranceExtensionReceipt[];
   readonly receiptDigest: Digest;

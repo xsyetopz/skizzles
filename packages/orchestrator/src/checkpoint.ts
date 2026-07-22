@@ -1,5 +1,10 @@
 import { bytesOf, exactKeys, isRecord, nonempty } from "./codec.ts";
 import { type Digest, digestBytes, digestValue } from "./digest.ts";
+import { isNormalizedRequest } from "./intent.ts";
+import { isRepositoryContext } from "./repository.ts";
+
+const digestPattern = /^sha256:[0-9a-f]{64}$/u;
+const taskRestorationReceipts = new WeakSet<object>();
 
 export interface VerificationRun {
   readonly commandBytes: readonly number[];
@@ -21,14 +26,56 @@ export interface VerifiedCheckpoint {
   readonly id: string;
   readonly evidence: CheckpointEvidence;
   readonly evidenceDigest: Digest;
+  readonly taskScope: TaskCheckpointScope | null;
   readonly rationale?: string;
   readonly supersedes?: string;
+}
+
+export interface TaskCheckpointScope {
+  readonly taskId: string;
+  readonly repositoryId: string;
+  readonly rootIdentity: string;
+  readonly requestDigest: Digest;
+  readonly repositoryTreeDigest: Digest;
+  readonly contextDigest: Digest;
+  readonly scopeDigest: Digest;
+}
+
+export interface TaskCheckpointRestorationReceipt {
+  readonly checkpointId: string;
+  readonly taskId: string;
+  readonly repositoryId: string;
+  readonly rootIdentity: string;
+  readonly requestDigest: Digest;
+  readonly repositoryTreeDigest: Digest;
+  readonly contextDigest: Digest;
+  readonly checkpointEvidenceDigest: Digest;
+  readonly restorationDigest: Digest;
+}
+
+export function isTaskCheckpointRestorationReceipt(
+  value: unknown,
+): value is TaskCheckpointRestorationReceipt {
+  return (
+    isRecord(value) &&
+    taskRestorationReceipts.has(value) &&
+    typeof value["checkpointId"] === "string" &&
+    typeof value["taskId"] === "string" &&
+    typeof value["repositoryId"] === "string" &&
+    typeof value["rootIdentity"] === "string" &&
+    validDigest(value["requestDigest"]) &&
+    validDigest(value["repositoryTreeDigest"]) &&
+    validDigest(value["contextDigest"]) &&
+    validDigest(value["checkpointEvidenceDigest"]) &&
+    validDigest(value["restorationDigest"])
+  );
 }
 
 export interface VerificationAuthorityPort {
   capture: (input: {
     readonly checkpointId: string;
     readonly supersedes?: string;
+    readonly taskScope?: TaskCheckpointScope;
   }) => unknown | Promise<unknown>;
 }
 
@@ -58,6 +105,23 @@ export type CheckpointValidation =
         | "CHECKPOINT_SUPERSEDED"
         | "TREE_DRIFT"
         | "VERIFIER_DRIFT";
+    };
+
+export type TaskCheckpointRestoration =
+  | {
+      readonly status: "restored";
+      readonly receipt: TaskCheckpointRestorationReceipt;
+    }
+  | {
+      readonly status: "rejected";
+      readonly code:
+        | "INVALID_CHECKPOINT_INPUT"
+        | "CHECKPOINT_NOT_FOUND"
+        | "CHECKPOINT_SUPERSEDED"
+        | "CHECKPOINT_SCOPE_MISMATCH"
+        | "TREE_DRIFT"
+        | "VERIFIER_DRIFT"
+        | "VERIFICATION_AUTHORITY_REJECTED";
     };
 
 interface CapturedEvidence {
@@ -105,9 +169,46 @@ export class CheckpointLedger {
           code: "SUPERSESSION_REQUIRES_NEW_EVIDENCE",
         };
       }
-      const checkpoint = this.checkpoint(id, captured);
+      const checkpoint = this.checkpoint(id, captured, null);
       this.checkpoints.set(id, checkpoint);
       this.evidenceHistory.add(captured.digest);
+      return { status: "accepted", checkpoint };
+    } finally {
+      this.reservedIds.delete(id);
+    }
+  }
+
+  async createTask(input: unknown): Promise<CheckpointResult> {
+    const parsed = parseTaskCheckpointInput(input);
+    if (parsed === undefined) {
+      return { status: "rejected", code: "INVALID_CHECKPOINT_INPUT" };
+    }
+    const { id, scope } = parsed;
+    if (this.checkpoints.has(id)) {
+      return { status: "rejected", code: "CHECKPOINT_EXISTS" };
+    }
+    if (this.reservedIds.has(id)) {
+      return { status: "rejected", code: "CHECKPOINT_OPERATION_IN_PROGRESS" };
+    }
+    this.reservedIds.add(id);
+    try {
+      const captured = await this.capture(id, undefined, scope);
+      if (captured === undefined) {
+        return { status: "rejected", code: "VERIFICATION_AUTHORITY_REJECTED" };
+      }
+      if (this.checkpoints.has(id)) {
+        return { status: "rejected", code: "CHECKPOINT_EXISTS" };
+      }
+      const evidenceDigest = checkpointDigest(captured.digest, scope);
+      if (this.evidenceHistory.has(evidenceDigest)) {
+        return {
+          status: "rejected",
+          code: "SUPERSESSION_REQUIRES_NEW_EVIDENCE",
+        };
+      }
+      const checkpoint = this.checkpoint(id, captured, scope);
+      this.checkpoints.set(id, checkpoint);
+      this.evidenceHistory.add(evidenceDigest);
       return { status: "accepted", checkpoint };
     } finally {
       this.reservedIds.delete(id);
@@ -152,7 +253,7 @@ export class CheckpointLedger {
     this.reservedPreviousIds.add(previousId);
     this.reservedIds.add(id);
     try {
-      const captured = await this.capture(id, previousId);
+      const captured = await this.capture(id, previousId, previous.taskScope);
       if (captured === undefined) {
         return { status: "rejected", code: "VERIFICATION_AUTHORITY_REJECTED" };
       }
@@ -165,15 +266,25 @@ export class CheckpointLedger {
       if (this.checkpoints.has(id)) {
         return { status: "rejected", code: "CHECKPOINT_EXISTS" };
       }
-      if (this.evidenceHistory.has(captured.digest)) {
+      const evidenceDigest = checkpointDigest(
+        captured.digest,
+        previous.taskScope,
+      );
+      if (this.evidenceHistory.has(evidenceDigest)) {
         return {
           status: "rejected",
           code: "SUPERSESSION_REQUIRES_NEW_EVIDENCE",
         };
       }
-      const checkpoint = this.checkpoint(id, captured, previousId, rationale);
+      const checkpoint = this.checkpoint(
+        id,
+        captured,
+        previous.taskScope,
+        previousId,
+        rationale,
+      );
       this.checkpoints.set(id, checkpoint);
-      this.evidenceHistory.add(captured.digest);
+      this.evidenceHistory.add(evidenceDigest);
       this.superseded.add(previousId);
       return { status: "accepted", checkpoint };
     } finally {
@@ -195,29 +306,98 @@ export class CheckpointLedger {
     if (this.superseded.has(input.id)) {
       return { status: "invalid", code: "CHECKPOINT_SUPERSEDED" };
     }
-    const current = await this.capture(input.id, checkpoint.supersedes);
+    const current = await this.capture(
+      input.id,
+      checkpoint.supersedes,
+      checkpoint.taskScope,
+    );
     if (current === undefined) {
       return { status: "invalid", code: "VERIFICATION_AUTHORITY_REJECTED" };
     }
     if (current.evidence.treeDigest !== checkpoint.evidence.treeDigest) {
       return { status: "invalid", code: "TREE_DRIFT" };
     }
-    if (current.digest !== checkpoint.evidenceDigest) {
+    if (
+      checkpointDigest(current.digest, checkpoint.taskScope) !==
+      checkpoint.evidenceDigest
+    ) {
       return { status: "invalid", code: "VERIFIER_DRIFT" };
     }
     return { status: "valid" };
   }
 
+  async restoreTask(input: unknown): Promise<TaskCheckpointRestoration> {
+    const parsed = parseTaskCheckpointInput(input);
+    if (parsed === undefined) {
+      return { status: "rejected", code: "INVALID_CHECKPOINT_INPUT" };
+    }
+    const checkpoint = this.checkpoints.get(parsed.id);
+    if (checkpoint === undefined) {
+      return { status: "rejected", code: "CHECKPOINT_NOT_FOUND" };
+    }
+    if (this.superseded.has(parsed.id)) {
+      return { status: "rejected", code: "CHECKPOINT_SUPERSEDED" };
+    }
+    if (!sameTaskScope(checkpoint.taskScope, parsed.scope)) {
+      return { status: "rejected", code: "CHECKPOINT_SCOPE_MISMATCH" };
+    }
+    const current = await this.capture(
+      checkpoint.id,
+      checkpoint.supersedes,
+      checkpoint.taskScope,
+    );
+    if (current === undefined) {
+      return { status: "rejected", code: "VERIFICATION_AUTHORITY_REJECTED" };
+    }
+    if (this.checkpoints.get(parsed.id) !== checkpoint) {
+      return { status: "rejected", code: "CHECKPOINT_NOT_FOUND" };
+    }
+    if (this.superseded.has(parsed.id)) {
+      return { status: "rejected", code: "CHECKPOINT_SUPERSEDED" };
+    }
+    if (current.evidence.treeDigest !== checkpoint.evidence.treeDigest) {
+      return { status: "rejected", code: "TREE_DRIFT" };
+    }
+    if (
+      checkpointDigest(current.digest, checkpoint.taskScope) !==
+      checkpoint.evidenceDigest
+    ) {
+      return { status: "rejected", code: "VERIFIER_DRIFT" };
+    }
+    const scope = parsed.scope;
+    const material = {
+      checkpointId: checkpoint.id,
+      taskId: scope.taskId,
+      repositoryId: scope.repositoryId,
+      rootIdentity: scope.rootIdentity,
+      requestDigest: scope.requestDigest,
+      repositoryTreeDigest: scope.repositoryTreeDigest,
+      contextDigest: scope.contextDigest,
+      checkpointEvidenceDigest: checkpoint.evidenceDigest,
+    };
+    const receipt = Object.freeze({
+      ...material,
+      restorationDigest: digestValue(material),
+    });
+    taskRestorationReceipts.add(receipt);
+    return {
+      status: "restored",
+      receipt,
+    };
+  }
+
   private checkpoint(
     id: string,
     captured: CapturedEvidence,
+    taskScope: TaskCheckpointScope | null,
     supersedes?: string,
     rationale?: string,
   ): VerifiedCheckpoint {
     return Object.freeze({
       id,
       evidence: captured.evidence,
-      evidenceDigest: captured.digest,
+      evidenceDigest: checkpointDigest(captured.digest, taskScope),
+      taskScope,
       ...(rationale === undefined ? {} : { rationale }),
       ...(supersedes === undefined ? {} : { supersedes }),
     });
@@ -226,6 +406,7 @@ export class CheckpointLedger {
   private async capture(
     checkpointId: string,
     supersedes?: string,
+    taskScope?: TaskCheckpointScope | null,
   ): Promise<CapturedEvidence | undefined> {
     let raw: unknown;
     try {
@@ -233,6 +414,9 @@ export class CheckpointLedger {
         Object.freeze({
           checkpointId,
           ...(supersedes === undefined ? {} : { supersedes }),
+          ...(taskScope === undefined || taskScope === null
+            ? {}
+            : { taskScope }),
         }),
       );
     } catch {
@@ -240,6 +424,65 @@ export class CheckpointLedger {
     }
     return parseEvidence(raw);
   }
+}
+
+function parseTaskCheckpointInput(
+  input: unknown,
+): Readonly<{ id: string; scope: TaskCheckpointScope }> | undefined {
+  if (
+    !(
+      isRecord(input) &&
+      exactKeys(input, [
+        "id",
+        "taskId",
+        "rootIdentity",
+        "request",
+        "repository",
+      ]) &&
+      nonempty(input.id, 128) &&
+      nonempty(input.taskId, 128) &&
+      nonempty(input["rootIdentity"], 256) &&
+      isNormalizedRequest(input.request) &&
+      isRepositoryContext(input.repository) &&
+      input.request.intentDigest === input.repository.requestDigest
+    )
+  ) {
+    return;
+  }
+  const scopeMaterial = {
+    taskId: input.taskId,
+    repositoryId: input.repository.repositoryId,
+    rootIdentity: input["rootIdentity"],
+    requestDigest: input.request.intentDigest,
+    repositoryTreeDigest: input.repository.treeDigest,
+    contextDigest: input.repository.contextDigest,
+  };
+  return Object.freeze({
+    id: input.id,
+    scope: Object.freeze({
+      ...scopeMaterial,
+      scopeDigest: digestValue(scopeMaterial),
+    }),
+  });
+}
+
+function checkpointDigest(
+  evidenceDigest: Digest,
+  taskScope: TaskCheckpointScope | null,
+): Digest {
+  if (taskScope === null) return evidenceDigest;
+  return digestValue({ evidenceDigest, taskScope });
+}
+
+function sameTaskScope(
+  left: TaskCheckpointScope | null,
+  right: TaskCheckpointScope,
+): boolean {
+  return left !== null && left.scopeDigest === right.scopeDigest;
+}
+
+function validDigest(value: unknown): value is Digest {
+  return typeof value === "string" && digestPattern.test(value);
 }
 
 function parseEvidence(value: unknown): CapturedEvidence | undefined {

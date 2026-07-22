@@ -3,6 +3,7 @@ import { isFrozenOpaque, snapshotArray, snapshotRecord } from "./snapshot.ts";
 
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
 const maximumEntries = 256;
+const authenticReceipts = new WeakSet<object>();
 const workspaceIdentityField = ["workspace", "IdentityDigest"].join("");
 const provenanceMeasurementField = ["provenance", "MeasurementDigest"].join("");
 
@@ -203,10 +204,20 @@ function parseReceipt(
     cleanup,
   });
   if (receipt["receiptDigest"] !== digestValue(material)) return;
-  return Object.freeze({
+  const parsed = Object.freeze({
     ...material,
     receiptDigest: receipt["receiptDigest"],
   });
+  authenticReceipts.add(parsed);
+  return parsed;
+}
+
+export function isPhysicalIntegrationReceipt(
+  value: unknown,
+): value is PhysicalIntegrationReceipt {
+  return (
+    typeof value === "object" && value !== null && authenticReceipts.has(value)
+  );
 }
 
 function sameBindings(
@@ -521,7 +532,7 @@ function declarationDigestOf(value: unknown): string | undefined {
       ? descriptor.value
       : undefined;
   } catch {
-    return;
+    return undefined;
   }
 }
 

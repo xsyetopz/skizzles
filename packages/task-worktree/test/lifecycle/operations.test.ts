@@ -37,21 +37,27 @@ describe("task-scoped Git worktree lifecycle operations", () => {
     expect(Object.isFrozen(prepared.receipt)).toBe(true);
     expect(Object.isFrozen(prepared.receipt.diff)).toBe(true);
     expect(isTaskWorktreeReceipt(prepared.receipt)).toBe(true);
+    const candidateManifestDigest = prepared.receipt.candidateManifestDigest;
+    expect(candidateManifestDigest).toMatch(/^sha256:[0-9a-f]{64}$/u);
 
-    expect(
-      await authority.revalidate(
-        Object.freeze({ version: 1 as const, session: prepared.session }),
-      ),
-    ).toMatchObject({ status: "valid" });
-    expect(
-      await authority.run(
-        Object.freeze({
-          version: 1 as const,
-          session: prepared.session,
-          profileIds: Object.freeze(["status"]),
-        }),
-      ),
-    ).toMatchObject({ status: "ran" });
+    const revalidated = await authority.revalidate(
+      Object.freeze({ version: 1 as const, session: prepared.session }),
+    );
+    expect(revalidated).toMatchObject({
+      status: "valid",
+      receipt: { candidateManifestDigest },
+    });
+    const ran = await authority.run(
+      Object.freeze({
+        version: 1 as const,
+        session: prepared.session,
+        profileIds: Object.freeze(["status"]),
+      }),
+    );
+    expect(ran).toMatchObject({
+      status: "ran",
+      receipt: { candidateManifestDigest },
+    });
 
     const allocation = worktreeAllocation(fixture.repository);
     expect(allocation.branch).toMatch(/^codex\/task-alpha-1-[0-9a-f]{16}$/u);
@@ -103,11 +109,18 @@ describe("task-scoped Git worktree lifecycle operations", () => {
       throw new Error(committed.code);
     }
     expect(committed.status).toBe("committed");
+    expect(committed.receipt.candidateManifestDigest).toBe(
+      candidateManifestDigest,
+    );
 
     const closed = await authority.close(
       Object.freeze({ version: 1 as const, session: prepared.session }),
     );
     expect(closed.status).toBe("closed");
+    if (closed.status === "closed")
+      expect(closed.receipt.candidateManifestDigest).toBe(
+        candidateManifestDigest,
+      );
     expect(worktreePaths(fixture.repository)).toEqual([fixture.repository]);
     expect(await readdir(fixture.worktreeParent)).toEqual([]);
     expect(

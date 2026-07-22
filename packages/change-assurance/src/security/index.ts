@@ -41,6 +41,31 @@ export {
 } from "./extension.ts";
 export { analyzeSecurityCandidates } from "./policy/analyze.ts";
 export { parseSecurityPolicyConfig } from "./policy/config.ts";
+export {
+  createIndependentSecurityReviewAuthority,
+  isIndependentSecurityReviewAuthority,
+  isSecurityReviewReceipt,
+} from "./review/authority.ts";
+export type {
+  IndependentSecurityReviewAuthority,
+  IndependentSecurityReviewConfig,
+  IndependentSecurityReviewCreationResult,
+  SecurityPolicyLinterAuthority,
+  SecurityPolicyLinterConfig,
+  SecurityPolicyLinterCreationResult,
+  SecurityPolicyLintFinding,
+  SecurityPolicyLintInput,
+  SecurityPolicyLintReceipt,
+  SecurityPolicyLintResult,
+  SecurityReviewInput,
+  SecurityReviewReceipt,
+  SecurityReviewResult,
+} from "./review/contract.ts";
+export {
+  createSecurityPolicyLinter,
+  isSecurityPolicyLinter,
+  isSecurityPolicyLintReceipt,
+} from "./review/linter.ts";
 export type {
   CandidateBytes,
   CredentialFinding,

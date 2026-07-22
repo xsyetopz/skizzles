@@ -1,4 +1,5 @@
 import type {
+  ParsedSecuritySource,
   SecurityAnalysisReceipt,
   SecurityAssessment,
   SecurityFinding,
@@ -19,6 +20,7 @@ import {
   inspectSinks,
 } from "./analysis/sinks.ts";
 import { parseSecurityPolicyConfig } from "./config.ts";
+import { inspectSecurityDataflows } from "./dataflow.ts";
 import { parseSecurityCandidate } from "./parser.ts";
 
 export async function analyzeSecurityCandidates(
@@ -27,16 +29,35 @@ export async function analyzeSecurityCandidates(
 ): Promise<SecurityAnalysisReceipt> {
   const config = parseSecurityPolicyConfig(configInput);
   if (config === undefined) return invalidConfigReceipt();
-  const targetReceipts: SecurityTargetReceipt[] = [];
+  const analyzedTargets: AnalyzedTarget[] = [];
   for (const target of assessment.targets) {
-    targetReceipts.push(await analyzeTarget(target, config));
+    analyzedTargets.push(await analyzeTarget(target, config));
   }
+  const dataflowFindings = inspectSecurityDataflows(
+    analyzedTargets.flatMap(({ source }) =>
+      source === undefined ? [] : [source],
+    ),
+    config,
+  );
+  const targetReceipts = analyzedTargets.map(({ receipt }) =>
+    targetReceipt(
+      receipt.path,
+      bytesFromCandidate(
+        assessment.targets.find(({ path }) => path === receipt.path)
+          ?.candidateBytes ?? null,
+      ),
+      [
+        ...receipt.findings,
+        ...dataflowFindings.filter(({ path }) => path === receipt.path),
+      ],
+    ),
+  );
   const findings = targetReceipts.flatMap(
     ({ findings: targetFindings }) => targetFindings,
   );
   const orderedFindings = sortFindings(findings);
   const evidenceDigest = digestValue({
-    version: "security-ast-v1",
+    version: "security-ast-v2",
     requestDigest: assessment.requestDigest,
     declarationDigest: assessment.declarationDigest,
     targets: targetReceipts,
@@ -53,7 +74,7 @@ export async function analyzeSecurityCandidates(
 async function analyzeTarget(
   target: SecurityAssessment["targets"][number],
   config: SecurityPolicyConfig,
-): Promise<SecurityTargetReceipt> {
+): Promise<AnalyzedTarget> {
   const candidateBytes = bytesFromCandidate(target.candidateBytes);
   const findings: SecurityFinding[] = [];
   if (candidateBytes === undefined) {
@@ -64,7 +85,9 @@ async function analyzeTarget(
         "Candidate bytes are required for AST security analysis.",
       ),
     );
-    return targetReceipt(target.path, candidateBytes, findings);
+    return Object.freeze({
+      receipt: targetReceipt(target.path, candidateBytes, findings),
+    });
   }
   const parsed = await parseSecurityCandidate(target.path, candidateBytes);
   if (parsed.status === "rejected") {
@@ -78,11 +101,21 @@ async function analyzeTarget(
           "Candidate could not be parsed as a TypeScript AST.",
       ),
     );
-    return targetReceipt(target.path, candidateBytes, findings);
+    return Object.freeze({
+      receipt: targetReceipt(target.path, candidateBytes, findings),
+    });
   }
   inspectEntrypoint(parsed.source, target.path, config, findings);
   inspectImports(parsed.source, target.path, config, findings);
   inspectDeclarations(parsed.source, target.path, findings);
   inspectSinks(parsed.source, target.path, config, findings);
-  return targetReceipt(target.path, candidateBytes, findings);
+  return Object.freeze({
+    receipt: targetReceipt(target.path, candidateBytes, findings),
+    source: parsed.source,
+  });
+}
+
+interface AnalyzedTarget {
+  readonly receipt: SecurityTargetReceipt;
+  readonly source?: ParsedSecuritySource;
 }

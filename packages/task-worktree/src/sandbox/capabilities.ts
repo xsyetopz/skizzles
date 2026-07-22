@@ -12,4 +12,5 @@ export type {
   SandboxExecutionLimits,
   SandboxExecutionReceipt,
   SandboxExecutionResult,
+  SandboxVerificationObjective,
 } from "./contract.ts";

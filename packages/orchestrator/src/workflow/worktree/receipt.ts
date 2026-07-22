@@ -9,7 +9,12 @@ export function createWorktreeMaterial(
 ) {
   return Object.freeze({
     receiptDigest: receipt.receiptDigest,
+    taskEpochDigest: receipt.taskEpochDigest,
     candidateDigest: receipt.candidateDigest,
+    candidateManifestDigest: receipt.candidateManifestDigest,
+    baselineTestManifestDigest: receipt.baselineTestManifestDigest,
+    candidateTestManifestDigest: receipt.candidateTestManifestDigest,
+    specificationLockDigest: receipt.specificationLockDigest,
     declaredPathDigest: receipt.declaredPathDigest,
     commitMessageDigest: receipt.commitPlan.messageDigest,
     executedProfileIds,
@@ -25,10 +30,16 @@ export function sameTaskWorktreeBinding(
     isTaskWorktreeReceipt(actual) &&
     expected.authorityId === actual.authorityId &&
     expected.taskId === actual.taskId &&
+    expected.taskEpochDigest === actual.taskEpochDigest &&
     expected.branchName === actual.branchName &&
     expected.baseCommitDigest === actual.baseCommitDigest &&
     expected.declaredPathDigest === actual.declaredPathDigest &&
     expected.candidateDigest === actual.candidateDigest &&
+    expected.candidateManifestDigest === actual.candidateManifestDigest &&
+    expected.baselineTestManifestDigest === actual.baselineTestManifestDigest &&
+    expected.candidateTestManifestDigest ===
+      actual.candidateTestManifestDigest &&
+    expected.specificationLockDigest === actual.specificationLockDigest &&
     expected.diff.digest === actual.diff.digest &&
     expected.sandbox.policyDigest === actual.sandbox.policyDigest &&
     expected.dependencies.digest === actual.dependencies.digest &&

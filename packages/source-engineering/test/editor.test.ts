@@ -64,7 +64,12 @@ describe("TypeScript 7 declaration editing", () => {
     expect(candidate).toContain("return 2");
     expect(candidate).toContain("enum Mode");
     expect(candidate).not.toContain("type Label");
-    expect(result.receipt.changedNodeDigests).toHaveLength(3);
+    expect(result.receipt.changes).toHaveLength(3);
+    expect(
+      result.receipt.changes.every(({ changeDigest }) =>
+        changeDigest.startsWith("sha256:"),
+      ),
+    ).toBe(true);
     expect(result.receipt.candidateDigest).not.toBe(
       result.receipt.baselineDigest,
     );

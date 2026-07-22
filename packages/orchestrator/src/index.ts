@@ -11,6 +11,9 @@ export type {
   CheckpointEvidence,
   CheckpointResult,
   CheckpointValidation,
+  TaskCheckpointRestoration,
+  TaskCheckpointRestorationReceipt,
+  TaskCheckpointScope,
   VerificationAuthorityPort,
   VerificationRun,
   VerifiedCheckpoint,
@@ -63,6 +66,16 @@ export type {
   PhysicalIntegrationBindings,
   PhysicalIntegrationReceipt,
 } from "./engineering/physical.ts";
+export type {
+  TaskContext,
+  TaskContextBootstrap,
+  TaskContextResetHandle,
+  TaskContextResetReceipt,
+  TaskContextResetResult,
+  TaskContextResetStage,
+  TaskRuntimeInterruptAuthorityPort,
+  TaskRuntimeInterruptRequest,
+} from "./engineering/reset/contract.ts";
 export { createEngineeringWorkflow } from "./engineering/workflow.ts";
 export {
   type CanonicalIntent,
@@ -157,6 +170,17 @@ export type {
   TargetState,
   TargetStatus,
 } from "./state/target.ts";
+export {
+  createWorkflowVerificationAuthority,
+  isWorkflowVerificationAuthority,
+} from "./workflow/verification/authority.ts";
+export type {
+  WorkflowPhysicalVerificationEvidence,
+  WorkflowVerificationAuthority,
+  WorkflowVerificationAuthorityConfig,
+  WorkflowVerificationAuthorityCreationResult,
+  WorkflowVerificationDecisionPort,
+} from "./workflow/verification/contract.ts";
 export {
   isTaskWorktreeApprovalBridge,
   TaskWorktreeApprovalBridge,

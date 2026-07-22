@@ -1,7 +1,9 @@
 import {
   isTaskWorktreeReceipt,
+  isTaskWorktreeVerificationReceipt,
   type TaskWorktreeApprovalAuthorityRequest,
   type TaskWorktreeReceipt,
+  type TaskWorktreeVerificationReceipt,
 } from "@skizzles/task-worktree";
 import {
   type ApprovalRequest,
@@ -14,6 +16,7 @@ interface ApprovalRecord {
   readonly approval: ApprovalRequest;
   readonly receipt: TaskWorktreeReceipt;
   readonly profileIds: readonly string[];
+  readonly verificationReceipts: readonly TaskWorktreeVerificationReceipt[];
   readonly repositoryId: string;
   readonly rootIdentity: string;
 }
@@ -48,6 +51,7 @@ export class TaskWorktreeApprovalBridge {
       approval: ApprovalRequest;
       receipt: TaskWorktreeReceipt;
       profileIds: readonly string[];
+      verificationReceipts: readonly TaskWorktreeVerificationReceipt[];
       repositoryId: string;
       rootIdentity: string;
     }>,
@@ -59,7 +63,8 @@ export class TaskWorktreeApprovalBridge {
       ) ||
       input.approval.challenge === null ||
       input.approval.taskId !== input.receipt.taskId ||
-      !validProfiles(input.profileIds)
+      !validProfiles(input.profileIds) ||
+      !validVerificationReceipts(input.verificationReceipts, input.receipt)
     ) {
       return;
     }
@@ -76,6 +81,7 @@ export class TaskWorktreeApprovalBridge {
         approval: input.approval,
         receipt: input.receipt,
         profileIds: Object.freeze([...input.profileIds]),
+        verificationReceipts: Object.freeze([...input.verificationReceipts]),
         repositoryId: input.repositoryId,
         rootIdentity: input.rootIdentity,
       }),
@@ -120,14 +126,22 @@ export class TaskWorktreeApprovalBridge {
       binding.repositoryId !== record.repositoryId ||
       binding.rootIdentity !== record.rootIdentity ||
       binding.taskId !== record.receipt.taskId ||
+      binding.taskEpochDigest !== record.receipt.taskEpochDigest ||
       binding.requestDigest !== permit.requestDigest ||
       binding.treeDigest !== permit.treeDigest ||
       binding.baselineDigest !== permit.baselineDigest ||
       binding.candidateDigest !== record.receipt.candidateDigest ||
+      binding.candidateManifestDigest !==
+        record.receipt.candidateManifestDigest ||
       binding.diffDigest !== record.receipt.diff.digest ||
       binding.commitPlanDigest !== record.receipt.commitPlan.planDigest ||
       binding.runReceiptDigest !== record.receipt.receiptDigest ||
-      !exactProfiles(binding.runProfileIds, record.profileIds)
+      !exactProfiles(binding.runProfileIds, record.profileIds) ||
+      !exactVerificationBinding(
+        binding.verificationProfileIds,
+        binding.verificationReceiptDigests,
+        record.verificationReceipts,
+      )
     ) {
       return Object.freeze({ status: "rejected" });
     }
@@ -138,6 +152,58 @@ export class TaskWorktreeApprovalBridge {
       approvalDigest: permit.permitDigest,
     });
   };
+}
+
+function exactVerificationBinding(
+  profileIds: readonly string[],
+  receiptDigests: readonly string[],
+  receipts: readonly TaskWorktreeVerificationReceipt[],
+): boolean {
+  if (
+    profileIds.length !== receipts.length ||
+    receiptDigests.length !== receipts.length
+  ) {
+    return false;
+  }
+  const expected = new Map(
+    profileIds.map((profileId, index) => [profileId, receiptDigests[index]]),
+  );
+  return (
+    expected.size === receipts.length &&
+    receipts.every(
+      ({ profileId, receiptDigest }) =>
+        expected.get(profileId) === receiptDigest,
+    )
+  );
+}
+
+function validVerificationReceipts(
+  receipts: readonly TaskWorktreeVerificationReceipt[],
+  taskReceipt: TaskWorktreeReceipt,
+): boolean {
+  return (
+    Object.isFrozen(receipts) &&
+    receipts.length === 4 &&
+    receipts.every(
+      (receipt) =>
+        isTaskWorktreeVerificationReceipt(receipt) &&
+        receipt.authorityId === taskReceipt.authorityId &&
+        receipt.taskId === taskReceipt.taskId &&
+        receipt.taskEpochDigest === taskReceipt.taskEpochDigest &&
+        receipt.candidateDigest === taskReceipt.candidateDigest &&
+        receipt.candidateManifestDigest ===
+          taskReceipt.candidateManifestDigest &&
+        receipt.baselineTestManifestDigest ===
+          taskReceipt.baselineTestManifestDigest &&
+        receipt.candidateTestManifestDigest ===
+          taskReceipt.candidateTestManifestDigest &&
+        receipt.specificationLockDigest === taskReceipt.specificationLockDigest,
+    ) &&
+    new Set(receipts.map(({ profileId }) => profileId)).size ===
+      receipts.length &&
+    new Set(receipts.map(({ receiptDigest }) => receiptDigest)).size ===
+      receipts.length
+  );
 }
 
 function recordKey(

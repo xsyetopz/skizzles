@@ -2,16 +2,16 @@
 import { describe, expect, it } from "bun:test";
 import { Buffer } from "node:buffer";
 import { isChangeAssuranceReceipt } from "@skizzles/change-assurance";
-import { snapshotRecord } from "../../src/engineering/snapshot.ts";
-import { createEngineeringWorkflow } from "../../src/engineering/workflow.ts";
-import { createTestChangeDeclaration } from "./assurance-fixture.ts";
+import { snapshotRecord } from "../../../src/engineering/snapshot.ts";
+import { createEngineeringWorkflow } from "../../../src/engineering/workflow.ts";
+import { createTestChangeDeclaration } from "../assurance-fixture.ts";
 import {
   candidate,
   createFixture,
   digest,
   replacement,
   targetPath,
-} from "./source-fixture.ts";
+} from "./fixture.ts";
 
 describe("engineering workflow with the real source engine", () => {
   it("drives describe and every cursor step before awaiting approval", async () => {
@@ -29,6 +29,7 @@ describe("engineering workflow with the real source engine", () => {
       const target = described.context.targets.find(
         (entry) => entry.path === targetPath,
       );
+      expect(described.context.templates[0]?.language).toBe("typescript");
       const declaration = target?.declarations.find(
         (entry) =>
           entry.declarationKind === "function" && entry.name === "value",
@@ -107,6 +108,7 @@ describe("engineering workflow with the real source engine", () => {
         JSON.parse(Buffer.from(evidenceBase64, "base64").toString("utf8")),
         [
           "version",
+          "stage",
           "contextReceiptDigest",
           "baselineDigest",
           "preview",
@@ -123,6 +125,9 @@ describe("engineering workflow with the real source engine", () => {
         "targets",
         "integrations",
         "assurance",
+        "security",
+        "taskVerificationReceipts",
+        "verificationGateReceipt",
       ]);
       const assuranceReceipt = snapshotRecord(evidencePreview?.["assurance"], [
         "requestDigest",
@@ -131,6 +136,7 @@ describe("engineering workflow with the real source engine", () => {
         "baselineDigest",
         "targetSetDigest",
         "candidateDigest",
+        "candidateManifestDigest",
         "declarationDigest",
         "extensionReceipts",
         "receiptDigest",
@@ -145,6 +151,7 @@ describe("engineering workflow with the real source engine", () => {
         "source-advance",
         "source-advance",
         "change-assurance",
+        "security-review",
         "phase2-prepare",
       ]);
       expect(fixture.destination.currentText(targetPath)).toBeUndefined();

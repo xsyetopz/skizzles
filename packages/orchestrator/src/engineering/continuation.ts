@@ -10,6 +10,7 @@ export interface EngineeringContinuation {
 }
 
 export interface ContinuationBindings {
+  readonly taskEpochDigest: Digest;
   readonly requestDigest: Digest;
   readonly repositoryId: string;
   readonly treeDigest: Digest;
@@ -50,6 +51,7 @@ export type ContinuationIssueResult =
 export class ContinuationLedger<State extends object> {
   private sequence = 0;
   private readonly entries = new WeakMap<object, ContinuationEntry<State>>();
+  private readonly epochs = new Map<Digest, Set<object>>();
 
   issue(bindings: ContinuationBindings, state: State): ContinuationIssueResult {
     const safeBindings = parseBindings(bindings);
@@ -59,6 +61,7 @@ export class ContinuationLedger<State extends object> {
     this.sequence += 1;
     const continuationId = digestValue({
       sequence: this.sequence,
+      taskEpochDigest: safeBindings.taskEpochDigest,
       requestDigest: safeBindings.requestDigest,
       repositoryId: safeBindings.repositoryId,
       treeDigest: safeBindings.treeDigest,
@@ -74,6 +77,9 @@ export class ContinuationLedger<State extends object> {
       bindings: safeBindings,
       state,
     });
+    const entries = this.epochs.get(safeBindings.taskEpochDigest) ?? new Set();
+    entries.add(continuation);
+    this.epochs.set(safeBindings.taskEpochDigest, entries);
     return { status: "issued", continuation };
   }
 
@@ -102,17 +108,44 @@ export class ContinuationLedger<State extends object> {
       return { status: "rejected", code: "CONTINUATION_REJECTED" };
     }
     this.entries.delete(value);
+    this.removeEpochEntry(entry.bindings.taskEpochDigest, value);
     return {
       status: "accepted",
       state: entry.state,
       bindings: entry.bindings,
     };
   }
+
+  epochFor(value: unknown): Digest | undefined {
+    if (typeof value !== "object" || value === null) return;
+    return this.entries.get(value)?.bindings.taskEpochDigest;
+  }
+
+  revokeEpoch(taskEpochDigest: Digest): readonly State[] {
+    const handles = this.epochs.get(taskEpochDigest);
+    if (handles === undefined) return Object.freeze([]);
+    const states: State[] = [];
+    for (const handle of handles) {
+      const entry = this.entries.get(handle);
+      if (entry !== undefined) states.push(entry.state);
+      this.entries.delete(handle);
+    }
+    this.epochs.delete(taskEpochDigest);
+    return Object.freeze(states);
+  }
+
+  private removeEpochEntry(taskEpochDigest: Digest, handle: object): void {
+    const entries = this.epochs.get(taskEpochDigest);
+    if (entries === undefined) return;
+    entries.delete(handle);
+    if (entries.size === 0) this.epochs.delete(taskEpochDigest);
+  }
 }
 
 function parseBindings(value: unknown): ContinuationBindings | undefined {
   const snapshot = snapshotRecord(value, [
     "requestDigest",
+    "taskEpochDigest",
     "repositoryId",
     "treeDigest",
     "baselineDigest",
@@ -125,6 +158,7 @@ function parseBindings(value: unknown): ContinuationBindings | undefined {
     !(
       snapshot !== undefined &&
       validDigest(snapshot["requestDigest"]) &&
+      validDigest(snapshot["taskEpochDigest"]) &&
       validIdentity(snapshot["repositoryId"]) &&
       validDigest(snapshot["treeDigest"]) &&
       validDigest(snapshot["baselineDigest"]) &&
@@ -138,6 +172,7 @@ function parseBindings(value: unknown): ContinuationBindings | undefined {
   }
   return Object.freeze({
     requestDigest: snapshot["requestDigest"],
+    taskEpochDigest: snapshot["taskEpochDigest"],
     repositoryId: snapshot["repositoryId"],
     treeDigest: snapshot["treeDigest"],
     baselineDigest: snapshot["baselineDigest"],
@@ -209,6 +244,7 @@ function sameBindings(
 ): boolean {
   return (
     left.requestDigest === right.requestDigest &&
+    left.taskEpochDigest === right.taskEpochDigest &&
     left.repositoryId === right.repositoryId &&
     left.treeDigest === right.treeDigest &&
     left.baselineDigest === right.baselineDigest &&

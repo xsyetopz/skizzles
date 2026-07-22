@@ -10,6 +10,7 @@ const firstDigest = `sha256:${"a".repeat(hexLength)}` as const;
 const secondDigest = `sha256:${"b".repeat(hexLength)}` as const;
 
 const bindings: ContinuationBindings = Object.freeze({
+  taskEpochDigest: firstDigest,
   requestDigest: firstDigest,
   repositoryId: "repo-a",
   treeDigest: firstDigest,

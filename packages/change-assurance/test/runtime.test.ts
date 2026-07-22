@@ -1,5 +1,7 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
+import { createHash } from "node:crypto";
+import { createCandidateManifest } from "@skizzles/candidate-manifest";
 import { createChangeAssuranceExtension } from "../src/extension.ts";
 import {
   type ChangeAssuranceDomain,
@@ -46,13 +48,18 @@ function createFacade() {
   return { assurance: created.changeAssurance, seen };
 }
 
-function createDeclaration() {
+function createDeclaration(
+  targets: readonly Readonly<{
+    path: string;
+    operation: "write" | "delete";
+  }>[] = Object.freeze([
+    Object.freeze({ path: "src/value.ts", operation: "write" as const }),
+  ]),
+) {
   const created = createChangeDeclaration({
     requestDigest: digest("a"),
     repositoryId: "repository",
-    targets: Object.freeze([
-      Object.freeze({ path: "src/value.ts", operation: "write" as const }),
-    ]),
+    targets,
     plans: Object.freeze({
       "middleware-security": Object.freeze({ entryPoints: Object.freeze([]) }),
       "migration-configuration-secrets": Object.freeze({
@@ -145,6 +152,87 @@ describe("change assurance facade", () => {
     ).toBe("rejected");
   });
 
+  it("binds a canonical candidate manifest to target bytes and operations", async () => {
+    const { assurance } = createFacade();
+    const declarationTargets = Object.freeze([
+      Object.freeze({ path: "src/a.ts", operation: "write" as const }),
+      Object.freeze({ path: "src/b.ts", operation: "write" as const }),
+    ]);
+    const firstDeclaration = declarationTargets[0];
+    const secondDeclaration = declarationTargets[1];
+    if (firstDeclaration === undefined || secondDeclaration === undefined)
+      throw new Error("candidate manifest fixture targets missing");
+    const targets = Object.freeze([
+      Object.freeze({
+        ...firstDeclaration,
+        baselineBytes: Object.freeze([]),
+        candidateBytes: Object.freeze([1]),
+      }),
+      Object.freeze({
+        ...secondDeclaration,
+        baselineBytes: Object.freeze([]),
+        candidateBytes: Object.freeze([2]),
+      }),
+    ]);
+    const firstTarget = targets[0];
+    const secondTarget = targets[1];
+    if (firstTarget === undefined || secondTarget === undefined)
+      throw new Error("candidate manifest assessment targets missing");
+    const assessment = Object.freeze({
+      requestDigest: digest("a"),
+      repositoryId: "repository",
+      treeDigest: digest("b"),
+      baselineDigest: digest("c"),
+      declaration: createDeclaration(declarationTargets),
+      targets,
+    });
+    const result = await assurance.assess(assessment);
+    if (result.status !== "accepted") throw new Error(result.code);
+    const expected = createCandidateManifest(
+      Object.freeze(
+        targets.map(({ path, operation, candidateBytes }) =>
+          Object.freeze({
+            path,
+            operation,
+            contentDigest: sha256(candidateBytes),
+          }),
+        ),
+      ),
+    );
+    expect(result.receipt.candidateManifestDigest).toBe(
+      expected.manifestDigest,
+    );
+    const drifted = Object.freeze({
+      ...assessment,
+      targets: Object.freeze([
+        Object.freeze({ ...firstTarget, candidateBytes: Object.freeze([9]) }),
+        secondTarget,
+      ]),
+    });
+    expect(
+      assurance.verify(
+        Object.freeze({ receipt: result.receipt, assessment: drifted }),
+      ),
+    ).toBe(false);
+    const reordered = Object.freeze({
+      ...assessment,
+      targets: Object.freeze([secondTarget, firstTarget]),
+    });
+    expect(
+      assurance.verify(
+        Object.freeze({ receipt: result.receipt, assessment: reordered }),
+      ),
+    ).toBe(true);
+  });
+
+  it("distinguishes deletion from writing empty content", async () => {
+    const deleted = await assessSingleTarget("delete", null);
+    const emptied = await assessSingleTarget("write", Object.freeze([]));
+    expect(deleted.candidateManifestDigest).not.toBe(
+      emptied.candidateManifestDigest,
+    );
+  });
+
   it("requires one authentic extension for every assurance domain", () => {
     const created = createChangeAssurance(
       Object.freeze({ extensions: Object.freeze([]) }),
@@ -187,3 +275,32 @@ describe("change assurance facade", () => {
     expect(reads).toBe(0);
   });
 });
+
+async function assessSingleTarget(
+  operation: "write" | "delete",
+  candidateBytes: readonly number[] | null,
+) {
+  const { assurance } = createFacade();
+  const declarationTarget = Object.freeze({ path: "src/value.ts", operation });
+  const assessment = Object.freeze({
+    requestDigest: digest("a"),
+    repositoryId: "repository",
+    treeDigest: digest("b"),
+    baselineDigest: digest("c"),
+    declaration: createDeclaration(Object.freeze([declarationTarget])),
+    targets: Object.freeze([
+      Object.freeze({
+        ...declarationTarget,
+        baselineBytes: Object.freeze([]),
+        candidateBytes,
+      }),
+    ]),
+  });
+  const result = await assurance.assess(assessment);
+  if (result.status !== "accepted") throw new Error(result.code);
+  return result.receipt;
+}
+
+function sha256(bytes: readonly number[]) {
+  return `sha256:${createHash("sha256").update(Uint8Array.from(bytes)).digest("hex")}` as const;
+}

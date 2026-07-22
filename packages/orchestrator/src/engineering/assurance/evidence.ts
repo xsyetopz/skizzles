@@ -1,28 +1,11 @@
 import {
   type ChangeAssurance,
-  type ChangeAssuranceReceipt,
   type ChangeDeclaration,
   isChangeAssuranceReceipt,
 } from "@skizzles/change-assurance";
 import type { Digest } from "../../digest.ts";
 import type { PreparedBatch } from "../source/evidence.ts";
-
-export interface AssuranceEvidence {
-  readonly receipt: ChangeAssuranceReceipt;
-  readonly input: Readonly<{
-    requestDigest: Digest;
-    repositoryId: string;
-    treeDigest: Digest;
-    baselineDigest: Digest;
-    declaration: ChangeDeclaration;
-    targets: readonly Readonly<{
-      path: string;
-      operation: "write";
-      baselineBytes: readonly number[];
-      candidateBytes: readonly number[];
-    }>[];
-  }>;
-}
+import type { AssuranceEvidence } from "./contract.ts";
 
 export async function assessChange(
   assurance: ChangeAssurance,

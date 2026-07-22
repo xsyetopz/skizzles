@@ -1,6 +1,9 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { afterEach, describe, expect, it } from "bun:test";
-import { createSourceEngineering } from "../../src/index.ts";
+import {
+  createSourceEngineering,
+  isStructuralEvidenceReceipt,
+} from "../../src/index.ts";
 import {
   batchRequest,
   cleanupCompilerRoots,
@@ -95,7 +98,7 @@ describe("public source-engineering workflow", () => {
     expect(started.next).toEqual({
       kind: "edit",
       ordinal: 0,
-      operationIndex: 0,
+      epoch: 1,
     });
 
     const firstCursor = started.cursor;
@@ -106,7 +109,11 @@ describe("public source-engineering workflow", () => {
     if (editedProduction.status !== "ready") {
       throw new Error("production edit did not advance");
     }
-    expect(editedProduction.next).toEqual({ kind: "format", ordinal: 1 });
+    expect(editedProduction.next).toEqual({
+      kind: "format",
+      ordinal: 1,
+      epoch: 2,
+    });
     expect(
       await engine.advance(Object.freeze({ cursor: firstCursor })),
     ).toEqual({ status: "rejected", code: "CURSOR_REPLAYED" });
@@ -118,32 +125,10 @@ describe("public source-engineering workflow", () => {
     if (formattedProduction.status !== "ready") {
       throw new Error("production format did not advance");
     }
-    expect(formattedProduction.next).toEqual({
-      kind: "edit",
-      ordinal: 2,
-      operationIndex: 0,
-    });
-
-    const editedTest = await engine.advance(
-      Object.freeze({ cursor: formattedProduction.cursor }),
-    );
-    expect(editedTest.status).toBe("ready");
-    if (editedTest.status !== "ready") {
-      throw new Error("negative-path edit did not advance");
-    }
-    expect(editedTest.next).toEqual({ kind: "format", ordinal: 3 });
-
-    const formattedTest = await engine.advance(
-      Object.freeze({ cursor: editedTest.cursor }),
-    );
-    expect(formattedTest.status).toBe("ready");
-    if (formattedTest.status !== "ready") {
-      throw new Error("negative-path format did not advance");
-    }
-    expect(formattedTest.next).toEqual({ kind: "validate", ordinal: 4 });
+    expect(formattedProduction.next).toEqual({ kind: "validate", ordinal: 2 });
 
     const prepared = await engine.advance(
-      Object.freeze({ cursor: formattedTest.cursor }),
+      Object.freeze({ cursor: formattedProduction.cursor }),
     );
     expect(prepared.status).toBe("prepared");
     if (prepared.status !== "prepared") {
@@ -162,6 +147,23 @@ describe("public source-engineering workflow", () => {
     );
     expect(textOf(prepared.artifacts[1]?.readBytes())).toBe(testCandidate);
     expect(prepared.receipt.compilerReceipt.receipts).toHaveLength(2);
+    expect(prepared.receipt.compilerReceipt.receipts[0]).toMatchObject({
+      epoch: 1,
+      epochKind: "edit",
+      predecessorReceiptDigest: null,
+      targets: [{ path: productionPath }, { path: testPath }],
+    });
+    expect(prepared.receipt.structuralReceipt.compilerChain.links).toHaveLength(
+      2,
+    );
+    expect(
+      isStructuralEvidenceReceipt(prepared.receipt.structuralReceipt),
+    ).toBe(true);
+    expect(
+      isStructuralEvidenceReceipt(
+        Object.freeze({ ...prepared.receipt.structuralReceipt }),
+      ),
+    ).toBe(false);
     expect(prepared.receipt.policyReceipt.findingCount).toBe(0);
     expect(prepared.receipt.indexReceipt).toMatchObject({ status: "indexed" });
 

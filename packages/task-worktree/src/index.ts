@@ -25,6 +25,7 @@ export type {
   TaskWorktreeRevalidationResult,
   TaskWorktreeRunResult,
   TaskWorktreeSession,
+  TaskWorktreeVerificationResult,
 } from "./contract.ts";
 export {
   digestTaskWorktreeBytes,
@@ -35,4 +36,17 @@ export {
   isTaskWorktree,
 } from "./lifecycle/facade.ts";
 export { isTaskWorktreeReceipt } from "./lifecycle/receipt.ts";
+export type {
+  TaskWorktreeProtectedPathAuthorizationRequest,
+  TaskWorktreeProtectedPathMode,
+  TaskWorktreeProtectedPathPolicy,
+} from "./protection/public-contract.ts";
 export type { SandboxAuthorityExecutionRequest } from "./sandbox/capabilities.ts";
+export type {
+  TaskWorktreeVerificationArtifactReceipt,
+  TaskWorktreeVerificationObjective,
+  TaskWorktreeVerificationProfile,
+  TaskWorktreeVerificationReceipt,
+  TaskWorktreeVerificationReport,
+} from "./verification/contract.ts";
+export { isTaskWorktreeVerificationReceipt } from "./verification/receipt.ts";

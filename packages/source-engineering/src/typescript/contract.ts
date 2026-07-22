@@ -40,6 +40,24 @@ export interface TypeScriptDeclaration {
   readonly nodeDigest: Digest;
 }
 
+export interface TypeScriptAstNodeIdentity {
+  readonly nodeId: Digest;
+  readonly declarationKind: DeclarationKind;
+  readonly name: string;
+  readonly nodeDigest: Digest;
+  readonly identityDigest: Digest;
+  readonly span: Readonly<{ start: number; end: number }>;
+}
+
+export interface TypeScriptAstChange {
+  readonly path: string;
+  readonly operation: TypeScriptNodeOperation["kind"];
+  readonly anchor: TypeScriptAstNodeIdentity;
+  readonly baselineNode: TypeScriptAstNodeIdentity | null;
+  readonly candidateNode: TypeScriptAstNodeIdentity | null;
+  readonly changeDigest: Digest;
+}
+
 export interface TypeScriptEditReceipt {
   readonly path: string;
   readonly objective: "behavioral" | "format-only";
@@ -48,7 +66,7 @@ export interface TypeScriptEditReceipt {
   readonly candidateDigest: Digest;
   readonly candidateSemanticDigest: Digest;
   readonly candidateBytes: readonly number[];
-  readonly changedNodeDigests: readonly Digest[];
+  readonly changes: readonly TypeScriptAstChange[];
 }
 
 export type TypeScriptEditResult =

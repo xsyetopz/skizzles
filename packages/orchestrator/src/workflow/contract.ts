@@ -5,7 +5,9 @@ import type {
   TaskWorktreePrepareTerminalResult,
   TaskWorktreeReceipt,
   TaskWorktreeSession,
+  TaskWorktreeVerificationReceipt,
 } from "@skizzles/task-worktree";
+import type { VerificationGateReceipt } from "@skizzles/verification-gate";
 import type {
   CrashInjectionPort,
   DestinationAuthorityPort,
@@ -18,6 +20,9 @@ import type {
 import type { Orchestrator } from "../runtime.ts";
 import type { ApprovalRequest } from "../state/approval.ts";
 import type { TargetBaseline } from "../state/target.ts";
+import type { WorkflowEngineeringEvidence } from "./evidence.ts";
+import type { WorkflowVerificationAuthority } from "./verification/contract.ts";
+import type { WorkflowVerificationProfileIds } from "./verification/task-contract.ts";
 import type { TaskWorktreeApprovalBridge } from "./worktree/approval.ts";
 
 export type TerminalPublication =
@@ -50,6 +55,8 @@ export interface CausalWorkflowConfig {
   readonly baselineAuthority: PublicationBaselineAuthorityPort;
   readonly taskWorktree: TaskWorktree;
   readonly taskWorktreeApproval: TaskWorktreeApprovalBridge;
+  readonly verificationAuthority: WorkflowVerificationAuthority;
+  readonly verificationProfiles: WorkflowVerificationProfileIds;
   readonly transaction: {
     readonly destination: DestinationAuthorityPort;
     readonly leases: RepositoryLeaseAuthorityPort;
@@ -68,6 +75,9 @@ export interface WorkflowReview {
   readonly diffDigest: string;
   readonly taskWorktreeReceipt: TaskWorktreeReceipt;
   readonly executedProfileIds: readonly string[];
+  readonly taskVerificationReceipts: readonly TaskWorktreeVerificationReceipt[];
+  readonly verificationGateReceipt: VerificationGateReceipt;
+  readonly engineeringEvidence: WorkflowEngineeringEvidence;
 }
 
 export interface WorkflowCleanupHandle {
@@ -102,6 +112,7 @@ export type WorkflowFailureCode =
   | "EXECUTION_BUDGET_REJECTED"
   | "TASK_WORKTREE_REJECTED"
   | "TASK_WORKTREE_REVALIDATION_REJECTED"
+  | "VERIFICATION_GATE_REJECTED"
   | "TASK_WORKTREE_COMMIT_REJECTED"
   | "PUBLICATION_BASELINE_REJECTED"
   | "DIFF_REJECTED"

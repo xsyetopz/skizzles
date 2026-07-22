@@ -47,6 +47,24 @@ const policy: SecurityPolicyConfig = Object.freeze({
       imports: Object.freeze(["sessionBoundary"]),
       capability: "session",
     }),
+    Object.freeze({
+      interfaceId: "execution-interface",
+      module: "@app/secure-execution",
+      imports: Object.freeze(["secureExec"]),
+      capability: "execution",
+    }),
+    Object.freeze({
+      interfaceId: "database-interface",
+      module: "@app/secure-database",
+      imports: Object.freeze(["secureQuery"]),
+      capability: "database",
+    }),
+    Object.freeze({
+      interfaceId: "network-interface",
+      module: "@app/secure-network",
+      imports: Object.freeze(["secureFetch"]),
+      capability: "network",
+    }),
   ]),
   benchmarks: Object.freeze([
     Object.freeze({
@@ -61,17 +79,17 @@ const policy: SecurityPolicyConfig = Object.freeze({
     Object.freeze({
       capability: "execution",
       names: Object.freeze(["exec"]),
-      secureInterfaceIds: Object.freeze(["session-interface"]),
+      secureInterfaceIds: Object.freeze(["execution-interface"]),
     }),
     Object.freeze({
       capability: "database",
       names: Object.freeze(["query"]),
-      secureInterfaceIds: Object.freeze(["session-interface"]),
+      secureInterfaceIds: Object.freeze(["database-interface"]),
     }),
     Object.freeze({
       capability: "network",
       names: Object.freeze(["fetch"]),
-      secureInterfaceIds: Object.freeze(["session-interface"]),
+      secureInterfaceIds: Object.freeze(["network-interface"]),
     }),
   ]),
 });

@@ -22,6 +22,7 @@ rewriting its rationale.
 | [0012](0012-source-engineering-pipeline.md) | Accepted | Derive candidate bytes through a TypeScript-first source-engineering capability and bind validation provenance into the gated publication path. |
 | [0013](0013-change-assurance-boundary.md) | Accepted | Assess exact source candidates through independently owned security, migration, performance, and supply-chain authorities before integration or approval. |
 | [0014](0014-task-worktree-boundary.md) | Accepted | Isolate each task in an authenticated Git worktree with exact write scope, sandboxed commands, bounded diffs, and one approved commit. |
+| [0015](0015-verification-gate.md) | Accepted | Gate publication on exact mutation, property, modified-coverage, original-test, security-review, specification-lock, and task-context-reset evidence. |
 
 ## Record contract
 

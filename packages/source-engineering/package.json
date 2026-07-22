@@ -13,6 +13,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@skizzles/candidate-manifest": "workspace:*",
     "@skizzles/run-workspace": "workspace:*",
     "typescript": "7.0.2"
   },

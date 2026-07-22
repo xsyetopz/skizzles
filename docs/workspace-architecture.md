@@ -16,14 +16,17 @@ The current workspace dependency edges are:
 
 <!-- workspace-policy:dependency-edges:start -->
 ```text
+@skizzles/change-assurance -> @skizzles/candidate-manifest
 @skizzles/change-assurance -> @skizzles/run-workspace
 @skizzles/installer -> @skizzles/container-lab
 @skizzles/installer -> @skizzles/prompt-layer
 @skizzles/installer -> @skizzles/run-workspace
 @skizzles/model-catalog -> @skizzles/run-workspace
+@skizzles/orchestrator -> @skizzles/candidate-manifest
 @skizzles/orchestrator -> @skizzles/change-assurance
 @skizzles/orchestrator -> @skizzles/source-engineering
 @skizzles/orchestrator -> @skizzles/task-worktree
+@skizzles/orchestrator -> @skizzles/verification-gate
 @skizzles/orchestrator -> @skizzles/workspace-transaction
 @skizzles/plugin-builder -> @skizzles/command-hook
 @skizzles/plugin-builder -> @skizzles/command-supervisor
@@ -34,8 +37,11 @@ The current workspace dependency edges are:
 @skizzles/plugin-builder -> @skizzles/run-workspace
 @skizzles/plugin-builder -> @skizzles/usage-analyzer
 @skizzles/prompt-layer -> @skizzles/run-workspace
+@skizzles/source-engineering -> @skizzles/candidate-manifest
 @skizzles/source-engineering -> @skizzles/run-workspace
+@skizzles/task-worktree -> @skizzles/candidate-manifest
 @skizzles/task-worktree -> @skizzles/command-supervisor
+@skizzles/verification-gate -> @skizzles/candidate-manifest
 @skizzles/workspace-policy -> @skizzles/run-workspace
 ```
 <!-- workspace-policy:dependency-edges:end -->
@@ -69,6 +75,14 @@ policy, and semantic-diff provenance. The orchestrator composes that evidence
 with approval and publication; source-engineering never writes the canonical
 workspace.
 
+`@skizzles/candidate-manifest` owns the canonical versioned identity shared by
+source engineering, change assurance, and task worktrees for an exact candidate
+file set. A manifest contains only sorted normalized relative paths, write or
+delete operations, and content digests; it contains no source bytes or host
+paths and does not claim caller authority. Each consuming capability derives
+and authenticates the same manifest independently while retaining its own
+native candidate digest domain.
+
 `@skizzles/change-assurance` owns pre-publication non-functional, security,
 migration, secret, performance, dependency, vulnerability, and license
 assurance. Trusted hosts issue authentic change declarations; four dedicated
@@ -83,6 +97,16 @@ deterministic Conventional Commit synthesis. It creates one approved commit in
 the isolated branch; `@skizzles/workspace-transaction` remains the only owner of
 canonical destination publication. Unsupported OS sandbox enforcement fails
 closed instead of degrading to unsandboxed execution.
+
+`@skizzles/verification-gate` owns Phase 6 acceptance aggregation. It derives
+the complete mutation objective from authenticated modified executable maps,
+requires deterministic property and modified-node/branch coverage evidence,
+proves the original test manifest ran against the candidate production overlay,
+and invokes a distinct reviewer last. It does not edit source, execute commands,
+inspect Git, or rerun another package's verifier. The orchestrator composes its
+receipt only after source engineering, change assurance, security review,
+physical integration, and task-worktree validation have produced authentic,
+exactly bound evidence.
 
 ## Run lifecycle ownership
 

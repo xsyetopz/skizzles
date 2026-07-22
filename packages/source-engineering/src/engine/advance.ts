@@ -1,3 +1,4 @@
+import { digestText } from "../digest.ts";
 import type { TemplateEvidenceReceipt } from "../evidence/source.ts";
 import type {
   SourceLanguageAdapterBindings,
@@ -12,6 +13,12 @@ import type {
   SourceEngineeringStartResult,
 } from "./contract.ts";
 import type { SourceEngineeringState } from "./cursor.ts";
+import {
+  candidateSetDigestOf,
+  cloneTarget,
+  commitTargets,
+  compileEpoch,
+} from "./epoch.ts";
 import { objectValue, parseBatchRequest } from "./input.ts";
 import type {
   BatchRequest,
@@ -60,17 +67,30 @@ function startBatch(
       baseline: described.baseline,
       operations: target.operations,
       candidate: described.baseline,
-      changedDeclarations: [],
+      astChanges: [],
       templateReceipts: [],
       formatterReceipt: null,
     };
   });
   const steps = createSteps(targets);
+  const targetSetDigest = digestText(
+    JSON.stringify(targets.map(({ path }) => path)),
+  );
+  const baselineCandidateSetDigest = candidateSetDigestOf(
+    context.adapter,
+    targets,
+  );
+  if (baselineCandidateSetDigest === undefined)
+    return rejected("CONTEXT_DRIFTED");
   const batch: BatchState = {
     request,
     targets,
     steps,
     context,
+    compilerReceipts: [],
+    targetSetDigest,
+    baselineCandidateSetDigest,
+    candidateSetDigest: baselineCandidateSetDigest,
     step: 0,
   };
   return ready(state.issueCursor(batch), steps[0]);
@@ -89,21 +109,13 @@ async function advanceBatch(
 
   const { batch } = consumed;
   const step = batch.steps[batch.step];
-  const location = step === undefined ? undefined : locateStep(batch, step);
-  if (
-    step === undefined ||
-    location === undefined ||
-    step.kind === "validate"
-  ) {
+  if (step === undefined || step.kind === "validate") {
     return rejected("CURSOR_FORGED");
   }
-  const target = batch.targets[location.targetIndex];
-  if (target === undefined) return rejected("CURSOR_FORGED");
-
   const failure =
     step.kind === "edit"
-      ? await applyEdit(config, batch, target, location.operationIndex)
-      : await applyFormat(batch, target);
+      ? await applyEditEpoch(config, batch, step.epoch)
+      : await applyFormatEpoch(batch, step.epoch);
   if (failure !== undefined) return rejected(failure);
 
   batch.step += 1;
@@ -181,87 +193,88 @@ function sameTemplates(config: EngineConfig, context: ContextState): boolean {
 function createSteps(
   targets: readonly BatchTargetState[],
 ): readonly BatchStep[] {
-  const steps: BatchStep[] = [];
-  for (const target of targets) {
-    for (
-      let operationIndex = 0;
-      operationIndex < target.operations.length;
-      operationIndex += 1
-    ) {
-      steps.push(
-        Object.freeze({
-          kind: "edit",
-          ordinal: steps.length,
-          operationIndex,
-        }),
-      );
-    }
-    steps.push(Object.freeze({ kind: "format", ordinal: steps.length }));
-  }
+  const epochs = [
+    ...new Set(
+      targets.flatMap(({ operations }) => operations.map(({ epoch }) => epoch)),
+    ),
+  ].sort((left, right) => left - right);
+  const steps: BatchStep[] = epochs.map((epoch, ordinal) =>
+    Object.freeze({ kind: "edit", ordinal, epoch }),
+  );
+  const formatEpoch = (epochs.at(-1) ?? 0) + 1;
+  steps.push(
+    Object.freeze({
+      kind: "format",
+      ordinal: steps.length,
+      epoch: formatEpoch,
+    }),
+  );
   steps.push(Object.freeze({ kind: "validate", ordinal: steps.length }));
   return Object.freeze(steps);
 }
 
-function locateStep(batch: BatchState, expected: BatchStep) {
-  let ordinal = 0;
-  for (
-    let targetIndex = 0;
-    targetIndex < batch.targets.length;
-    targetIndex += 1
-  ) {
-    const target = batch.targets[targetIndex];
-    if (target === undefined) return missingLocation();
-    for (
-      let operationIndex = 0;
-      operationIndex < target.operations.length;
-      operationIndex += 1
-    ) {
-      if (ordinal === expected.ordinal && expected.kind === "edit") {
-        return { targetIndex, operationIndex };
-      }
-      ordinal += 1;
-    }
-    if (ordinal === expected.ordinal && expected.kind === "format") {
-      return { targetIndex, operationIndex: -1 };
-    }
-    ordinal += 1;
-  }
-  return missingLocation();
-}
-
-async function applyEdit(
+async function applyEditEpoch(
   config: EngineConfig,
   batch: BatchState,
-  target: BatchTargetState,
-  operationIndex: number,
+  epoch: number | undefined,
 ): Promise<SourceEngineeringFailureCode | undefined> {
-  const operation = target.operations[operationIndex];
-  if (operation === undefined) return "EDIT_REJECTED";
-  const translated = await translateOperation(
-    config,
-    batch.context.adapter,
-    target,
-    operation,
-  );
-  if (typeof translated === "string") return translated;
-  const edited = await batch.context.adapter.adapter.editDeclarations({
-    parsed: target.candidate,
-    objective: batch.request.objective,
-    operations: Object.freeze([translated.operation]),
-  });
-  if (edited.status !== "edited") return "EDIT_REJECTED";
-  const text = new TextDecoder().decode(
-    Uint8Array.from(edited.receipt.candidateBytes),
-  );
-  const parsed = await batch.context.adapter.adapter.parse({
-    targetPath: target.path,
-    sourceText: text,
-  });
-  if (parsed.status !== "parsed") return "EDIT_REJECTED";
-  target.candidate = parsed.parsed;
-  target.changedDeclarations.push(...edited.receipt.changedNodeDigests);
-  if (translated.receipt !== undefined)
-    target.templateReceipts.push(translated.receipt);
+  if (epoch === undefined) return "EDIT_REJECTED";
+  const candidates = batch.targets.map(cloneTarget);
+  let operationCount = 0;
+  for (const target of candidates) {
+    const operations = target.operations.filter(
+      (operation) => operation.epoch === epoch,
+    );
+    if (operations.length === 0) continue;
+    operationCount += operations.length;
+    const translatedOperations: TypeScriptNodeOperation[] = [];
+    const templateReceipts: TemplateEvidenceReceipt[] = [];
+    for (const operation of operations) {
+      const translated = await translateOperation(
+        config,
+        batch.context.adapter,
+        target,
+        operation,
+      );
+      if (typeof translated === "string") return translated;
+      translatedOperations.push(translated.operation);
+      if (translated.receipt !== undefined) {
+        templateReceipts.push(translated.receipt);
+      }
+    }
+    const edited = await batch.context.adapter.adapter.editDeclarations({
+      parsed: target.candidate,
+      objective: batch.request.objective,
+      operations: Object.freeze(translatedOperations),
+    });
+    if (
+      edited.status !== "edited" ||
+      edited.receipt.changes.length !== operations.length
+    ) {
+      return "EDIT_REJECTED";
+    }
+    const text = new TextDecoder().decode(
+      Uint8Array.from(edited.receipt.candidateBytes),
+    );
+    const parsed = await batch.context.adapter.adapter.parse({
+      targetPath: target.path,
+      sourceText: text,
+    });
+    if (parsed.status !== "parsed") return "EDIT_REJECTED";
+    target.candidate = parsed.parsed;
+    target.astChanges.push(
+      ...edited.receipt.changes.map((change) =>
+        Object.freeze({ epoch, change }),
+      ),
+    );
+    target.templateReceipts.push(...templateReceipts);
+  }
+  if (operationCount === 0) return "EDIT_REJECTED";
+  const compiled = await compileEpoch(batch, candidates, epoch, "edit");
+  if (compiled === undefined) return "COMPILER_REJECTED";
+  commitTargets(batch.targets, candidates);
+  batch.compilerReceipts.push(compiled.receipt);
+  batch.candidateSetDigest = compiled.candidateSetDigest;
   return completed();
 }
 
@@ -350,31 +363,38 @@ function selector(
   });
 }
 
-async function applyFormat(batch: BatchState, target: BatchTargetState) {
+async function applyFormatEpoch(batch: BatchState, epoch: number | undefined) {
+  if (epoch === undefined) return "FORMATTER_REJECTED";
   const profile = batch.context.adapter.formatterProfiles.get(
     batch.request.formatterId,
   );
   if (profile === undefined) return "FORMATTER_REJECTED";
-  const formatted = await batch.context.adapter.adapter.formatCandidate({
-    candidate: target.candidate,
-    treeDigest: batch.request.repository.treeDigest,
-    profileId: profile.profileId,
-  });
-  if (formatted.status !== "formatted") return "FORMATTER_REJECTED";
-  const text = new TextDecoder().decode(
-    Uint8Array.from(formatted.receipt.formattedBytes),
-  );
-  const parsed = await batch.context.adapter.adapter.parse({
-    targetPath: target.path,
-    sourceText: text,
-  });
-  if (parsed.status !== "parsed") return "FORMATTER_REJECTED";
-  target.candidate = parsed.parsed;
-  target.formatterReceipt = formatted.receipt;
+  const candidates = batch.targets.map(cloneTarget);
+  for (const target of candidates) {
+    const formatted = await batch.context.adapter.adapter.formatCandidate({
+      candidate: target.candidate,
+      treeDigest: batch.request.repository.treeDigest,
+      profileId: profile.profileId,
+    });
+    if (formatted.status !== "formatted") return "FORMATTER_REJECTED";
+    const text = new TextDecoder().decode(
+      Uint8Array.from(formatted.receipt.formattedBytes),
+    );
+    const parsed = await batch.context.adapter.adapter.parse({
+      targetPath: target.path,
+      sourceText: text,
+    });
+    if (parsed.status !== "parsed") return "FORMATTER_REJECTED";
+    target.candidate = parsed.parsed;
+    target.formatterReceipt = formatted.receipt;
+  }
+  const compiled = await compileEpoch(batch, candidates, epoch, "format");
+  if (compiled === undefined) return "COMPILER_REJECTED";
+  commitTargets(batch.targets, candidates);
+  batch.compilerReceipts.push(compiled.receipt);
+  batch.candidateSetDigest = compiled.candidateSetDigest;
   return completed();
 }
-
-function missingLocation(): undefined {}
 
 function completed(): undefined {}
 
@@ -403,12 +423,12 @@ function ready(
 ): SourceEngineeringStartResult {
   if (next === undefined) return rejected("CURSOR_FORGED");
   const publicNext: SourceEngineeringNextStep = Object.freeze(
-    next.operationIndex === undefined
+    next.epoch === undefined
       ? { kind: next.kind, ordinal: next.ordinal }
       : {
           kind: next.kind,
           ordinal: next.ordinal,
-          operationIndex: next.operationIndex,
+          epoch: next.epoch,
         },
   );
   return Object.freeze({ status: "ready", cursor, next: publicNext });

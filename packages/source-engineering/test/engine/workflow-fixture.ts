@@ -202,6 +202,12 @@ export function engineConfig(
     sourceEvidence,
     languageAdapters: Object.freeze([adapter.adapter]),
     literalRegistry: literalRegistry(),
+    structuralPolicy: Object.freeze({
+      metricVersion: "cyclomatic-v1",
+      maxFunctionComplexity: 64,
+      maxFunctionIncrease: 64,
+      maxAggregateIncrease: 128,
+    }),
     templates: Object.freeze([
       Object.freeze({
         templateId: "typescript-function",
@@ -313,6 +319,7 @@ function batchTarget(
     path,
     operations: Object.freeze([
       Object.freeze({
+        epoch: 1,
         kind: "replace",
         selector: Object.freeze({
           declarationKind: "function",

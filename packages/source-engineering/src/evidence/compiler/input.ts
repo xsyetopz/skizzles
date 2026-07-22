@@ -1,12 +1,15 @@
 import { resolve } from "node:path";
 import { types } from "node:util";
-import { digestBytes } from "../../digest.ts";
+import { digestBytes, digestText } from "../../digest.ts";
 import type {
   ParsedCandidateOverlay,
   ParsedCompilerInput,
   TrustedCompilerState,
 } from "./authority-state.ts";
-import type { CompilerEvidenceBindings } from "./contract.ts";
+import type {
+  CompilerEvidenceBindings,
+  CompilerEvidenceReceipt,
+} from "./contract.ts";
 import {
   exactRecord,
   inside,
@@ -37,10 +40,16 @@ export function parseCompilerInput(
     "targetPath",
     "candidateDigest",
     "semanticDigest",
+    "epoch",
+    "epochKind",
+    "predecessorCandidateSetDigest",
+    "candidateSetDigest",
+    "targetSetDigest",
     "profileId",
     "toolId",
     "toolVersion",
     "targets",
+    "predecessor",
   ]);
   if (record === undefined) return;
   const bindings = parseBindings(record);
@@ -48,6 +57,21 @@ export function parseCompilerInput(
   if (!matchesState(bindings, state)) return "stale";
   const targets = parseTargets(record.get("targets"), state.rootPath);
   if (targets === undefined || targets === "candidate-stale") return targets;
+  const predecessor = record.get("predecessor");
+  if (
+    !(
+      predecessor === null ||
+      (typeof predecessor === "object" && predecessor !== null)
+    )
+  ) {
+    return;
+  }
+  if (
+    bindings.targetSetDigest !== targetSetDigest(targets) ||
+    bindings.candidateSetDigest !== candidateSetDigest(targets)
+  ) {
+    return "candidate-stale";
+  }
   const selected = targets.find(({ path }) => path === bindings.targetPath);
   if (
     selected === undefined ||
@@ -55,7 +79,11 @@ export function parseCompilerInput(
     selected.semanticDigest !== bindings.semanticDigest
   )
     return "candidate-stale";
-  return Object.freeze({ bindings, targets });
+  return Object.freeze({
+    bindings,
+    targets,
+    predecessor: predecessor as CompilerEvidenceReceipt | null,
+  });
 }
 
 function parseTargets(
@@ -97,6 +125,13 @@ function parseBindings(
   const targetPath = record.get("targetPath");
   const candidateDigest = record.get("candidateDigest");
   const semanticDigest = record.get("semanticDigest");
+  const epoch = record.get("epoch");
+  const epochKind = record.get("epochKind");
+  const predecessorCandidateSetDigest = record.get(
+    "predecessorCandidateSetDigest",
+  );
+  const candidateSetDigestValue = record.get("candidateSetDigest");
+  const targetSetDigestValue = record.get("targetSetDigest");
   const profileId = record.get("profileId");
   if (
     !(
@@ -108,6 +143,14 @@ function parseBindings(
       validPath(targetPath) &&
       validDigest(candidateDigest) &&
       validDigest(semanticDigest) &&
+      typeof epoch === "number" &&
+      Number.isSafeInteger(epoch) &&
+      epoch > 0 &&
+      epoch <= maximumTargets &&
+      (epochKind === "edit" || epochKind === "format") &&
+      validDigest(predecessorCandidateSetDigest) &&
+      validDigest(candidateSetDigestValue) &&
+      validDigest(targetSetDigestValue) &&
       validId(profileId, maximumProfileIdentityLength)
     ) ||
     record.get("toolId") !== "typescript" ||
@@ -123,10 +166,35 @@ function parseBindings(
     targetPath,
     candidateDigest,
     semanticDigest,
+    epoch,
+    epochKind,
+    predecessorCandidateSetDigest,
+    candidateSetDigest: candidateSetDigestValue,
+    targetSetDigest: targetSetDigestValue,
     profileId,
     toolId: "typescript",
     toolVersion: "7.0.2",
   });
+}
+
+function targetSetDigest(
+  targets: readonly ParsedCandidateOverlay[],
+): ReturnType<typeof digestText> {
+  return digestText(JSON.stringify(targets.map(({ path }) => path)));
+}
+
+function candidateSetDigest(
+  targets: readonly ParsedCandidateOverlay[],
+): ReturnType<typeof digestText> {
+  return digestText(
+    JSON.stringify(
+      targets.map(({ path, candidateDigest, semanticDigest }) => ({
+        path,
+        candidateDigest,
+        semanticDigest,
+      })),
+    ),
+  );
 }
 
 function parseTarget(

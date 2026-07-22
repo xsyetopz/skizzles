@@ -8,6 +8,7 @@ import {
   CheckpointLedger,
   type CheckpointResult,
   type CheckpointValidation,
+  type TaskCheckpointRestoration,
 } from "./checkpoint.ts";
 import { exactKeys, isRecord } from "./codec.ts";
 import { type DiagnosticResult, interceptDiagnostic } from "./diagnostic.ts";
@@ -71,8 +72,10 @@ export interface Orchestrator {
   createDiagnostic(input: unknown): Promise<DiagnosticResult>;
   createFilePayload(input: unknown): FilePayloadResult;
   createCheckpoint(input: unknown): Promise<CheckpointResult>;
+  createTaskCheckpoint(input: unknown): Promise<CheckpointResult>;
   supersedeCheckpoint(input: unknown): Promise<CheckpointResult>;
   validateCheckpoint(input: unknown): Promise<CheckpointValidation>;
+  restoreTaskCheckpoint(input: unknown): Promise<TaskCheckpointRestoration>;
   proposeChange(input: unknown): ProposalResult;
   reviewChange(input: unknown): Promise<ReviewResult>;
   applyChange(input: unknown): Promise<StructuralResult>;
@@ -84,6 +87,7 @@ export interface Orchestrator {
   terminateExecution(input: unknown): ExecutionTerminationResult;
   completeExecution(input: unknown): Promise<ExecutionCompletionResult>;
   discover(input: unknown): Promise<DiscoveryResult>;
+  discoverTask(input: unknown): Promise<DiscoveryResult>;
   expandDiscovery(input: unknown): Promise<DiscoveryResult>;
   planApproval(input: unknown): ApprovalTransitionResult;
   reviewApproval(input: unknown): ApprovalTransitionResult;
@@ -187,6 +191,11 @@ export function createOrchestrator(input: unknown): OrchestratorResult {
         status: "rejected",
         code: "INVALID_CHECKPOINT_INPUT",
       }),
+    createTaskCheckpoint: (value: unknown) =>
+      safeAsync(() => checkpoints.createTask(value), {
+        status: "rejected",
+        code: "INVALID_CHECKPOINT_INPUT",
+      }),
     supersedeCheckpoint: (value: unknown) =>
       safeAsync(() => checkpoints.supersede(value), {
         status: "rejected",
@@ -195,6 +204,11 @@ export function createOrchestrator(input: unknown): OrchestratorResult {
     validateCheckpoint: (value: unknown) =>
       safeAsync(() => checkpoints.validate(value), {
         status: "invalid",
+        code: "INVALID_CHECKPOINT_INPUT",
+      }),
+    restoreTaskCheckpoint: (value: unknown) =>
+      safeAsync(() => checkpoints.restoreTask(value), {
+        status: "rejected",
         code: "INVALID_CHECKPOINT_INPUT",
       }),
     proposeChange: (value: unknown) => safeProposal(value, structural),
@@ -231,6 +245,11 @@ export function createOrchestrator(input: unknown): OrchestratorResult {
       }),
     discover: (value: unknown) =>
       safeAsync(() => discovery.discover(value), {
+        status: "rejected",
+        code: "INVALID_DISCOVERY_INPUT",
+      }),
+    discoverTask: (value: unknown) =>
+      safeAsync(() => discovery.discoverTask(value), {
         status: "rejected",
         code: "INVALID_DISCOVERY_INPUT",
       }),

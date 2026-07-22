@@ -2,11 +2,16 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { TaskWorktree, TaskWorktreeSession } from "../../src/index.ts";
+import type {
+  TaskWorktree,
+  TaskWorktreeApprovalAuthorityRequest,
+  TaskWorktreeSession,
+} from "../../src/index.ts";
 import {
   cleanupFixtures,
   createApprovalEvidence,
   createAuthority,
+  createAuthorityWithApproval,
   createFixture,
   prepareInput,
   worktreeAllocation,
@@ -15,6 +20,63 @@ import {
 afterEach(cleanupFixtures);
 
 describe("task-worktree promotion permits", () => {
+  it("freezes nested approval arrays and rejects a replayed binding decision", async () => {
+    const fixture = await createFixture();
+    let firstBindingDigest: string | undefined;
+    let observed: TaskWorktreeApprovalAuthorityRequest | undefined;
+    const authority = createAuthorityWithApproval(
+      fixture,
+      Object.freeze({
+        id: "approval-array-regression",
+        authorize: (request: TaskWorktreeApprovalAuthorityRequest) => {
+          observed ??= request;
+          firstBindingDigest ??= request.binding.bindingDigest;
+          return Object.freeze({
+            status: "approved" as const,
+            bindingDigest: firstBindingDigest,
+            approvalDigest: `sha256:${"d".repeat(64)}` as const,
+          });
+        },
+      }),
+    );
+    const first = await authority.prepare(prepareInput("array-first"));
+    const second = await authority.prepare(prepareInput("array-second"));
+    if (first.status !== "prepared" || second.status !== "prepared")
+      throw new Error("parallel prepare failed");
+    await runValidation(authority, first.session);
+    await runValidation(authority, second.session);
+    expect(
+      await authority.authorize(
+        Object.freeze({
+          version: 1 as const,
+          session: first.session,
+          approvalEvidence: Object.freeze({}),
+        }),
+      ),
+    ).toMatchObject({ status: "authorized" });
+    const binding = observed?.binding;
+    if (binding === undefined) throw new Error("approval binding not observed");
+    expect(Object.isFrozen(binding)).toBe(true);
+    for (const values of [
+      binding.runProfileIds,
+      binding.runOutcomeDigests,
+      binding.verificationProfileIds,
+      binding.verificationReceiptDigests,
+    ]) {
+      expect(Object.isFrozen(values)).toBe(true);
+      expect(Reflect.set(values, 0, "forged")).toBe(false);
+    }
+    expect(
+      await authority.authorize(
+        Object.freeze({
+          version: 1 as const,
+          session: second.session,
+          approvalEvidence: Object.freeze({}),
+        }),
+      ),
+    ).toEqual({ status: "rejected", code: "APPROVAL_REJECTED" });
+  });
+
   it("rejects arbitrary approval facts and forged permit lookalikes", async () => {
     const authority = createAuthority(await createFixture());
     const prepared = await authority.prepare(prepareInput("permit-forgery"));

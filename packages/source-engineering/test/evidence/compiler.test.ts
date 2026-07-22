@@ -180,6 +180,73 @@ describe("factory-issued TypeScript compiler evidence", () => {
       });
     });
   });
+
+  it("rejects omitted, reordered, and cross-authority spliced predecessors", async () => {
+    await withProject(strictConfig(), async (project) => {
+      const authority = project.authority();
+      const targets = [
+        overlay("src/value.ts", "export const value: string = 'ok';\n"),
+      ];
+      const first = await captureCompilerEvidence(authority, input(targets));
+      if (first.status !== "accepted") throw new Error("first epoch failed");
+
+      await expect(
+        captureCompilerEvidence(
+          authority,
+          chainInput(targets, null, 2, first.receipt.candidateSetDigest),
+        ),
+      ).resolves.toEqual({
+        status: "rejected",
+        code: "COMPILER_CHAIN_REJECTED",
+      });
+      await expect(
+        captureCompilerEvidence(
+          authority,
+          chainInput(
+            targets,
+            first.receipt,
+            3,
+            first.receipt.candidateSetDigest,
+          ),
+        ),
+      ).resolves.toEqual({
+        status: "rejected",
+        code: "COMPILER_CHAIN_REJECTED",
+      });
+
+      const foreignAuthority = project.authority();
+      const foreign = await captureCompilerEvidence(
+        foreignAuthority,
+        input(targets),
+      );
+      if (foreign.status !== "accepted")
+        throw new Error("foreign epoch failed");
+      await expect(
+        captureCompilerEvidence(
+          authority,
+          chainInput(
+            targets,
+            foreign.receipt,
+            2,
+            foreign.receipt.candidateSetDigest,
+          ),
+        ),
+      ).resolves.toEqual({
+        status: "rejected",
+        code: "COMPILER_CHAIN_REJECTED",
+      });
+
+      const second = await captureCompilerEvidence(
+        authority,
+        chainInput(targets, first.receipt, 2, first.receipt.candidateSetDigest),
+      );
+      expect(second.status).toBe("accepted");
+      if (second.status !== "accepted") throw new Error("valid chain failed");
+      expect(second.receipt.predecessorReceiptDigest).toBe(
+        first.receipt.receiptDigest,
+      );
+    });
+  });
 });
 
 interface TestProject {
@@ -284,6 +351,9 @@ function input(
 ): CompilerEvidenceInput {
   const selected = targets[0];
   if (selected === undefined) throw new Error("test input requires a target");
+  const sorted = [...targets].sort((left, right) =>
+    left.path.localeCompare(right.path),
+  );
   return Object.freeze({
     requestDigest: digestText("request"),
     repositoryId: "repo-a",
@@ -293,10 +363,43 @@ function input(
     targetPath: selected.path,
     candidateDigest: selected.candidateDigest,
     semanticDigest: selected.semanticDigest,
+    epoch: 1,
+    epochKind: "edit",
+    predecessorCandidateSetDigest: digestText("baseline-candidate-set"),
+    candidateSetDigest: digestText(
+      JSON.stringify(
+        sorted.map(({ path, candidateDigest, semanticDigest }) => ({
+          path,
+          candidateDigest,
+          semanticDigest,
+        })),
+      ),
+    ),
+    targetSetDigest: digestText(JSON.stringify(sorted.map(({ path }) => path))),
     profileId: "strict-typescript",
     toolId: "typescript",
     toolVersion: "7.0.2",
     targets: Object.freeze([...targets]),
+    predecessor: null,
+  });
+}
+
+function chainInput(
+  targets: readonly CompilerCandidateOverlay[],
+  predecessor:
+    | import("../../src/evidence/compiler.ts").CompilerEvidenceReceipt
+    | null,
+  epoch: number,
+  predecessorCandidateSetDigest: string,
+): CompilerEvidenceInput {
+  const first = input(targets);
+  return Object.freeze({
+    ...first,
+    epoch,
+    epochKind: "format",
+    predecessorCandidateSetDigest:
+      predecessorCandidateSetDigest as `sha256:${string}`,
+    predecessor,
   });
 }
 

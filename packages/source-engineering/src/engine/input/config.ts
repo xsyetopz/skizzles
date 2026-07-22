@@ -6,7 +6,11 @@ import {
 } from "../../language/adapter.ts";
 import type { SourceLanguageAdapterBindings } from "../../language/typescript-contract.ts";
 import { isLiteralRegistry } from "../../policy/literal/registry.ts";
-import type { EngineConfig, EngineTemplate } from "../workflow-state.ts";
+import type {
+  EngineConfig,
+  EngineTemplate,
+  StructuralPolicy,
+} from "../workflow-state.ts";
 import {
   boundedText,
   frozenArray,
@@ -21,6 +25,7 @@ export function parseEngineConfig(value: unknown): EngineConfig | undefined {
     "languageAdapters",
     "literalRegistry",
     "templates",
+    "structuralPolicy",
   ]);
   if (record === undefined) return;
   const sourceEvidence = parseSourceEvidence(record.get("sourceEvidence"));
@@ -29,11 +34,15 @@ export function parseEngineConfig(value: unknown): EngineConfig | undefined {
   );
   const literalRegistry = record.get("literalRegistry");
   const templates = parseTemplates(record.get("templates"));
+  const structuralPolicy = parseStructuralPolicy(
+    record.get("structuralPolicy"),
+  );
   if (
     sourceEvidence === undefined ||
     languageAdapters === undefined ||
     !isLiteralRegistry(literalRegistry) ||
-    templates === undefined
+    templates === undefined ||
+    structuralPolicy === undefined
   ) {
     return;
   }
@@ -42,7 +51,43 @@ export function parseEngineConfig(value: unknown): EngineConfig | undefined {
     languageAdapters,
     literalRegistry,
     templates,
+    structuralPolicy,
   });
+}
+
+function parseStructuralPolicy(value: unknown): StructuralPolicy | undefined {
+  const record = frozenRecord(value, [
+    "metricVersion",
+    "maxFunctionComplexity",
+    "maxFunctionIncrease",
+    "maxAggregateIncrease",
+  ]);
+  const maxFunctionComplexity = record?.get("maxFunctionComplexity");
+  const maxFunctionIncrease = record?.get("maxFunctionIncrease");
+  const maxAggregateIncrease = record?.get("maxAggregateIncrease");
+  if (
+    record?.get("metricVersion") !== "cyclomatic-v1" ||
+    !boundedInteger(maxFunctionComplexity, 1) ||
+    !boundedInteger(maxFunctionIncrease, 0) ||
+    !boundedInteger(maxAggregateIncrease, 0)
+  ) {
+    return;
+  }
+  return Object.freeze({
+    metricVersion: "cyclomatic-v1",
+    maxFunctionComplexity,
+    maxFunctionIncrease,
+    maxAggregateIncrease,
+  });
+}
+
+function boundedInteger(value: unknown, minimum: number): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= minimum &&
+    value <= 1_000_000
+  );
 }
 
 function parseSourceEvidence(

@@ -222,6 +222,15 @@ describe("language adapter public workflows", () => {
           targetPath: path,
           candidateDigest: digest(candidateText),
           semanticDigest,
+          epoch: 1,
+          epochKind: "edit",
+          predecessorCandidateSetDigest: digest("direct-baseline-set"),
+          candidateSetDigest: digest(
+            JSON.stringify([
+              { path, candidateDigest: digest(candidateText), semanticDigest },
+            ]),
+          ),
+          targetSetDigest: digest(JSON.stringify([path])),
           targets: Object.freeze([
             Object.freeze({
               path,
@@ -232,6 +241,7 @@ describe("language adapter public workflows", () => {
               ]),
             }),
           ]),
+          predecessor: null,
         }),
       );
       expect(directCompiler).toMatchObject({ status: "accepted" });
@@ -257,6 +267,12 @@ describe("language adapter public workflows", () => {
           sourceEvidence: sourceEvidenceResult.evidence,
           languageAdapters: Object.freeze([adapterResult.adapter]),
           literalRegistry: literal.registry,
+          structuralPolicy: Object.freeze({
+            metricVersion: "cyclomatic-v1",
+            maxFunctionComplexity: 64,
+            maxFunctionIncrease: 64,
+            maxAggregateIncrease: 128,
+          }),
           templates: Object.freeze([
             Object.freeze({
               templateId: "declaration",
@@ -295,6 +311,7 @@ describe("language adapter public workflows", () => {
             path,
             operations: Object.freeze([
               Object.freeze({
+                epoch: 1,
                 kind: "replace",
                 selector: Object.freeze({
                   declarationKind: "function",

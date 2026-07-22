@@ -8,6 +8,8 @@ import type { DependencyResolutionRequest } from "../../dependency/resolution.ts
 import type { DiffCeilings } from "../../diff/contract.ts";
 import type { SandboxAuthorityExecutionRequest } from "../../sandbox/capabilities.ts";
 import { authorizeStructuredCommand } from "../../sandbox/command-policy.ts";
+import { parseProtectedPaths } from "./protection.ts";
+import { parseVerificationProfiles } from "./verification.ts";
 
 const identityPattern = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,255}$/u;
 const pathSegmentPattern = /^(?!\.\.?$)[^/\0]+$/u;
@@ -24,9 +26,11 @@ export function parseConfig(input: unknown): TaskWorktreeConfig | undefined {
     "repositoryId",
     "repositoryRoot",
     "rootIdentity",
+    "protectedPaths",
     "sandbox",
     "sandboxWritePaths",
     "worktreeParent",
+    "verificationProfiles",
   ]);
   if (values === undefined || !Object.isFrozen(input)) return;
   const authorityId = values.get("authorityId");
@@ -38,6 +42,7 @@ export function parseConfig(input: unknown): TaskWorktreeConfig | undefined {
   const worktreeParent = values.get("worktreeParent");
   const repositoryId = values.get("repositoryId");
   const rootIdentity = values.get("rootIdentity");
+  const protectedPaths = parseProtectedPaths(values.get("protectedPaths"));
   const diffCeilings = parseDiffCeilings(values.get("diffCeilings"));
   const commitPolicy = parseCommitPolicy(values.get("commitPolicy"));
   const sandbox = parseSandboxConfig(values.get("sandbox"));
@@ -50,6 +55,9 @@ export function parseConfig(input: unknown): TaskWorktreeConfig | undefined {
     values.get("dependencyRequests"),
   );
   const commandProfiles = parseCommandProfiles(values.get("commandProfiles"));
+  const verificationProfiles = parseVerificationProfiles(
+    values.get("verificationProfiles"),
+  );
   if (
     !(
       identity(authorityId) &&
@@ -65,7 +73,10 @@ export function parseConfig(input: unknown): TaskWorktreeConfig | undefined {
     sandboxWritePaths === undefined ||
     resolver === undefined ||
     dependencyRequests === undefined ||
-    commandProfiles === undefined
+    commandProfiles === undefined ||
+    protectedPaths === undefined ||
+    verificationProfiles === undefined ||
+    (verificationProfiles.length > 0 && protectedPaths.testRoots.length === 0)
   ) {
     return;
   }
@@ -75,6 +86,7 @@ export function parseConfig(input: unknown): TaskWorktreeConfig | undefined {
     worktreeParent,
     repositoryId,
     rootIdentity,
+    protectedPaths,
     approvalAuthority: Object.freeze({
       id: approval.id,
       authorize: async (request: TaskWorktreeApprovalAuthorityRequest) =>
@@ -97,6 +109,7 @@ export function parseConfig(input: unknown): TaskWorktreeConfig | undefined {
     }),
     dependencyRequests,
     commandProfiles,
+    verificationProfiles,
   });
 }
 

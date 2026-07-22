@@ -37,18 +37,75 @@ export async function close(
     return rejected("SESSION_MISMATCH");
   }
   if (bindings.closed) return rejected("LIFECYCLE_CLOSED");
-  if (!bindings.cleanup.worktreeRemoved) {
+  let candidateValidated = false;
+  if (
+    bindings.candidate.committedHead === null &&
+    !bindings.cleanup.worktreeRemoved
+  ) {
     const allocation = await inspectAllocation(bindings);
-    if (allocation === undefined) return rejected("COMMAND_FAILED");
-    if (!allocation.registered) return rejected("REPOSITORY_MISMATCH");
-    if (bindings.candidate.committedHead === null && !allocation.clean) {
+    if (allocation === undefined || !allocation.registered)
+      return rejected("REPOSITORY_MISMATCH");
+    if (!allocation.clean) {
       const validation = await revalidateSession(
         owner,
         Object.freeze({ version: 1 as const, session: input.session }),
       );
       if (validation.status !== "valid") return rejected("DIRTY_WORKTREE");
-    } else if (!allocation.clean) {
-      return rejected("DIRTY_WORKTREE");
+      candidateValidated = true;
+    }
+  }
+  if (!bindings.cleanup.baselineViewRemoved) {
+    const baselineViewRoot = bindings.verification.baselineViewRoot;
+    if (baselineViewRoot !== null) {
+      const entries = await listWorktrees(
+        bindings.git,
+        bindings.repository.root,
+      );
+      if (
+        entries === undefined ||
+        !entries.some(
+          (entry) =>
+            entry.root === baselineViewRoot &&
+            entry.head === bindings.repository.head &&
+            entry.branch === null,
+        )
+      )
+        return rejected("CLEANUP_INCOMPLETE");
+      const removed = await bindings.git.run(bindings.repository.root, [
+        "worktree",
+        "remove",
+        "--force",
+        "--",
+        baselineViewRoot,
+      ]);
+      if (removed === undefined) return rejected("CLEANUP_INCOMPLETE");
+      const remaining = await listWorktrees(
+        bindings.git,
+        bindings.repository.root,
+      );
+      if (
+        remaining === undefined ||
+        remaining.some((entry) => entry.root === baselineViewRoot) ||
+        (await pathExists(baselineViewRoot))
+      )
+        return rejected("CLEANUP_INCOMPLETE");
+    }
+    bindings.cleanup.baselineViewRemoved = true;
+  }
+  if (!bindings.cleanup.worktreeRemoved) {
+    const allocation = await inspectAllocation(bindings);
+    if (allocation === undefined) return rejected("COMMAND_FAILED");
+    if (!allocation.registered) return rejected("REPOSITORY_MISMATCH");
+    if (!allocation.clean) {
+      if (bindings.candidate.committedHead !== null)
+        return rejected("DIRTY_WORKTREE");
+      if (!candidateValidated) {
+        const validation = await revalidateSession(
+          owner,
+          Object.freeze({ version: 1 as const, session: input.session }),
+        );
+        if (validation.status !== "valid") return rejected("DIRTY_WORKTREE");
+      }
     }
     const removed = await bindings.git.run(bindings.repository.root, [
       "worktree",
@@ -116,6 +173,10 @@ export async function close(
     prepareDigest: bindings.prepareDigest,
     finalHead: bindings.cleanup.finalHead,
     branch: bindings.branch,
+    baselineViewRemoved: bindings.cleanup.baselineViewRemoved,
+    verificationReceipts: bindings.verification.receipts.map(
+      ({ receiptDigest }) => receiptDigest,
+    ),
   });
   return Object.freeze({
     status: "closed",

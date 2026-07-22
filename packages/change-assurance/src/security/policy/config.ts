@@ -50,6 +50,16 @@ export function parseSecurityPolicyConfig(
               auditedImports.some(({ module }) => module === id)
             ),
         ),
+    ) ||
+    sinks.some(({ capability, secureInterfaceIds }) =>
+      secureInterfaceIds.some(
+        (id) =>
+          !secureInterfaces.some(
+            (secureInterface) =>
+              secureInterface.interfaceId === id &&
+              secureInterface.capability === capability,
+          ),
+      ),
     )
   )
     return;
