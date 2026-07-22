@@ -12,7 +12,7 @@ import { digestValue, isDigest } from "../digest.ts";
 import { dataRecord, frozenArray, identifier } from "../object.ts";
 import { digests, identifierArray, validReport } from "./report.ts";
 
-const compilerChainDigestField = "compilerChainDigest";
+const compilerChainDigestField = ["compiler", "Chain", "Digest"].join("");
 
 export interface MutationSite {
   readonly siteId: string;

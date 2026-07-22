@@ -9,7 +9,7 @@ import {
 import {
   type CodexRuntime,
   systemCodexRuntime,
-} from "../../src/codex-child.ts";
+} from "../../src/codex/child.ts";
 import {
   cleanupCatalogRoots,
   createCatalogRoot,

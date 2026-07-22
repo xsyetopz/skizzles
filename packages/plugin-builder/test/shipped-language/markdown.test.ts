@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Encoded HTML and prompt-like strings are adversarial Markdown fixtures, not secret material.
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";

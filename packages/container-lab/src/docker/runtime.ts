@@ -215,7 +215,9 @@ function parseNormalizedModel(parse: () => unknown): ComposeModel | undefined {
   try {
     const value = parse();
     return isComposeModel(value) ? value : undefined;
-  } catch {}
+  } catch {
+    return undefined;
+  }
 }
 
 function isComposeModel(value: unknown): value is ComposeModel {
@@ -530,8 +532,17 @@ function boundedLogTail(
   maxLines: number,
   maxBytes: number,
 ): { text: string; truncated: boolean } {
-  const sanitized = value
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "�")
+  const sanitized = Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    const isUnsafeControl =
+      codePoint <= 8 ||
+      codePoint === 11 ||
+      codePoint === 12 ||
+      (codePoint >= 14 && codePoint <= 31) ||
+      codePoint === 127;
+    return isUnsafeControl ? "�" : character;
+  })
+    .join("")
     .trimEnd();
   const lines = sanitized.split("\n");
   let selected = lines.slice(-maxLines).join("\n");

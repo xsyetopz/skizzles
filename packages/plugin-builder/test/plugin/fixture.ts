@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Synthetic revisions and digests are deterministic packaging fixtures, not credentials.
 import { chmod, cp, mkdir, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { create } from "@skizzles/run-workspace";
@@ -239,7 +240,7 @@ async function fixture(
   await write(
     root,
     "packages/model-catalog/src/catalog/refresh.ts",
-    'import "../codex-child.ts";\nimport "./schema.ts";\nimport "./store.ts";\nexport const fixture = "refresh";\n',
+    'import "../codex/child.ts";\nimport "./schema.ts";\nimport "./store.ts";\nexport const fixture = "refresh";\n',
   );
   await write(
     root,
@@ -249,12 +250,12 @@ async function fixture(
   await write(
     root,
     "packages/model-catalog/src/cli.ts",
-    'import "./catalog/refresh.ts";\nimport "./catalog/store.ts";\nimport "./codex-child.ts";\nimport "./launch-agent.ts";\nexport const fixture = "cli";\n',
+    'import "./catalog/refresh.ts";\nimport "./catalog/store.ts";\nimport "./codex/child.ts";\nimport "./launch-agent.ts";\nexport const fixture = "cli";\n',
   );
   await write(
     root,
-    "packages/model-catalog/src/codex-child.ts",
-    'import "./catalog/schema.ts";\nexport const fixture = "codex-child";\n',
+    "packages/model-catalog/src/codex/child.ts",
+    'import "../catalog/schema.ts";\nexport const fixture = "codex-child";\n',
   );
   await write(
     root,
@@ -369,7 +370,7 @@ async function fixture(
   await write(
     root,
     "assets/skizzles_subagent.toml",
-    'model_instructions_file = "./skizzles_subagent_instructions.md"\n',
+    'model_instructions_file = "./subagent-instructions.md"\n',
   );
   await write(
     root,
@@ -388,7 +389,7 @@ async function fixture(
     await write(
       root,
       `assets/agents/${role}.toml`,
-      `model_instructions_file = "../skizzles_subagent_instructions.md"\n`,
+      `model_instructions_file = "../subagent-instructions.md"\n`,
     );
   }
   const canonicalRoot = resolve(import.meta.dir, "../../../..");

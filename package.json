@@ -5,8 +5,7 @@
   "type": "module",
   "packageManager": "bun@1.3.14",
   "workspaces": [
-    "packages/*",
-    "skills/codex-project-tooling/assets/fastmcp-bun-template"
+    "packages/*"
   ],
   "scripts": {
     "build": "bun run packages:build && bun run plugin:build",

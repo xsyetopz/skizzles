@@ -267,7 +267,7 @@ function validateFileSize(
       findings,
       "missing-file-size-review",
       findingPath,
-      `${lines} physical lines requires an architecture-file-reviews.json responsibility record`,
+      `${lines} physical lines requires an architecture-reviews.json responsibility record`,
     );
   }
 }
@@ -337,7 +337,7 @@ async function readFileReviews(
   packageRoot: string,
   findings: WorkspaceFinding[],
 ): Promise<ReadonlyMap<string, FileReview>> {
-  const path = resolve(packageRoot, "architecture-file-reviews.json");
+  const path = resolve(packageRoot, "architecture-reviews.json");
   let value: unknown;
   try {
     value = JSON.parse(await readFile(path, "utf8")) as unknown;

@@ -294,6 +294,7 @@ async function readyRuntimeProblem(
     }
     return error instanceof Error ? error.message : String(error);
   }
+  return undefined;
 }
 
 async function assertDestroyFilesystem(

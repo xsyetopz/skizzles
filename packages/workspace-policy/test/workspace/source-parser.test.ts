@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Embedded source-parser fixtures exercise temporary-path handling, not secret material.
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";

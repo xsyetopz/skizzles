@@ -9,7 +9,7 @@ package-local documentation and tests, the single root lockfile, and removal of
 superseded source layouts. Authored TypeScript is owned by `src/` or `test/`;
 generated, vendored, dependency, and build-output directories are excluded.
 Files above 650 physical lines require a package-local
-`architecture-file-reviews.json` responsibility record, files above 800 fail,
+`architecture-reviews.json` responsibility record, files above 800 fail,
 and executable entrypoints have a 200-line budget. Declared TypeScript exports
 and optional binaries are compiled in memory as package-entrypoint smoke tests.
 Every manifest dependency map is typed and validated. Production imports may

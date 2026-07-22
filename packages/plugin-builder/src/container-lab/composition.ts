@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: The pinned revision is public source-provenance metadata for deterministic packaging.
 import {
   chmod,
   copyFile,

@@ -47,7 +47,9 @@ function pluginRootFrom(arguments_: string[]): string | undefined {
       return;
     }
     return pluginRoot;
-  } catch {}
+  } catch {
+    return;
+  }
 }
 
 function shellWord(value: string): string {
@@ -85,6 +87,7 @@ function commandFrom(
       return { key, value };
     }
   }
+  return;
 }
 
 function rewrittenCommand(

@@ -228,12 +228,38 @@ describe("workspace policy", () => {
     expect(codes).toContain("invalid-biome-command");
   });
 
+  it("rejects non-deterministic package scripts and tsconfig scope", async () => {
+    const root = await fixture();
+    const packageRoot = join(root, "packages/example");
+    const manifest = packageManifest();
+    manifest.scripts["build"] = "bun build src/index.ts";
+    manifest.scripts["test"] = "bun test --watch";
+    manifest.scripts["typecheck"] = "tsc --noEmit";
+    await writeFile(
+      join(packageRoot, "package.json"),
+      JSON.stringify(manifest),
+    );
+    await writeFile(
+      join(packageRoot, "tsconfig.json"),
+      JSON.stringify({
+        extends: "../../tsconfig.base.json",
+        include: ["**/*"],
+      }),
+    );
+
+    const codes = (await validateWorkspace(root)).map(({ code }) => code);
+    expect(codes).toContain("invalid-build-command");
+    expect(codes).toContain("invalid-test-command");
+    expect(codes).toContain("invalid-typecheck-command");
+    expect(codes).toContain("invalid-package-tsconfig");
+  });
+
   it.each([
     "bunx @biomejs/biome@2.5.3 check --config-path ../../biome.jsonc .",
     "bunx @biomejs/biome@2.5.4 check .",
     "bunx @biomejs/biome@2.5.4 check --config-path ./biome.jsonc .",
     "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root .. .",
-    "echo bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+    "echo bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
   ])("rejects a non-canonical Biome command: %s", async (check) => {
     const root = await fixture();
     const packageRoot = join(root, "packages/example");
@@ -249,53 +275,38 @@ describe("workspace policy", () => {
       code: "invalid-biome-command",
       path: "packages/example",
       message:
-        "package check must start with bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../..",
+        "package check must be bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
     });
   });
 
-  it("accepts the portable FastMCP template's local Biome config command", async () => {
+  it("rejects workspace roots outside the single canonical pattern", async () => {
     const root = await fixture();
-    const portableRoot = join(
-      root,
-      "skills/codex-project-tooling/assets/fastmcp-bun-template",
-    );
     const rootPackage = rootManifest();
-    rootPackage["workspaces"] = [
-      "packages/*",
-      "skills/codex-project-tooling/assets/fastmcp-bun-template",
-    ];
+    rootPackage["workspaces"] = ["packages/*", "modules/*"];
     await writeFile(join(root, "package.json"), JSON.stringify(rootPackage));
-    await mkdir(join(portableRoot, "src"), { recursive: true });
-    await mkdir(join(portableRoot, "test"), { recursive: true });
-    const manifest = packageManifest("codex-fastmcp-template");
-    manifest.scripts["check"] =
-      "bunx @biomejs/biome@2.5.4 check --config-path ./biome.jsonc ./biome.jsonc ./package.json ./tsconfig.json ./src ./test";
-    await writeFile(
-      join(portableRoot, "package.json"),
-      JSON.stringify(manifest),
-    );
-    await writeFile(join(portableRoot, "README.md"), "# Portable template\n");
-    await writeFile(join(portableRoot, "tsconfig.json"), "{}\n");
-    await writeFile(join(portableRoot, "src/index.ts"), "export {};\n");
-    await writeFile(join(portableRoot, "src/cli.ts"), "export {};\n");
-    await writeFile(join(portableRoot, "test/index.test.ts"), "export {};\n");
 
-    expect(await validateWorkspace(root)).toEqual([]);
+    expect(await validateWorkspace(root)).toContainEqual({
+      code: "workspace-discovery",
+      path: "package.json",
+      message: 'root workspaces must be exactly ["packages/*"]',
+    });
   });
 
-  it("rejects the portable local Biome command in an ordinary package", async () => {
+  it("rejects nested package manifests below an immediate package", async () => {
     const root = await fixture();
-    const packageRoot = join(root, "packages/example");
-    const manifest = packageManifest();
-    manifest.scripts["check"] =
-      "bunx @biomejs/biome@2.5.4 check --config-path biome.jsonc --vcs-root . .";
+    const nestedRoot = join(root, "packages/example/module");
+    await mkdir(nestedRoot);
     await writeFile(
-      join(packageRoot, "package.json"),
-      JSON.stringify(manifest),
+      join(nestedRoot, "package.json"),
+      JSON.stringify(packageManifest("@skizzles/nested")),
     );
 
-    const codes = (await validateWorkspace(root)).map(({ code }) => code);
-    expect(codes).toContain("invalid-biome-command");
+    expect(await validateWorkspace(root)).toContainEqual({
+      code: "nested-package-manifest",
+      path: "packages/example/module/package.json",
+      message:
+        "workspace package manifests must be immediate packages/*/package.json children",
+    });
   });
 });
 
@@ -422,7 +433,13 @@ async function fixture(): Promise<string> {
     JSON.stringify(packageManifest()),
   );
   await writeFile(join(root, "packages/example/README.md"), "# Example\n");
-  await writeFile(join(root, "packages/example/tsconfig.json"), "{}\n");
+  await writeFile(
+    join(root, "packages/example/tsconfig.json"),
+    JSON.stringify({
+      extends: "../../tsconfig.base.json",
+      include: ["src/**/*.ts", "test/**/*.ts"],
+    }),
+  );
   await writeFile(
     join(root, "packages/example/src/index.ts"),
     "export const value = 1;\n",
@@ -444,12 +461,22 @@ function rootManifest(
   return {
     ...packageManifest("skizzles"),
     workspaces: ["packages/*"],
+    scripts: rootScripts(),
     devDependencies: {
       "@types/bun": "^1.3.14",
       "@types/node": "^26.1.1",
       typescript: "^7.0.2",
       ...extraDevDependencies,
     },
+  };
+}
+
+function rootScripts(): Record<string, string> {
+  return {
+    "packages:build": "bun run --workspaces --sequential build",
+    "packages:check": "bun run --workspaces --sequential check",
+    typecheck: "bun run --workspaces --sequential typecheck",
+    test: "bun run --workspaces --sequential test",
   };
 }
 
@@ -472,11 +499,11 @@ function packageManifest(name = "@skizzles/example"): {
     exports: { ".": "./src/index.ts" },
     bin: { example: "./src/cli.ts" },
     scripts: {
-      build: "bun build ./src/index.ts",
+      build: "bun build ./src/index.ts --target=bun --outdir=dist",
       check:
-        "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+        "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
       test: "bun test ./test",
-      typecheck: "tsc --noEmit",
+      typecheck: "tsc -p tsconfig.json --noEmit",
     },
     dependencies: {},
     devDependencies: {

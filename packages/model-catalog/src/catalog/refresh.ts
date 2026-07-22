@@ -13,7 +13,7 @@ import {
   preflightCatalog,
   requireOwnedProcessScope,
   systemCodexRuntime,
-} from "../codex-child.ts";
+} from "../codex/child.ts";
 import { applyLunaV2Overlay, type LunaOverlay } from "./schema.ts";
 import {
   cachedCatalog,

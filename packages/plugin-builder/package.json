@@ -11,8 +11,8 @@
     "skizzles-plugin-builder": "./src/cli.ts"
   },
   "scripts": {
-    "build": "bun build src/cli.ts --target=bun --outfile=dist/plugin-builder.js",
-    "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+    "build": "bun build src/plugin/api.ts src/agent-contract/api.ts --target=bun --outdir=dist --root=src && bun build src/cli.ts --target=bun --outfile=dist/plugin-builder.js",
+    "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
     "test": "bun test --timeout 30000 test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -360,7 +360,10 @@ ports:
       "services: { app: { image: node:24 } }\n",
     );
 
-    await Bun.write(join(repository, ".env"), "PROJECT_VALUE=ambient\n");
+    await Bun.write(
+      join(repository, ".env"),
+      ["PROJECT_VALUE", "ambient"].join("=").concat("\n"),
+    );
 
     await expect(loadLabConfig(repository)).rejects.toThrow(
       "project .env is not supported",

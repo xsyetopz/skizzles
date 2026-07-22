@@ -52,18 +52,18 @@ function catchBindingIsMeaningfullyUsed(clause: CatchClause): boolean {
     return false;
   }
 
-  let used = false;
+  const meaningfulUses = new Set<Node>();
   visitNodes(clause.block, (node) => {
     if (
-      !used &&
+      meaningfulUses.size === 0 &&
       isIdentifier(node) &&
       names.has(node.text) &&
       isMeaningful(node)
     ) {
-      used = true;
+      meaningfulUses.add(node);
     }
   });
-  return used;
+  return meaningfulUses.size > 0;
 }
 
 function isMeaningful(node: Node): boolean {

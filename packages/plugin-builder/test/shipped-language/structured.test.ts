@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Encoded markup is a synthetic structured-content rejection fixture, not secret material.
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";

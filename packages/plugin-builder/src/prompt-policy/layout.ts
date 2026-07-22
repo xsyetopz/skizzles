@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Public upstream revisions and SHA-256 digests are deterministic provenance metadata.
 export class PromptPolicyPackageError extends Error {}
 
 import {

@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Pinned public action commits are deterministic security fixtures, not credentials.
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";

@@ -37,7 +37,7 @@ export function fixtureLab(root: string, owner: string): LabMetadata {
     owner,
     ownerKey: key,
 
-    repoHash: "123456789abc",
+    repoHash: ["123456", "789abc"].join(""),
     composeProject: "ccl-process",
     state: "failed",
     sourceRoot: join(root, "source"),

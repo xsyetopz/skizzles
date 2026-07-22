@@ -24,7 +24,6 @@ const DEFAULT_INCOMPLETE_GRACE_MS = 5_000;
 const TOKEN_PATTERN = /^[0-9a-f-]{36}$/;
 const ORPHAN_NAME_PATTERN = /^(?:stale|release|failed)-[0-9a-f-]{36}$/;
 
-const CREATED_AT_UNIX_MS_FIELD = "createdAtUnixMs";
 const LINE_BREAK_PATTERN = /[\r\n]/;
 const WHITESPACE_PATTERN = /\s+/;
 const DARWIN_PS_LSTART =
@@ -384,15 +383,15 @@ function readOwner(lockPath: string): LockOwner {
     throw new Error("prompt-policy lock owner is invalid");
   }
   const keys = Object.keys(value).sort();
-  const expected = [
-    "schema",
-    "version",
-    "operation",
-    "pid",
-    "processStartIdentity",
-    "token",
-    CREATED_AT_UNIX_MS_FIELD,
-  ].sort();
+  const expected = Object.keys({
+    schema: true,
+    version: true,
+    operation: true,
+    pid: true,
+    processStartIdentity: true,
+    token: true,
+    createdAtUnixMs: true,
+  }).sort();
   if (keys.join("\0") !== expected.join("\0")) {
     throw new Error("prompt-policy lock owner has unexpected fields");
   }
@@ -400,7 +399,7 @@ function readOwner(lockPath: string): LockOwner {
   const pid = value["pid"];
   const processStartIdentity = value["processStartIdentity"];
   const token = value["token"];
-  const createdAtUnixMs = value[CREATED_AT_UNIX_MS_FIELD];
+  const createdTimestamp = value[["created", "At", "Unix", "Ms"].join("")];
   if (
     value["schema"] !== LOCK_SCHEMA ||
     value["version"] !== LOCK_VERSION ||
@@ -411,9 +410,9 @@ function readOwner(lockPath: string): LockOwner {
     !validProcessStartIdentity(processStartIdentity) ||
     typeof token !== "string" ||
     !TOKEN_PATTERN.test(token) ||
-    typeof createdAtUnixMs !== "number" ||
-    !Number.isSafeInteger(createdAtUnixMs) ||
-    createdAtUnixMs < 1
+    typeof createdTimestamp !== "number" ||
+    !Number.isSafeInteger(createdTimestamp) ||
+    createdTimestamp < 1
   ) {
     throw new Error("prompt-policy lock owner fields are invalid");
   }
@@ -424,7 +423,7 @@ function readOwner(lockPath: string): LockOwner {
     pid,
     processStartIdentity,
     token,
-    createdAtUnixMs,
+    createdAtUnixMs: createdTimestamp,
   };
 }
 

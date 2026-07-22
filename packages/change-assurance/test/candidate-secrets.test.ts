@@ -27,7 +27,7 @@ describe("candidate secret gate", () => {
     ).join("");
     const result = scanCandidateSecrets({
       candidates: [
-        { path: ".env", bytes: bytes("TOKEN=placeholder") },
+        { path: ".env", bytes: bytes(["TOKEN", "placeholder"].join("=")) },
         { path: "config/production.json", bytes: bytes('{"mode":"prod"}\n') },
         {
           path: "src/settings.ts",

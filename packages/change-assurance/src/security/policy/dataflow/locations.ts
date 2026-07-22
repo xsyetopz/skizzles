@@ -64,6 +64,7 @@ export function expressionLocation<Value>(
     }
     return `${base}.*`;
   }
+  return undefined;
 }
 
 export function locationValues<Value>(

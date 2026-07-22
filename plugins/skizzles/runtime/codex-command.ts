@@ -831,7 +831,9 @@ function inspectCompletedRun(path, id) {
         "stdout.log": identity(stdoutInfo)
       }
     };
-  } catch {}
+  } catch {
+    return;
+  }
 }
 function sameRunIdentity(left, right) {
   return left.id === right.id && sameIdentity(left.directoryIdentity, right.directoryIdentity) && artifactNames.every((name) => sameIdentity(left.artifactIdentities[name], right.artifactIdentities[name]));
@@ -1357,6 +1359,7 @@ function executeQuery(subcommand, arguments_) {
     }
     return 0;
   }
+  return;
 }
 function execute(subcommand, arguments_) {
   return subcommand === "run" ? executeRun(arguments_) : executeQuery(subcommand, arguments_);

@@ -8,8 +8,10 @@ import type { CandidateBytes, SecretScanInput } from "./contract.ts";
 
 export function dataValue(input: object, key: string): unknown {
   const descriptor = Object.getOwnPropertyDescriptor(input, key);
-  if (descriptor !== undefined && "value" in descriptor)
+  if (descriptor !== undefined && "value" in descriptor) {
     return descriptor.value;
+  }
+  return undefined;
 }
 
 export function pathIsUnsafe(path: string): boolean {

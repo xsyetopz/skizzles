@@ -75,6 +75,7 @@ function spawnRpcSupervisor(
       if (event === "exited")
         throw new Error("Codex app-server supervisor exited unexpectedly");
     }
+    return undefined;
   };
   return {
     process: child,

@@ -13,7 +13,7 @@
     "build": "bun build ./src/biome-suppressions.ts ./src/cli.ts ./src/security-cli.ts ./src/workspace/policy.ts --target=bun --format=esm --outdir=./dist --external typescript --external 'typescript/*'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test ./test",
-    "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test package.json tsconfig.json"
+    "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json"
   },
   "dependencies": {
     "@skizzles/run-workspace": "workspace:*",

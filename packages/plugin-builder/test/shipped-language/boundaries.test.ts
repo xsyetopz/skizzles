@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Adversarial strings and digests are synthetic boundary fixtures used to prove fail-closed validation.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   copyFile,

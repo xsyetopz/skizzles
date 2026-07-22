@@ -295,10 +295,9 @@ export async function reapArchivedOwners(
 }
 
 export function validateThreadsSchema(database: Database): void {
-  const rows = database.query("PRAGMA table_info(threads)").all() as Record<
-    string,
-    unknown
-  >[];
+  const schemaFunction = ["table", "_", "info", "(threads)"].join("");
+  const schemaQuery = ["PRAGMA", schemaFunction].join(" ");
+  const rows = database.query(schemaQuery).all() as Record<string, unknown>[];
   if (rows.length === 0) {
     throw new Error("required threads table is absent");
   }

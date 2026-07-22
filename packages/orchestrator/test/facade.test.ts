@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Public facade export names are asserted as API contract fixtures, not secret material.
 import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { createEngineeringWorkflow, createOrchestrator } from "../src/index.ts";

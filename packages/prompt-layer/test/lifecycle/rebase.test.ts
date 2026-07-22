@@ -4,8 +4,8 @@ import { join } from "node:path";
 import {
   authorPromptPatch,
   checkPrompt,
-  parseImmutableCommit,
   PromptLayerError,
+  parseImmutableCommit,
   rebasePrompt,
 } from "../../src/cli.ts";
 import {
@@ -87,7 +87,7 @@ describe("immutable upstream rebase contracts", () => {
         ),
         "utf8",
       )
-    ).replace("bc5c9161b46feddc13282652fd2cfdf1e5bab4a9", commit);
+    ).replace(currentCommit(), commit);
     await writeFile(candidatePath, candidate);
     await rebasePrompt(root, commit, { candidatePath, fetcher });
     await checkPrompt(root);

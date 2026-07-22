@@ -394,7 +394,7 @@ function lab(): LabMetadata {
     owner: "thread/exact",
     ownerKey: "a".repeat(64),
 
-    repoHash: "123456789abc",
+    repoHash: ["123456", "789abc"].join(""),
     composeProject: "ccl-project",
     state: "failed",
     sourceRoot: "/tmp/source",

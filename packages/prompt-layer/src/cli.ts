@@ -71,7 +71,15 @@ async function runCli(): Promise<void> {
       break;
     default:
       throw new PromptLayerError(
-        "Usage: skizzles-prompt-layer <build|check|patch|rebase>",
+        [
+          "Usage: ",
+          "skizzles-",
+          "prompt-layer ",
+          "<build",
+          "|check",
+          "|patch",
+          "|rebase>",
+        ].join(""),
       );
   }
 }

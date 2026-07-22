@@ -509,6 +509,12 @@ async function fixture(): Promise<string> {
     JSON.stringify({
       ...packageManifest("skizzles"),
       workspaces: ["packages/*"],
+      scripts: {
+        "packages:build": "bun run --workspaces --sequential build",
+        "packages:check": "bun run --workspaces --sequential check",
+        typecheck: "bun run --workspaces --sequential typecheck",
+        test: "bun run --workspaces --sequential test",
+      },
     }),
   );
   await addPackage(root, "example", "@skizzles/example");
@@ -525,7 +531,13 @@ async function addPackage(
   await mkdir(join(packageRoot, "test"), { recursive: true });
   await writeManifest(root, directory, packageManifest(name));
   await writeFile(join(packageRoot, "README.md"), `# ${name}\n`);
-  await writeFile(join(packageRoot, "tsconfig.json"), "{}\n");
+  await writeFile(
+    join(packageRoot, "tsconfig.json"),
+    JSON.stringify({
+      extends: "../../tsconfig.base.json",
+      include: ["src/**/*.ts", "test/**/*.ts"],
+    }),
+  );
   await writeFile(
     join(packageRoot, "src/index.ts"),
     "export type Value = number;\n",
@@ -556,11 +568,11 @@ function packageManifest(name: string) {
     exports: { ".": "./src/index.ts" },
     bin: {},
     scripts: {
-      build: "bun build ./src/index.ts",
+      build: "bun build ./src/index.ts --target=bun --outdir=dist",
       check:
-        "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+        "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
       test: "bun test ./test",
-      typecheck: "tsc --noEmit",
+      typecheck: "tsc -p tsconfig.json --noEmit",
     },
     dependencies: {} as Record<string, string>,
     devDependencies: {

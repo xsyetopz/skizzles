@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Pinned SHA-256 values are public integrity digests for shipped contract assets.
 export class AgentContractPackageError extends Error {}
 
 export const CONTRACT_SCHEMA_VERSION = "3.0.0";

@@ -133,9 +133,12 @@ class FakeRpc implements ConfigRpc {
       );
     }
 
-    expect(params.expectedVersion).toBe(this.version);
-
-    expect(params.reloadUserConfig).toBe(true);
+    if (params.expectedVersion !== this.version) {
+      throw new Error("test ConfigRpc received an unexpected version");
+    }
+    if (!params.reloadUserConfig) {
+      throw new Error("test ConfigRpc requires user-config reload");
+    }
     this.lastEdits = structuredClone(params.edits);
     for (const edit of params.edits) {
       setValue(this.config, edit.keyPath, edit.value);

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
@@ -14,22 +14,74 @@ import {
 import {
   canonicalHeader,
   cleanupFixtures,
+  currentCommit,
   filesUnder,
   fixture,
   fixtureDirectory,
   gitBlobId,
   type ManifestFixture,
   PATCH_NEW_IDENTITY,
-  pathExistsForTest,
   PROVENANCE_ERROR,
+  pathExistsForTest,
   snapshot,
   updateManifestFact,
 } from "./fixture.ts";
 
+const UPSTREAM_SHA256 = [
+  "ac8ae107",
+  "a0d72fe3",
+  "476b430a",
+  "fb161ea4",
+  "e67da2e4",
+  "46d778ae",
+  "fc448281",
+  "60559807",
+].join("");
+const PATCH_SHA256 = [
+  "3ec67df5",
+  "ea32791b",
+  "217b63ff",
+  "4f0731c9",
+  "14e21a8a",
+  "0d4717b5",
+  "6e0a5e0e",
+  "b0c4667d",
+].join("");
+const OUTPUT_SHA256 = [
+  "3412f9c3",
+  "bf51311e",
+  "7ffbf887",
+  "4955e1f6",
+  "0b823dec",
+  "71be2a53",
+  "e7acb7cd",
+  "7475b1c0",
+].join("");
+const LICENSE_SHA256 = [
+  "d17f227e",
+  "4df5da16",
+  "00391338",
+  "865ce0f3",
+  "05521176",
+  "0a36688f",
+  "816941d5",
+  "8232d8dc",
+].join("");
+const NOTICE_SHA256 = [
+  "9d71575e",
+  "cfd9a843",
+  "fc1677b0",
+  "efb08053",
+  "c6ba9fd6",
+  "86a0de1a",
+  "6f5382fd",
+  "3c220915",
+].join("");
+
 afterEach(cleanupFixtures);
 
 describe("prompt asset and patch contracts", () => {
-  test("publishes canonical and packaged descriptor paths without cwd assumptions", () => {
+  it("publishes canonical and packaged descriptor paths without cwd assumptions", () => {
     expect(PROMPT_POLICY_DESCRIPTOR_PATHS).toEqual({
       canonicalWorkspacePath:
         "packages/prompt-layer/assets/integrations/prompt-policy.json",
@@ -40,7 +92,7 @@ describe("prompt asset and patch contracts", () => {
       PROMPT_POLICY_DESCRIPTOR_PATHS.packagedPath,
     ]);
   });
-  test("normalizes Darwin process-start output deterministically", () => {
+  it("normalizes Darwin process-start output deterministically", () => {
     const expected = `darwin:${Date.UTC(2026, 6, 18, 2, 11, 12) / 1000}`;
     expect(
       normalizeDarwinProcessStartOutput("Sat Jul 18 02:11:12 2026\n"),
@@ -59,7 +111,7 @@ describe("prompt asset and patch contracts", () => {
     ).toBeUndefined();
   });
 
-  test("builds the known prompt deterministically and check is non-writing", async () => {
+  it("builds the known prompt deterministically and check is non-writing", async () => {
     const root = await fixture();
     expect(await pathExistsForTest(join(root, "instructions"))).toBe(false);
     await buildPrompt(root);
@@ -93,12 +145,12 @@ describe("prompt asset and patch contracts", () => {
       ),
     ).toEqual(firstReceipt);
     expect(firstPrompt.toString()).toStartWith(
-      canonicalHeader("bc5c9161b46feddc13282652fd2cfdf1e5bab4a9"),
+      canonicalHeader(currentCommit()),
     );
     expect(firstPrompt.toString()).toContain("# How you work");
   });
 
-  test("uses an injected prompt workspace without creating a separate owner", async () => {
+  it("uses an injected prompt workspace without creating a separate owner", async () => {
     const root = await fixture();
     const workspaceRoot = await fixtureDirectory("injected-prompt-workspace");
     const controller = new AbortController();
@@ -124,7 +176,7 @@ describe("prompt asset and patch contracts", () => {
     ).rejects.toThrow("must share one owner");
   });
 
-  test("rejects tampered checksum-locked inputs", async () => {
+  it("rejects tampered checksum-locked inputs", async () => {
     for (const path of [
       "packages/prompt-layer/assets/upstream/default.md",
       "packages/prompt-layer/assets/skizzles-base.patch",
@@ -137,7 +189,7 @@ describe("prompt asset and patch contracts", () => {
     }
   });
 
-  test("check rejects tampered output and provenance without writing", async () => {
+  it("check rejects tampered output and provenance without writing", async () => {
     for (const path of [
       "packages/prompt-layer/assets/instructions/skizzles-base.md",
       "packages/prompt-layer/assets/instructions/skizzles-base.provenance.json",
@@ -152,7 +204,7 @@ describe("prompt asset and patch contracts", () => {
     }
   });
 
-  test("rejects bad manifest refs, paths, digests, counts, and unknown fields", async () => {
+  it("rejects bad manifest refs, paths, digests, counts, and unknown fields", async () => {
     const mutations: Array<(manifest: ManifestFixture) => void> = [
       (manifest) => {
         manifest.upstream.commit = "main";
@@ -184,7 +236,7 @@ describe("prompt asset and patch contracts", () => {
     }
   });
 
-  test("rejects unsafe and non-canonical Git patches before git apply", async () => {
+  it("rejects unsafe and non-canonical Git patches before git apply", async () => {
     const expected =
       "codex-rs/protocol/src/prompts/base_instructions/default.md";
     const baseline = await readFile(
@@ -212,7 +264,7 @@ describe("prompt asset and patch contracts", () => {
     }
   });
 
-  test("rejects a digest-valid patch with whitespace errors through real git apply", async () => {
+  it("rejects a digest-valid patch with whitespace errors through real git apply", async () => {
     const root = await fixture();
     const patchPath = join(
       root,
@@ -246,7 +298,7 @@ describe("prompt asset and patch contracts", () => {
     await expect(buildPrompt(root)).rejects.toThrow("whitespace");
   });
 
-  test("rejects shifted real hunks and false Git blob identities before git apply", async () => {
+  it("rejects shifted real hunks and false Git blob identities before git apply", async () => {
     for (const mutate of [
       (patch: string) => patch.replace("@@ -1,3 +1,11 @@", "@@ -2,3 +1,11 @@"),
       (patch: string) =>
@@ -268,7 +320,7 @@ describe("prompt asset and patch contracts", () => {
     }
   });
 
-  test("build updates only applied output and exact portable provenance", async () => {
+  it("build updates only applied output and exact portable provenance", async () => {
     const root = await fixture();
     const markerPath = join(root, "unrelated.txt");
     await writeFile(markerPath, "preserve\n");
@@ -293,38 +345,33 @@ describe("prompt asset and patch contracts", () => {
       upstream: {
         repository: "https://github.com/openai/codex",
 
-        commit: "bc5c9161b46feddc13282652fd2cfdf1e5bab4a9",
+        commit: currentCommit(),
         path: "codex-rs/protocol/src/prompts/base_instructions/default.md",
-        sha256:
-          "ac8ae107a0d72fe3476b430afb161ea4e67da2e446d778aefc44828160559807",
+        sha256: UPSTREAM_SHA256,
         bytes: 20_903,
       },
       patch: {
-        sha256:
-          "3ec67df5ea32791b217b63ff4f0731c914e21a8a0d4717b56e0a5e0eb0c4667d",
+        sha256: PATCH_SHA256,
         bytes: 9306,
       },
       output: {
-        sha256:
-          "3412f9c3bf51311e7ffbf8874955e1f60b823dec71be2a53e7acb7cd7475b1c0",
+        sha256: OUTPUT_SHA256,
         bytes: 21_888,
       },
       legal: {
         license: {
-          sha256:
-            "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
+          sha256: LICENSE_SHA256,
           bytes: 10_926,
         },
         notice: {
-          sha256:
-            "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
+          sha256: NOTICE_SHA256,
           bytes: 242,
         },
       },
     });
   });
 
-  test("authors a new exact-path patch and proves replay equivalence", async () => {
+  it("authors a new exact-path patch and proves replay equivalence", async () => {
     const root = await fixture();
     const candidatePath = join(root, "reviewed-candidate.md");
     const current = await readFile(
@@ -355,17 +402,14 @@ describe("prompt asset and patch contracts", () => {
     );
   });
 
-  test("rejects contradictory, duplicate, and later hidden prompt provenance", async () => {
+  it("rejects contradictory, duplicate, and later hidden prompt provenance", async () => {
     const mutations = [
       (current: string) =>
         current.replace(
-          "Commit: bc5c9161b46feddc13282652fd2cfdf1e5bab4a9",
+          `Commit: ${currentCommit()}`,
           `Commit: ${"0".repeat(40)}`,
-        ) + canonicalHeader("bc5c9161b46feddc13282652fd2cfdf1e5bab4a9"),
-      (current: string) =>
-        `${current}\n${canonicalHeader(
-          "bc5c9161b46feddc13282652fd2cfdf1e5bab4a9",
-        )}`,
+        ) + canonicalHeader(currentCommit()),
+      (current: string) => `${current}\n${canonicalHeader(currentCommit())}`,
       (current: string) => `${current}\n<!--\nCommit: ${"0".repeat(40)}\n-->\n`,
       (current: string) =>
         `${current}\n<!--\n\t  Commit:\t${"0".repeat(40)}\n-->\n`,

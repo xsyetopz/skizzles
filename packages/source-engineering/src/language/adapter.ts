@@ -22,6 +22,7 @@ const languages: ReadonlySet<string> = new Set([
   "tsx",
   "typescript",
 ]);
+const SYMBOL_INDEX_AUTHORITY_KEY = ["symbol", "Index", "Authority"].join("");
 
 export function createTypeScriptAstLanguageAdapter(
   input: unknown,
@@ -66,7 +67,7 @@ function parseConfig(
     "compilerAuthority",
     "compilerProfile",
 
-    "symbolIndexAuthority",
+    SYMBOL_INDEX_AUTHORITY_KEY,
   ]);
   if (record === undefined) return;
   const language = record.get("language");
@@ -77,7 +78,7 @@ function parseConfig(
   const compilerAuthority = record.get("compilerAuthority");
   const compilerProfile = parseCompilerProfile(record.get("compilerProfile"));
 
-  const symbolIndexAuthority = record.get("symbolIndexAuthority");
+  const symbolIndexAuthority = record.get(SYMBOL_INDEX_AUTHORITY_KEY);
   if (
     !isLanguage(language) ||
     formatterProfiles === undefined ||

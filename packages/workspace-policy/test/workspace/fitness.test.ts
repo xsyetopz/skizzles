@@ -225,7 +225,7 @@ describe("mandatory workspace architecture fitness", () => {
     expect(codes).not.toContain("authored-file-too-large");
 
     await writeFile(
-      join(packageRoot, "architecture-file-reviews.json"),
+      join(packageRoot, "architecture-reviews.json"),
       JSON.stringify({
         files: {
           "src/reviewed.ts": {
@@ -289,6 +289,12 @@ async function fixture(): Promise<string> {
   roots.push(root);
   await writeFile(join(root, "bun.lock"), "");
   const rootPackage = packageManifest("skizzles");
+  rootPackage.scripts = {
+    "packages:build": "bun run --workspaces --sequential build",
+    "packages:check": "bun run --workspaces --sequential check",
+    typecheck: "bun run --workspaces --sequential typecheck",
+    test: "bun run --workspaces --sequential test",
+  };
   await writeFile(
     join(root, "package.json"),
     JSON.stringify({ ...rootPackage, workspaces: ["packages/*"] }),
@@ -307,7 +313,13 @@ async function addPackage(
   await mkdir(join(packageRoot, "test"), { recursive: true });
   await writeManifest(root, directory, packageManifest(name));
   await writeFile(join(packageRoot, "README.md"), `# ${name}\n`);
-  await writeFile(join(packageRoot, "tsconfig.json"), "{}\n");
+  await writeFile(
+    join(packageRoot, "tsconfig.json"),
+    JSON.stringify({
+      extends: "../../tsconfig.base.json",
+      include: ["src/**/*.ts", "test/**/*.ts"],
+    }),
+  );
   await writeFile(
     join(packageRoot, "src/index.ts"),
     "export const value = 1;\n",
@@ -352,11 +364,11 @@ function packageManifest(name: string): {
     exports: { ".": "./src/index.ts" },
     bin: { example: "./src/cli.ts" },
     scripts: {
-      build: "bun build ./src/index.ts",
+      build: "bun build ./src/index.ts --target=bun --outdir=dist",
       check:
-        "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+        "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
       test: "bun test ./test",
-      typecheck: "tsc --noEmit",
+      typecheck: "tsc -p tsconfig.json --noEmit",
     },
     dependencies: {},
     devDependencies: {

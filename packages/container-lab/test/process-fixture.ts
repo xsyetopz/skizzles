@@ -136,6 +136,7 @@ async function cleanupFixtureGroup([processGroup, identities]: [
       return asError(error);
     }
   }
+  return undefined;
 }
 
 function stubbornGroupScript(afterRelease = "wait"): string {

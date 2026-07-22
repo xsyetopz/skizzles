@@ -38,6 +38,32 @@ afterEach(async () => {
 });
 
 describe("workspace dependency maps", () => {
+  it("rejects duplicated dependency metadata and runtime type tooling", async () => {
+    const root = await fixture();
+    const manifest = packageManifest("@skizzles/example");
+    manifest.dependencies["@types/node"] = "^26.1.1";
+    manifest.dependencies["typescript"] = "^7.0.2";
+    await writeManifest(root, "example", manifest);
+
+    const findings = await validateWorkspace(root);
+    expect(findings).toContainEqual({
+      code: "duplicate-dependency-metadata",
+      path: "packages/example",
+      message: "@types/node must be declared in exactly one dependency map",
+    });
+    expect(findings).toContainEqual({
+      code: "duplicate-dependency-metadata",
+      path: "packages/example",
+      message: "typescript must be declared in exactly one dependency map",
+    });
+    expect(findings).toContainEqual({
+      code: "runtime-dev-tool",
+      path: "packages/example",
+      message:
+        "@types/node is compile-time tooling and must be a development dependency",
+    });
+  });
+
   it.each(["optionalDependencies", "peerDependencies"] as const)(
     "rejects malformed package and root %s maps",
     async (map) => {
@@ -294,7 +320,13 @@ async function addPackage(
   await mkdir(join(packageRoot, "test"), { recursive: true });
   await writeManifest(root, directory, packageManifest(name));
   await writeFile(join(packageRoot, "README.md"), `# ${name}\n`);
-  await writeFile(join(packageRoot, "tsconfig.json"), "{}\n");
+  await writeFile(
+    join(packageRoot, "tsconfig.json"),
+    JSON.stringify({
+      extends: "../../tsconfig.base.json",
+      include: ["src/**/*.ts", "test/**/*.ts"],
+    }),
+  );
   await writeFile(
     join(packageRoot, "src/index.ts"),
     "export const value = 1;\n",
@@ -355,6 +387,12 @@ async function binLinkFixture(consumerKind: BinConsumerKind): Promise<{
 function rootManifest(): TestManifest & { workspaces: string[] } {
   const manifest = packageManifest("skizzles");
   manifest.bin = {};
+  manifest.scripts = {
+    "packages:build": "bun run --workspaces --sequential build",
+    "packages:check": "bun run --workspaces --sequential check",
+    typecheck: "bun run --workspaces --sequential typecheck",
+    test: "bun run --workspaces --sequential test",
+  };
   return { ...manifest, workspaces: ["packages/*"] };
 }
 
@@ -367,11 +405,11 @@ function packageManifest(name = "@skizzles/example"): TestManifest {
     exports: { ".": "./src/index.ts" },
     bin: { example: "./src/cli.ts" },
     scripts: {
-      build: "bun build ./src/index.ts",
+      build: "bun build ./src/index.ts --target=bun --outdir=dist",
       check:
-        "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+        "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
       test: "bun test ./test",
-      typecheck: "tsc --noEmit",
+      typecheck: "tsc -p tsconfig.json --noEmit",
     },
     dependencies: {},
     devDependencies: {

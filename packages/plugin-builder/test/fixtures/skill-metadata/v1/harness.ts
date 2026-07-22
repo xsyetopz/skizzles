@@ -1,3 +1,4 @@
+// biome-ignore-all lint/suspicious/noMisplacedAssertion: Fixture assertion helpers are intentionally called by package tests.
 import { expect } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdir, rename, symlink, unlink, writeFile } from "node:fs/promises";

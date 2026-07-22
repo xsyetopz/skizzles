@@ -1767,7 +1767,7 @@ async function createWithRuntime(options, runtime) {
 function create(options = {}) {
   return createWithRuntime(options, systemRuntime());
 }
-// packages/model-catalog/src/codex-child.ts
+// packages/model-catalog/src/codex/child.ts
 import { lstat as lstat3, mkdir as mkdir2, realpath as realpath2, writeFile } from "fs/promises";
 import { isAbsolute as isAbsolute2, join as join6 } from "path";
 import process6 from "process";
@@ -1856,7 +1856,7 @@ function applyLunaV2Overlay(value) {
   return { catalog: cloned, overlay: "applied" };
 }
 
-// packages/model-catalog/src/codex-group.ts
+// packages/model-catalog/src/codex/group.ts
 import process4 from "process";
 var FORCED_EXIT_TIMEOUT_MS = 2000;
 function signalOwnedCodexSupervisor(supervisorExited, pid, signal, kill = process4.kill) {
@@ -1946,7 +1946,7 @@ function codexSupervisorGroup(child, label, kill = process4.kill) {
   };
 }
 
-// packages/model-catalog/src/codex-supervisor.ts
+// packages/model-catalog/src/codex/supervisor.ts
 import process5 from "process";
 var CODEX_SUPERVISOR_PROTOCOL_VERSION = 1;
 var CODEX_SUPERVISOR_SOURCE = String.raw`
@@ -2050,7 +2050,7 @@ function codexSupervisorCommand(binary, args) {
   ];
 }
 
-// packages/model-catalog/src/codex-child.ts
+// packages/model-catalog/src/codex/child.ts
 var SEMANTIC_VERSION = /(?<![0-9A-Za-z-])((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)(?=\s|$)/;
 var CHILD_FAILURE_MESSAGES = {
   "bundled-exit": "codex bundled catalog command failed",

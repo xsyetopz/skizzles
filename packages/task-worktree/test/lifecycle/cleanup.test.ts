@@ -172,7 +172,7 @@ function ambiguousGitWrapper(realGit: string): string {
     '  if [ "$take_root" = "1" ]; then root="$argument"; take_root=0; fi',
     '  if [ "$argument" = "--" ]; then take_root=1; fi',
 
-    '  previous="$argument"',
+    ['  previous="', "$argument", '"'].join(""),
     "done",
     '"$real_git" "$@"',
     "status=$?",

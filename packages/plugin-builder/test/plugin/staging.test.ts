@@ -4,8 +4,8 @@ import { join, resolve } from "node:path";
 import process from "node:process";
 import {
   compareTrees,
-  packagePaths,
   PackagingError,
+  packagePaths,
   stagePlugin,
 } from "../../src/plugin/api.ts";
 import {

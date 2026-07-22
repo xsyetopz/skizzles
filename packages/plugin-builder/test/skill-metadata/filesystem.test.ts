@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Invisible Unicode sequences are adversarial filesystem fixtures, not secret material.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   copyFile,

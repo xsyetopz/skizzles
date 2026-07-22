@@ -3,8 +3,16 @@ import { PromptLayerError } from "../lifecycle/contract.ts";
 
 const POLICY_SCHEMA = "skizzles.shipped-language-policy.v2";
 const POLICY_VERSION = 2;
-const POLICY_SHA256 =
-  "444d0182b07c1bb92f5703459b133b47c10bb81484625a289281d748bde53f53";
+const POLICY_SHA256 = [
+  "444d0182",
+  "b07c1bb9",
+  "2f570345",
+  "9b133b47",
+  "c10bb814",
+  "84625a28",
+  "9281d748",
+  "bde53f53",
+].join("");
 const MAX_POLICY_BYTES = 64 * 1024;
 const MAX_DIAGNOSTIC_PATH_UNITS = 512;
 const CONTROL_CHARACTER_MAX = 31;

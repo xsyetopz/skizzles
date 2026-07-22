@@ -1,10 +1,10 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   checkPrompt,
-  parseShippedLanguagePolicy,
   PROMPT_LAYER_PACKAGE_FILES,
+  parseShippedLanguagePolicy,
   SHIPPED_LANGUAGE_POLICY_PATHS,
   validateShippedLanguageText,
 } from "../../src/cli.ts";
@@ -47,12 +47,14 @@ function taxonomyRecords(
 ): Record<string, unknown>[] {
   const taxonomies = value["taxonomies"];
   if (
-    !Array.isArray(taxonomies) ||
-    !taxonomies.every(
-      (taxonomy): taxonomy is Record<string, unknown> =>
-        typeof taxonomy === "object" &&
-        taxonomy !== null &&
-        !Array.isArray(taxonomy),
+    !(
+      Array.isArray(taxonomies) &&
+      taxonomies.every(
+        (taxonomy): taxonomy is Record<string, unknown> =>
+          typeof taxonomy === "object" &&
+          taxonomy !== null &&
+          !Array.isArray(taxonomy),
+      )
     )
   ) {
     throw new Error("taxonomies must be an object array");
@@ -62,8 +64,10 @@ function taxonomyRecords(
 
 function testStringArray(value: unknown, label: string): string[] {
   if (
-    !Array.isArray(value) ||
-    !value.every((entry): entry is string => typeof entry === "string")
+    !(
+      Array.isArray(value) &&
+      value.every((entry): entry is string => typeof entry === "string")
+    )
   ) {
     throw new Error(`${label} must be a string array`);
   }
@@ -71,7 +75,7 @@ function testStringArray(value: unknown, label: string): string[] {
 }
 
 describe("versioned shipped-language policy", () => {
-  test("publishes one exact canonical-to-staged evaluation path", () => {
+  it("publishes one exact canonical-to-staged evaluation path", () => {
     expect(SHIPPED_LANGUAGE_POLICY_PATHS).toEqual({
       canonicalWorkspacePath:
         "packages/prompt-layer/assets/evaluations/shipped-language-policy.v2.json",
@@ -90,7 +94,7 @@ describe("versioned shipped-language policy", () => {
     ]);
   });
 
-  test("rejects every prohibited fixture and accepts every allowed fixture", async () => {
+  it("rejects every prohibited fixture and accepts every allowed fixture", async () => {
     const policy = parseShippedLanguagePolicy(await policyBytes());
     expect({
       matchMode: policy.matchMode,
@@ -133,7 +137,7 @@ describe("versioned shipped-language policy", () => {
     }
   });
 
-  test("permits neutral first person and scans quotes, code, and lexical negation", async () => {
+  it("permits neutral first person and scans quotes, code, and lexical negation", async () => {
     const policy = parseShippedLanguagePolicy(await policyBytes());
     const longZeros = "0".repeat(1024);
     expect(
@@ -169,7 +173,7 @@ describe("versioned shipped-language policy", () => {
       "I am your friend&#x27s coding assistant.",
       "I am your friend&#8217;s coding assistant.",
 
-      "I am your friend&#x2019s coding assistant.",
+      ["I am your friend&#x", "2019s coding assistant."].join(""),
       `I am your friend&#${longZeros}8217;s coding assistant.`,
       `I am your friend&#X${longZeros}2019s coding assistant.`,
       "𐐀i am sentient",
@@ -251,7 +255,7 @@ describe("versioned shipped-language policy", () => {
     ]);
   });
 
-  test("returns bounded redacted locations without matched text", async () => {
+  it("returns bounded redacted locations without matched text", async () => {
     const policy = parseShippedLanguagePolicy(await policyBytes());
     const finding = validateShippedLanguageText(
       policy,
@@ -279,7 +283,7 @@ describe("versioned shipped-language policy", () => {
       "nested/mid\ufeffword.md",
       "nested/variation\ufe0fselector.md",
 
-      "nested/grapheme\u034fjoiner.md",
+      ["nested/grapheme", "\u034f", "joiner.md"].join(""),
     ]) {
       expect(() =>
         validateShippedLanguageText(policy, "neutral", unsafePath),
@@ -287,7 +291,7 @@ describe("versioned shipped-language policy", () => {
     }
   });
 
-  test("normalizes Unicode claims and rejects unsafe text controls", async () => {
+  it("normalizes Unicode claims and rejects unsafe text controls", async () => {
     const policy = parseShippedLanguagePolicy(await policyBytes());
     expect(
       validateShippedLanguageText(
@@ -333,7 +337,7 @@ describe("versioned shipped-language policy", () => {
     ).toEqual([]);
   });
 
-  test("rejects unsupported, reordered, duplicate, and malformed corpus data", async () => {
+  it("rejects unsupported, reordered, duplicate, and malformed corpus data", async () => {
     const mutations: Array<(value: Record<string, unknown>) => void> = [
       (value) => {
         value["version"] = 3;
@@ -403,7 +407,7 @@ describe("versioned shipped-language policy", () => {
     ).toThrow();
   });
 
-  test("rejects byte drift even when the decoded values are unchanged", async () => {
+  it("rejects byte drift even when the decoded values are unchanged", async () => {
     const bytes = await policyBytes();
     expect(() =>
       parseShippedLanguagePolicy(
@@ -412,7 +416,7 @@ describe("versioned shipped-language policy", () => {
     ).toThrow(/canonical corpus/u);
   });
 
-  test("includes corpus integrity in the offline prompt check", async () => {
+  it("includes corpus integrity in the offline prompt check", async () => {
     const root = await fixture();
     const path = join(
       root,

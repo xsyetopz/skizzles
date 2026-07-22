@@ -11,6 +11,8 @@
       "!!**/node_modules",
       "!!**/dist",
       "!!**/coverage",
+      "!!plugins/skizzles",
+      "!!skills/codex-project-tooling/assets/fastmcp-bun-template",
       "!!**/*.generated.{js,jsx,mjs,cjs,ts,tsx,mts,cts}"
     ],
     "ignoreUnknown": true
@@ -277,24 +279,6 @@
       }
     }
   },
-  "overrides": [
-    {
-      "includes": [
-        "plugins/skizzles/hooks/manage-command-output.ts",
-        "plugins/skizzles/packages/container-lab/src/cli.ts",
-        "plugins/skizzles/packages/container-lab/src/reaper-cli.ts",
-        "plugins/skizzles/packages/installer/src/cli.ts",
-        "plugins/skizzles/runtime/codex-command.ts",
-        "plugins/skizzles/runtime/model-catalog.ts",
-        "plugins/skizzles/scripts/analyze.ts"
-      ],
-      // Bun emits these dependency-self-contained executable artifacts.
-      // Their canonical inputs remain fully checked; plugin:check proves exact derivation.
-      "formatter": { "enabled": false },
-      "linter": { "enabled": false },
-      "assist": { "enabled": false }
-    }
-  ],
   "javascript": {
     "globals": ["Bun", "$"],
     "formatter": {

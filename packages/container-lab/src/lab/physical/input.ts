@@ -130,7 +130,9 @@ export function parseCandidateTargets(
 ): readonly PhysicalCandidateTarget[] | undefined {
   try {
     return parseCandidateTargetArray(value);
-  } catch {}
+  } catch {
+    return undefined;
+  }
 }
 
 export function parseProbeProfiles(
@@ -423,7 +425,9 @@ function snapshotUnknownRecord(
       record.set(key, descriptor.value);
     }
     return record;
-  } catch {}
+  } catch {
+    return undefined;
+  }
 }
 
 function boundedString(value: unknown, maximumBytes: number): value is string {

@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Embedded candidate programs intentionally exercise assertion-policy syntax, not credentials.
 import { describe, expect, it } from "bun:test";
 import {
   analyzeSourcePolicy,

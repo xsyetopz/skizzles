@@ -14,8 +14,8 @@ import {
   fixtureDirectory,
   leaveCrashedAuthorTransaction,
   MACHINE_PATH,
-  snapshot,
   SYMLINK_ERROR,
+  snapshot,
   type TransactionEntryFixture,
   type TransactionJournalFixture,
 } from "./fixture.ts";

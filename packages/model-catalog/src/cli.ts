@@ -13,7 +13,7 @@ import {
   validatePhysicalRegularFile,
   writePrivateAtomic,
 } from "./catalog/store.ts";
-import { CodexChildError } from "./codex-child.ts";
+import { CodexChildError } from "./codex/child.ts";
 import { renderLaunchAgent } from "./launch-agent.ts";
 
 const USAGE =

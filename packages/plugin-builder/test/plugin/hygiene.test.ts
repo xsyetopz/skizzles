@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: High-entropy strings are synthetic hygiene-test payloads used to prove rejection behavior.
 import { afterEach, describe, expect, it } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";

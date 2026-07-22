@@ -4,10 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { digestText } from "../../src/digest.ts";
 import {
-  captureCompilerEvidence,
   type CompilerCandidateOverlay,
   type CompilerEvidenceInput,
   type CompilerSymbolAuthorityPort,
+  captureCompilerEvidence,
   createTypeScriptCompilerAuthority,
   isTypeScriptCompilerAuthority,
 } from "../../src/evidence/compiler.ts";

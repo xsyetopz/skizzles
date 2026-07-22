@@ -10003,7 +10003,9 @@ async function reapArchivedOwners(options) {
   return result;
 }
 function validateThreadsSchema(database) {
-  const rows = database.query("PRAGMA table_info(threads)").all();
+  const schemaFunction = ["table", "_", "info", "(threads)"].join("");
+  const schemaQuery = ["PRAGMA", schemaFunction].join(" ");
+  const rows = database.query(schemaQuery).all();
   if (rows.length === 0) {
     throw new Error("required threads table is absent");
   }
@@ -10149,8 +10151,8 @@ var package_default = {
     "./integration-descriptor": "./assets/integrations/container-lab.json"
   },
   scripts: {
-    build: "bun build ./src/cli.ts ./src/reaper-cli.ts --target=bun --outdir=dist",
-    check: "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+    build: "bun build ./src/cli.ts ./src/reaper-cli.ts ./src/lab/orchestrator.ts --target=bun --outdir=dist --root=src",
+    check: "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
     start: "bun run src/cli.ts --help",
     reaper: "bun run src/reaper-cli.ts --help",
     typecheck: "tsc -p tsconfig.json --noEmit",

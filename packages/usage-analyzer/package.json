@@ -9,7 +9,7 @@
   "scripts": {
     "analyze": "bun run src/main.ts",
     "build": "bun build src/main.ts --target=bun --format=esm --outfile=dist/usage-analyzer.js",
-    "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+    "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
     "test": "bun test test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

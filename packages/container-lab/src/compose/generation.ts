@@ -193,6 +193,7 @@ function publishedTarget(port: unknown): number | undefined {
     const parsed = Number(port["target"]);
     return Number.isInteger(parsed) ? parsed : undefined;
   }
+  return undefined;
 }
 
 function asArray(value: unknown): unknown[] {

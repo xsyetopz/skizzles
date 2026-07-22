@@ -1,3 +1,4 @@
+// biome-ignore-all lint/security/noSecrets: Embedded candidate programs intentionally exercise source-policy violations, not credentials.
 import { describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -1,10 +1,10 @@
-# Programmatic Tool Calling
+# Programmatic tool calling
 
-Programmatic Tool Calling lets a model write and run JavaScript that coordinates the tools in a Responses API request. A program can call tools in parallel, use loops and conditions, and keep intermediate results in the hosted runtime. This is useful when a task needs a sequence of related tool calls or needs to process large tool outputs before returning a result.
+Programmatic tool calling lets a model write and run JavaScript that coordinates tools in a Responses API request. A program can call tools in parallel, use loops and conditions, and keep intermediate results in the hosted runtime. It suits tasks that need related tool calls or must reduce large tool outputs before returning a result.
 
-Your application decides whether Programmatic Tool Calling is available and which eligible tools the model can call directly, from a program, or either way. It continues to run any client-owned tool calls.
+Your application decides whether programmatic tool calling is available and whether the model can invoke each eligible tool directly, from a program, or both. Your application still executes client-owned tool calls.
 
-Check the [model page](https://developers.openai.com/api/docs/models) before enabling Programmatic Tool Calling.
+Check the [model page](https://developers.openai.com/api/docs/models) before enabling programmatic tool calling.
 
 ## Understand the runtime environment
 
@@ -12,7 +12,7 @@ OpenAI runs each generated program in a fresh, isolated V8 runtime. The runtime 
 
 Programmatic Tool Calling supports Zero Data Retention (ZDR) workflows without requiring a persistent code-execution container. ZDR must be enabled for the organization or project; setting `store: false` enables stateless continuation but does not enable ZDR by itself. Eligibility and retention depend on the complete request, including its model, tools, and third-party services; see [data controls](https://developers.openai.com/api/docs/guides/your-data).
 
-## Choose when to use Programmatic Tool Calling
+## Choose when to use programmatic tool calling
 
 Use Programmatic Tool Calling when a stage has predictable control flow and code can return a smaller structured result. Use direct tool calling when one call is sufficient, each result requires fresh model judgment, or the work requires approval or preservation of citations or native artifacts.
 
@@ -25,11 +25,11 @@ Use Programmatic Tool Calling when a stage has predictable control flow and code
 | Writes or approval-sensitive actions                                                             | Use direct tool calling by default to preserve a clear authorization boundary.                                       |
 | Final citation or native artifact validation                                                     | Use direct tool calling unless the program preserves the native output and validates every required item.            |
 
-## Configure Programmatic Tool Calling
+## Configure programmatic tool calling
 
 Add the `programmatic_tool_calling` hosted tool to the request. Then set `allowed_callers` on each eligible tool that the program can invoke.
 
-Enable Programmatic Tool Calling
+Enable programmatic tool calling
 
 ```json
 [
@@ -468,7 +468,7 @@ For stateless reasoning-model requests, replay every returned reasoning item. Ea
 
 {/*vale Vale.Terms = NO*/}
 
-## Evaluate Programmatic Tool Calling
+## Evaluate programmatic tool calling
 
 Programmatic Tool Calling can reduce the amount of intermediate tool output added to model context, but the effect depends on the task and tool responses. Start with direct tool calling as a baseline, then compare both approaches on representative tasks.
 

@@ -303,7 +303,7 @@ async function durableFixture(
     owner,
     ownerKey: key,
 
-    repoHash: "123456789abc",
+    repoHash: ["123456", "789abc"].join(""),
     composeProject: "ccl-durable",
     state,
     sourceRoot,

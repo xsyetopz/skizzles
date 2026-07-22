@@ -317,6 +317,7 @@ function callName(node: CallExpression): string | undefined {
   if (isIdentifier(node.expression)) return node.expression.text;
   if (isPropertyAccessExpression(node.expression))
     return node.expression.name.text;
+  return undefined;
 }
 
 function capabilityFor(name: string): SecurityCallSite["capability"] {

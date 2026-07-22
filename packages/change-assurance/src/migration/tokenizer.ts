@@ -62,14 +62,14 @@ function isDigit(character: string): boolean {
 }
 
 function dollarDelimiter(source: string, start: number): string | undefined {
-  if (source[start] !== "$") return;
+  if (source[start] !== "$") return undefined;
   let cursor = start + 1;
   if (source[cursor] === "$") return "$$";
-  if (!isIdentifierStart(source[cursor] ?? "")) return;
+  if (!isIdentifierStart(source[cursor] ?? "")) return undefined;
   cursor += 1;
   while (cursor < source.length && isIdentifierPart(source[cursor] ?? ""))
     cursor += 1;
-  if (source[cursor] !== "$") return;
+  if (source[cursor] !== "$") return undefined;
   return source.slice(start, cursor + 1);
 }
 
@@ -97,6 +97,7 @@ function readQuoted(
     value += character;
     cursor += 1;
   }
+  return undefined;
 }
 
 export function tokenizeSql(source: string): SqlTokenizationResult {

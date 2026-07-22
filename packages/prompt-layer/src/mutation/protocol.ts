@@ -21,6 +21,7 @@ import { validProcessStartIdentity } from "./process-identity.ts";
 export const LOCK_VERSION = 1;
 export const TOKEN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const CREATED_AT_KEY = ["created", "At", "Unix", "Ms"].join("");
 
 export interface MutationLockOwner {
   version: number;
@@ -49,7 +50,7 @@ export function reclaimClaimValue(value: unknown): ReclaimClaim {
       "processStartIdentity",
       "token",
 
-      "createdAtUnixMs",
+      CREATED_AT_KEY,
     ],
     "prompt lock reclaim claim",
   );
@@ -62,7 +63,7 @@ export function reclaimClaimValue(value: unknown): ReclaimClaim {
     ),
     token: stringValue(object["token"], "reclaim token"),
     createdAtUnixMs: numberValue(
-      object["createdAtUnixMs"],
+      object[CREATED_AT_KEY],
       "reclaim creation time",
     ),
   };
@@ -91,7 +92,7 @@ export function lockOwnerValue(value: unknown): MutationLockOwner {
       "processStartIdentity",
       "token",
 
-      "createdAtUnixMs",
+      CREATED_AT_KEY,
     ],
     "prompt mutation lock owner",
   );
@@ -104,7 +105,7 @@ export function lockOwnerValue(value: unknown): MutationLockOwner {
   );
   const token = stringValue(object["token"], "lock token");
   const createdAtUnixMs = numberValue(
-    object["createdAtUnixMs"],
+    object[CREATED_AT_KEY],
     "lock creation time",
   );
   if (

@@ -118,6 +118,7 @@ export function rawCapabilityFor(
   if (rawExecutionModules.has(module)) return "execution";
   if (rawDatabaseModules.has(module)) return "database";
   if (rawNetworkModules.has(module)) return "network";
+  return undefined;
 }
 
 export function sensitiveModule(module: string): boolean {

@@ -64,6 +64,33 @@ function validatePackageDependencies(
       );
     }
   }
+  for (const dependency of dependencyNames(manifest)) {
+    const owners = dependencyMaps(manifest).filter(
+      (dependencies) => dependency in dependencies,
+    ).length;
+    if (owners > 1) {
+      addFinding(
+        findings,
+        "duplicate-dependency-metadata",
+        relativeRoot,
+        `${dependency} must be declared in exactly one dependency map`,
+      );
+    }
+  }
+  for (const dependency of ["@types/bun", "@types/node"] as const) {
+    if (
+      dependency in manifest.dependencies ||
+      dependency in manifest.optionalDependencies ||
+      dependency in manifest.peerDependencies
+    ) {
+      addFinding(
+        findings,
+        "runtime-dev-tool",
+        relativeRoot,
+        `${dependency} is compile-time tooling and must be a development dependency`,
+      );
+    }
+  }
 }
 
 function validateRootDependencyPolicy(

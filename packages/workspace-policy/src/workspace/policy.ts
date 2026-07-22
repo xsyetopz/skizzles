@@ -38,7 +38,6 @@ const SKIZZLES_PACKAGE_NAMES = [
   "@skizzles/verification-gate",
   "@skizzles/workspace-transaction",
   "@skizzles/workspace-policy",
-  "codex-fastmcp-template",
 ] as const;
 
 async function validateWorkspace(
@@ -53,10 +52,7 @@ async function validateWorkspace(
   }
 
   validateRootManifest(rootManifest, findings);
-  const packageRoots = await discoverPackageRoots(
-    root,
-    rootManifest.workspaces,
-  );
+  const packageRoots = await discoverPackageRoots(root, findings);
   const packages: WorkspacePackage[] = [];
   const names = new Map<string, string>();
   for (const packageRoot of packageRoots) {

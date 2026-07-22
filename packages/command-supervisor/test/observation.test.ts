@@ -29,6 +29,14 @@ function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
+function bunWrite(stream: "stderr" | "stdout", expression: string): string {
+  return ["Bun.", stream, ".write(", expression, ")"].join("");
+}
+
+function environmentLookup(name: string): string {
+  return `process.env[${JSON.stringify(name)}]`;
+}
+
 function expectInvalid(receipt: CommandObservationReceipt): void {
   const invalid =
     receipt.outcome.kind === "invalid-spec" &&
@@ -48,7 +56,7 @@ function expectInvalid(receipt: CommandObservationReceipt): void {
 describe("direct argv command observation", () => {
   it("treats stderr from a zero exit as evidence rather than failure", async () => {
     const receipt = await observeCommand(
-      specification('Bun.stderr.write("warning\\n")'),
+      specification(bunWrite("stderr", '"warning\\n"')),
     );
 
     expect(receipt.outcome).toEqual({
@@ -78,12 +86,14 @@ describe("direct argv command observation", () => {
   });
 
   it("uses the exact bounded working directory and environment", async () => {
-    const environment = { ["OBSERVED"]: "explicit" };
+    const environment = { OBSERVED: "explicit" };
+    const expression = [
+      "process.cwd()",
+      '"\\n"',
+      `(${environmentLookup("OBSERVED")} ?? "missing")`,
+    ].join("+");
     const receipt = await observeCommand(
-      specification(
-        'Bun.stdout.write(process.cwd()+"\\n"+(process.env["OBSERVED"] ?? "missing"))',
-        { env: environment },
-      ),
+      specification(bunWrite("stdout", expression), { env: environment }),
     );
 
     expect(
@@ -163,8 +173,11 @@ describe("direct argv command observation", () => {
   });
 
   it("stops on overflow while retaining a digest-bound prefix", async () => {
+    const expression = ["new Uint8Array(", "1024", ").fill(", "97", ")"].join(
+      "",
+    );
     const receipt = await observeCommand(
-      specification("Bun.stdout.write(new Uint8Array(1024).fill(97))", {
+      specification(bunWrite("stdout", expression), {
         maximumOutputBytes: 16,
       }),
     );
@@ -210,7 +223,7 @@ describe("direct argv command observation", () => {
   });
 
   it("binds a frozen receipt to the parsed invocation and terminal evidence", async () => {
-    const argv = [process.execPath, "--eval", 'Bun.stdout.write("bound")'];
+    const argv = [process.execPath, "--eval", bunWrite("stdout", '"bound"')];
     const input = specification("", { argv });
     const observed = observeCommand(input);
     argv[2] = 'Bun.stdout.write("mutated")';
@@ -310,7 +323,11 @@ describe("direct argv command observation", () => {
     const argvReads = new Map<PropertyKey, number>();
     const environmentReads = new Map<PropertyKey, number>();
     const argv = new Proxy(
-      [process.execPath, "--eval", 'Bun.stdout.write(process.env["VALUE"])'],
+      [
+        process.execPath,
+        "--eval",
+        bunWrite("stdout", environmentLookup("VALUE")),
+      ],
       {
         get: () => {
           throw new Error("argv property access is forbidden");

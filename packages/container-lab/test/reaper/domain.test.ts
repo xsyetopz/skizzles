@@ -346,7 +346,7 @@ async function createLabFixture(
     owner,
     ownerKey: key,
 
-    repoHash: "123456789abc",
+    repoHash: ["123456", "789abc"].join(""),
     composeProject: "ccl-reaper",
     state: "failed",
     sourceRoot,

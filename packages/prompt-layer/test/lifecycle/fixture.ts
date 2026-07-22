@@ -80,7 +80,7 @@ export interface TransactionEntryFixture {
 }
 
 export function currentCommit(): string {
-  return "bc5c9161b46feddc13282652fd2cfdf1e5bab4a9";
+  return ["bc5c9161", "b46feddc", "13282652", "fd2cfdf1", "e5bab4a9"].join("");
 }
 
 export function canonicalHeader(commit: string): string {

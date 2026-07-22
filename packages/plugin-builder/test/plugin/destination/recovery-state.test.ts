@@ -8,6 +8,7 @@ import {
   claimArtifacts,
   collectMessages,
   crashAt,
+  temporaryRoot as createTemporaryRoot,
   currentClaim,
   durableAllocatorArtifacts,
   expectProcessGone,
@@ -19,7 +20,6 @@ import {
   seededDestination,
   spawnRecoveryContender,
   startWorker,
-  temporaryRoot as createTemporaryRoot,
   waitForFile,
   writeRecoveryWorkerModule,
 } from "./claim-fixture.ts";

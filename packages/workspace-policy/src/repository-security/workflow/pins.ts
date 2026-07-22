@@ -1,4 +1,5 @@
 // biome-ignore-all lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
+// biome-ignore-all lint/security/noSecrets: Immutable public action commits are provenance identifiers, not credentials.
 import { readFile } from "node:fs/promises";
 import {
   isAlias,

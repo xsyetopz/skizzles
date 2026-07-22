@@ -163,6 +163,7 @@ function executable(name: string, pathValue: string): string | undefined {
       return candidate;
     } catch {}
   }
+  return undefined;
 }
 
 function adminJson(

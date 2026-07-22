@@ -86,6 +86,7 @@ function executeQuery(
     }
     return 0;
   }
+  return;
 }
 
 function execute(

@@ -4,8 +4,8 @@ import { join } from "node:path";
 import process from "node:process";
 import { buildPrompt, type ProcessIdentityProvider } from "../../src/cli.ts";
 import {
-  cleanupFixtures,
   CURRENT_PROCESS_IDENTITY_ERROR,
+  cleanupFixtures,
   fixture,
   identityProvider,
   LIVE_PID_ERROR,

@@ -2,6 +2,38 @@
   "naming_exceptions": [
     {
       "rule": "semantic-token-limit",
+      "path": "docs/decisions/0017-evidence-driven-routing.md",
+      "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
+      "owner": "Repository architecture policy",
+      "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
+      "review": "Rename only through an explicit ADR history migration that updates every reference atomically."
+    },
+    {
+      "rule": "temporal-file",
+      "path": "docs/decisions/0017-evidence-driven-routing.md",
+      "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
+      "owner": "Repository architecture policy",
+      "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
+      "review": "Remove only if the repository adopts a different versioned ADR identity convention."
+    },
+    {
+      "rule": "filename-colony",
+      "path": "assets/skizzles",
+      "reason": "These root assets are the portable native instruction profile and its subagent contract, published under exact paths consumed by installer and plugin staging.",
+      "owner": "Portable instruction profile and plugin builder",
+      "control": "Installer path resolution, role TOMLs, plugin staging, generated parity, and installation tests bind the exact asset names and bytes.",
+      "review": "Remove only in a versioned instruction-profile and plugin-layout migration with an explicit canonical-to-distribution map."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "assets/skizzles_subagent_instructions.md",
+      "reason": "The root subagent instruction asset is a published portable profile path required by role configuration and plugin staging.",
+      "owner": "Portable instruction profile and plugin builder",
+      "control": "Role configuration, installer, plugin staging, and parity tests bind the exact canonical path and content.",
+      "review": "Remove only in a versioned instruction-profile and plugin-layout migration."
+    },
+    {
+      "rule": "semantic-token-limit",
       "path": "docs/decisions/0001-modular-packaging-monolith.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",

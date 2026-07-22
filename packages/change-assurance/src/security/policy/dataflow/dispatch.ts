@@ -189,6 +189,7 @@ function memberName(expression: Expression): string | undefined {
     isStringLiteral(expression.argumentExpression)
   )
     return expression.argumentExpression.text;
+  return undefined;
 }
 
 function memberBase(expression: Expression): Expression | undefined {
@@ -197,6 +198,7 @@ function memberBase(expression: Expression): Expression | undefined {
     isElementAccessExpression(expression)
   )
     return expression.expression;
+  return undefined;
 }
 
 function isReflectObject(expression: Expression | undefined): boolean {

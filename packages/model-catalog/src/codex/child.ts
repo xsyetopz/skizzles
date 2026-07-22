@@ -7,13 +7,13 @@ import {
   type JsonObject,
   LUNA_MODEL,
   parseJson,
-} from "./catalog/schema.ts";
-import { codexSupervisorGroup } from "./codex-group.ts";
+} from "../catalog/schema.ts";
+import { codexSupervisorGroup } from "./group.ts";
 import {
   codexSupervisorCommand,
   codexSupervisorProtocol,
   type FinalCodexSupervisorMessage,
-} from "./codex-supervisor.ts";
+} from "./supervisor.ts";
 
 const SEMANTIC_VERSION =
   /(?<![0-9A-Za-z-])((?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)(?=\s|$)/;

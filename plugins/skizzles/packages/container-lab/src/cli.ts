@@ -7453,6 +7453,7 @@ function publishedTarget(port) {
     const parsed = Number(port["target"]);
     return Number.isInteger(parsed) ? parsed : undefined;
   }
+  return;
 }
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -8283,7 +8284,9 @@ function parseNormalizedModel(parse) {
   try {
     const value = parse();
     return isComposeModel(value) ? value : undefined;
-  } catch {}
+  } catch {
+    return;
+  }
 }
 function isComposeModel(value) {
   if (!isRecord(value)) {
@@ -8466,7 +8469,11 @@ function numericProperty(value, key) {
   return typeof candidate === "number" ? candidate : Number(candidate);
 }
 function boundedLogTail(value, maxLines, maxBytes) {
-  const sanitized = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "\uFFFD").trimEnd();
+  const sanitized = Array.from(value, (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    const isUnsafeControl = codePoint <= 8 || codePoint === 11 || codePoint === 12 || codePoint >= 14 && codePoint <= 31 || codePoint === 127;
+    return isUnsafeControl ? "\uFFFD" : character;
+  }).join("").trimEnd();
   const lines = sanitized.split(`
 `);
   let selected = lines.slice(-maxLines).join(`
@@ -12290,6 +12297,7 @@ async function readyRuntimeProblem(roots, lab) {
     }
     return error instanceof Error ? error.message : String(error);
   }
+  return;
 }
 async function assertDestroyFilesystem(roots, lab) {
   await assertOwnerStateDirectory(roots.stateRoot, lab.ownerKey, "owner state directory is missing or unsafe", { canonicalMismatch: "unsafe-indirection" });
@@ -13028,8 +13036,8 @@ var package_default = {
     "./integration-descriptor": "./assets/integrations/container-lab.json"
   },
   scripts: {
-    build: "bun build ./src/cli.ts ./src/reaper-cli.ts --target=bun --outdir=dist",
-    check: "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+    build: "bun build ./src/cli.ts ./src/reaper-cli.ts ./src/lab/orchestrator.ts --target=bun --outdir=dist --root=src",
+    check: "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
     start: "bun run src/cli.ts --help",
     reaper: "bun run src/reaper-cli.ts --help",
     typecheck: "tsc -p tsconfig.json --noEmit",

@@ -143,17 +143,17 @@ function hasExpectRoot(node: Node): boolean {
 }
 
 function conditionIsErrorRelated(node: Node): boolean {
-  let related = false;
+  const relatedProperties = new Set<Node>();
   visitNodes(node, (candidate) => {
     if (
-      !related &&
+      relatedProperties.size === 0 &&
       isPropertyAccessExpression(candidate) &&
       ERROR_CONDITION_PATTERN.test(candidate.name.text)
     ) {
-      related = true;
+      relatedProperties.add(candidate);
     }
   });
-  return related;
+  return relatedProperties.size > 0;
 }
 
 function branchExercisesFailure(node: Node): boolean {

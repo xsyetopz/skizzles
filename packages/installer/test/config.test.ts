@@ -22,8 +22,8 @@ import {
 } from "../src/codex-config.ts";
 import {
   type ConfigEdit,
-  configReceiptPath,
   type ConfigRpc,
+  configReceiptPath,
   configureCodex,
   desiredConfigEdits,
   unconfigureCodex,
@@ -148,7 +148,9 @@ class FakeRpc implements ConfigRpc {
       throw this.writeError;
     }
 
-    expect(params.reloadUserConfig).toBe(true);
+    if (!params.reloadUserConfig) {
+      throw new Error("test ConfigRpc requires user-config reload");
+    }
     for (const edit of params.edits) {
       setValue(this.config, edit.keyPath, edit.value);
     }
@@ -285,11 +287,13 @@ describe("Codex configuration lifecycle", () => {
       "base.md": "top base\n",
       "compact.md": "top compact file\n",
 
-      "catalog.json": '{"models":[{"slug":"fixture"}]}\n',
+      "catalog.json": `${JSON.stringify({ models: [{ slug: "fixture" }] })}\n`,
       "profiles/base.md": "profile base\n",
       "profiles/compact.md": "profile compact\n",
 
-      "profiles/catalog.json": '{"models":[{"slug":"profile"}]}\n',
+      "profiles/catalog.json": `${JSON.stringify({
+        models: [{ slug: "profile" }],
+      })}\n`,
       "agents/reviewer.toml":
         'model_instructions_file = "role-base.md"\ndeveloper_instructions = "Review"\n',
       "agents/role-base.md": "role base\n",

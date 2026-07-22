@@ -120,6 +120,7 @@ export async function finalizeCleanup(
       }),
     );
   }
+  return undefined;
 }
 
 export function committedFailure(

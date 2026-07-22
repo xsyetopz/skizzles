@@ -6,32 +6,45 @@ const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 
 export async function discoverPackageRoots(
   root: string,
-  patterns: readonly string[],
+  findings: WorkspaceFinding[],
 ): Promise<string[]> {
-  const roots = new Set<string>();
-  for (const pattern of patterns) {
-    if (!pattern.endsWith("/*")) {
-      roots.add(resolve(root, pattern));
-      continue;
+  const packagesRoot = resolve(root, "packages");
+  const roots: string[] = [];
+  for (const entry of await readdir(packagesRoot, { withFileTypes: true })) {
+    if (
+      entry.isDirectory() &&
+      (await exists(join(packagesRoot, entry.name, "package.json")))
+    ) {
+      roots.push(join(packagesRoot, entry.name));
     }
-    const parent = resolve(root, pattern.slice(0, -2));
-    for (const entry of await readdir(parent, { withFileTypes: true })) {
-      if (
-        entry.isDirectory() &&
-        (await exists(join(parent, entry.name, "package.json")))
-      ) {
-        roots.add(join(parent, entry.name));
+  }
+  for (const path of await listFiles(
+    packagesRoot,
+    new Set(["dist", "node_modules"]),
+  )) {
+    if (path.endsWith(`${sep}package.json`)) {
+      const relativePath = toPortablePath(relative(root, path));
+      if (relativePath.split("/").length !== 3) {
+        addFinding(
+          findings,
+          "nested-package-manifest",
+          relativePath,
+          "workspace package manifests must be immediate packages/*/package.json children",
+        );
       }
     }
   }
-  return [...roots].sort();
+  return roots.sort((left, right) => left.localeCompare(right, "en"));
 }
 
 export async function validateLockfiles(
   root: string,
   findings: WorkspaceFinding[],
 ): Promise<void> {
-  for (const path of await listFiles(root, new Set([".git", "node_modules"]))) {
+  for (const path of await listFiles(
+    root,
+    new Set([".git", "node_modules", "plugins"]),
+  )) {
     if (path.endsWith(`${sep}bun.lock`) && path !== join(root, "bun.lock")) {
       addFinding(
         findings,
@@ -88,9 +101,14 @@ export async function validateRootSourceIsolation(
   findings: WorkspaceFinding[],
 ): Promise<void> {
   const excluded = new Set([".git", "dist", "node_modules", "plugins"]);
+  const frameworkTemplate = join(
+    root,
+    "skills/codex-project-tooling/assets/fastmcp-bun-template",
+  );
   for (const path of await listFiles(root, excluded)) {
     if (
       SOURCE_EXTENSIONS.has(path.slice(path.lastIndexOf("."))) &&
+      !inside(frameworkTemplate, path) &&
       !packageRoots.some((packageRoot) => inside(packageRoot, path))
     ) {
       addFinding(

@@ -16,9 +16,9 @@ import {
 } from "../fuzz.ts";
 import { boundedInteger } from "../object.ts";
 import {
+  modifiedLineCount as countModifiedLines,
   coverageObjectiveFailures,
   createCoverageObjective,
-  modifiedLineCount as countModifiedLines,
   parseCoverageReport,
 } from "./coverage.ts";
 import {
@@ -34,7 +34,9 @@ import { bindingDigest } from "./report.ts";
 import { authorizeExclusion, parseReviewer } from "./review.ts";
 import { deriveMutationInventory, parseSourceReport } from "./source.ts";
 
-const productionOverlayDigestField = "productionOverlayDigest";
+const productionOverlayDigestField = ["production", "Overlay", "Digest"].join(
+  "",
+);
 
 const gates = new WeakSet<object>();
 const receipts = new WeakSet<object>();

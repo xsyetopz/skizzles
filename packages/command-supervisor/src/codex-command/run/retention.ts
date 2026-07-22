@@ -94,7 +94,9 @@ function inspectCompletedRun(
         "stdout.log": identity(stdoutInfo),
       },
     };
-  } catch {}
+  } catch {
+    return;
+  }
 }
 
 function sameRunIdentity(left: RetainedRun, right: RetainedRun): boolean {

@@ -12,6 +12,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import process from "node:process";
 
+const noBreakSpace = "\u00a0";
+const emSpace = "\u2003";
+
 const packageRoot = resolve(import.meta.dir, "../..");
 const hook = join(packageRoot, "src/manage-command-output.ts");
 const hookAsset = join(packageRoot, "assets/hooks.json");
@@ -382,9 +385,8 @@ describe("managed command output hook", () => {
       "cargo test;\nbun test",
       "flutter test > result.txt",
       "flutter test *.dart",
-      "cargo\u00a0test",
-
-      "cargo\u2003test",
+      `cargo${noBreakSpace}test`,
+      `cargo${emSpace}test`,
     ]) {
       const result = invoke(
         JSON.stringify({

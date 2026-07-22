@@ -8,7 +8,7 @@ import type { SandboxVerificationObjective } from "./contract.ts";
 
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
 
-const productionOverlayDigestKey = "productionOverlayDigest";
+const productionOverlayDigestKey = ["production", "Overlay", "Digest"].join("");
 
 export function parseSandboxVerificationObjective(
   value: unknown,

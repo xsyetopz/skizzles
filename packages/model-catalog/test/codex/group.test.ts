@@ -4,14 +4,14 @@ import { join } from "node:path";
 import process from "node:process";
 import type { RunWorkspace } from "@skizzles/run-workspace";
 import {
-  clientVersion,
   CodexChildError,
   type CodexRuntime,
-} from "../src/codex-child.ts";
+  clientVersion,
+} from "../../src/codex/child.ts";
 import {
   codexSupervisorGroup,
   signalOwnedCodexSupervisor,
-} from "../src/codex-group.ts";
+} from "../../src/codex/group.ts";
 
 function subprocess(
   exited: Promise<number>,

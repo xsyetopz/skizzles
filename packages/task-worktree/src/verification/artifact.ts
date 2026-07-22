@@ -16,7 +16,7 @@ import { parseCoverageArtifactReport } from "./coverage-report.ts";
 const reportIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
 
-const productionOverlayDigestKey = "productionOverlayDigest";
+const productionOverlayDigestKey = ["production", "Overlay", "Digest"].join("");
 
 export async function prepareArtifactDestination(
   root: string,

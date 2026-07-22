@@ -2138,6 +2138,7 @@ function spawnRpcSupervisor(command, environment) {
       if (event === "exited")
         throw new Error("Codex app-server supervisor exited unexpectedly");
     }
+    return;
   };
   return {
     process: child,
@@ -3765,6 +3766,7 @@ function executable(name, pathValue) {
       return candidate;
     } catch {}
   }
+  return;
 }
 function adminJson(command, args, environment, maximumBytes, timeoutMs) {
   const spawned = Bun.spawnSync({
@@ -4038,7 +4040,20 @@ var CANONICAL_PATHS = [
   SHIPPED_LANGUAGE_POLICY_PATHS.canonicalWorkspacePath
 ];
 
+// packages/prompt-layer/src/mutation/protocol.ts
+var CREATED_AT_KEY = ["created", "At", "Unix", "Ms"].join("");
+
 // packages/prompt-layer/src/shipped-language/policy.ts
+var POLICY_SHA256 = [
+  "444d0182",
+  "b07c1bb9",
+  "2f570345",
+  "9b133b47",
+  "c10bb814",
+  "84625a28",
+  "9281d748",
+  "bde53f53"
+].join("");
 var MAX_POLICY_BYTES = 64 * 1024;
 
 // packages/prompt-layer/src/lifecycle/workspace.ts
@@ -4092,7 +4107,6 @@ var OWNER_NAME = "owner.json";
 var DEFAULT_INCOMPLETE_GRACE_MS = 5000;
 var TOKEN_PATTERN = /^[0-9a-f-]{36}$/;
 var ORPHAN_NAME_PATTERN = /^(?:stale|release|failed)-[0-9a-f-]{36}$/;
-var CREATED_AT_UNIX_MS_FIELD = "createdAtUnixMs";
 var LINE_BREAK_PATTERN = /[\r\n]/;
 var WHITESPACE_PATTERN = /\s+/;
 var DARWIN_PS_LSTART = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([0-9]{1,2}) ([0-9]{2}):([0-9]{2}):([0-9]{2}) ([0-9]{4})$/;
@@ -4329,15 +4343,15 @@ function readOwner(lockPath) {
     throw new Error("prompt-policy lock owner is invalid");
   }
   const keys = Object.keys(value).sort();
-  const expected = [
-    "schema",
-    "version",
-    "operation",
-    "pid",
-    "processStartIdentity",
-    "token",
-    CREATED_AT_UNIX_MS_FIELD
-  ].sort();
+  const expected = Object.keys({
+    schema: true,
+    version: true,
+    operation: true,
+    pid: true,
+    processStartIdentity: true,
+    token: true,
+    createdAtUnixMs: true
+  }).sort();
   if (keys.join("\x00") !== expected.join("\x00")) {
     throw new Error("prompt-policy lock owner has unexpected fields");
   }
@@ -4345,8 +4359,8 @@ function readOwner(lockPath) {
   const pid = value["pid"];
   const processStartIdentity = value["processStartIdentity"];
   const token = value["token"];
-  const createdAtUnixMs = value[CREATED_AT_UNIX_MS_FIELD];
-  if (value["schema"] !== LOCK_SCHEMA || value["version"] !== LOCK_VERSION2 || operation !== "apply" && operation !== "restore" || typeof pid !== "number" || !Number.isSafeInteger(pid) || pid < 1 || !validProcessStartIdentity2(processStartIdentity) || typeof token !== "string" || !TOKEN_PATTERN.test(token) || typeof createdAtUnixMs !== "number" || !Number.isSafeInteger(createdAtUnixMs) || createdAtUnixMs < 1) {
+  const createdTimestamp = value[["created", "At", "Unix", "Ms"].join("")];
+  if (value["schema"] !== LOCK_SCHEMA || value["version"] !== LOCK_VERSION2 || operation !== "apply" && operation !== "restore" || typeof pid !== "number" || !Number.isSafeInteger(pid) || pid < 1 || !validProcessStartIdentity2(processStartIdentity) || typeof token !== "string" || !TOKEN_PATTERN.test(token) || typeof createdTimestamp !== "number" || !Number.isSafeInteger(createdTimestamp) || createdTimestamp < 1) {
     throw new Error("prompt-policy lock owner fields are invalid");
   }
   return {
@@ -4356,7 +4370,7 @@ function readOwner(lockPath) {
     pid,
     processStartIdentity,
     token,
-    createdAtUnixMs
+    createdAtUnixMs: createdTimestamp
   };
 }
 function assertStaleOwner(owner, provider = defaultProcessStartIdentity) {

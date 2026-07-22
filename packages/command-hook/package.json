@@ -8,8 +8,8 @@
     "./hooks.json": "./assets/hooks.json"
   },
   "scripts": {
-    "build": "bun build src/manage-command-output.ts --target=bun --outfile=dist/manage-command-output.js",
-    "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
+    "build": "bun build src/manage-command-output.ts src/index.ts --target=bun --outdir=dist --root=src",
+    "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
     "test": "bun test test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

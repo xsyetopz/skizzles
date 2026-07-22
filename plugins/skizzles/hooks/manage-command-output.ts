@@ -367,7 +367,9 @@ function pluginRootFrom(arguments_) {
       return;
     }
     return pluginRoot;
-  } catch {}
+  } catch {
+    return;
+  }
 }
 function shellWord(value) {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -398,6 +400,7 @@ function commandFrom(input) {
       return { key, value };
     }
   }
+  return;
 }
 function rewrittenCommand(event, pluginRoot) {
   if (event.hook_event_name !== "PreToolUse") {

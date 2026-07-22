@@ -1,10 +1,11 @@
+// biome-ignore-all lint/security/noSecrets: Public SHA-256 constants identify deterministic shipped-language content.
 import { createHash } from "node:crypto";
 import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ShippedLanguageFinding } from "@skizzles/prompt-layer";
 import {
-  parseShippedLanguagePolicy,
   PROMPT_LAYER_PACKAGE_FILES,
+  parseShippedLanguagePolicy,
   SHIPPED_LANGUAGE_POLICY_PATHS,
   validateShippedLanguageText,
 } from "@skizzles/prompt-layer";

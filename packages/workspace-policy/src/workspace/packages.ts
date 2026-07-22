@@ -13,10 +13,12 @@ import {
 import { validateExportImports } from "./export-imports.ts";
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
-const PORTABLE_FASTMCP_ROOT =
-  "skills/codex-project-tooling/assets/fastmcp-bun-template";
-const PORTABLE_FASTMCP_CHECK =
-  "bunx @biomejs/biome@2.5.4 check --config-path ./biome.jsonc ./biome.jsonc ./package.json ./tsconfig.json ./src ./test";
+const REQUIRED_PACKAGE_SCRIPTS = {
+  check:
+    "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
+  test: "bun test",
+  typecheck: "tsc -p tsconfig.json --noEmit",
+} as const;
 
 export async function readWorkspaceManifest(
   root: string,
@@ -118,12 +120,31 @@ export function validateRootManifest(
       });
     }
   }
-  if (!manifest.workspaces.includes("packages/*")) {
+  if (
+    manifest.workspaces.length !== 1 ||
+    manifest.workspaces[0] !== "packages/*"
+  ) {
     findings.push({
       code: "workspace-discovery",
       path: "package.json",
-      message: "root workspaces must discover packages/*",
+      message: 'root workspaces must be exactly ["packages/*"]',
     });
+  }
+  const aggregateScripts = {
+    "packages:build": "bun run --workspaces --sequential build",
+    "packages:check": "bun run --workspaces --sequential check",
+    typecheck: "bun run --workspaces --sequential typecheck",
+    test: "bun run --workspaces --sequential test",
+  } as const;
+  for (const [name, command] of Object.entries(aggregateScripts)) {
+    if (manifest.scripts[name] !== command) {
+      addFinding(
+        findings,
+        "invalid-aggregate-script",
+        "package.json",
+        `${name} must be ${command}`,
+      );
+    }
   }
 }
 
@@ -186,28 +207,51 @@ function validatePackageMetadata(
       );
     }
   }
-  const check = manifest.scripts["check"];
-  if (check !== undefined) {
-    const workspacePath = toPortablePath(relative(relativeRoot, "."));
-    const configPath = `${workspacePath}/biome.jsonc`;
-    const requiredPrefix = `bunx @biomejs/biome@2.5.4 check --config-path ${configPath} --vcs-root ${workspacePath}`;
-    const usesPortableFastMcpCheck =
-      relativeRoot === PORTABLE_FASTMCP_ROOT &&
-      check === PORTABLE_FASTMCP_CHECK;
-    if (
-      !(
-        usesPortableFastMcpCheck ||
-        check === requiredPrefix ||
-        check.startsWith(`${requiredPrefix} `)
-      )
-    ) {
-      addFinding(
-        findings,
-        "invalid-biome-command",
-        relativeRoot,
-        `package check must start with ${requiredPrefix}`,
-      );
-    }
+  if (manifest.scripts["check"] !== REQUIRED_PACKAGE_SCRIPTS.check) {
+    addFinding(
+      findings,
+      "invalid-biome-command",
+      relativeRoot,
+      `package check must be ${REQUIRED_PACKAGE_SCRIPTS.check}`,
+    );
+  }
+  if (manifest.scripts["typecheck"] !== REQUIRED_PACKAGE_SCRIPTS.typecheck) {
+    addFinding(
+      findings,
+      "invalid-typecheck-command",
+      relativeRoot,
+      `package typecheck must be ${REQUIRED_PACKAGE_SCRIPTS.typecheck}`,
+    );
+  }
+  const test = manifest.scripts["test"];
+  if (
+    test !== undefined &&
+    (!(test === "bun test test" || test.startsWith("bun test ")) ||
+      !/(?:^|\s)(?:\.\/)?test(?:\s|$)/u.test(test) ||
+      test.includes("--watch"))
+  ) {
+    addFinding(
+      findings,
+      "invalid-test-command",
+      relativeRoot,
+      "package test must run the owned test directory once with bun test",
+    );
+  }
+  const build = manifest.scripts["build"];
+  if (
+    build !== undefined &&
+    !(
+      build.startsWith("bun build ") &&
+      build.includes("--target=bun") &&
+      /(?:--outdir=\.?\/?dist|--outfile=\.?\/?dist\/)/u.test(build)
+    )
+  ) {
+    addFinding(
+      findings,
+      "invalid-build-command",
+      relativeRoot,
+      "package build must explicitly build Bun entrypoints into dist",
+    );
   }
 }
 
@@ -225,6 +269,31 @@ async function validateRequiredPackageFiles(
         `missing ${required}`,
       );
     }
+  }
+  await validatePackageTsconfig(relativeRoot, packageRoot, findings);
+}
+
+async function validatePackageTsconfig(
+  relativeRoot: string,
+  packageRoot: string,
+  findings: WorkspaceFinding[],
+): Promise<void> {
+  const path = join(packageRoot, "tsconfig.json");
+  const value = await readJson(path, findings);
+  if (
+    !isRecord(value) ||
+    value["extends"] !== "../../tsconfig.base.json" ||
+    !Array.isArray(value["include"]) ||
+    value["include"].length !== 2 ||
+    value["include"][0] !== "src/**/*.ts" ||
+    value["include"][1] !== "test/**/*.ts"
+  ) {
+    addFinding(
+      findings,
+      "invalid-package-tsconfig",
+      relativeRoot,
+      "tsconfig must extend ../../tsconfig.base.json and include only owned src/test TypeScript",
+    );
   }
 }
 

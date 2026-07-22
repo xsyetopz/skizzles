@@ -289,6 +289,7 @@ function commitmentSnapshot(
       priorFailure: result.cause,
     };
   }
+  return undefined;
 }
 
 function priorFailureCode(
