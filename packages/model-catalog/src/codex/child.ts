@@ -1,7 +1,7 @@
 import { lstat, mkdir, realpath, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import process from "node:process";
-import type { RunWorkspace } from "@skizzles/run-workspace";
+import type { RunWorkspace } from "@skizzles/scratchspace";
 import {
   assertCompleteCatalog,
   type JsonObject,

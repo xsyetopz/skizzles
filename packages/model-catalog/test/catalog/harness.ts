@@ -5,7 +5,7 @@ import {
   create,
   type OwnedChild,
   type RunWorkspace,
-} from "@skizzles/run-workspace";
+} from "@skizzles/scratchspace";
 
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const READINESS_POLL_MS = 10;

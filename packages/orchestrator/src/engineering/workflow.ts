@@ -1,4 +1,4 @@
-import { createCausalWorkflow } from "../workflow/causal-workflow.ts";
+import { createCausalWorkflow } from "../workflow/causal/create.ts";
 import type {
   EngineeringContinuationCancelResult,
   EngineeringDescribeResult,
@@ -7,7 +7,7 @@ import type {
   EngineeringWorkflowResult,
 } from "./contract.ts";
 import { EngineeringCoordinator } from "./coordinator.ts";
-import { parseEngineeringConfig } from "./input.ts";
+import { parseEngineeringConfig } from "./input/parse.ts";
 
 const invalidPrepare = Object.freeze({
   status: "rejected" as const,

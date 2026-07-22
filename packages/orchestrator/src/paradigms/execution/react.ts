@@ -1,5 +1,5 @@
 import { digestValue } from "../../digest.ts";
-import { snapshotRecord } from "../../engineering/snapshot.ts";
+import { snapshotRecord } from "../../engineering/session/snapshot.ts";
 import { isExecutionCommandCatalog } from "./catalog.ts";
 import type {
   ExecutionCommandCatalog,

@@ -1,10 +1,14 @@
 import {
   isStructuralEvidenceReceipt,
   type StructuralEvidenceReceipt,
-} from "@skizzles/source-engineering";
+} from "@skizzles/source-transformation";
 import { type Digest, digestBytes, digestValue } from "../../digest.ts";
 import type { SourceEngineeringPort } from "../contract.ts";
-import { isFrozenOpaque, snapshotArray, snapshotRecord } from "../snapshot.ts";
+import {
+  isFrozenOpaque,
+  snapshotArray,
+  snapshotRecord,
+} from "../session/snapshot.ts";
 
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
 const maximumSourceBytes = 1_500_000;

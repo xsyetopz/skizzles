@@ -1,7 +1,7 @@
 import { existsSync, lstatSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { PROMPT_POLICY_DESCRIPTOR_PATHS } from "@skizzles/prompt-layer";
-import type { RunWorkspace } from "@skizzles/run-workspace";
+import { PROMPT_POLICY_DESCRIPTOR_PATHS } from "@skizzles/prompt-policy";
+import type { RunWorkspace } from "@skizzles/scratchspace";
 import {
   type ConfigEdit,
   type ConfigRpc,

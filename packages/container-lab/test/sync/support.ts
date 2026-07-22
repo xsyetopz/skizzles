@@ -128,7 +128,10 @@ export async function crashApply(
     sourceRoot: state.source,
     targetRoot: state.target,
   });
-  const modulePath = path.join(import.meta.dir, "../../src/sync/apply.ts");
+  const modulePath = path.join(
+    import.meta.dir,
+    "../../src/sync/transaction/apply.ts",
+  );
   const script = `
     const { applySyncWithHooks } = await import(${JSON.stringify(modulePath)});
     const options = JSON.parse(process.env.SYNC_CRASH_OPTIONS);

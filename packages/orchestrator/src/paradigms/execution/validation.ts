@@ -1,5 +1,8 @@
 import { type Digest, digestValue } from "../../digest.ts";
-import { snapshotArray, snapshotRecord } from "../../engineering/snapshot.ts";
+import {
+  snapshotArray,
+  snapshotRecord,
+} from "../../engineering/session/snapshot.ts";
 import type {
   ApplyPatchCommand,
   CodeActSandboxRequest,

@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@skizzles/container-lab": "workspace:*",
-    "@skizzles/prompt-layer": "workspace:*",
-    "@skizzles/run-workspace": "workspace:*"
+    "@skizzles/prompt-policy": "workspace:*",
+    "@skizzles/scratchspace": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

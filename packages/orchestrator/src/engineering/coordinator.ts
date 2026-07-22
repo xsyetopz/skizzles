@@ -1,10 +1,8 @@
 import type { Digest } from "../digest.ts";
 import type { TargetBaseline } from "../state/target.ts";
-import type { CausalWorkflow } from "../workflow/contract.ts";
+import type { CausalWorkflow } from "../workflow/causal/contract.ts";
 import { assessChange } from "./assurance/evidence.ts";
 import { reviewAssuranceSecurity } from "./assurance/security.ts";
-import { reserveContext } from "./context.ts";
-import { ContinuationLedger } from "./continuation.ts";
 import type {
   EngineeringContinuationCancelResult,
   EngineeringDescribeResult,
@@ -12,8 +10,8 @@ import type {
   EngineeringWorkflow,
   EngineeringWorkflowConfig,
 } from "./contract.ts";
-import { parseDescribeInput } from "./describe-input.ts";
-import { parseEngineeringInput } from "./input.ts";
+import { parseDescribeInput } from "./input/describe.ts";
+import { parseEngineeringInput } from "./input/parse.ts";
 import { prepareEngineeringPhase2 } from "./phase2/prepare.ts";
 import { attestPhysicalIntegration } from "./physical.ts";
 import type { TaskContextResetResult } from "./reset/contract.ts";
@@ -23,17 +21,9 @@ import {
 } from "./reset/controller.ts";
 import { TaskEpochResources } from "./reset/resources.ts";
 import { EngineeringReviewLifecycle } from "./reset/review.ts";
-import { snapshotRecord } from "./snapshot.ts";
-import {
-  advanceSourceEngineering,
-  startSourceEngineering,
-} from "./source/adapter.ts";
-import {
-  describeSourceEngineering,
-  sourceContextMatches,
-  sourceRepository,
-} from "./source/context.ts";
-import { prepareBatch } from "./source/evidence.ts";
+import { reserveContext } from "./session/context.ts";
+import { ContinuationLedger } from "./session/continuation.ts";
+import { snapshotRecord } from "./session/snapshot.ts";
 import {
   contextBindingsFor,
   continuationBindingsFor,
@@ -44,7 +34,17 @@ import {
   type PreparationContext,
   type PreparationState,
   sameContinuationBindings,
-} from "./state.ts";
+} from "./session/state.ts";
+import {
+  advanceSourceEngineering,
+  startSourceEngineering,
+} from "./source/adapter.ts";
+import {
+  describeSourceEngineering,
+  sourceContextMatches,
+  sourceRepository,
+} from "./source/context.ts";
+import { prepareBatch } from "./source/evidence.ts";
 
 interface ContextRecord extends PreparationContext {
   consumed: boolean;

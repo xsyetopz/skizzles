@@ -7,16 +7,16 @@ import type {
   ExpectedSnapshot,
   PostCommitLeaseCleanupFailure,
   PublicationResult,
-} from "@skizzles/workspace-transaction";
+} from "@skizzles/workspace-publication";
+import type { RepositoryContext } from "../admission/repository.ts";
 import { exactKeys, isRecord } from "../codec.ts";
 import { digestValue } from "../digest.ts";
-import type { RepositoryContext } from "../repository.ts";
 import type { TargetBaseline } from "../state/target.ts";
 import type {
   CapturedPublicationBaseline,
   PublicationBaselineAuthorityPort,
   PublicationIdentity,
-} from "./contract.ts";
+} from "./causal/contract.ts";
 import type { WorkflowEngineeringEvidence } from "./evidence.ts";
 import { createWorktreeMaterial } from "./worktree/receipt.ts";
 

@@ -10,7 +10,7 @@ and must never be repaired directly.
 
 ## Prepare
 
-1. Inspect `package.json`, `packages/plugin-builder/template/.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`, and `git status`.
+1. Inspect `package.json`, `packages/plugin-packaging/template/.codex-plugin/plugin.json`, `.agents/plugins/marketplace.json`, and `git status`.
 2. Run `bun install --frozen-lockfile` and `bun run workspace:check`.
 3. Keep the tracked root `.DS_Store` untouched and remove Finder metadata or local state from package inputs.
 4. Do not mutate a live Codex directory, installed plugin, `PATH`, launchd, or Container Lab state.

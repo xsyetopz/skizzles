@@ -1,9 +1,9 @@
 import type {
   ApprovalBindings,
   ApprovalDecision,
-} from "@skizzles/workspace-transaction";
+} from "@skizzles/workspace-publication";
 import type { PromotionPermit } from "../../state/approval.ts";
-import type { PublicationIdentity } from "../contract.ts";
+import type { PublicationIdentity } from "../causal/contract.ts";
 
 const rawDigest = /^[0-9a-f]{64}$/u;
 

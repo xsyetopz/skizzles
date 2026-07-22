@@ -2,8 +2,8 @@ import {
   digestTaskWorktreeValue,
   isTaskWorktreeReceipt,
 } from "@skizzles/task-worktree";
-import type { WorkflowReview } from "../workflow/contract.ts";
-import type { PreparationState } from "./state.ts";
+import type { WorkflowReview } from "../workflow/causal/contract.ts";
+import type { PreparationState } from "./session/state.ts";
 
 export function negativeTestEvidenceMatches(
   state: PreparationState,

@@ -11,7 +11,7 @@ import process from "node:process";
 import containerLabIntegrationDescriptor from "@skizzles/container-lab/integration-descriptor" with {
   type: "json",
 };
-import type { RunWorkspace } from "@skizzles/run-workspace";
+import type { RunWorkspace } from "@skizzles/scratchspace";
 import { harnessReceiptPath, uninstallHarness } from "./harness.ts";
 import { skillsReceiptPath, uninstallSkills } from "./skills.ts";
 

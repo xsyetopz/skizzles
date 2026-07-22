@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import process from "node:process";
-import { PROMPT_POLICY_DESCRIPTOR_PATHS } from "@skizzles/prompt-layer";
+import { PROMPT_POLICY_DESCRIPTOR_PATHS } from "@skizzles/prompt-policy";
 import {
   type ConfigEdit,
   type ConfigRpc,
@@ -168,19 +168,19 @@ describe("prompt-policy source and lock boundaries", () => {
         writeFileSync(
           join(
             f.sourceRoot,
-            "packages/prompt-layer/assets/instructions/skizzles-base.md",
+            "packages/prompt-policy/assets/instructions/skizzles-base.md",
           ),
           "tampered\n",
         );
       } else if (mutation === "license") {
         writeFileSync(
-          join(f.sourceRoot, "packages/prompt-layer/assets/upstream/LICENSE"),
+          join(f.sourceRoot, "packages/prompt-policy/assets/upstream/LICENSE"),
           "tampered\n",
         );
       } else {
         const path = join(
           f.sourceRoot,
-          "packages/prompt-layer/assets/instructions/skizzles-base.provenance.json",
+          "packages/prompt-policy/assets/instructions/skizzles-base.provenance.json",
         );
         const provenance = JSON.parse(readFileSync(path, "utf8"));
         provenance.baselineRole = "swapped provenance role";
@@ -188,7 +188,7 @@ describe("prompt-policy source and lock boundaries", () => {
         writeFileSync(path, bytes);
         const descriptorPath = join(
           f.sourceRoot,
-          "packages/prompt-layer/assets/integrations/prompt-policy.json",
+          "packages/prompt-policy/assets/integrations/prompt-policy.json",
         );
         const descriptor = JSON.parse(readFileSync(descriptorPath, "utf8"));
         descriptor.base.provenance.sha256 = new Bun.CryptoHasher("sha256")
@@ -219,12 +219,12 @@ describe("prompt-policy source and lock boundaries", () => {
       f.sourceRoot = copyPolicySource(f.root);
       const descriptorPath = join(
         f.sourceRoot,
-        "packages/prompt-layer/assets/integrations/prompt-policy.json",
+        "packages/prompt-policy/assets/integrations/prompt-policy.json",
       );
       const descriptor = JSON.parse(readFileSync(descriptorPath, "utf8"));
       if (mutation === "renamed-source") {
         descriptor.base.legal.license.sourcePath =
-          "packages/prompt-layer/assets/upstream/COPYING";
+          "packages/prompt-policy/assets/upstream/COPYING";
       } else if (mutation === "alternate-package") {
         descriptor.base.legal.notice.packagedPath =
           "third_party/openai-codex/NOTICE.txt";
@@ -261,13 +261,13 @@ describe("prompt-policy source and lock boundaries", () => {
 
     const prompt = join(
       copied,
-      "packages/prompt-layer/assets/instructions/skizzles-base.md",
+      "packages/prompt-policy/assets/instructions/skizzles-base.md",
     );
     rmSync(prompt);
     symlinkSync(
       join(
         repoRoot,
-        "packages/prompt-layer/assets/instructions/skizzles-base.md",
+        "packages/prompt-policy/assets/instructions/skizzles-base.md",
       ),
       prompt,
     );
@@ -490,13 +490,13 @@ describe("prompt-policy source and lock boundaries", () => {
 function copyPolicySource(root: string): string {
   const source = join(root, "policy-source");
   for (const path of [
-    "packages/prompt-layer/assets/integrations/prompt-policy.json",
-    "packages/prompt-layer/assets/instructions/skizzles-base.md",
-    "packages/prompt-layer/assets/instructions/skizzles-base.provenance.json",
-    "packages/prompt-layer/assets/instructions/developer-instructions.md",
-    "packages/prompt-layer/assets/instructions/compact-prompt.md",
-    "packages/prompt-layer/assets/upstream/LICENSE",
-    "packages/prompt-layer/assets/upstream/NOTICE",
+    "packages/prompt-policy/assets/integrations/prompt-policy.json",
+    "packages/prompt-policy/assets/instructions/skizzles-base.md",
+    "packages/prompt-policy/assets/instructions/skizzles-base.provenance.json",
+    "packages/prompt-policy/assets/instructions/developer-instructions.md",
+    "packages/prompt-policy/assets/instructions/compact-prompt.md",
+    "packages/prompt-policy/assets/upstream/LICENSE",
+    "packages/prompt-policy/assets/upstream/NOTICE",
   ]) {
     const destination = join(source, path);
     mkdirSync(dirname(destination), { recursive: true });
@@ -509,31 +509,31 @@ function copyPackagedPolicySource(root: string): string {
   const source = join(root, "packaged-policy-source");
   const mappings = [
     [
-      "packages/prompt-layer/assets/integrations/prompt-policy.json",
+      "packages/prompt-policy/assets/integrations/prompt-policy.json",
       "integrations/prompt-policy.json",
     ],
     [
-      "packages/prompt-layer/assets/instructions/skizzles-base.md",
+      "packages/prompt-policy/assets/instructions/skizzles-base.md",
       "instructions/skizzles-base.md",
     ],
     [
-      "packages/prompt-layer/assets/instructions/skizzles-base.provenance.json",
+      "packages/prompt-policy/assets/instructions/skizzles-base.provenance.json",
       "instructions/skizzles-base.provenance.json",
     ],
     [
-      "packages/prompt-layer/assets/instructions/developer-instructions.md",
+      "packages/prompt-policy/assets/instructions/developer-instructions.md",
       "instructions/developer-instructions.md",
     ],
     [
-      "packages/prompt-layer/assets/instructions/compact-prompt.md",
+      "packages/prompt-policy/assets/instructions/compact-prompt.md",
       "instructions/compact-prompt.md",
     ],
     [
-      "packages/prompt-layer/assets/upstream/LICENSE",
+      "packages/prompt-policy/assets/upstream/LICENSE",
       "third_party/openai-codex/LICENSE",
     ],
     [
-      "packages/prompt-layer/assets/upstream/NOTICE",
+      "packages/prompt-policy/assets/upstream/NOTICE",
       "third_party/openai-codex/NOTICE",
     ],
   ] as const;

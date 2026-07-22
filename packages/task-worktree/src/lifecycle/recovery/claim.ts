@@ -16,7 +16,7 @@ import {
   pathExists,
   type RepositorySnapshot,
 } from "../../git/repository.ts";
-import { removeWritableRoot } from "../allocation.ts";
+import { removeWritableRoot } from "../preparation/allocation.ts";
 
 export interface AllocationClaim {
   readonly schema: "skizzles.task-worktree/allocation-claim";
@@ -172,8 +172,10 @@ export async function cleanupFailedAllocation(
   if (!(await removeOwnedWorktree(binding))) return false;
   if (!(await removeOwnedBranch(binding))) return false;
   if (
-    !binding.writableRemoved &&
-    !(await removeWritableRoot(binding.parent, binding.writableRoot))
+    !(
+      binding.writableRemoved ||
+      (await removeWritableRoot(binding.parent, binding.writableRoot))
+    )
   ) {
     return false;
   }

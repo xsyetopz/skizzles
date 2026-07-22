@@ -42,7 +42,7 @@ awaits and revalidate ledger state before committing a transition.
 ## Engineering workflow
 
 `createEngineeringWorkflow()` is the public effectful entrypoint. It composes
-the authenticated `@skizzles/source-engineering` facade with the internal
+the authenticated `@skizzles/source-transformation` facade with the internal
 causal publication workflow:
 
 1. `describe()` takes the language from a host-owned validation profile and
@@ -101,7 +101,7 @@ The internal causal state control enforces these publication properties:
 
 The internal causal workflow composes those state machines with the intentional
 public APIs of `@skizzles/task-worktree` and
-`@skizzles/workspace-transaction`:
+`@skizzles/workspace-publication`:
 
 1. reserve a clean target baseline and require complete bounded discovery;
 2. capture exact publication baselines, then ask the authentic task-worktree
@@ -159,7 +159,7 @@ then invokes the injected model-dispatch authority. Dispatch requests are
 runtime-authentic, digest-bound values; copied request shapes cannot invoke the
 registered model adapter. Successful execution must traverse Engineering's
 source, assurance, security, physical, task-worktree, mutation, property,
-coverage, original-test, verification-gate, and approval preparation before the
+coverage, original-test, acceptance, and approval preparation before the
 runtime returns `awaiting-approval`.
 
 The default route is the non-ReAct Locate, Patch, Verify state machine. The

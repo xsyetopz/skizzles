@@ -5,7 +5,7 @@ import {
   create,
   type RunWorkspace,
   RunWorkspaceAbortedError,
-} from "@skizzles/run-workspace";
+} from "@skizzles/scratchspace";
 
 interface InstallerLifecycle {
   cleanupStale: () => Promise<CleanupReport>;

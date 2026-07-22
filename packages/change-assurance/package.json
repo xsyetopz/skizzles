@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@skizzles/candidate-manifest": "workspace:*",
-    "@skizzles/run-workspace": "workspace:*",
+    "@skizzles/scratchspace": "workspace:*",
     "typescript": "7.0.2"
   },
   "devDependencies": {

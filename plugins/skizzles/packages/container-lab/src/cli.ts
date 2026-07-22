@@ -10156,12 +10156,6 @@ async function removeLabState(stateRoot, owner, labId) {
   await rm4(labManifestPath(stateRoot, owner, labId), { force: true });
 }
 
-// packages/container-lab/src/sync/apply.ts
-import { randomUUID as randomUUID3 } from "crypto";
-import { lstat as lstat10, mkdir as mkdir7, rename as rename4, rm as rm8 } from "fs/promises";
-import path8 from "path";
-import process9 from "process";
-
 // packages/container-lab/src/sync/comparison.ts
 function sameSyncFile(a, b) {
   if (a === b) {
@@ -10226,12 +10220,173 @@ function compareManifestPath(name, before, from, to) {
     change: from ? { path: name, action: "upsert", file: from } : { path: name, action: "delete" }
   };
 }
+// packages/container-lab/src/sync/preview.ts
+import { randomBytes } from "crypto";
+import path5 from "path";
+import process8 from "process";
 
-// packages/container-lab/src/sync/directories.ts
-import { lstat as lstat5, mkdir as mkdir5, rmdir } from "fs/promises";
+// packages/container-lab/src/public/json.ts
+var PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
+function serializePublicJson(value) {
+  let candidate = value;
+  let encoded = `${JSON.stringify(candidate)}
+`;
+  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET && isRecord8(value) && isRecord8(value["transcript"]) && typeof value["transcript"]["text"] === "string") {
+    const characters = Array.from(value["transcript"]["text"]);
+    let low = 0;
+    let high = characters.length;
+    while (low < high) {
+      const start = Math.floor((low + high) / 2);
+      const text2 = characters.slice(start).join("");
+      const transcript = {
+        ...value["transcript"],
+        text: text2,
+        bytes: Buffer.byteLength(text2),
+        lines: text2 ? text2.split(`
+`).length : 0,
+        truncated: true
+      };
+      const attempt = `${JSON.stringify({ ...value, transcript })}
+`;
+      if (Buffer.byteLength(attempt) <= PUBLIC_JSON_BYTE_BUDGET) {
+        high = start;
+      } else {
+        low = start + 1;
+      }
+    }
+    const text = characters.slice(low).join("");
+    candidate = {
+      ...value,
+      transcript: {
+        ...value["transcript"],
+        text,
+        bytes: Buffer.byteLength(text),
+        lines: text ? text.split(`
+`).length : 0,
+        truncated: true
+      }
+    };
+    encoded = `${JSON.stringify(candidate)}
+`;
+  }
+  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET) {
+    throw new Error("public response exceeds the 16 KiB output budget");
+  }
+  return encoded;
+}
+function isRecord8(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// packages/container-lab/src/sync/git-manifest.ts
+import { lstat as lstat5 } from "fs/promises";
+import process7 from "process";
+
+// packages/container-lab/src/process/git.ts
+import { isAbsolute as isAbsolute4 } from "path";
+var isolatedGitConfiguration = [
+  "-c",
+  "core.hooksPath=/dev/null",
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  "core.logAllRefUpdates=false"
+];
+async function runLocalGit(args, options, environment) {
+  assertLocalClone(args);
+  return await runCommand("git", [...isolatedGitConfiguration, ...args], {
+    ...options,
+    env: gitProcessEnvironment(environment)
+  });
+}
+function assertLocalClone(args) {
+  if (args[0] !== "clone") {
+    return;
+  }
+  const source = args.at(-2);
+  const destination = args.at(-1);
+  if (!args.includes("--local") || typeof source !== "string" || typeof destination !== "string" || !isAbsolute4(source) || !isAbsolute4(destination)) {
+    throw new Error("Git clone requires absolute local source and destination");
+  }
+}
+function gitProcessEnvironment(environment) {
+  const result = {
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TERMINAL_PROMPT: "0",
+    LANG: "C",
+    LC_ALL: "C"
+  };
+  for (const name of ["PATH", "TMPDIR", "TMP", "TEMP"]) {
+    const value = environment[name];
+    if (Object.hasOwn(environment, name) && typeof value === "string") {
+      result[name] = value;
+    }
+  }
+  return result;
+}
+
+// packages/container-lab/src/sync/git-manifest.ts
+var MAX_SYNC_FILES = 20000;
+var MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
+async function eligibleGitPaths(root, environment = process7.env) {
+  const canonical = await canonicalRoot(root);
+  const { stdout } = await runLocalGit([
+    "-C",
+    canonical,
+    "ls-files",
+    "-z",
+    "--cached",
+    "--others",
+    "--exclude-standard"
+  ], { maxOutputBytes: 64 * 1024 * 1024, rejectOnOutputLimit: true }, environment);
+  const values = stdout.toString("utf8").split("\x00").filter(Boolean).map(safeRelativePath);
+  const unique = [...new Set(values)].sort((a, b) => a.localeCompare(b));
+  if (unique.length > MAX_SYNC_FILES) {
+    throw new Error(`Git workspace exceeds ${MAX_SYNC_FILES} synchronized paths`);
+  }
+  return unique;
+}
+async function buildGitManifest(root, environment = process7.env) {
+  const canonical = await canonicalRoot(root);
+  const files = Object.create(null);
+  let totalBytes = 0;
+  for (const relative4 of await eligibleGitPaths(canonical, environment)) {
+    try {
+      const stat2 = await lstat5(await guardedPath(canonical, relative4));
+      if (!(stat2.isFile() || stat2.isSymbolicLink())) {
+        continue;
+      }
+      const file = await describeSyncFile(canonical, relative4);
+      totalBytes += file.size;
+      if (totalBytes > MAX_SYNC_TOTAL_BYTES) {
+        throw new Error("Git workspace exceeds 512 MiB synchronization limit");
+      }
+      files[relative4] = file;
+    } catch (error) {
+      if (error.code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+  return { root: canonical, digest: manifestDigest(files), files };
+}
+function manifestDigest(files) {
+  const compact = Object.keys(files).sort().map((name) => {
+    const file = files[name];
+    if (!file) {
+      throw new Error(`missing manifest entry: ${name}`);
+    }
+    return [name, file.kind, file.sha256, file.size, file.mode];
+  });
+  return sha256(JSON.stringify(compact));
+}
+
+// packages/container-lab/src/sync/transaction/directories.ts
+import { lstat as lstat6, mkdir as mkdir5, rmdir } from "fs/promises";
 import path3 from "path";
 
-// packages/container-lab/src/sync/durability.ts
+// packages/container-lab/src/sync/transaction/durability.ts
 import { randomUUID as randomUUID2 } from "crypto";
 import { mkdir as mkdir4, open as open3, rename as rename2, rm as rm5, writeFile as writeFile4 } from "fs/promises";
 import path2 from "path";
@@ -10266,7 +10421,7 @@ async function writeDurableJson(file, value) {
   }
 }
 
-// packages/container-lab/src/sync/directories.ts
+// packages/container-lab/src/sync/transaction/directories.ts
 async function planCreatedDirectories(targetRoot, changes) {
   const canonical = await canonicalRoot(targetRoot);
   const missing = new Set;
@@ -10314,7 +10469,7 @@ async function missingParentsForChange(canonicalTarget, change) {
   for (let index = 1;index <= parts.length; index++) {
     const relative4 = parts.slice(0, index).join("/");
     try {
-      const stat2 = await lstat5(path3.join(canonicalTarget, ...parts.slice(0, index)));
+      const stat2 = await lstat6(path3.join(canonicalTarget, ...parts.slice(0, index)));
       if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
         throw new Error(`Unsafe synchronization parent for ${change.path}`);
       }
@@ -10424,7 +10579,7 @@ async function retirementAncestorState(targetRoot, relative4, journalOwnedPaths)
   for (let index = 1;index <= parts.length; index++) {
     const ancestor = parts.slice(0, index).join("/");
     try {
-      const stat2 = await lstat5(path3.join(canonical, ...parts.slice(0, index)));
+      const stat2 = await lstat6(path3.join(canonical, ...parts.slice(0, index)));
       if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
         throw createdDirectoryConflict(relative4);
       }
@@ -10445,7 +10600,7 @@ function createdDirectoryConflict(relative4) {
 }
 async function directoryIdentity(root, relative4) {
   const directory = await guardedPath(root, relative4);
-  const stat2 = await lstat5(directory, { bigint: true });
+  const stat2 = await lstat6(directory, { bigint: true });
   if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
     throw new Error(`Unsafe synchronization directory: ${relative4}`);
   }
@@ -10456,169 +10611,7 @@ async function directoryIdentity(root, relative4) {
   };
 }
 
-// packages/container-lab/src/sync/git-manifest.ts
-import { lstat as lstat6 } from "fs/promises";
-import process7 from "process";
-
-// packages/container-lab/src/process/git.ts
-import { isAbsolute as isAbsolute4 } from "path";
-var isolatedGitConfiguration = [
-  "-c",
-  "core.hooksPath=/dev/null",
-  "-c",
-  "core.fsmonitor=false",
-  "-c",
-  "core.logAllRefUpdates=false"
-];
-async function runLocalGit(args, options, environment) {
-  assertLocalClone(args);
-  return await runCommand("git", [...isolatedGitConfiguration, ...args], {
-    ...options,
-    env: gitProcessEnvironment(environment)
-  });
-}
-function assertLocalClone(args) {
-  if (args[0] !== "clone") {
-    return;
-  }
-  const source = args.at(-2);
-  const destination = args.at(-1);
-  if (!args.includes("--local") || typeof source !== "string" || typeof destination !== "string" || !isAbsolute4(source) || !isAbsolute4(destination)) {
-    throw new Error("Git clone requires absolute local source and destination");
-  }
-}
-function gitProcessEnvironment(environment) {
-  const result = {
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_TERMINAL_PROMPT: "0",
-    LANG: "C",
-    LC_ALL: "C"
-  };
-  for (const name of ["PATH", "TMPDIR", "TMP", "TEMP"]) {
-    const value = environment[name];
-    if (Object.hasOwn(environment, name) && typeof value === "string") {
-      result[name] = value;
-    }
-  }
-  return result;
-}
-
-// packages/container-lab/src/sync/git-manifest.ts
-var MAX_SYNC_FILES = 20000;
-var MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
-async function eligibleGitPaths(root, environment = process7.env) {
-  const canonical = await canonicalRoot(root);
-  const { stdout } = await runLocalGit([
-    "-C",
-    canonical,
-    "ls-files",
-    "-z",
-    "--cached",
-    "--others",
-    "--exclude-standard"
-  ], { maxOutputBytes: 64 * 1024 * 1024, rejectOnOutputLimit: true }, environment);
-  const values = stdout.toString("utf8").split("\x00").filter(Boolean).map(safeRelativePath);
-  const unique = [...new Set(values)].sort((a, b) => a.localeCompare(b));
-  if (unique.length > MAX_SYNC_FILES) {
-    throw new Error(`Git workspace exceeds ${MAX_SYNC_FILES} synchronized paths`);
-  }
-  return unique;
-}
-async function buildGitManifest(root, environment = process7.env) {
-  const canonical = await canonicalRoot(root);
-  const files = Object.create(null);
-  let totalBytes = 0;
-  for (const relative4 of await eligibleGitPaths(canonical, environment)) {
-    try {
-      const stat2 = await lstat6(await guardedPath(canonical, relative4));
-      if (!(stat2.isFile() || stat2.isSymbolicLink())) {
-        continue;
-      }
-      const file = await describeSyncFile(canonical, relative4);
-      totalBytes += file.size;
-      if (totalBytes > MAX_SYNC_TOTAL_BYTES) {
-        throw new Error("Git workspace exceeds 512 MiB synchronization limit");
-      }
-      files[relative4] = file;
-    } catch (error) {
-      if (error.code !== "ENOENT") {
-        throw error;
-      }
-    }
-  }
-  return { root: canonical, digest: manifestDigest(files), files };
-}
-function manifestDigest(files) {
-  const compact = Object.keys(files).sort().map((name) => {
-    const file = files[name];
-    if (!file) {
-      throw new Error(`missing manifest entry: ${name}`);
-    }
-    return [name, file.kind, file.sha256, file.size, file.mode];
-  });
-  return sha256(JSON.stringify(compact));
-}
-
-// packages/container-lab/src/sync/preview.ts
-import { randomBytes } from "crypto";
-import path5 from "path";
-import process8 from "process";
-
-// packages/container-lab/src/public/json.ts
-var PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
-function serializePublicJson(value) {
-  let candidate = value;
-  let encoded = `${JSON.stringify(candidate)}
-`;
-  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET && isRecord8(value) && isRecord8(value["transcript"]) && typeof value["transcript"]["text"] === "string") {
-    const characters = Array.from(value["transcript"]["text"]);
-    let low = 0;
-    let high = characters.length;
-    while (low < high) {
-      const start = Math.floor((low + high) / 2);
-      const text2 = characters.slice(start).join("");
-      const transcript = {
-        ...value["transcript"],
-        text: text2,
-        bytes: Buffer.byteLength(text2),
-        lines: text2 ? text2.split(`
-`).length : 0,
-        truncated: true
-      };
-      const attempt = `${JSON.stringify({ ...value, transcript })}
-`;
-      if (Buffer.byteLength(attempt) <= PUBLIC_JSON_BYTE_BUDGET) {
-        high = start;
-      } else {
-        low = start + 1;
-      }
-    }
-    const text = characters.slice(low).join("");
-    candidate = {
-      ...value,
-      transcript: {
-        ...value["transcript"],
-        text,
-        bytes: Buffer.byteLength(text),
-        lines: text ? text.split(`
-`).length : 0,
-        truncated: true
-      }
-    };
-    encoded = `${JSON.stringify(candidate)}
-`;
-  }
-  if (Buffer.byteLength(encoded) > PUBLIC_JSON_BYTE_BUDGET) {
-    throw new Error("public response exceeds the 16 KiB output budget");
-  }
-  return encoded;
-}
-function isRecord8(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-// packages/container-lab/src/sync/state.ts
+// packages/container-lab/src/sync/transaction/state.ts
 import { lstat as lstat7, mkdir as mkdir6 } from "fs/promises";
 import path4 from "path";
 async function syncStatePaths(identity3) {
@@ -11096,12 +11089,151 @@ function assertPublicPreviewFitsBudget(preview, options) {
     throw new Error("Synchronization preview cannot be exposed within the 16 KiB public output budget; reduce the change set before applying");
   }
 }
+// packages/container-lab/src/sync/transaction/apply.ts
+import { randomUUID as randomUUID3 } from "crypto";
+import { lstat as lstat10, mkdir as mkdir7, rename as rename4, rm as rm8 } from "fs/promises";
+import path8 from "path";
+import process9 from "process";
 
-// packages/container-lab/src/sync/recovery.ts
+// packages/container-lab/src/sync/transaction/recovery.ts
 import { lstat as lstat9, rm as rm7 } from "fs/promises";
 import path7 from "path";
 
-// packages/container-lab/src/sync/staging.ts
+// packages/container-lab/src/sync/validation/journal.ts
+function parseSyncJournal(value) {
+  const object = exactObject(value, "synchronization journal", [
+    "version",
+    "state",
+    "previewToken",
+    "previewBinding",
+    "targetRoot",
+    "baselinePath",
+    "newBaseline",
+    "backups",
+    "createdDirectories",
+    "deleteParentDirectories",
+    "mutatedPaths",
+    "appliedStates"
+  ], ["creatingDirectory"]);
+  if (object.version !== 1) {
+    invalid("synchronization journal version");
+  }
+  if (object.state !== "preparing" && object.state !== "prepared" && object.state !== "applied" && object.state !== "rolledBack" && object.state !== "committed") {
+    invalid("synchronization journal state");
+  }
+  const backups = parseBackups(object.backups);
+  const paths = backups.map((item) => item.path);
+  const { createdDirectories, creatingDirectory, deleteParentDirectories } = parseJournalDirectories(object, paths, object.state);
+  const mutatedPaths = parsePathArray(object.mutatedPaths, "mutated paths");
+  if (object.state === "preparing" && mutatedPaths.length > 0) {
+    invalid("preparing synchronization journal mutations");
+  }
+  for (const mutated of mutatedPaths) {
+    if (!paths.includes(mutated)) {
+      invalid("journal mutated path provenance");
+    }
+  }
+  const appliedStates = parseNullableFileRecord(object.appliedStates, "journal applied states");
+  if (!sameStringSet(Object.keys(appliedStates), paths)) {
+    invalid("journal applied state coverage");
+  }
+  for (const backup of backups) {
+    const intended = appliedStates[backup.path];
+    if (intended === undefined) {
+      invalid("journal applied state coverage");
+    }
+    if (!backup.publication) {
+      invalid("journal publication provenance");
+    }
+  }
+  return {
+    version: 1,
+    state: object.state,
+    previewToken: stringMatching(object.previewToken, TOKEN, "journal preview token"),
+    previewBinding: digest(object.previewBinding, "journal preview binding"),
+    targetRoot: requiredString2(object.targetRoot, "journal target root"),
+    baselinePath: requiredString2(object.baselinePath, "journal baseline path"),
+    newBaseline: parseBaselineFile(object.newBaseline),
+    backups,
+    createdDirectories,
+    ...creatingDirectory === undefined ? {} : { creatingDirectory },
+    deleteParentDirectories,
+    mutatedPaths,
+    appliedStates
+  };
+}
+function parseJournalDirectories(object, paths, state) {
+  const createdDirectories = parseDirectoryIdentities(object.createdDirectories, "journal created directories");
+  if (createdDirectories.some((directory) => !paths.some((relative4) => relative4.startsWith(`${directory.path}/`)))) {
+    invalid("journal created directory provenance");
+  }
+  if (state === "preparing" && createdDirectories.length > 0) {
+    invalid("preparing synchronization journal directories");
+  }
+  const creatingDirectory = object.creatingDirectory === undefined ? undefined : syncPath(object.creatingDirectory, "journal creating directory");
+  if (creatingDirectory !== undefined && (state !== "prepared" || createdDirectories.some((entry) => entry.path === creatingDirectory) || !paths.some((relative4) => relative4.startsWith(`${creatingDirectory}/`)))) {
+    invalid("journal creating directory provenance");
+  }
+  return {
+    createdDirectories,
+    ...creatingDirectory === undefined ? {} : { creatingDirectory },
+    deleteParentDirectories: parseDirectoryIdentities(object.deleteParentDirectories, "journal delete parent directories")
+  };
+}
+function parseBackups(value) {
+  if (!Array.isArray(value)) {
+    invalid("journal backups");
+  }
+  const backups = value.map((entry, index) => {
+    const object = objectValue(entry, `journal backup ${index}`);
+    const existed = object.existed;
+    if (typeof existed !== "boolean") {
+      invalid(`journal backup ${index} existence`);
+    }
+    const required = existed ? ["path", "existed", "kind", "mode", "backup", "original"] : ["path", "existed", "original"];
+    assertExactKeys(object, `journal backup ${index}`, [
+      ...required,
+      "publication"
+    ]);
+    const relative4 = syncPath(object.path, `journal backup ${index} path`);
+    const publication = requiredString2(object.publication, `journal backup ${index} publication`);
+    if (!existed) {
+      if (object.original !== null) {
+        invalid(`journal backup ${index} original`);
+      }
+      const record2 = {
+        path: relative4,
+        existed: false,
+        original: null,
+        publication
+      };
+      return record2;
+    }
+    const kind = object.kind;
+    if (kind !== "file" && kind !== "symlink") {
+      invalid(`journal backup ${index} kind`);
+    }
+    const mode = parseMode(object.mode, `journal backup ${index} mode`);
+    const original = parseSyncFile(object.original, relative4, `journal backup ${index} original`);
+    if (original.kind !== kind || original.mode !== mode) {
+      invalid(`journal backup ${index} descriptor`);
+    }
+    const record = {
+      path: relative4,
+      existed: true,
+      kind,
+      mode,
+      backup: requiredString2(object.backup, `journal backup ${index} path`),
+      original,
+      publication
+    };
+    return record;
+  });
+  assertSortedUnique(backups.map((item) => item.path), "journal backup paths");
+  return backups;
+}
+
+// packages/container-lab/src/sync/transaction/staging.ts
 import {
   chmod,
   copyFile,
@@ -11317,141 +11449,7 @@ async function assertPublicationAvailable(publication, relative4) {
   throw new Error(`Synchronization publication path already exists: ${relative4}`);
 }
 
-// packages/container-lab/src/sync/validation/journal.ts
-function parseSyncJournal(value) {
-  const object = exactObject(value, "synchronization journal", [
-    "version",
-    "state",
-    "previewToken",
-    "previewBinding",
-    "targetRoot",
-    "baselinePath",
-    "newBaseline",
-    "backups",
-    "createdDirectories",
-    "deleteParentDirectories",
-    "mutatedPaths",
-    "appliedStates"
-  ], ["creatingDirectory"]);
-  if (object.version !== 1) {
-    invalid("synchronization journal version");
-  }
-  if (object.state !== "preparing" && object.state !== "prepared" && object.state !== "applied" && object.state !== "rolledBack" && object.state !== "committed") {
-    invalid("synchronization journal state");
-  }
-  const backups = parseBackups(object.backups);
-  const paths = backups.map((item) => item.path);
-  const { createdDirectories, creatingDirectory, deleteParentDirectories } = parseJournalDirectories(object, paths, object.state);
-  const mutatedPaths = parsePathArray(object.mutatedPaths, "mutated paths");
-  if (object.state === "preparing" && mutatedPaths.length > 0) {
-    invalid("preparing synchronization journal mutations");
-  }
-  for (const mutated of mutatedPaths) {
-    if (!paths.includes(mutated)) {
-      invalid("journal mutated path provenance");
-    }
-  }
-  const appliedStates = parseNullableFileRecord(object.appliedStates, "journal applied states");
-  if (!sameStringSet(Object.keys(appliedStates), paths)) {
-    invalid("journal applied state coverage");
-  }
-  for (const backup of backups) {
-    const intended = appliedStates[backup.path];
-    if (intended === undefined) {
-      invalid("journal applied state coverage");
-    }
-    if (!backup.publication) {
-      invalid("journal publication provenance");
-    }
-  }
-  return {
-    version: 1,
-    state: object.state,
-    previewToken: stringMatching(object.previewToken, TOKEN, "journal preview token"),
-    previewBinding: digest(object.previewBinding, "journal preview binding"),
-    targetRoot: requiredString2(object.targetRoot, "journal target root"),
-    baselinePath: requiredString2(object.baselinePath, "journal baseline path"),
-    newBaseline: parseBaselineFile(object.newBaseline),
-    backups,
-    createdDirectories,
-    ...creatingDirectory === undefined ? {} : { creatingDirectory },
-    deleteParentDirectories,
-    mutatedPaths,
-    appliedStates
-  };
-}
-function parseJournalDirectories(object, paths, state) {
-  const createdDirectories = parseDirectoryIdentities(object.createdDirectories, "journal created directories");
-  if (createdDirectories.some((directory) => !paths.some((relative4) => relative4.startsWith(`${directory.path}/`)))) {
-    invalid("journal created directory provenance");
-  }
-  if (state === "preparing" && createdDirectories.length > 0) {
-    invalid("preparing synchronization journal directories");
-  }
-  const creatingDirectory = object.creatingDirectory === undefined ? undefined : syncPath(object.creatingDirectory, "journal creating directory");
-  if (creatingDirectory !== undefined && (state !== "prepared" || createdDirectories.some((entry) => entry.path === creatingDirectory) || !paths.some((relative4) => relative4.startsWith(`${creatingDirectory}/`)))) {
-    invalid("journal creating directory provenance");
-  }
-  return {
-    createdDirectories,
-    ...creatingDirectory === undefined ? {} : { creatingDirectory },
-    deleteParentDirectories: parseDirectoryIdentities(object.deleteParentDirectories, "journal delete parent directories")
-  };
-}
-function parseBackups(value) {
-  if (!Array.isArray(value)) {
-    invalid("journal backups");
-  }
-  const backups = value.map((entry, index) => {
-    const object = objectValue(entry, `journal backup ${index}`);
-    const existed = object.existed;
-    if (typeof existed !== "boolean") {
-      invalid(`journal backup ${index} existence`);
-    }
-    const required = existed ? ["path", "existed", "kind", "mode", "backup", "original"] : ["path", "existed", "original"];
-    assertExactKeys(object, `journal backup ${index}`, [
-      ...required,
-      "publication"
-    ]);
-    const relative4 = syncPath(object.path, `journal backup ${index} path`);
-    const publication = requiredString2(object.publication, `journal backup ${index} publication`);
-    if (!existed) {
-      if (object.original !== null) {
-        invalid(`journal backup ${index} original`);
-      }
-      const record2 = {
-        path: relative4,
-        existed: false,
-        original: null,
-        publication
-      };
-      return record2;
-    }
-    const kind = object.kind;
-    if (kind !== "file" && kind !== "symlink") {
-      invalid(`journal backup ${index} kind`);
-    }
-    const mode = parseMode(object.mode, `journal backup ${index} mode`);
-    const original = parseSyncFile(object.original, relative4, `journal backup ${index} original`);
-    if (original.kind !== kind || original.mode !== mode) {
-      invalid(`journal backup ${index} descriptor`);
-    }
-    const record = {
-      path: relative4,
-      existed: true,
-      kind,
-      mode,
-      backup: requiredString2(object.backup, `journal backup ${index} path`),
-      original,
-      publication
-    };
-    return record;
-  });
-  assertSortedUnique(backups.map((item) => item.path), "journal backup paths");
-  return backups;
-}
-
-// packages/container-lab/src/sync/recovery.ts
+// packages/container-lab/src/sync/transaction/recovery.ts
 var JOURNAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 async function recoverSyncTransactions(options, hooks = {}) {
   const state = await syncStatePaths(options);
@@ -11657,7 +11655,7 @@ async function rollbackJournalSafely(targetRoot, journal) {
   await restoreBackups(targetRoot, restorations);
 }
 
-// packages/container-lab/src/sync/apply.ts
+// packages/container-lab/src/sync/transaction/apply.ts
 async function applySync(options) {
   return await applySyncWithHooks(options);
 }

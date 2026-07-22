@@ -4,7 +4,10 @@ import {
   type TaskWorktreeSession,
 } from "@skizzles/task-worktree";
 import type { ExecutionSession } from "../../state/execution.ts";
-import type { CausalWorkflowConfig, WorkflowFailureCode } from "../contract.ts";
+import type {
+  CausalWorkflowConfig,
+  WorkflowFailureCode,
+} from "../causal/contract.ts";
 
 export async function runWorkflowTask(
   config: CausalWorkflowConfig,

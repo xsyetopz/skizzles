@@ -2,7 +2,7 @@ import type { TaskWorktreePrepareTerminalResult } from "@skizzles/task-worktree"
 import type {
   WorkflowCleanupReceipt,
   WorkflowPrepareResult,
-} from "../contract.ts";
+} from "../causal/contract.ts";
 
 export function preparationResult(
   outcome: TaskWorktreePrepareTerminalResult,

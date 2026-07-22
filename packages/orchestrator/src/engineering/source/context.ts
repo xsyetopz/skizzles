@@ -5,8 +5,12 @@ import type {
   EngineeringWorkflowConfig,
   SourceEngineeringPort,
 } from "../contract.ts";
-import type { ParsedDescribeInput } from "../describe-input.ts";
-import { isFrozenOpaque, snapshotArray, snapshotRecord } from "../snapshot.ts";
+import type { ParsedDescribeInput } from "../input/describe.ts";
+import {
+  isFrozenOpaque,
+  snapshotArray,
+  snapshotRecord,
+} from "../session/snapshot.ts";
 
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
 const maximumEntries = 4096;

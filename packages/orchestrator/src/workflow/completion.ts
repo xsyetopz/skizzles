@@ -3,12 +3,10 @@ import type {
   PublicationResult,
   RecoveryResult,
   WorkspaceTransaction,
-} from "@skizzles/workspace-transaction";
+} from "@skizzles/workspace-publication";
 import { exactKeys, isRecord } from "../codec.ts";
 import type { ExecutionSession } from "../state/execution.ts";
 import type { TransactionApprovalBridge } from "./approval/bridge.ts";
-import { preparationResult } from "./completion/preparation.ts";
-import { retryWorkflowCleanup } from "./completion/retry.ts";
 import type {
   CausalWorkflowConfig,
   TerminalPublication,
@@ -18,7 +16,9 @@ import type {
   WorkflowPromotionResult,
   WorkflowRecoveryResult,
   WorkflowRejectionResult,
-} from "./contract.ts";
+} from "./causal/contract.ts";
+import { preparationResult } from "./completion/preparation.ts";
+import { retryWorkflowCleanup } from "./completion/retry.ts";
 import type { WorkflowLifecycle } from "./lifecycle.ts";
 import type { CleanupRecord, WorkflowRecord } from "./record.ts";
 import {

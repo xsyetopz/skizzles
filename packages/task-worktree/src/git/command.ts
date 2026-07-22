@@ -2,7 +2,7 @@ import { dirname } from "node:path";
 import {
   observeCommand,
   recoverCommandOutput,
-} from "@skizzles/command-supervisor";
+} from "@skizzles/command-observation";
 
 export interface GitCommandResult {
   readonly exitCode: number;

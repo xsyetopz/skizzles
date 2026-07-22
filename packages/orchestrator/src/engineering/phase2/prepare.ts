@@ -2,7 +2,7 @@ import { digestValue } from "../../digest.ts";
 import type {
   CausalWorkflow,
   WorkflowReview,
-} from "../../workflow/contract.ts";
+} from "../../workflow/causal/contract.ts";
 import {
   issueWorkflowEvidenceDraft,
   workflowEvidencePreview,
@@ -17,13 +17,13 @@ import type {
 import { negativeTestEvidenceMatches } from "../negative-evidence.ts";
 import { isPhysicalIntegrationReceipt } from "../physical.ts";
 import type { TaskReviewRecord } from "../reset/resources.ts";
+import type { PreparationState } from "../session/state.ts";
 import {
   createEvidenceBytes,
   createPreGateEvidenceBytes,
   createPreview,
   verifyPreparedSnapshot,
 } from "../source/evidence.ts";
-import type { PreparationState } from "../state.ts";
 
 export async function prepareEngineeringPhase2(
   input: Readonly<{

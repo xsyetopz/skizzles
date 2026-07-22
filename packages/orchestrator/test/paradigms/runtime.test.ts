@@ -20,8 +20,8 @@ import {
   createRoutingExperimentObserver,
   type RoutingExperimentEvent,
 } from "../../src/paradigms/routing-observer.ts";
-import { createAgentRuntime } from "../../src/paradigms/runtime.ts";
-import type { ModelDispatchRequest } from "../../src/paradigms/runtime-contract.ts";
+import type { ModelDispatchRequest } from "../../src/paradigms/runtime/contract.ts";
+import { createAgentRuntime } from "../../src/paradigms/runtime/create.ts";
 import { createSchedulerWorkerAuthority } from "../../src/paradigms/scheduler/authority.ts";
 import type { SchedulerDispatchRequest } from "../../src/paradigms/scheduler/contract.ts";
 import { createDependencyScheduler } from "../../src/paradigms/scheduler/runtime.ts";

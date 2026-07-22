@@ -12,8 +12,8 @@ distribution output.
 - Every production TypeScript domain owns `package.json`, `src/`, `test/`,
   `tsconfig.json`, `README.md`, direct dependencies, and intentional exports or
   binaries under `packages/`.
-- `packages/plugin-builder/` is the sole plugin staging authority.
-  `packages/prompt-layer/` owns prompt inputs and provenance.
+- `packages/plugin-packaging/` is the sole plugin staging authority.
+  `packages/prompt-policy/` owns prompt inputs and provenance.
 - Root `assets/` owns portable native instruction and role assets used by the
   optional installer instruction profile; the package builder stages them into
   generated output.

@@ -13,8 +13,8 @@ import {
   type TemplateAuthorityPort,
   type TypeScriptCompilerAuthority,
   type TypeScriptSymbolIndexAuthorityPort,
-} from "@skizzles/source-engineering";
-import type { repositoryContext } from "../../support.ts";
+} from "@skizzles/source-transformation";
+import type { repositoryContext } from "../../facade/support.ts";
 import { baselineFor, digest, schemaText } from "./data.ts";
 
 const formatterConfigDigest = digest("formatter-config");

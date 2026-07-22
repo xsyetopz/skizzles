@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
-import type { ContextBindings } from "../../src/engineering/context.ts";
-import { reserveContext } from "../../src/engineering/context.ts";
+import type { ContextBindings } from "../../src/engineering/session/context.ts";
+import { reserveContext } from "../../src/engineering/session/context.ts";
 
 const digest = `sha256:${"a".repeat(64)}` as const;
 const bindings: ContextBindings = Object.freeze({

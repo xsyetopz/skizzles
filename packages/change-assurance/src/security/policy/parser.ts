@@ -1,7 +1,7 @@
 // biome-ignore-all lint/correctness/noUnresolvedImports: TypeScript 7 exposes parser and AST APIs through unstable package exports.
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
-import { create as createRunWorkspace } from "@skizzles/run-workspace";
+import { create as createRunWorkspace } from "@skizzles/scratchspace";
 import {
   type BinaryExpression,
   type CallExpression,

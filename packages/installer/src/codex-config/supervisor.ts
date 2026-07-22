@@ -1,5 +1,5 @@
 import process from "node:process";
-import type { OwnedChild } from "@skizzles/run-workspace";
+import type { OwnedChild } from "@skizzles/scratchspace";
 
 const EXIT_TIMEOUT_MS = 2000;
 const POLL_MS = 10;

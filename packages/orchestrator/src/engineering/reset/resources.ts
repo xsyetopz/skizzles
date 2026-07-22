@@ -5,10 +5,10 @@ import type {
   WorkflowPrepareResult,
   WorkflowRecoveryHandle,
   WorkflowReview,
-} from "../../workflow/contract.ts";
-import type { ContinuationLedger } from "../continuation.ts";
+} from "../../workflow/causal/contract.ts";
 import type { EngineeringReview } from "../contract.ts";
-import type { PreparationState } from "../state.ts";
+import type { ContinuationLedger } from "../session/continuation.ts";
+import type { PreparationState } from "../session/state.ts";
 import type { ResetSettlement } from "./controller.ts";
 
 export interface TaskReviewRecord {

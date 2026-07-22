@@ -8,7 +8,7 @@ import type {
   RepositoryIdentity,
   SiblingSnapshot,
   TargetSnapshot,
-} from "@skizzles/workspace-transaction";
+} from "@skizzles/workspace-publication";
 
 interface StoredFile {
   readonly bytes: Uint8Array;

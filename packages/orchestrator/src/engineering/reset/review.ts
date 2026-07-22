@@ -4,8 +4,8 @@ import type {
   WorkflowPromotionResult,
   WorkflowRecoveryResult,
   WorkflowRejectionResult,
-} from "../../workflow/contract.ts";
-import { snapshotRecord } from "../snapshot.ts";
+} from "../../workflow/causal/contract.ts";
+import { snapshotRecord } from "../session/snapshot.ts";
 import type { TaskContextController } from "./controller.ts";
 import type { TaskEpochResources } from "./resources.ts";
 

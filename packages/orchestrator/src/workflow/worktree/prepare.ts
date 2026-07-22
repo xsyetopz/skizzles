@@ -9,7 +9,7 @@ import type { TargetBaseline } from "../../state/target.ts";
 import type {
   CapturedPublicationBaseline,
   CausalWorkflowConfig,
-} from "../contract.ts";
+} from "../causal/contract.ts";
 import type { WorkflowLifecycle } from "../lifecycle.ts";
 import type { PrepareInput } from "../prepare-input.ts";
 

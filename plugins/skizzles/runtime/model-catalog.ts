@@ -7,7 +7,7 @@ import process8 from "process";
 // packages/model-catalog/src/catalog/refresh.ts
 import { join as join8, resolve as resolve3 } from "path";
 
-// packages/run-workspace/src/errors.ts
+// packages/scratchspace/src/errors.ts
 class RunWorkspaceError extends Error {
   code;
   constructor(code, message, options) {
@@ -17,7 +17,7 @@ class RunWorkspaceError extends Error {
   }
 }
 
-// packages/run-workspace/src/aborted.ts
+// packages/scratchspace/src/aborted.ts
 class RunWorkspaceAbortedError extends RunWorkspaceError {
   signal;
   constructor(message = "Run workspace creation was aborted", signal) {
@@ -26,13 +26,13 @@ class RunWorkspaceAbortedError extends RunWorkspaceError {
     this.signal = signal;
   }
 }
-// packages/run-workspace/src/janitor.ts
+// packages/scratchspace/src/janitor.ts
 import { basename, dirname, join as join4 } from "path";
 
-// packages/run-workspace/src/marker.ts
+// packages/scratchspace/src/ownership/marker.ts
 import { join as join3 } from "path";
 
-// packages/run-workspace/src/platform.ts
+// packages/scratchspace/src/process/platform.ts
 import { execFile } from "child_process";
 import { constants as constants3, realpathSync } from "fs";
 import {
@@ -53,12 +53,12 @@ import { join as join2, win32 } from "path";
 import process2 from "process";
 import { promisify } from "util";
 
-// packages/run-workspace/src/usage/directory.ts
+// packages/scratchspace/src/usage/directory.ts
 import { constants as constants2 } from "fs";
 import { lstat, open, opendir } from "fs/promises";
 import { join } from "path";
 
-// packages/run-workspace/src/usage/darwin.ts
+// packages/scratchspace/src/usage/darwin.ts
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { constants } from "fs";
 import process from "process";
@@ -293,7 +293,7 @@ function openDarwinUsageDirectory(handle) {
   return new DarwinUsageDirectory(handle.fd, entry, () => handle.close());
 }
 
-// packages/run-workspace/src/usage/directory.ts
+// packages/scratchspace/src/usage/directory.ts
 var blockBytes2 = 512n;
 var unsafeEntryName2 = /[\\/\0]/u;
 function safeName2(name) {
@@ -450,7 +450,7 @@ async function openSystemUsageDirectory(path, platform) {
   }
 }
 
-// packages/run-workspace/src/platform.ts
+// packages/scratchspace/src/process/platform.ts
 var execFileAsync = promisify(execFile);
 var decimalPattern = /^\d+$/u;
 var whitespacePattern = /\s+/gu;
@@ -751,7 +751,7 @@ function managedParent(runtime) {
   return join2(runtime.temporaryDirectory(), managedDirectoryName);
 }
 
-// packages/run-workspace/src/safety.ts
+// packages/scratchspace/src/ownership/safety.ts
 async function inspectCanonicalDirectory(runtime, path) {
   const [identity, canonical] = await Promise.all([
     runtime.lstatIdentity(path),
@@ -773,7 +773,7 @@ async function inspectPrivateDirectory(runtime, path) {
   return inspected;
 }
 
-// packages/run-workspace/src/marker.ts
+// packages/scratchspace/src/ownership/marker.ts
 var markerSchema = 1;
 var decimalPattern2 = /^\d+$/u;
 var runIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -903,7 +903,7 @@ function safeReason(reason) {
   return sanitized.trim().slice(0, maximumReasonLength);
 }
 
-// packages/run-workspace/src/janitor.ts
+// packages/scratchspace/src/janitor.ts
 var defaultMinimumAgeMs = 60 * 60 * 1000;
 var defaultScanLimit = 128;
 function integerOption(value, fallback, name, maximum) {
@@ -1067,7 +1067,7 @@ async function cleanupStaleWithRuntime(options, runtime) {
 function cleanupStale(options = {}) {
   return cleanupStaleWithRuntime(options, systemRuntime());
 }
-// packages/run-workspace/src/lifecycle.ts
+// packages/scratchspace/src/lifecycle.ts
 import {
   basename as basename2,
   isAbsolute,
@@ -1077,7 +1077,7 @@ import {
   win32 as win322
 } from "path";
 
-// packages/run-workspace/src/children.ts
+// packages/scratchspace/src/process/children.ts
 function observeExit(attempt) {
   let exit;
   try {
@@ -1154,7 +1154,7 @@ async function stopChildren(options) {
   return attempts.map(childReport);
 }
 
-// packages/run-workspace/src/signals.ts
+// packages/scratchspace/src/process/signals.ts
 import process3 from "process";
 var targets = new Set;
 var listeners = new Map;
@@ -1196,7 +1196,7 @@ function coordinateSignals(target) {
   };
 }
 
-// packages/run-workspace/src/usage/scan.ts
+// packages/scratchspace/src/usage/scan.ts
 import { types } from "util";
 var maximumScanLimit = 1e6;
 var maximumSafeBytes = BigInt(Number.MAX_SAFE_INTEGER);
@@ -1415,7 +1415,7 @@ async function inspectWorkspaceUsage(runtime, root, runId, expectedRoot, limits)
   }
 }
 
-// packages/run-workspace/src/lifecycle.ts
+// packages/scratchspace/src/lifecycle.ts
 var defaultGracefulStopMs = 5000;
 var defaultForceStopMs = 5000;
 function isAborted(signal) {

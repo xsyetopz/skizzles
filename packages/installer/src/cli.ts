@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import process from "node:process";
-import { RunWorkspaceAbortedError } from "@skizzles/run-workspace";
+import { RunWorkspaceAbortedError } from "@skizzles/scratchspace";
 import { parseInstallerCommand } from "./cli-arguments.ts";
 import { configureCodex, unconfigureCodex } from "./config.ts";
 import { doctor } from "./doctor.ts";
@@ -22,7 +22,7 @@ async function main(argv = process.argv.slice(2)): Promise<void> {
 
 async function execute(
   parsed: ReturnType<typeof parseInstallerCommand>,
-  workspace: import("@skizzles/run-workspace").RunWorkspace,
+  workspace: import("@skizzles/scratchspace").RunWorkspace,
 ): Promise<void> {
   switch (parsed.command) {
     case "doctor": {

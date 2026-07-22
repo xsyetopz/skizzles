@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 // @bun
 
-// packages/usage-analyzer/src/main.ts
+// packages/usage-analysis/src/main.ts
 import { join as join2 } from "path";
 import process2 from "process";
 
-// packages/usage-analyzer/src/rollout/discovery.ts
+// packages/usage-analysis/src/rollout/discovery.ts
 import { Database } from "bun:sqlite";
 import { join } from "path";
 var rolloutIdPattern = /([0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\.jsonl$/i;
@@ -70,10 +70,10 @@ function loadTitles(codexHome) {
   return titles;
 }
 
-// packages/usage-analyzer/src/rollout/parser.ts
+// packages/usage-analysis/src/rollout/parser.ts
 import { basename } from "path";
 
-// packages/usage-analyzer/src/usage.ts
+// packages/usage-analysis/src/usage.ts
 function asObject(value) {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return;
@@ -190,7 +190,7 @@ function aggregateRecord(entries) {
   return Object.fromEntries([...entries].map(([key, value]) => [key, serializableAggregate(value)]));
 }
 
-// packages/usage-analyzer/src/rollout/reader.ts
+// packages/usage-analysis/src/rollout/reader.ts
 async function* lines(path) {
   const reader = Bun.file(path).stream().getReader();
   const decoder = new TextDecoder;
@@ -234,7 +234,7 @@ async function* readEvents(path) {
   }
 }
 
-// packages/usage-analyzer/src/rollout/parser.ts
+// packages/usage-analysis/src/rollout/parser.ts
 function classify(source) {
   const subagent = property(source, "subagent");
   if (property(subagent, "other") === "guardian") {
@@ -428,7 +428,7 @@ async function parseRollout(path, options) {
   return parsed;
 }
 
-// packages/usage-analyzer/src/aggregation.ts
+// packages/usage-analysis/src/aggregation.ts
 var subagentRoles = new Set([
   "triage",
   "worker",
@@ -648,7 +648,7 @@ async function buildReport(codexHome, paths, options) {
   };
 }
 
-// packages/usage-analyzer/src/cli.ts
+// packages/usage-analysis/src/cli.ts
 import process from "process";
 var dateOnlyPattern = /^(\d{4})-(\d{2})-(\d{2})$/;
 var localDateTimePattern = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/;
@@ -767,7 +767,7 @@ function parseArgs(argv) {
   return options;
 }
 
-// packages/usage-analyzer/src/report.ts
+// packages/usage-analysis/src/report.ts
 var localDateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   year: "numeric",
   month: "numeric",
@@ -916,7 +916,7 @@ function printJson(report) {
   console.log(JSON.stringify(report, null, 2));
 }
 
-// packages/usage-analyzer/src/routing/parsers.ts
+// packages/usage-analysis/src/routing/parsers.ts
 var freeze = (value) => Object.freeze(value);
 var digestPattern = /^sha256:[0-9a-f]{64}$/u;
 var finite = (value, name, integer = false) => {
@@ -1294,7 +1294,7 @@ function parseIdentifierList(value, name) {
   return Object.freeze(identifiers);
 }
 
-// packages/usage-analyzer/src/routing/learner.ts
+// packages/usage-analysis/src/routing/learner.ts
 var wilsonZ = 1.96;
 function routingStratum(task) {
   return [
@@ -1409,7 +1409,7 @@ function isCausalAssignment(method) {
   return method === "randomized" || method === "exploration";
 }
 
-// packages/usage-analyzer/src/main.ts
+// packages/usage-analysis/src/main.ts
 async function run(argv, environment) {
   const options = parseArgs(argv);
   const codexHome = environment["CODEX_HOME"] ?? join2(environment["HOME"] ?? "", ".codex");

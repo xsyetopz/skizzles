@@ -11,7 +11,7 @@ output, publication, and live activation are distinct decisions.
 ## Align
 
 1. Obtain the exact target version and destination.
-2. Update `package.json`, every workspace package manifest, and `packages/plugin-builder/template/.codex-plugin/plugin.json` to the same version.
+2. Update `package.json`, every workspace package manifest, and `packages/plugin-packaging/template/.codex-plugin/plugin.json` to the same version.
 3. Run `bun install` once to update the sole root `bun.lock`, then prove `bun install --frozen-lockfile`.
 4. Run `bun run workspace:check` to reject missing packages, version drift, dependency leakage, or invalid exports.
 

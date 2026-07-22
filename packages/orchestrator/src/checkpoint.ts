@@ -1,7 +1,7 @@
+import { isNormalizedRequest } from "./admission/intent.ts";
+import { isRepositoryContext } from "./admission/repository.ts";
 import { bytesOf, exactKeys, isRecord, nonempty } from "./codec.ts";
 import { type Digest, digestBytes, digestValue } from "./digest.ts";
-import { isNormalizedRequest } from "./intent.ts";
-import { isRepositoryContext } from "./repository.ts";
 
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
 const taskRestorationReceipts = new WeakSet<object>();

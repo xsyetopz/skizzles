@@ -3,7 +3,7 @@ import type {
   ModelDispatchAuthority,
   ModelDispatchAuthorityCreationResult,
   ModelDispatchRequest,
-} from "./runtime-contract.ts";
+} from "./runtime/contract.ts";
 
 type RawDispatch = (
   request: ModelDispatchRequest,

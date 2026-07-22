@@ -12,7 +12,7 @@ import type { TargetBaseline } from "../state/target.ts";
 import type {
   WorkflowCleanupHandle,
   WorkflowCleanupReceipt,
-} from "./contract.ts";
+} from "./causal/contract.ts";
 
 const handles = new WeakSet<object>();
 const receipts = new WeakSet<object>();

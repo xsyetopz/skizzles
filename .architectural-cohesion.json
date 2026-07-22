@@ -1,8 +1,16 @@
 {
   "naming_exceptions": [
     {
+      "rule": "filename-colony",
+      "path": "assets/skizzles",
+      "reason": "These root assets are the portable native instruction profile and its subagent contract, published under exact paths consumed by installer and plugin staging.",
+      "owner": "Portable instruction profile and plugin builder",
+      "control": "Installer path resolution, role TOMLs, plugin staging, generated parity, and installation tests bind the exact asset names and bytes.",
+      "review": "Remove only in a versioned instruction-profile and plugin-layout migration with an explicit canonical-to-distribution map."
+    },
+    {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0017-evidence-driven-routing.md",
+      "path": "docs/decisions/orchestration/0017-evidence-driven-routing.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -10,19 +18,11 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0017-evidence-driven-routing.md",
+      "path": "docs/decisions/orchestration/0017-evidence-driven-routing.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
       "review": "Remove only if the repository adopts a different versioned ADR identity convention."
-    },
-    {
-      "rule": "filename-colony",
-      "path": "assets/skizzles",
-      "reason": "These root assets are the portable native instruction profile and its subagent contract, published under exact paths consumed by installer and plugin staging.",
-      "owner": "Portable instruction profile and plugin builder",
-      "control": "Installer path resolution, role TOMLs, plugin staging, generated parity, and installation tests bind the exact asset names and bytes.",
-      "review": "Remove only in a versioned instruction-profile and plugin-layout migration with an explicit canonical-to-distribution map."
     },
     {
       "rule": "semantic-token-limit",
@@ -34,7 +34,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0001-modular-packaging-monolith.md",
+      "path": "docs/decisions/workspace/0001-modular-packaging-monolith.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -42,7 +42,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0001-modular-packaging-monolith.md",
+      "path": "docs/decisions/workspace/0001-modular-packaging-monolith.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -50,7 +50,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0002-executable-architecture-fitness.md",
+      "path": "docs/decisions/workspace/0002-executable-architecture-fitness.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -58,7 +58,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0002-executable-architecture-fitness.md",
+      "path": "docs/decisions/workspace/0002-executable-architecture-fitness.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -66,7 +66,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0003-agent-trust-and-evaluation.md",
+      "path": "docs/decisions/orchestration/0003-agent-trust-and-evaluation.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -74,7 +74,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0003-agent-trust-and-evaluation.md",
+      "path": "docs/decisions/orchestration/0003-agent-trust-and-evaluation.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -82,7 +82,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0004-measurement-gated-rust.md",
+      "path": "docs/decisions/platform/0004-measurement-gated-rust.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -90,7 +90,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0004-measurement-gated-rust.md",
+      "path": "docs/decisions/platform/0004-measurement-gated-rust.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -98,7 +98,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0005-ephemeral-repository-security-tools.md",
+      "path": "docs/decisions/workspace/0005-ephemeral-repository-security-tools.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -106,7 +106,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0005-ephemeral-repository-security-tools.md",
+      "path": "docs/decisions/workspace/0005-ephemeral-repository-security-tools.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -114,7 +114,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0006-container-process-environment.md",
+      "path": "docs/decisions/platform/0006-container-process-environment.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -122,7 +122,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0006-container-process-environment.md",
+      "path": "docs/decisions/platform/0006-container-process-environment.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -130,7 +130,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0007-repository-identity.md",
+      "path": "docs/decisions/workspace/0007-repository-identity.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -138,7 +138,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0007-repository-identity.md",
+      "path": "docs/decisions/workspace/0007-repository-identity.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -146,7 +146,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0008-typescript-source-parser.md",
+      "path": "docs/decisions/workspace/0008-typescript-source-parser.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -154,7 +154,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0008-typescript-source-parser.md",
+      "path": "docs/decisions/workspace/0008-typescript-source-parser.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -162,7 +162,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0009-owned-run-workspaces.md",
+      "path": "docs/decisions/workspace/0009-owned-scratchspaces.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -170,7 +170,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0009-owned-run-workspaces.md",
+      "path": "docs/decisions/workspace/0009-owned-scratchspaces.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -178,7 +178,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0010-orchestration-runtime.md",
+      "path": "docs/decisions/orchestration/0010-orchestration-runtime.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -186,7 +186,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0010-orchestration-runtime.md",
+      "path": "docs/decisions/orchestration/0010-orchestration-runtime.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -194,7 +194,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0011-orchestration-execution-boundaries.md",
+      "path": "docs/decisions/orchestration/0011-orchestration-execution-boundaries.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -202,7 +202,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0011-orchestration-execution-boundaries.md",
+      "path": "docs/decisions/orchestration/0011-orchestration-execution-boundaries.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -210,7 +210,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0012-source-engineering-pipeline.md",
+      "path": "docs/decisions/workspace/0012-source-transformation-pipeline.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -218,7 +218,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0012-source-engineering-pipeline.md",
+      "path": "docs/decisions/workspace/0012-source-transformation-pipeline.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -226,7 +226,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0013-change-assurance-boundary.md",
+      "path": "docs/decisions/workspace/0013-change-assurance-boundary.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -234,7 +234,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0013-change-assurance-boundary.md",
+      "path": "docs/decisions/workspace/0013-change-assurance-boundary.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -242,7 +242,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0014-task-worktree-boundary.md",
+      "path": "docs/decisions/workspace/0014-task-worktree-boundary.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -250,7 +250,15 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0014-task-worktree-boundary.md",
+      "path": "docs/decisions/workspace/0014-task-worktree-boundary.md",
+      "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
+      "owner": "Repository architecture policy",
+      "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
+      "review": "Remove only if the repository adopts a different versioned ADR identity convention."
+    },
+    {
+      "rule": "temporal-file",
+      "path": "docs/decisions/workspace/0015-acceptance.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -258,7 +266,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0015-verification-gate.md",
+      "path": "docs/decisions/orchestration/0016-academic-paradigm-routing.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
       "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
@@ -266,7 +274,7 @@
     },
     {
       "rule": "temporal-file",
-      "path": "docs/decisions/0015-verification-gate.md",
+      "path": "docs/decisions/orchestration/0016-academic-paradigm-routing.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
@@ -274,23 +282,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "docs/decisions/0016-academic-paradigm-routing.md",
-      "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
-      "owner": "Repository architecture policy",
-      "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
-      "review": "Rename only through an explicit ADR history migration that updates every reference atomically."
-    },
-    {
-      "rule": "temporal-file",
-      "path": "docs/decisions/0016-academic-paradigm-routing.md",
-      "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
-      "owner": "Repository architecture policy",
-      "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
-      "review": "Remove only if the repository adopts a different versioned ADR identity convention."
-    },
-    {
-      "rule": "semantic-token-limit",
-      "path": "packages/command-hook/src/manage-command-output.ts",
+      "path": "packages/command-routing/src/manage-command-output.ts",
       "reason": "The published plugin generator contract stages this exact canonical source path into the hook runtime.",
       "owner": "Command Hook and plugin builder",
       "control": "Plugin staging tests and generated parity checks verify the exact source and destination paths.",
@@ -330,15 +322,15 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "packages/prompt-layer/assets/evaluations/shipped-language-policy.v2.json",
+      "path": "packages/prompt-policy/assets/evaluations/shipped-language-policy.v2.json",
       "reason": "The versioned shipped-language schema and distributed plugin descriptor publish this exact evaluation path.",
       "owner": "Prompt Layer shipped-language contract",
-      "control": "Prompt Layer and plugin-builder parity tests bind the exact canonical path, packaged path, schema version, and bytes.",
+      "control": "Prompt Layer and plugin-packaging parity tests bind the exact canonical path, packaged path, schema version, and bytes.",
       "review": "Remove only in a versioned evaluation-schema and plugin-layout migration."
     },
     {
       "rule": "temporal-file",
-      "path": "packages/prompt-layer/assets/evaluations/shipped-language-policy.v2.json",
+      "path": "packages/prompt-policy/assets/evaluations/shipped-language-policy.v2.json",
       "reason": "The v2 suffix is the externally observed evaluation schema version, not a temporary implementation marker.",
       "owner": "Prompt Layer shipped-language contract",
       "control": "Prompt Layer parser tests reject schema/path version drift and plugin parity tests verify the distributed name.",
@@ -346,7 +338,7 @@
     },
     {
       "rule": "semantic-token-limit",
-      "path": "packages/prompt-layer/assets/instructions/skizzles-base.provenance.json",
+      "path": "packages/prompt-policy/assets/instructions/skizzles-base.provenance.json",
       "reason": "The published prompt manifest and public policy descriptor require this exact generated provenance filename.",
       "owner": "Prompt Layer lifecycle and plugin packaging",
       "control": "Prompt checks bind its digest and byte count; plugin parity and installer validation bind the packaged path.",
@@ -354,10 +346,10 @@
     },
     {
       "rule": "redundant-owner-prefix",
-      "path": "packages/prompt-layer/assets/integrations/prompt-policy.json",
+      "path": "packages/prompt-policy/assets/integrations/prompt-policy.json",
       "reason": "The published prompt-policy descriptor is a stable cross-package and distributed integration contract.",
       "owner": "Prompt Layer descriptor contract",
-      "control": "Prompt Layer, installer, and plugin-builder tests bind the exact canonical and packaged descriptor paths.",
+      "control": "Prompt Layer, installer, and plugin-packaging tests bind the exact canonical and packaged descriptor paths.",
       "review": "Remove only in a versioned descriptor and plugin-layout migration."
     },
     {
@@ -365,7 +357,7 @@
       "path": "skills/codex-container-lab/scripts/codex-container-lab",
       "reason": "The skill launcher is a published executable path and command name referenced by installed guidance and integration descriptors.",
       "owner": "Container Lab public skill surface",
-      "control": "Launcher, installer, command-hook, shipped-language, plugin staging, and parity tests bind the exact path and executable mode.",
+      "control": "Launcher, installer, command-routing, shipped-language, plugin staging, and parity tests bind the exact path and executable mode.",
       "review": "Remove only in a versioned public launcher and plugin-layout migration."
     },
     {
@@ -373,7 +365,7 @@
       "path": "skills/codex-container-lab/scripts/codex-container-lab",
       "reason": "The skill launcher is a published executable path and command name referenced by installed guidance and integration descriptors.",
       "owner": "Container Lab public skill surface",
-      "control": "Launcher, installer, command-hook, shipped-language, plugin staging, and parity tests bind the exact path and executable mode.",
+      "control": "Launcher, installer, command-routing, shipped-language, plugin staging, and parity tests bind the exact path and executable mode.",
       "review": "Remove only in a versioned public launcher and plugin-layout migration."
     },
     {
@@ -381,7 +373,7 @@
       "path": "skills/designer-runtime/scripts/designer-sim",
       "reason": "The designer simulator is a published executable skill path staged into the plugin and referenced by shipped policy.",
       "owner": "Designer Runtime public skill surface",
-      "control": "Prompt Layer and plugin-builder shipped-language tests bind the exact canonical and distributed path and executable mode.",
+      "control": "Prompt Layer and plugin-packaging shipped-language tests bind the exact canonical and distributed path and executable mode.",
       "review": "Remove only in a versioned public simulator and plugin-layout migration."
     },
     {
@@ -413,7 +405,7 @@
     {
       "class": "generated",
       "path": "plugins/skizzles",
-      "reason": "This directory is generated by the deterministic plugin-builder distribution runner from canonical packages and skills.",
+      "reason": "This directory is generated by the deterministic plugin-packaging distribution runner from canonical packages and skills.",
       "owner": "Plugin Builder",
       "control": "The plugin build and parity check compare the generated tree against canonical staging inputs; contributors never hand-edit it.",
       "review": "Remove when this path ceases to be generated distribution output or the canonical staging authority changes."

@@ -13,13 +13,16 @@ import type {
   SyncDirection,
   SyncPreview,
 } from "./contract.ts";
+import { buildGitManifest, manifestDigest } from "./git-manifest.ts";
 import {
   captureDeleteParentDirectories,
   planCreatedDirectories,
-} from "./directories.ts";
-import { writeDurableJson } from "./durability.ts";
-import { buildGitManifest, manifestDigest } from "./git-manifest.ts";
-import { readRequiredUnknownJson, syncStatePaths } from "./state.ts";
+} from "./transaction/directories.ts";
+import { writeDurableJson } from "./transaction/durability.ts";
+import {
+  readRequiredUnknownJson,
+  syncStatePaths,
+} from "./transaction/state.ts";
 import { parseBaselineFile } from "./validation/preview.ts";
 
 const DEFAULT_TTL_MS = 5 * 60 * 1000;

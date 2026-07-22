@@ -1,17 +1,17 @@
 #!/usr/bin/env bun
 // @bun
 
-// packages/command-supervisor/src/codex-command.ts
+// packages/command-observation/src/codex-command.ts
 import process8 from "process";
 
-// packages/command-supervisor/src/codex-command/cli.ts
+// packages/command-observation/src/codex-command/cli.ts
 import process7 from "process";
 
-// packages/command-supervisor/src/codex-command/run/command.ts
+// packages/command-observation/src/codex-command/run/command.ts
 import { join as join5 } from "path";
 import process6 from "process";
 
-// packages/command-supervisor/src/codex-command/capture-lifecycle.ts
+// packages/command-observation/src/codex-command/capture-lifecycle.ts
 var captureCancellationMilliseconds = 25;
 function waitForCaptureDrain(captures, drainMilliseconds) {
   const allDone = Promise.all(captures.map((capture) => capture.done));
@@ -34,7 +34,7 @@ async function finishCaptures(captures) {
   }
 }
 
-// packages/command-supervisor/src/codex-command/settings.ts
+// packages/command-observation/src/codex-command/settings.ts
 import { accessSync, constants } from "fs";
 import { tmpdir } from "os";
 import { basename, isAbsolute, join, relative, resolve } from "path";
@@ -95,10 +95,10 @@ function loadRunSettings() {
   };
 }
 
-// packages/command-supervisor/src/codex-command/shell-process.ts
+// packages/command-observation/src/codex-command/shell-process.ts
 import process3 from "process";
 
-// packages/command-supervisor/src/codex-command/process-tree.ts
+// packages/command-observation/src/codex-command/process-tree.ts
 import process2 from "process";
 var forcedExitWaitMilliseconds = 500;
 function missingProcess(error) {
@@ -155,7 +155,7 @@ async function terminateProcessTree(child, signalGraceMilliseconds) {
   return "killed";
 }
 
-// packages/command-supervisor/src/codex-command/shell-process.ts
+// packages/command-observation/src/codex-command/shell-process.ts
 var supervisedSignals = [
   "SIGINT",
   "SIGTERM",
@@ -268,7 +268,7 @@ function spawnSupervisedShell(shell, script, signalGraceMilliseconds) {
   };
 }
 
-// packages/command-supervisor/src/codex-command/stream-capture.ts
+// packages/command-observation/src/codex-command/stream-capture.ts
 import { createHash } from "crypto";
 import { writeSync } from "fs";
 import process4 from "process";
@@ -367,7 +367,7 @@ ${content}`);
   }
 }
 
-// packages/command-supervisor/src/codex-command/run/artifacts.ts
+// packages/command-observation/src/codex-command/run/artifacts.ts
 import {
   closeSync,
   constants as constants2,
@@ -384,7 +384,7 @@ import {
 } from "fs";
 import { basename as basename3, dirname as dirname3, join as join4 } from "path";
 
-// packages/command-supervisor/src/codex-command/run/retention.ts
+// packages/command-observation/src/codex-command/run/retention.ts
 import {
   lstatSync as lstatSync2,
   readdirSync,
@@ -394,7 +394,7 @@ import {
 } from "fs";
 import { dirname as dirname2, join as join3, resolve as resolve3 } from "path";
 
-// packages/command-supervisor/src/codex-command/run/status.ts
+// packages/command-observation/src/codex-command/run/status.ts
 import { createHash as createHash2 } from "crypto";
 var runStatusSchema = "skizzles.command-supervisor/run-status";
 var runStatusVersion = 1;
@@ -479,7 +479,7 @@ function completeRun(status, input) {
   status.lifecycle.cleanup = input.cleanup;
 }
 
-// packages/command-supervisor/src/codex-command/run/evidence.ts
+// packages/command-observation/src/codex-command/run/evidence.ts
 function verifyEvidence(status, evidence, content) {
   const terminal = status.lifecycle.state !== "running";
   return content.length >= evidence.storedBytes && (!terminal || content.length === evidence.storedBytes) && content.length <= status.retention.maximumOutputArtifactBytes && sha256Digest(content.subarray(0, evidence.storedBytes)) === evidence.sha256;
@@ -488,7 +488,7 @@ function verifyRunEvidence(status, stdout, stderr) {
   return verifyEvidence(status, status.evidence.stdout, stdout) && verifyEvidence(status, status.evidence.stderr, stderr);
 }
 
-// packages/command-supervisor/src/codex-command/run/root.ts
+// packages/command-observation/src/codex-command/run/root.ts
 import { lstatSync, mkdirSync, realpathSync } from "fs";
 import { basename as basename2, dirname, join as join2, resolve as resolve2 } from "path";
 import process5 from "process";
@@ -577,7 +577,7 @@ function validatedRootIdentity(root) {
   return identity(info);
 }
 
-// packages/command-supervisor/src/codex-command/run/lifecycle-codec.ts
+// packages/command-observation/src/codex-command/run/lifecycle-codec.ts
 function isRecord(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -673,7 +673,7 @@ function parseRunLifecycle(value) {
   return terminalLifecycle(state, value["startedAt"], completedAt, exitCode, cancellationSignal, drain, cleanup);
 }
 
-// packages/command-supervisor/src/codex-command/run/status-codec.ts
+// packages/command-observation/src/codex-command/run/status-codec.ts
 var maximumStatusBytes = 64 * 1024;
 var sha256Pattern = /^[a-f0-9]{64}$/u;
 function isRecord2(value) {
@@ -792,7 +792,7 @@ function serializeRunStatus(status) {
   return content;
 }
 
-// packages/command-supervisor/src/codex-command/run/retention.ts
+// packages/command-observation/src/codex-command/run/retention.ts
 var generatedRunIdPattern = /^[a-f0-9]{12}$/u;
 var artifactNames = ["status.json", "stderr.log", "stdout.log"];
 function exactArtifactEntries(path) {
@@ -892,7 +892,7 @@ function cleanOldRuns(root, limit) {
   } catch {}
 }
 
-// packages/command-supervisor/src/codex-command/run/artifacts.ts
+// packages/command-observation/src/codex-command/run/artifacts.ts
 var retainedOutputTailBytes = 1200;
 function closeArtifact(file) {
   if (file === undefined) {
@@ -1081,7 +1081,7 @@ function artifactTail(path) {
   }
 }
 
-// packages/command-supervisor/src/codex-command/run/command.ts
+// packages/command-observation/src/codex-command/run/command.ts
 function progressReporter(startedAt, stdout, stderr) {
   let lastReportedStdoutBytes = 0;
   let lastReportedStderrBytes = 0;
@@ -1189,7 +1189,7 @@ async function runCommand(script) {
   return result.exitCode;
 }
 
-// packages/command-supervisor/src/codex-command/run/queries.ts
+// packages/command-observation/src/codex-command/run/queries.ts
 import { lstatSync as lstatSync4, readdirSync as readdirSync2, readFileSync as readFileSync3 } from "fs";
 import { join as join6 } from "path";
 var queryRunIdPattern = /^[A-Za-z0-9._-]+$/u;
@@ -1298,7 +1298,7 @@ class RunStoreQueries {
   }
 }
 
-// packages/command-supervisor/src/codex-command/cli.ts
+// packages/command-observation/src/codex-command/cli.ts
 var usage = "usage: codex-command run --base64url <script> | status <run-id> | tail <run-id> [stdout|stderr] | errors <run-id> | search <text> [run-id]";
 var base64UrlPattern = /^[A-Za-z0-9_-]+$/u;
 function decodeScript(value) {
@@ -1379,5 +1379,5 @@ async function dispatchCommand(arguments_) {
   }
 }
 
-// packages/command-supervisor/src/codex-command.ts
+// packages/command-observation/src/codex-command.ts
 process8.exit(await dispatchCommand(process8.argv.slice(2)));

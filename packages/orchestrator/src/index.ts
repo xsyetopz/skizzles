@@ -1,3 +1,29 @@
+export {
+  type CanonicalIntent,
+  type IntentResult,
+  type NormalizedRequest,
+  recoverRequestBytes,
+  type SecuritySeverity,
+} from "./admission/intent.ts";
+export type {
+  InvariantEvidence,
+  InvariantState,
+  PreflightApproval,
+  PreflightResult,
+  RepositoryGraphPort,
+  VerifiedInvariant,
+} from "./admission/preflight.ts";
+export {
+  ANCHOR_PRECEDENCE,
+  type AnchorPrecedence,
+  type EffectClassification,
+  type EffectClassificationAuthorityPort,
+  type EffectClassificationResult,
+  type EffectKind,
+  type RepositoryAnchor,
+  type RepositoryAuthorityPort,
+  type RepositoryContext,
+} from "./admission/repository.ts";
 export type {
   ArtifactKind,
   ArtifactValidator,
@@ -26,16 +52,6 @@ export {
   type DiagnosticSeverity,
   recoverDiagnosticBytes,
 } from "./diagnostic.ts";
-export type {
-  ContextBindings,
-  ContextBudgetAuthorityPort,
-  ContextOperation,
-  ContextPause,
-  ContextReservation,
-  ContextReserveRequest,
-  ContextReserveResult,
-} from "./engineering/context.ts";
-export type { EngineeringContinuation } from "./engineering/continuation.ts";
 export type {
   EngineeringContext,
   EngineeringContinuationCancelResult,
@@ -76,17 +92,20 @@ export type {
   TaskRuntimeInterruptAuthorityPort,
   TaskRuntimeInterruptRequest,
 } from "./engineering/reset/contract.ts";
+export type {
+  ContextBindings,
+  ContextBudgetAuthorityPort,
+  ContextOperation,
+  ContextPause,
+  ContextReservation,
+  ContextReserveRequest,
+  ContextReserveResult,
+} from "./engineering/session/context.ts";
+export type { EngineeringContinuation } from "./engineering/session/continuation.ts";
 export {
   createEngineeringWorkflow,
   isEngineeringWorkflow,
 } from "./engineering/workflow.ts";
-export {
-  type CanonicalIntent,
-  type IntentResult,
-  type NormalizedRequest,
-  recoverRequestBytes,
-  type SecuritySeverity,
-} from "./intent.ts";
 export type {
   CompressionDecision,
   CompressionReceipt,
@@ -196,7 +215,6 @@ export {
   isRoutingExperimentEvent,
   isRoutingExperimentObserver,
 } from "./paradigms/routing-observer.ts";
-export { createAgentRuntime, isAgentRuntime } from "./paradigms/runtime.ts";
 export type {
   AgentRuntime,
   AgentRuntimeConfig,
@@ -208,7 +226,11 @@ export type {
   ModelDispatchAuthority,
   ModelDispatchAuthorityCreationResult,
   ModelDispatchRequest,
-} from "./paradigms/runtime-contract.ts";
+} from "./paradigms/runtime/contract.ts";
+export {
+  createAgentRuntime,
+  isAgentRuntime,
+} from "./paradigms/runtime/create.ts";
 export { createSchedulerWorkerAuthority } from "./paradigms/scheduler/authority.ts";
 export type {
   DependencyScheduler,
@@ -227,25 +249,6 @@ export {
   createDependencyScheduler,
   isDependencyScheduler,
 } from "./paradigms/scheduler/runtime.ts";
-export type {
-  InvariantEvidence,
-  InvariantState,
-  PreflightApproval,
-  PreflightResult,
-  RepositoryGraphPort,
-  VerifiedInvariant,
-} from "./preflight.ts";
-export {
-  ANCHOR_PRECEDENCE,
-  type AnchorPrecedence,
-  type EffectClassification,
-  type EffectClassificationAuthorityPort,
-  type EffectClassificationResult,
-  type EffectKind,
-  type RepositoryAnchor,
-  type RepositoryAuthorityPort,
-  type RepositoryContext,
-} from "./repository.ts";
 export type {
   DimensionLimit,
   MeasurementAuthorityPort,

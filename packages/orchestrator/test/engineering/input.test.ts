@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import { createChangeDeclaration } from "@skizzles/change-assurance";
 import type { EngineeringValidationProfile } from "../../src/engineering/contract.ts";
-import { parseEngineeringInput } from "../../src/engineering/input.ts";
-import { createHarness, repositoryContext } from "../support.ts";
+import { parseEngineeringInput } from "../../src/engineering/input/parse.ts";
+import { createHarness, repositoryContext } from "../facade/support.ts";
 
 const digest = `sha256:${"a".repeat(64)}`;
 const profiles: readonly EngineeringValidationProfile[] = Object.freeze([

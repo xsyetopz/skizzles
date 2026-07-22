@@ -1,5 +1,5 @@
 /** Stable synchronization API; implementations are split by transaction domain. */
-export { applySync } from "./apply.ts";
+
 export { compareManifests } from "./comparison.ts";
 export type {
   ApplySyncOptions,
@@ -19,4 +19,5 @@ export {
   previewSync,
   publicSyncPreview,
 } from "./preview.ts";
-export { recoverSyncTransactions } from "./recovery.ts";
+export { applySync } from "./transaction/apply.ts";
+export { recoverSyncTransactions } from "./transaction/recovery.ts";

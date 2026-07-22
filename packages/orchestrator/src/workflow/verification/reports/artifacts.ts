@@ -1,5 +1,5 @@
+import type { VerificationAuthorityRequest } from "@skizzles/acceptance";
 import type { TaskWorktreeVerificationReceipt } from "@skizzles/task-worktree";
-import type { VerificationAuthorityRequest } from "@skizzles/verification-gate";
 import { exactKeys, isRecord } from "../../../codec.ts";
 import { digestValue } from "../../../digest.ts";
 

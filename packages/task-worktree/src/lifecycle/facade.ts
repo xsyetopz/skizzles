@@ -14,7 +14,7 @@ import {
   executeVerification,
   verifyVerificationReceipt,
 } from "../verification/execution.ts";
-import { close } from "./close.ts";
+import { close } from "./completion/close.ts";
 import { parseConfig } from "./configuration/config.ts";
 import {
   authorizeSession,
@@ -22,7 +22,7 @@ import {
   revalidateSession,
   runSession,
 } from "./operations.ts";
-import { prepare } from "./prepare.ts";
+import { prepare } from "./preparation/prepare.ts";
 import { retryCleanup } from "./recovery/pending.ts";
 import { isRegisteredTaskWorktree, registerAuthority } from "./state.ts";
 

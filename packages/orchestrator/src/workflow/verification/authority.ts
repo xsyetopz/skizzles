@@ -1,8 +1,3 @@
-import { createCandidateManifest } from "@skizzles/candidate-manifest";
-import {
-  isTaskWorktreeVerificationReceipt,
-  type TaskWorktreeVerificationReceipt,
-} from "@skizzles/task-worktree";
 import {
   createChangeAssuranceAuthority,
   createCoverageAuthority,
@@ -18,7 +13,12 @@ import {
   isVerificationGateReceipt,
   type VerificationAuthorityRequest,
   type VerificationGate,
-} from "@skizzles/verification-gate";
+} from "@skizzles/acceptance";
+import { createCandidateManifest } from "@skizzles/candidate-manifest";
+import {
+  isTaskWorktreeVerificationReceipt,
+  type TaskWorktreeVerificationReceipt,
+} from "@skizzles/task-worktree";
 import { exactKeys, isRecord } from "../../codec.ts";
 import { digestValue } from "../../digest.ts";
 import type {

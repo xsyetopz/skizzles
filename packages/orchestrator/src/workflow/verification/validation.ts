@@ -9,7 +9,7 @@ import {
 import {
   isSourceEngineering,
   isStructuralEvidenceReceipt,
-} from "@skizzles/source-engineering";
+} from "@skizzles/source-transformation";
 import { isRecord } from "../../codec.ts";
 import { digestBytes } from "../../digest.ts";
 import type {

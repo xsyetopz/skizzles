@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import process from "node:process";
-import { RunWorkspaceAbortedError } from "@skizzles/run-workspace";
+import { RunWorkspaceAbortedError } from "@skizzles/scratchspace";
 import { exitCodeForError } from "../src/cli.ts";
 
 const roots: string[] = [];

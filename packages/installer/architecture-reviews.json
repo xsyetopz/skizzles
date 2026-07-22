@@ -1,13 +1,3 @@
 {
-  "files": {
-    "test/config.test.ts": {
-      "owner": "installer-configuration-lifecycle",
-      "responsibilities": [
-        "native Codex configuration edit and restoration semantics",
-        "configuration receipt ownership and conflict handling",
-        "portable instruction-profile installation behavior"
-      ],
-      "reviewTrigger": "Split fixtures or test domains when a new configuration lifecycle concern cannot share the existing FakeRpc contract."
-    }
-  }
+  "files": {}
 }

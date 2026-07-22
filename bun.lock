@@ -10,6 +10,18 @@
         "typescript": "^7.0.2",
       },
     },
+    "packages/acceptance": {
+      "name": "@skizzles/acceptance",
+      "version": "0.1.0",
+      "dependencies": {
+        "@skizzles/candidate-manifest": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/candidate-manifest": {
       "name": "@skizzles/candidate-manifest",
       "version": "0.1.0",
@@ -24,7 +36,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@skizzles/candidate-manifest": "workspace:*",
-        "@skizzles/run-workspace": "workspace:*",
+        "@skizzles/scratchspace": "workspace:*",
         "typescript": "7.0.2",
       },
       "devDependencies": {
@@ -32,8 +44,8 @@
         "@types/node": "^26.1.1",
       },
     },
-    "packages/command-hook": {
-      "name": "@skizzles/command-hook",
+    "packages/command-observation": {
+      "name": "@skizzles/command-observation",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -41,8 +53,8 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/command-supervisor": {
-      "name": "@skizzles/command-supervisor",
+    "packages/command-routing": {
+      "name": "@skizzles/command-routing",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -67,8 +79,8 @@
       "version": "0.1.0",
       "dependencies": {
         "@skizzles/container-lab": "workspace:*",
-        "@skizzles/prompt-layer": "workspace:*",
-        "@skizzles/run-workspace": "workspace:*",
+        "@skizzles/prompt-policy": "workspace:*",
+        "@skizzles/scratchspace": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -80,7 +92,7 @@
       "name": "@skizzles/model-catalog",
       "version": "0.1.0",
       "dependencies": {
-        "@skizzles/run-workspace": "workspace:*",
+        "@skizzles/scratchspace": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -92,13 +104,13 @@
       "name": "@skizzles/orchestrator",
       "version": "0.1.0",
       "dependencies": {
+        "@skizzles/acceptance": "workspace:*",
         "@skizzles/candidate-manifest": "workspace:*",
         "@skizzles/change-assurance": "workspace:*",
         "@skizzles/reflexion-memory": "workspace:*",
-        "@skizzles/source-engineering": "workspace:*",
+        "@skizzles/source-transformation": "workspace:*",
         "@skizzles/task-worktree": "workspace:*",
-        "@skizzles/verification-gate": "workspace:*",
-        "@skizzles/workspace-transaction": "workspace:*",
+        "@skizzles/workspace-publication": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -106,21 +118,21 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/plugin-builder": {
-      "name": "@skizzles/plugin-builder",
+    "packages/plugin-packaging": {
+      "name": "@skizzles/plugin-packaging",
       "version": "0.1.0",
       "bin": {
         "skizzles-plugin-builder": "./src/cli.ts",
       },
       "dependencies": {
-        "@skizzles/command-hook": "workspace:*",
-        "@skizzles/command-supervisor": "workspace:*",
+        "@skizzles/command-observation": "workspace:*",
+        "@skizzles/command-routing": "workspace:*",
         "@skizzles/container-lab": "workspace:*",
         "@skizzles/installer": "workspace:*",
         "@skizzles/model-catalog": "workspace:*",
-        "@skizzles/prompt-layer": "workspace:*",
-        "@skizzles/run-workspace": "workspace:*",
-        "@skizzles/usage-analyzer": "workspace:*",
+        "@skizzles/prompt-policy": "workspace:*",
+        "@skizzles/scratchspace": "workspace:*",
+        "@skizzles/usage-analysis": "workspace:*",
         "yaml": "^2.9.0",
       },
       "devDependencies": {
@@ -129,11 +141,11 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/prompt-layer": {
-      "name": "@skizzles/prompt-layer",
+    "packages/prompt-policy": {
+      "name": "@skizzles/prompt-policy",
       "version": "0.1.0",
       "dependencies": {
-        "@skizzles/run-workspace": "workspace:*",
+        "@skizzles/scratchspace": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -150,8 +162,8 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/run-workspace": {
-      "name": "@skizzles/run-workspace",
+    "packages/scratchspace": {
+      "name": "@skizzles/scratchspace",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -159,12 +171,12 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/source-engineering": {
-      "name": "@skizzles/source-engineering",
+    "packages/source-transformation": {
+      "name": "@skizzles/source-transformation",
       "version": "0.1.0",
       "dependencies": {
         "@skizzles/candidate-manifest": "workspace:*",
-        "@skizzles/run-workspace": "workspace:*",
+        "@skizzles/scratchspace": "workspace:*",
         "typescript": "7.0.2",
       },
       "devDependencies": {
@@ -177,7 +189,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@skizzles/candidate-manifest": "workspace:*",
-        "@skizzles/command-supervisor": "workspace:*",
+        "@skizzles/command-observation": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -185,8 +197,8 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/usage-analyzer": {
-      "name": "@skizzles/usage-analyzer",
+    "packages/usage-analysis": {
+      "name": "@skizzles/usage-analysis",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -194,26 +206,14 @@
         "typescript": "^7.0.2",
       },
     },
-    "packages/verification-gate": {
-      "name": "@skizzles/verification-gate",
-      "version": "0.1.0",
-      "dependencies": {
-        "@skizzles/candidate-manifest": "workspace:*",
-      },
-      "devDependencies": {
-        "@types/bun": "^1.3.14",
-        "@types/node": "^26.1.1",
-        "typescript": "^7.0.2",
-      },
-    },
-    "packages/workspace-policy": {
-      "name": "@skizzles/workspace-policy",
+    "packages/workspace-governance": {
+      "name": "@skizzles/workspace-governance",
       "version": "0.1.0",
       "bin": {
         "skizzles-workspace-policy": "./src/cli.ts",
       },
       "dependencies": {
-        "@skizzles/run-workspace": "workspace:*",
+        "@skizzles/scratchspace": "workspace:*",
         "typescript": "7.0.2",
         "yaml": "^2.9.0",
       },
@@ -222,8 +222,8 @@
         "@types/node": "^26.1.1",
       },
     },
-    "packages/workspace-transaction": {
-      "name": "@skizzles/workspace-transaction",
+    "packages/workspace-publication": {
+      "name": "@skizzles/workspace-publication",
       "version": "0.1.0",
       "devDependencies": {
         "@types/bun": "^1.3.14",
@@ -233,13 +233,15 @@
     },
   },
   "packages": {
+    "@skizzles/acceptance": ["@skizzles/acceptance@workspace:packages/acceptance"],
+
     "@skizzles/candidate-manifest": ["@skizzles/candidate-manifest@workspace:packages/candidate-manifest"],
 
     "@skizzles/change-assurance": ["@skizzles/change-assurance@workspace:packages/change-assurance"],
 
-    "@skizzles/command-hook": ["@skizzles/command-hook@workspace:packages/command-hook"],
+    "@skizzles/command-observation": ["@skizzles/command-observation@workspace:packages/command-observation"],
 
-    "@skizzles/command-supervisor": ["@skizzles/command-supervisor@workspace:packages/command-supervisor"],
+    "@skizzles/command-routing": ["@skizzles/command-routing@workspace:packages/command-routing"],
 
     "@skizzles/container-lab": ["@skizzles/container-lab@workspace:packages/container-lab"],
 
@@ -249,25 +251,23 @@
 
     "@skizzles/orchestrator": ["@skizzles/orchestrator@workspace:packages/orchestrator"],
 
-    "@skizzles/plugin-builder": ["@skizzles/plugin-builder@workspace:packages/plugin-builder"],
+    "@skizzles/plugin-packaging": ["@skizzles/plugin-packaging@workspace:packages/plugin-packaging"],
 
-    "@skizzles/prompt-layer": ["@skizzles/prompt-layer@workspace:packages/prompt-layer"],
+    "@skizzles/prompt-policy": ["@skizzles/prompt-policy@workspace:packages/prompt-policy"],
 
     "@skizzles/reflexion-memory": ["@skizzles/reflexion-memory@workspace:packages/reflexion-memory"],
 
-    "@skizzles/run-workspace": ["@skizzles/run-workspace@workspace:packages/run-workspace"],
+    "@skizzles/scratchspace": ["@skizzles/scratchspace@workspace:packages/scratchspace"],
 
-    "@skizzles/source-engineering": ["@skizzles/source-engineering@workspace:packages/source-engineering"],
+    "@skizzles/source-transformation": ["@skizzles/source-transformation@workspace:packages/source-transformation"],
 
     "@skizzles/task-worktree": ["@skizzles/task-worktree@workspace:packages/task-worktree"],
 
-    "@skizzles/usage-analyzer": ["@skizzles/usage-analyzer@workspace:packages/usage-analyzer"],
+    "@skizzles/usage-analysis": ["@skizzles/usage-analysis@workspace:packages/usage-analysis"],
 
-    "@skizzles/verification-gate": ["@skizzles/verification-gate@workspace:packages/verification-gate"],
+    "@skizzles/workspace-governance": ["@skizzles/workspace-governance@workspace:packages/workspace-governance"],
 
-    "@skizzles/workspace-policy": ["@skizzles/workspace-policy@workspace:packages/workspace-policy"],
-
-    "@skizzles/workspace-transaction": ["@skizzles/workspace-transaction@workspace:packages/workspace-transaction"],
+    "@skizzles/workspace-publication": ["@skizzles/workspace-publication@workspace:packages/workspace-publication"],
 
     "@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 

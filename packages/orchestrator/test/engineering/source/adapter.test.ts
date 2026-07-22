@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { SourceEngineering } from "@skizzles/source-engineering";
+import type { SourceEngineering } from "@skizzles/source-transformation";
 import { digestBytes } from "../../../src/digest.ts";
 import {
   advanceSourceEngineering,
@@ -9,7 +9,7 @@ import {
 const bytes = new TextEncoder().encode("export const ready = true;\n");
 const digest = digestBytes(bytes);
 
-describe("source-engineering adapter", () => {
+describe("source-transformation adapter", () => {
   it("rejects caller-authored structural evidence and reads copied artifact bytes", async () => {
     const artifact = Object.freeze({
       path: "src/example.ts",

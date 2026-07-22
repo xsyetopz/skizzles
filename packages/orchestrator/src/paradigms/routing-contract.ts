@@ -1,7 +1,7 @@
 // biome-ignore-all lint: routing contracts use explicit exact-key validation and public constructors.
 
 import { type Digest, digestValue } from "../digest.ts";
-import { snapshotRecord } from "../engineering/snapshot.ts";
+import { snapshotRecord } from "../engineering/session/snapshot.ts";
 
 const assignments = new WeakSet<object>();
 const identifierPattern = /^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/u;

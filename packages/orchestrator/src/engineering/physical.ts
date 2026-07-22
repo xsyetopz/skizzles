@@ -1,5 +1,9 @@
 import { type Digest, digestValue } from "../digest.ts";
-import { isFrozenOpaque, snapshotArray, snapshotRecord } from "./snapshot.ts";
+import {
+  isFrozenOpaque,
+  snapshotArray,
+  snapshotRecord,
+} from "./session/snapshot.ts";
 
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
 const maximumEntries = 256;

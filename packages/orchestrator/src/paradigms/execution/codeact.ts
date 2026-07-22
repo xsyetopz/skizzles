@@ -1,4 +1,4 @@
-import { snapshotRecord } from "../../engineering/snapshot.ts";
+import { snapshotRecord } from "../../engineering/session/snapshot.ts";
 import type {
   CodeActExecutionResult,
   CodeActExecutor,

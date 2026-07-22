@@ -31,11 +31,11 @@ export {
   digestTaskWorktreeBytes,
   digestTaskWorktreeValue,
 } from "./digest.ts";
+export { isTaskWorktreeReceipt } from "./lifecycle/completion/receipt.ts";
 export {
   createTaskWorktree,
   isTaskWorktree,
 } from "./lifecycle/facade.ts";
-export { isTaskWorktreeReceipt } from "./lifecycle/receipt.ts";
 export type {
   TaskWorktreeProtectedPathAuthorizationRequest,
   TaskWorktreeProtectedPathMode,

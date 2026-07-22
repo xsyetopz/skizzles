@@ -2,7 +2,7 @@ import { expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
-import type { RunWorkspace } from "@skizzles/run-workspace";
+import type { RunWorkspace } from "@skizzles/scratchspace";
 import {
   CodexChildError,
   type CodexRuntime,

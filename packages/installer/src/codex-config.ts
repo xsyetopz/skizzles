@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import type { RunWorkspace } from "@skizzles/run-workspace";
-import { cleanupStale, create } from "@skizzles/run-workspace";
+import type { RunWorkspace } from "@skizzles/scratchspace";
+import { cleanupStale, create } from "@skizzles/scratchspace";
 import {
   createConfigPreviewSnapshot,
   PreviewConfigRpc,

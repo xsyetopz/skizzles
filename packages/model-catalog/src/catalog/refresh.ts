@@ -3,7 +3,7 @@ import {
   cleanupStale,
   create,
   type RunWorkspace,
-} from "@skizzles/run-workspace";
+} from "@skizzles/scratchspace";
 import {
   bundledCatalog,
   CodexChildError,

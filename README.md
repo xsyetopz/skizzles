@@ -1,6 +1,6 @@
 # Skizzles
 
-![Skizzles logo](packages/plugin-builder/template/assets/logo.png)
+![Skizzles logo](packages/plugin-packaging/template/assets/logo.png)
 
 Skizzles is a portable set of skills, hooks, and developer tools for Codex.
 This repository is the source workspace; `plugins/skizzles/` is the generated

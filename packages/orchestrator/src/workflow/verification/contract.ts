@@ -1,4 +1,13 @@
 import type {
+  DeterministicFuzzConfig,
+  VerificationAuthorityRequest,
+  VerificationCoverageThresholds,
+  VerificationGateFailureCode,
+  VerificationGateLimits,
+  VerificationGateReceipt,
+  VerificationGateVerifyResult,
+} from "@skizzles/acceptance";
+import type {
   ChangeAssurance,
   ChangeAssuranceAssessmentInput,
   ChangeAssuranceReceipt,
@@ -10,20 +19,11 @@ import type {
 import type {
   SourceEngineering,
   StructuralEvidenceReceipt,
-} from "@skizzles/source-engineering";
+} from "@skizzles/source-transformation";
 import type {
   TaskWorktree,
   TaskWorktreeSession,
 } from "@skizzles/task-worktree";
-import type {
-  DeterministicFuzzConfig,
-  VerificationAuthorityRequest,
-  VerificationCoverageThresholds,
-  VerificationGateFailureCode,
-  VerificationGateLimits,
-  VerificationGateReceipt,
-  VerificationGateVerifyResult,
-} from "@skizzles/verification-gate";
 import type { Digest } from "../../digest.ts";
 import type {
   WorkflowTaskVerificationReceipts,

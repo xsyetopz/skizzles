@@ -23,9 +23,9 @@ Append only evidence-backed candidates from completed orchestration work. This i
 - Scope: routing | context | proof
 - Observation: the framework had model/effort rollout totals but no strict
   assignment, workflow-shape, verified-success, or causal receipt join.
-- Evidence: current runtime and usage-analyzer boundaries were inspected before
+- Evidence: current runtime and usage-analysis boundaries were inspected before
   adding digest-bound host assignment, pre-approval observer evidence, strict
-  privacy-safe observations, and verification-gated empirical learning.
+  privacy-safe observations, and acceptance-gated empirical learning.
 - Proposed change: retain assignment and pre-approval observations, require
   independent verification and disjoint token ledgers, then learn expected
   workflow tokens per independently verified success inside comparable strata.

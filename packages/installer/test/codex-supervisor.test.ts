@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { lstat, readFile } from "node:fs/promises";
 import process from "node:process";
-import { create } from "@skizzles/run-workspace";
+import { create } from "@skizzles/scratchspace";
 import {
   signalOwnedSupervisor,
   spawnRpcSupervisor,

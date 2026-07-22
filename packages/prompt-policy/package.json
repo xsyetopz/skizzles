@@ -1,0 +1,23 @@
+{
+  "name": "@skizzles/prompt-policy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/cli.ts"
+  },
+  "scripts": {
+    "build": "bun build src/cli.ts --target=bun --outfile=dist/prompt-layer.js",
+    "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. ./src ./test ./package.json ./tsconfig.json",
+    "test": "bun test test",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@skizzles/scratchspace": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2"
+  }
+}

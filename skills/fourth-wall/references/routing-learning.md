@@ -73,8 +73,8 @@ Do not infer retries, escalation, or replacement from task names.
    Cool down only after the documented clean-success window, and reset the
    window after repair, rescue, or regression.
 
-The `@skizzles/usage-analyzer` routing API provides strict in-memory parsing,
+The `@skizzles/usage-analysis` routing API provides strict in-memory parsing,
 workflow-token accounting, stratified empirical summaries, and a
-verification-gated recommendation. The orchestrator's optional routing
+acceptance-gated recommendation. The orchestrator's optional routing
 observer supplies digest-bound join evidence; neither component owns a live
 model endpoint or silently changes host policy.

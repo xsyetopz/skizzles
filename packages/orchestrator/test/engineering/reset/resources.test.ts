@@ -1,13 +1,13 @@
 import { describe, expect, it } from "bun:test";
 import { digestValue } from "../../../src/digest.ts";
-import { ContinuationLedger } from "../../../src/engineering/continuation.ts";
 import { TaskEpochResources } from "../../../src/engineering/reset/resources.ts";
-import type { PreparationState } from "../../../src/engineering/state.ts";
+import { ContinuationLedger } from "../../../src/engineering/session/continuation.ts";
+import type { PreparationState } from "../../../src/engineering/session/state.ts";
 import type {
   CausalWorkflow,
   WorkflowCleanupReceipt,
   WorkflowRejectionResult,
-} from "../../../src/workflow/contract.ts";
+} from "../../../src/workflow/causal/contract.ts";
 
 describe("task epoch resource settlement", () => {
   it("owns cleanup handles returned before any review exists", async () => {

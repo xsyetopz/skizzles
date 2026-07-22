@@ -14,44 +14,44 @@ explicit `workspace:*` dependency and exported entrypoint.
 
 The current workspace dependency edges are:
 
-<!-- workspace-policy:dependency-edges:start -->
+<!-- workspace-governance:dependency-edges:start -->
 ```text
+@skizzles/acceptance -> @skizzles/candidate-manifest
 @skizzles/change-assurance -> @skizzles/candidate-manifest
-@skizzles/change-assurance -> @skizzles/run-workspace
+@skizzles/change-assurance -> @skizzles/scratchspace
 @skizzles/installer -> @skizzles/container-lab
-@skizzles/installer -> @skizzles/prompt-layer
-@skizzles/installer -> @skizzles/run-workspace
-@skizzles/model-catalog -> @skizzles/run-workspace
+@skizzles/installer -> @skizzles/prompt-policy
+@skizzles/installer -> @skizzles/scratchspace
+@skizzles/model-catalog -> @skizzles/scratchspace
+@skizzles/orchestrator -> @skizzles/acceptance
 @skizzles/orchestrator -> @skizzles/candidate-manifest
 @skizzles/orchestrator -> @skizzles/change-assurance
 @skizzles/orchestrator -> @skizzles/reflexion-memory
-@skizzles/orchestrator -> @skizzles/source-engineering
+@skizzles/orchestrator -> @skizzles/source-transformation
 @skizzles/orchestrator -> @skizzles/task-worktree
-@skizzles/orchestrator -> @skizzles/verification-gate
-@skizzles/orchestrator -> @skizzles/workspace-transaction
-@skizzles/plugin-builder -> @skizzles/command-hook
-@skizzles/plugin-builder -> @skizzles/command-supervisor
-@skizzles/plugin-builder -> @skizzles/container-lab
-@skizzles/plugin-builder -> @skizzles/installer
-@skizzles/plugin-builder -> @skizzles/model-catalog
-@skizzles/plugin-builder -> @skizzles/prompt-layer
-@skizzles/plugin-builder -> @skizzles/run-workspace
-@skizzles/plugin-builder -> @skizzles/usage-analyzer
-@skizzles/prompt-layer -> @skizzles/run-workspace
-@skizzles/source-engineering -> @skizzles/candidate-manifest
-@skizzles/source-engineering -> @skizzles/run-workspace
+@skizzles/orchestrator -> @skizzles/workspace-publication
+@skizzles/plugin-packaging -> @skizzles/command-observation
+@skizzles/plugin-packaging -> @skizzles/command-routing
+@skizzles/plugin-packaging -> @skizzles/container-lab
+@skizzles/plugin-packaging -> @skizzles/installer
+@skizzles/plugin-packaging -> @skizzles/model-catalog
+@skizzles/plugin-packaging -> @skizzles/prompt-policy
+@skizzles/plugin-packaging -> @skizzles/scratchspace
+@skizzles/plugin-packaging -> @skizzles/usage-analysis
+@skizzles/prompt-policy -> @skizzles/scratchspace
+@skizzles/source-transformation -> @skizzles/candidate-manifest
+@skizzles/source-transformation -> @skizzles/scratchspace
 @skizzles/task-worktree -> @skizzles/candidate-manifest
-@skizzles/task-worktree -> @skizzles/command-supervisor
-@skizzles/verification-gate -> @skizzles/candidate-manifest
-@skizzles/workspace-policy -> @skizzles/run-workspace
+@skizzles/task-worktree -> @skizzles/command-observation
+@skizzles/workspace-governance -> @skizzles/scratchspace
 ```
-<!-- workspace-policy:dependency-edges:end -->
+<!-- workspace-governance:dependency-edges:end -->
 
 The plugin builder is the explicit composition owner for all seven canonical
 workspace packages whose public entrypoints or assets it distributes.
-`@skizzles/run-workspace` is a supporting lifecycle dependency used during
+`@skizzles/scratchspace` is a supporting lifecycle dependency used during
 composition; it is not an eighth distributed plugin surface. The installer consumes
-provider-owned Container Lab and prompt-layer descriptor locations through their
+provider-owned Container Lab and prompt-policy descriptor locations through their
 explicit package exports; it does not traverse sibling private filesystem paths.
 
 `@skizzles/orchestrator` owns deterministic agent-request policy and execution
@@ -70,24 +70,24 @@ It exposes no generic shell and owns no live model endpoint.
 Routing experiments remain split across the same boundaries. The host supplies
 an explicit candidate assignment and the orchestrator binds it to dispatch and
 pre-approval digest evidence through an optional observer; it never selects a
-live endpoint. `@skizzles/usage-analyzer` owns the strict in-memory evidence learner,
+live endpoint. `@skizzles/usage-analysis` owns the strict in-memory evidence learner,
 which compares complete workflow tokens per independently verified success only
 inside comparable strata and treats AAII/price values as metadata priors.
 
-`@skizzles/workspace-transaction` owns repository-scoped publication leases,
+`@skizzles/workspace-publication` owns repository-scoped publication leases,
 destination-owned same-filesystem siblings, durable multi-file journals, and
 deterministic recovery. It provides serialized per-file atomic publication and
 recoverable file-set semantics; it does not claim portable multi-file atomicity.
 The orchestrator owns workflow policy and approval. Task-worktree composes
-command-supervisor's process observation behind its sandbox broker;
-run-workspace retains disposable-root lifecycle and quota evidence for its
+command-observation's process observation behind its sandbox broker;
+scratchspace retains disposable-root lifecycle and quota evidence for its
 remaining consumers. Neither capability is a direct orchestrator dependency.
 
-`@skizzles/source-engineering` owns language-specific source transformation and
+`@skizzles/source-transformation` owns language-specific source transformation and
 validation. It derives immutable candidates through compiler AST nodes, keeps
 symbol indexes advisory to compiler results, and binds template, formatter,
 policy, and semantic-diff provenance. The orchestrator composes that evidence
-with approval and publication; source-engineering never writes the canonical
+with approval and publication; source-transformation never writes the canonical
 workspace.
 
 `@skizzles/candidate-manifest` owns the canonical versioned identity shared by
@@ -117,11 +117,11 @@ preparation and before physical integration or approval.
 exact declared-path candidate writes, host-owned diff ceilings, sandbox
 capability negotiation and execution, dependency intervention evidence, and
 deterministic Conventional Commit synthesis. It creates one approved commit in
-the isolated branch; `@skizzles/workspace-transaction` remains the only owner of
+the isolated branch; `@skizzles/workspace-publication` remains the only owner of
 canonical destination publication. Unsupported OS sandbox enforcement fails
 closed instead of degrading to unsandboxed execution.
 
-`@skizzles/verification-gate` owns Phase 6 acceptance aggregation. It derives
+`@skizzles/acceptance` owns Phase 6 acceptance aggregation. It derives
 the complete mutation objective from authenticated modified executable maps,
 requires deterministic property and modified-node/branch coverage evidence,
 proves the original test manifest ran against the candidate production overlay,
@@ -135,26 +135,26 @@ exactly bound evidence.
 
 | Lifecycle role | Owner or consumers | Contract |
 | --- | --- | --- |
-| Disposable creator | `@skizzles/run-workspace` | Sole authority for creating, claiming, preserving, closing, and stale-reaping one-run temporary roots. |
+| Disposable creator | `@skizzles/scratchspace` | Sole authority for creating, claiming, preserving, closing, and stale-reaping one-run temporary roots. |
 | Task Git isolation | `@skizzles/task-worktree` | Owns deterministic task branches, isolated worktrees, sibling writable roots, sandboxed validation, approved isolated commits, and exact cleanup. These roots are not generic disposable workspaces. |
-| Injected consumers | `@skizzles/installer`, `@skizzles/model-catalog`, `@skizzles/plugin-builder`, `@skizzles/prompt-layer`, `@skizzles/workspace-policy` | Allocate run-local homes, previews, comparison staging, downloads, reports, and validation artifacts only through an injected or composition-root-created `RunWorkspace`. Same-filesystem destination transactions and their atomic siblings remain destination-owned rather than run-workspace staging. |
-| Child-scope owners | Installer Codex app-server, model-catalog Codex probes, plugin-builder runtime smokes, and workspace-policy security tools | Register the complete owned process scope before awaiting it; workspace close requests stop, waits, escalation, and only then root deletion. |
-| Durable exclusions | Canonical repository inputs, `plugins/skizzles/`, selected-home config/receipts and model-catalog output/status, installer prompt-policy locks, command-supervisor retained output, Container Lab durable manifests, same-filesystem destination transactions and atomic siblings, and separately owned shared caches | Never place durable authority in a disposable run root. Each surface retains its canonical package or host-state owner and separate retention policy. |
+| Injected consumers | `@skizzles/installer`, `@skizzles/model-catalog`, `@skizzles/plugin-packaging`, `@skizzles/prompt-policy`, `@skizzles/workspace-governance` | Allocate run-local homes, previews, comparison staging, downloads, reports, and validation artifacts only through an injected or composition-root-created `RunWorkspace`. Same-filesystem destination transactions and their atomic siblings remain destination-owned rather than scratchspace staging. |
+| Child-scope owners | Installer Codex app-server, model-catalog Codex probes, plugin-packaging runtime smokes, and workspace-governance security tools | Register the complete owned process scope before awaiting it; workspace close requests stop, waits, escalation, and only then root deletion. |
+| Durable exclusions | Canonical repository inputs, `plugins/skizzles/`, selected-home config/receipts and model-catalog output/status, installer prompt-policy locks, command-observation retained output, Container Lab durable manifests, same-filesystem destination transactions and atomic siblings, and separately owned shared caches | Never place durable authority in a disposable run root. Each surface retains its canonical package or host-state owner and separate retention policy. |
 
 ## Canonical and generated paths
 
 | Canonical owner | Generated plugin surface |
 | --- | --- |
-| `packages/command-hook` | `hooks/hooks.json`, bundled `hooks/manage-command-output.ts` |
-| `packages/command-supervisor` | bundled `runtime/codex-command.ts` |
+| `packages/command-routing` | `hooks/hooks.json`, bundled `hooks/manage-command-output.ts` |
+| `packages/command-observation` | bundled `runtime/codex-command.ts` |
 | `packages/model-catalog` | bundled `runtime/model-catalog.ts`, model-catalog assets |
-| `packages/usage-analyzer` | bundled `scripts/analyze.ts` |
+| `packages/usage-analysis` | bundled `scripts/analyze.ts` |
 | `packages/installer` | bundled `packages/installer/src/cli.ts` and runtime manifest |
 | `packages/container-lab` | bundled `packages/container-lab/src/{cli,reaper-cli}.ts`, descriptor, docs, and LaunchAgent template |
-| `packages/prompt-layer` | `instructions/`, `integrations/prompt-policy.json`, `evaluations/shipped-language-policy.v2.json`, and `third_party/openai-codex/` |
+| `packages/prompt-policy` | `instructions/`, `integrations/prompt-policy.json`, `evaluations/shipped-language-policy.v2.json`, and `third_party/openai-codex/` |
 | `assets/` | portable native root instructions and Fourth Wall role configuration assets |
 | `skills/` | `skills/` |
-| `packages/plugin-builder/template` | plugin manifest and static template assets |
+| `packages/plugin-packaging/template` | plugin manifest and static template assets |
 
 Bundled entrypoints preserve supported public paths while omitting canonical
 internal module trees, tests, development dependencies, and build output.
@@ -180,7 +180,7 @@ rejects only the unsafe dependency shape and continues to validate every
 declared target, build/import lifecycle, public-surface budget, and executable
 entrypoint thickness.
 
-`@skizzles/workspace-policy` verifies these requirements, scans imports for
+`@skizzles/workspace-governance` verifies these requirements, scans imports for
 dependency and containment violations, compiles declared TypeScript entrypoints
 in memory, imports TypeScript exports in isolated processes to reject
 import-time exit, stdio effects, lifecycle hangs, and POSIX same-group
@@ -197,7 +197,7 @@ descendant detection.
   compiler and environment type dependencies.
 - Biome: version 2.5.4 invoked through `bunx`; no local Biome dependency.
 - Lockfile: root `bun.lock` only, using Bun's isolated linker.
-- Repository verification: `@skizzles/workspace-policy` acquires checksum-pinned
+- Repository verification: `@skizzles/workspace-governance` acquires checksum-pinned
   actionlint 1.7.12, ShellCheck 0.11.0, and Gitleaks 8.30.1 only in disposable
   directories for the mandatory CI/release `security:check`; no binary is vendored
   or installed persistently.

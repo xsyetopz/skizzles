@@ -1,10 +1,10 @@
+import type { NormalizedRequest } from "../../admission/intent.ts";
+import type { RepositoryContext } from "../../admission/repository.ts";
 import type {
   TaskCheckpointRestoration,
   TaskCheckpointRestorationReceipt,
 } from "../../checkpoint.ts";
 import type { Digest } from "../../digest.ts";
-import type { NormalizedRequest } from "../../intent.ts";
-import type { RepositoryContext } from "../../repository.ts";
 import type { DiscoveryResult } from "../../state/discovery.ts";
 import type {
   TaskContext,

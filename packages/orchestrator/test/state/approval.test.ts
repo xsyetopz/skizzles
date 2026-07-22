@@ -7,7 +7,7 @@ import type {
   RepositoryContext,
   TargetBaseline,
 } from "../../src/index.ts";
-import { createHarness, repositoryContext } from "../support.ts";
+import { createHarness, repositoryContext } from "../facade/support.ts";
 
 const transactionDigest = `sha256:${"a".repeat(64)}` as const;
 

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "bun:test";
-import { createCausalWorkflow } from "../../../src/workflow/causal-workflow.ts";
+import { createCausalWorkflow } from "../../../src/workflow/causal/create.ts";
 import { TaskWorktreeApprovalBridge } from "../../../src/workflow/worktree/approval.ts";
 import {
   createFixture,

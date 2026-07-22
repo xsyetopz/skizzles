@@ -1,10 +1,10 @@
 import { expect, it } from "bun:test";
-import { createLocalRepositoryLeaseAuthority } from "@skizzles/workspace-transaction";
-import { createCausalWorkflow } from "../../src/workflow/causal-workflow.ts";
-import type { CausalWorkflow } from "../../src/workflow/contract.ts";
+import { createLocalRepositoryLeaseAuthority } from "@skizzles/workspace-publication";
+import type { CausalWorkflow } from "../../src/workflow/causal/contract.ts";
+import { createCausalWorkflow } from "../../src/workflow/causal/create.ts";
 import { createTestTaskWorktree } from "../engineering/worktree/fixture.ts";
-import { createHarness } from "../support.ts";
-import { createTestWorkflowVerificationAuthority } from "../verification-fixture.ts";
+import { createHarness } from "../facade/support.ts";
+import { createTestWorkflowVerificationAuthority } from "../facade/verification-fixture.ts";
 import { IsolatedDestination } from "./isolated-destination.ts";
 
 type WorkflowOperation = keyof CausalWorkflow;

@@ -5,7 +5,7 @@ import {
 } from "@skizzles/task-worktree";
 import type { PromotionPermit } from "../../state/approval.ts";
 import type { TargetBaseline } from "../../state/target.ts";
-import type { CausalWorkflowConfig } from "../contract.ts";
+import type { CausalWorkflowConfig } from "../causal/contract.ts";
 import {
   revalidateWorkflowEvidence,
   type WorkflowEngineeringEvidence,

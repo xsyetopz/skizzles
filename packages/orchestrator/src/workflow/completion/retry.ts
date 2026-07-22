@@ -1,5 +1,5 @@
 import { exactKeys, isRecord } from "../../codec.ts";
-import type { WorkflowCleanupResult } from "../contract.ts";
+import type { WorkflowCleanupResult } from "../causal/contract.ts";
 import { isWorkflowCleanupHandle } from "../lifecycle.ts";
 import type { CleanupRecord } from "../record.ts";
 import { preparationResult } from "./preparation.ts";

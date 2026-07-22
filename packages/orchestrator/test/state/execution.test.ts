@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { createHarness, repositoryContext } from "../support.ts";
+import { createHarness, repositoryContext } from "../facade/support.ts";
 
 describe("host-owned execution budgets", () => {
   it("admits each exact high-risk boundary and exhausts one event over", async () => {

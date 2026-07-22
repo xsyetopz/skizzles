@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { PROMPT_POLICY_DESCRIPTOR_PATHS } from "@skizzles/prompt-layer";
+import { PROMPT_POLICY_DESCRIPTOR_PATHS } from "@skizzles/prompt-policy";
 import { type JsonValue, readJsonFile } from "../codex-config.ts";
 import { pathEntryExists } from "../managed-files.ts";
 

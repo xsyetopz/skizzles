@@ -1,10 +1,10 @@
 import { createChangeDeclaration } from "@skizzles/change-assurance";
-import { createLocalRepositoryLeaseAuthority } from "@skizzles/workspace-transaction";
+import { createLocalRepositoryLeaseAuthority } from "@skizzles/workspace-publication";
 import { digestValue } from "../../../src/digest.ts";
-import type { ContextOperation } from "../../../src/engineering/context.ts";
+import type { ContextOperation } from "../../../src/engineering/session/context.ts";
 import { createEngineeringWorkflow } from "../../../src/engineering/workflow.ts";
-import { createHarness, repositoryContext } from "../../support.ts";
-import { createTestWorkflowVerificationAuthority } from "../../verification-fixture.ts";
+import { createHarness, repositoryContext } from "../../facade/support.ts";
+import { createTestWorkflowVerificationAuthority } from "../../facade/verification-fixture.ts";
 import { IsolatedDestination } from "../../workflow/isolated-destination.ts";
 import {
   createTestChangeAssurance,
@@ -151,7 +151,7 @@ export async function createFixture(options: SourceFixtureOptions = {}) {
     contextBudget: Object.freeze({
       reserve(
         input: Parameters<
-          import("../../../src/engineering/context.ts").ContextBudgetAuthorityPort["reserve"]
+          import("../../../src/engineering/session/context.ts").ContextBudgetAuthorityPort["reserve"]
         >[0],
       ) {
         operations.push(input.operation);

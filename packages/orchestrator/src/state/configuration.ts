@@ -1,15 +1,18 @@
-import { ArtifactRegistry, type ArtifactValidator } from "../artifact.ts";
-import type { VerificationAuthorityPort } from "../checkpoint.ts";
-import { exactKeys, isRecord, nonempty, stringArray } from "../codec.ts";
-import type { DiagnosticInterceptor } from "../diagnostic.ts";
-import type { NormalizedRequest } from "../intent.ts";
-import type { PreflightApproval, RepositoryGraphPort } from "../preflight.ts";
+import type { NormalizedRequest } from "../admission/intent.ts";
+import type {
+  PreflightApproval,
+  RepositoryGraphPort,
+} from "../admission/preflight.ts";
 import type {
   EffectClassification,
   EffectClassificationAuthorityPort,
   RepositoryAuthorityPort,
   RepositoryContext,
-} from "../repository.ts";
+} from "../admission/repository.ts";
+import { ArtifactRegistry, type ArtifactValidator } from "../artifact.ts";
+import type { VerificationAuthorityPort } from "../checkpoint.ts";
+import { exactKeys, isRecord, nonempty, stringArray } from "../codec.ts";
+import type { DiagnosticInterceptor } from "../diagnostic.ts";
 import type { MeasurementAuthorityPort, StructuralPort } from "../review.ts";
 import type { ApprovalAuthorityPort } from "./approval.ts";
 import {

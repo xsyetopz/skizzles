@@ -5,7 +5,7 @@ import process from "node:process";
 import containerLabIntegrationDescriptor from "@skizzles/container-lab/integration-descriptor" with {
   type: "json",
 };
-import { create, type RunWorkspace } from "@skizzles/run-workspace";
+import { create, type RunWorkspace } from "@skizzles/scratchspace";
 import {
   bundledContainerLabPaths,
   doctor,

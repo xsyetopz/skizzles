@@ -1,10 +1,10 @@
-import { isStructuralEvidenceReceipt } from "@skizzles/source-engineering";
 import {
   createDeterministicSeedSchedule,
   deterministicExtremeVectorDigests,
   deterministicFuzzCaseCount,
   deterministicFuzzRandomCaseCount,
-} from "@skizzles/verification-gate";
+} from "@skizzles/acceptance";
+import { isStructuralEvidenceReceipt } from "@skizzles/source-transformation";
 import { digestValue } from "../../digest.ts";
 import type {
   WorkflowVerificationAuthorityConfig,

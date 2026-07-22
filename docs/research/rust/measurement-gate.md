@@ -1,6 +1,6 @@
 # Rust measurement gate — 2026-07-18
 
-This is the dated evidence update for [ADR 0004](../../decisions/0004-measurement-gated-rust.md),
+This is the dated evidence update for [ADR 0004](../../decisions/platform/0004-measurement-gated-rust.md),
 not an acceptance benchmark or a Rust implementation proposal. The decision is **defer
 Rust and reject a pilot now**: no measured owner is shown to be a CPU-bound native
 candidate.
@@ -19,7 +19,7 @@ candidate.
 - Startup method: executable `--help` commands, measured in milliseconds; exit status
   reflects each CLI's existing usage contract rather than a new requirement.
 
-The repository changed concurrently. One plugin-builder test repetition failed while
+The repository changed concurrently. One plugin-packaging test repetition failed while
 the agent-contract staging inputs were changing; its two later repetitions passed. The
 then-current `plugin:check` also reported expected generated-output drift. Therefore,
 these are triage gate measurements, not frozen-commit acceptance benchmarks. The raw
@@ -33,14 +33,14 @@ evidence paths.
 | Package owner | Successful warm reps | Median | Range |
 | --- | ---: | ---: | ---: |
 | installer | 3 | 12.631s | 12.341–12.921s |
-| plugin-builder | 2 | 12.590s | 11.912–13.268s |
+| plugin-packaging | 2 | 12.590s | 11.912–13.268s |
 | container-lab | 3 | 9.241s | 9.207–9.270s |
-| command-supervisor | 3 | 6.364s | 6.174–6.432s |
+| command-observation | 3 | 6.364s | 6.174–6.432s |
 | model-catalog | 3 | 5.393s | 5.379–5.395s |
-| workspace-policy | 3 | 4.258s | 4.085–4.303s |
-| prompt-layer | 3 | 2.953s | 2.638–2.975s |
-| command-hook | 3 | 2.014s | 1.914–2.228s |
-| usage-analyzer | 3 | 0.419s | 0.389–0.438s |
+| workspace-governance | 3 | 4.258s | 4.085–4.303s |
+| prompt-policy | 3 | 2.953s | 2.638–2.975s |
+| command-routing | 3 | 2.014s | 1.914–2.228s |
+| usage-analysis | 3 | 0.419s | 0.389–0.438s |
 
 Typecheck medians/ranges were 80–114ms across the nine package owners; Bun-build
 medians/ranges were 8–17ms. CLI help/startup medians/ranges were 21–43ms: command

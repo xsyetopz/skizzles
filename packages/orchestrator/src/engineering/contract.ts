@@ -1,3 +1,4 @@
+import type { VerificationGateReceipt } from "@skizzles/acceptance";
 import type {
   ChangeAssurance,
   ChangeAssuranceReceipt,
@@ -7,11 +8,10 @@ import type {
   SecurityPolicyLintReceipt,
   SecurityReviewReceipt,
 } from "@skizzles/change-assurance";
-import type { SourceEngineering } from "@skizzles/source-engineering";
+import type { SourceEngineering } from "@skizzles/source-transformation";
 import type { TaskWorktreeVerificationReceipt } from "@skizzles/task-worktree";
-import type { VerificationGateReceipt } from "@skizzles/verification-gate";
-import type { NormalizedRequest } from "../intent.ts";
-import type { RepositoryContext } from "../repository.ts";
+import type { NormalizedRequest } from "../admission/intent.ts";
+import type { RepositoryContext } from "../admission/repository.ts";
 import type {
   CausalWorkflowConfig,
   WorkflowCleanupResult,
@@ -20,9 +20,7 @@ import type {
   WorkflowRecoveryResult,
   WorkflowRejectionResult,
   WorkflowReview,
-} from "../workflow/contract.ts";
-import type { ContextBudgetAuthorityPort, ContextPause } from "./context.ts";
-import type { EngineeringContinuation } from "./continuation.ts";
+} from "../workflow/causal/contract.ts";
 import type {
   PhysicalIntegrationAuthorityPort,
   PhysicalIntegrationReceipt,
@@ -32,6 +30,11 @@ import type {
   TaskContextResetResult,
   TaskRuntimeInterruptAuthorityPort,
 } from "./reset/contract.ts";
+import type {
+  ContextBudgetAuthorityPort,
+  ContextPause,
+} from "./session/context.ts";
+import type { EngineeringContinuation } from "./session/continuation.ts";
 
 export type EngineeringObjective = "behavioral" | "format-only";
 export type EngineeringDeclarationKind =
@@ -212,7 +215,9 @@ export type EngineeringPrepareResult =
     }
   | Exclude<
       Awaited<
-        ReturnType<import("../workflow/contract.ts").CausalWorkflow["prepare"]>
+        ReturnType<
+          import("../workflow/causal/contract.ts").CausalWorkflow["prepare"]
+        >
       >,
       { readonly status: "awaiting-approval" }
     >;

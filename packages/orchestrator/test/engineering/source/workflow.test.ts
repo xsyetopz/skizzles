@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import { Buffer } from "node:buffer";
 import { isChangeAssuranceReceipt } from "@skizzles/change-assurance";
-import { snapshotRecord } from "../../../src/engineering/snapshot.ts";
+import { snapshotRecord } from "../../../src/engineering/session/snapshot.ts";
 import { createEngineeringWorkflow } from "../../../src/engineering/workflow.ts";
 import { createTestChangeDeclaration } from "../assurance-fixture.ts";
 import {

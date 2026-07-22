@@ -5,7 +5,7 @@ import {
   type CreateOptions,
   create,
   type RunWorkspace,
-} from "@skizzles/run-workspace";
+} from "@skizzles/scratchspace";
 import {
   type InstallerLifecycle,
   runInstallerOperationWithLifecycle,

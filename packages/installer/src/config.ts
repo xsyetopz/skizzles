@@ -1,6 +1,6 @@
 import { existsSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { RunWorkspace } from "@skizzles/run-workspace";
+import type { RunWorkspace } from "@skizzles/scratchspace";
 import {
   type ConfigEdit,
   type ConfigRpc,

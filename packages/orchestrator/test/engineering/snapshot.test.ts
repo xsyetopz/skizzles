@@ -3,7 +3,7 @@ import {
   snapshotArray,
   snapshotOpaqueRecord,
   snapshotRecord,
-} from "../../src/engineering/snapshot.ts";
+} from "../../src/engineering/session/snapshot.ts";
 
 describe("descriptor-only engineering snapshots", () => {
   it("rejects accessors without invoking them", () => {

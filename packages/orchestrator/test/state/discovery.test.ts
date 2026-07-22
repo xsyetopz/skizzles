@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { createHarness, repositoryContext } from "../support.ts";
+import { createHarness, repositoryContext } from "../facade/support.ts";
 
 function scanResult(
   input: Readonly<Record<string, unknown>>,

@@ -8753,12 +8753,27 @@ function sameSyncFile(a, b) {
   }
   return a.kind === b.kind && a.sha256 === b.sha256 && a.size === b.size && a.mode === b.mode;
 }
+// packages/container-lab/src/public/json.ts
+var PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
 
-// packages/container-lab/src/sync/directories.ts
+// packages/container-lab/src/sync/git-manifest.ts
+var MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
+function manifestDigest(files) {
+  const compact = Object.keys(files).sort().map((name) => {
+    const file = files[name];
+    if (!file) {
+      throw new Error(`missing manifest entry: ${name}`);
+    }
+    return [name, file.kind, file.sha256, file.size, file.mode];
+  });
+  return sha256(JSON.stringify(compact));
+}
+
+// packages/container-lab/src/sync/transaction/directories.ts
 import { lstat as lstat5, mkdir as mkdir4, rmdir } from "fs/promises";
 import path3 from "path";
 
-// packages/container-lab/src/sync/durability.ts
+// packages/container-lab/src/sync/transaction/durability.ts
 import { randomUUID as randomUUID2 } from "crypto";
 import { mkdir as mkdir3, open as open3, rename as rename2, rm as rm4, writeFile as writeFile3 } from "fs/promises";
 import path2 from "path";
@@ -8793,7 +8808,7 @@ async function writeDurableJson(file, value) {
   }
 }
 
-// packages/container-lab/src/sync/directories.ts
+// packages/container-lab/src/sync/transaction/directories.ts
 async function assertDirectoryIdentities(targetRoot, identities, message2) {
   for (const expected of identities) {
     let actual;
@@ -8920,23 +8935,7 @@ async function directoryIdentity(root, relative3) {
   };
 }
 
-// packages/container-lab/src/sync/git-manifest.ts
-var MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
-function manifestDigest(files) {
-  const compact = Object.keys(files).sort().map((name) => {
-    const file = files[name];
-    if (!file) {
-      throw new Error(`missing manifest entry: ${name}`);
-    }
-    return [name, file.kind, file.sha256, file.size, file.mode];
-  });
-  return sha256(JSON.stringify(compact));
-}
-
-// packages/container-lab/src/public/json.ts
-var PUBLIC_JSON_BYTE_BUDGET = 16 * 1024;
-
-// packages/container-lab/src/sync/state.ts
+// packages/container-lab/src/sync/transaction/state.ts
 import { lstat as lstat6, mkdir as mkdir5 } from "fs/promises";
 import path4 from "path";
 async function syncStatePaths(identity3) {
@@ -9314,66 +9313,9 @@ function previewSemanticPayload(preview) {
     expectedTargets: Object.fromEntries(Object.entries(preview.expectedTargets).sort(([left], [right]) => left.localeCompare(right)))
   };
 }
-
-// packages/container-lab/src/sync/recovery.ts
+// packages/container-lab/src/sync/transaction/recovery.ts
 import { lstat as lstat8, rm as rm6 } from "fs/promises";
 import path6 from "path";
-
-// packages/container-lab/src/sync/staging.ts
-import {
-  chmod,
-  copyFile,
-  lstat as lstat7,
-  readlink as readlink2,
-  rename as rename3,
-  rm as rm5,
-  symlink
-} from "fs/promises";
-import path5 from "path";
-async function restoreBackups(targetRoot, backups) {
-  for (const record of backups) {
-    const target = await guardedPath(targetRoot, record.path, true);
-    if (!record.existed) {
-      await rm5(target, { force: true, recursive: false });
-      await syncDirectory(path5.dirname(target));
-      continue;
-    }
-    if (!(record.backup && record.publication)) {
-      throw new Error(`Missing synchronization backup for ${record.path}`);
-    }
-    await rm5(record.publication, { force: true, recursive: false });
-    if (record.kind === "symlink") {
-      await symlink(await readlink2(record.backup), record.publication);
-    } else {
-      await copyFile(record.backup, record.publication);
-      if (record.mode !== undefined) {
-        await chmod(record.publication, record.mode);
-      }
-      await syncFile(record.publication);
-    }
-    await rename3(record.publication, target);
-    await syncDirectory(path5.dirname(target));
-  }
-}
-async function validateBackupArtifacts(backups) {
-  for (const record of backups) {
-    if (!(record.existed && record.backup && record.original)) {
-      continue;
-    }
-    const actual = await describeSyncFile(path5.dirname(record.backup), path5.basename(record.backup));
-    if (!sameSyncFile(actual, record.original)) {
-      throw new Error(`Invalid synchronization backup for ${record.path}`);
-    }
-  }
-}
-async function cleanupPublications(backups) {
-  for (const record of backups) {
-    if (!record.publication) {
-      continue;
-    }
-    await rm5(record.publication, { force: true, recursive: false });
-  }
-}
 
 // packages/container-lab/src/sync/validation/journal.ts
 function parseSyncJournal(value) {
@@ -9509,7 +9451,63 @@ function parseBackups(value) {
   return backups;
 }
 
-// packages/container-lab/src/sync/recovery.ts
+// packages/container-lab/src/sync/transaction/staging.ts
+import {
+  chmod,
+  copyFile,
+  lstat as lstat7,
+  readlink as readlink2,
+  rename as rename3,
+  rm as rm5,
+  symlink
+} from "fs/promises";
+import path5 from "path";
+async function restoreBackups(targetRoot, backups) {
+  for (const record of backups) {
+    const target = await guardedPath(targetRoot, record.path, true);
+    if (!record.existed) {
+      await rm5(target, { force: true, recursive: false });
+      await syncDirectory(path5.dirname(target));
+      continue;
+    }
+    if (!(record.backup && record.publication)) {
+      throw new Error(`Missing synchronization backup for ${record.path}`);
+    }
+    await rm5(record.publication, { force: true, recursive: false });
+    if (record.kind === "symlink") {
+      await symlink(await readlink2(record.backup), record.publication);
+    } else {
+      await copyFile(record.backup, record.publication);
+      if (record.mode !== undefined) {
+        await chmod(record.publication, record.mode);
+      }
+      await syncFile(record.publication);
+    }
+    await rename3(record.publication, target);
+    await syncDirectory(path5.dirname(target));
+  }
+}
+async function validateBackupArtifacts(backups) {
+  for (const record of backups) {
+    if (!(record.existed && record.backup && record.original)) {
+      continue;
+    }
+    const actual = await describeSyncFile(path5.dirname(record.backup), path5.basename(record.backup));
+    if (!sameSyncFile(actual, record.original)) {
+      throw new Error(`Invalid synchronization backup for ${record.path}`);
+    }
+  }
+}
+async function cleanupPublications(backups) {
+  for (const record of backups) {
+    if (!record.publication) {
+      continue;
+    }
+    await rm5(record.publication, { force: true, recursive: false });
+  }
+}
+
+// packages/container-lab/src/sync/transaction/recovery.ts
 var JOURNAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 async function recoverSyncTransactions(options, hooks = {}) {
   const state = await syncStatePaths(options);

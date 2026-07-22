@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import {
   type ContinuationBindings,
   ContinuationLedger,
-} from "../../src/engineering/continuation.ts";
+} from "../../src/engineering/session/continuation.ts";
 
 const hexLength = 64;
 const firstDigest = `sha256:${"a".repeat(hexLength)}` as const;

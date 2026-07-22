@@ -1,3 +1,10 @@
+import { type IntentResult, normalizeRequest } from "./admission/intent.ts";
+import {
+  PreflightEngine,
+  type PreflightResult,
+} from "./admission/preflight.ts";
+import type { EffectClassificationAuthorityPort } from "./admission/repository.ts";
+import { classifyEffect } from "./admission/repository.ts";
 import {
   ArtifactRegistry,
   type FilePayloadResult,
@@ -12,10 +19,6 @@ import {
 } from "./checkpoint.ts";
 import { exactKeys, isRecord } from "./codec.ts";
 import { type DiagnosticResult, interceptDiagnostic } from "./diagnostic.ts";
-import { type IntentResult, normalizeRequest } from "./intent.ts";
-import { PreflightEngine, type PreflightResult } from "./preflight.ts";
-import type { EffectClassificationAuthorityPort } from "./repository.ts";
-import { classifyEffect } from "./repository.ts";
 import {
   type ProposalResult,
   type ReviewResult,

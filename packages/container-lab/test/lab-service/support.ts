@@ -226,7 +226,10 @@ export async function crashServiceApply(
     sourceRoot = lab.workspace;
     targetRoot = lab.sourceRoot;
   }
-  const modulePath = join(import.meta.dir, "../../src/sync/apply.ts");
+  const modulePath = join(
+    import.meta.dir,
+    "../../src/sync/transaction/apply.ts",
+  );
   const script = `
     const { applySyncWithHooks } = await import(${JSON.stringify(modulePath)});
     const options = JSON.parse(process.env.SYNC_CRASH_OPTIONS);

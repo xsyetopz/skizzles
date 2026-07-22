@@ -13,13 +13,13 @@ import type {
 } from "../contract.ts";
 import { digestTaskWorktreeValue } from "../digest.ts";
 import { verifyVerificationReceipt } from "../verification/execution.ts";
+import { validateSessionBindings } from "./candidate/validation.ts";
+import { createLifecycleReceipt } from "./completion/receipt.ts";
 import {
   consumePromotionPermit,
   createApprovalBinding,
   issuePromotionPermit,
-} from "./approval.ts";
-import { validateSessionBindings } from "./candidate/validation.ts";
-import { createLifecycleReceipt } from "./receipt.ts";
+} from "./preparation/approval.ts";
 import {
   type TaskWorktreeSessionBindings,
   taskWorktreeSessionBindings,

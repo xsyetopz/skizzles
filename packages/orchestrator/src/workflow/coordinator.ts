@@ -1,13 +1,12 @@
 import type {
   PublicationResult,
   WorkspaceTransaction,
-} from "@skizzles/workspace-transaction";
+} from "@skizzles/workspace-publication";
 import { exactKeys, isRecord } from "../codec.ts";
 import { digestValue } from "../digest.ts";
 import type { TargetBaseline } from "../state/target.ts";
 import type { TransactionApprovalBridge } from "./approval/bridge.ts";
 import { prepareWorkflowApproval } from "./approval/prepare.ts";
-import { WorkflowCompletion } from "./completion.ts";
 import type {
   CausalWorkflow,
   CausalWorkflowConfig,
@@ -16,7 +15,8 @@ import type {
   WorkflowPromotionResult,
   WorkflowRejectionResult,
   WorkflowReview,
-} from "./contract.ts";
+} from "./causal/contract.ts";
+import { WorkflowCompletion } from "./completion.ts";
 import {
   finalizeWorkflowEvidence,
   revalidateWorkflowEvidenceDraft,

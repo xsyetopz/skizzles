@@ -1,7 +1,7 @@
+import type { NormalizedRequest } from "../../admission/intent.ts";
+import type { RepositoryContext } from "../../admission/repository.ts";
 import { type Digest, digestValue } from "../../digest.ts";
-import type { NormalizedRequest } from "../../intent.ts";
-import type { RepositoryContext } from "../../repository.ts";
-import { snapshotRecord } from "../snapshot.ts";
+import { snapshotRecord } from "../session/snapshot.ts";
 import type {
   TaskContext,
   TaskContextResetHandle,

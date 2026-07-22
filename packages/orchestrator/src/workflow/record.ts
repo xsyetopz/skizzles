@@ -3,11 +3,11 @@ import type {
   TaskWorktreeReceipt,
   TaskWorktreeSession,
 } from "@skizzles/task-worktree";
-import type { RecoveryResult } from "@skizzles/workspace-transaction";
-import type { NormalizedRequest } from "../intent.ts";
-import type { RepositoryContext } from "../repository.ts";
+import type { RecoveryResult } from "@skizzles/workspace-publication";
+import type { NormalizedRequest } from "../admission/intent.ts";
+import type { RepositoryContext } from "../admission/repository.ts";
 import type { TargetBaseline } from "../state/target.ts";
-import type { TerminalPublication, WorkflowReview } from "./contract.ts";
+import type { TerminalPublication, WorkflowReview } from "./causal/contract.ts";
 import type { WorkflowEngineeringEvidence } from "./evidence.ts";
 import type { WorkflowLifecycle } from "./lifecycle.ts";
 import type { PreparedPublication } from "./publication.ts";

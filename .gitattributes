@@ -1,19 +1,19 @@
-packages/prompt-layer/assets/upstream/default.md text eol=lf
-packages/prompt-layer/assets/upstream/LICENSE text eol=lf
-packages/prompt-layer/assets/upstream/NOTICE text eol=lf
-packages/prompt-layer/assets/skizzles-base.patch text eol=lf
-packages/prompt-layer/assets/manifest.json text eol=lf
-packages/prompt-layer/assets/.transaction/journal.json text eol=lf
-packages/prompt-layer/assets/.mutation-lock/owner.json text eol=lf
-packages/prompt-layer/assets/.mutation-lock/reclaim.json text eol=lf
-packages/prompt-layer/assets/instructions/skizzles-base.md text eol=lf
-packages/prompt-layer/assets/instructions/skizzles-base.provenance.json text eol=lf
+packages/prompt-policy/assets/upstream/default.md text eol=lf
+packages/prompt-policy/assets/upstream/LICENSE text eol=lf
+packages/prompt-policy/assets/upstream/NOTICE text eol=lf
+packages/prompt-policy/assets/skizzles-base.patch text eol=lf
+packages/prompt-policy/assets/manifest.json text eol=lf
+packages/prompt-policy/assets/.transaction/journal.json text eol=lf
+packages/prompt-policy/assets/.mutation-lock/owner.json text eol=lf
+packages/prompt-policy/assets/.mutation-lock/reclaim.json text eol=lf
+packages/prompt-policy/assets/instructions/skizzles-base.md text eol=lf
+packages/prompt-policy/assets/instructions/skizzles-base.provenance.json text eol=lf
 
 # These checksum-locked upstream/derived bytes intentionally preserve upstream
 # trailing whitespace; Git whitespace diagnostics must accept their exact bytes.
-packages/prompt-layer/assets/upstream/default.md whitespace=-trailing-space
-packages/prompt-layer/assets/skizzles-base.patch whitespace=-trailing-space
-packages/prompt-layer/assets/instructions/skizzles-base.md whitespace=-trailing-space
+packages/prompt-policy/assets/upstream/default.md whitespace=-trailing-space
+packages/prompt-policy/assets/skizzles-base.patch whitespace=-trailing-space
+packages/prompt-policy/assets/instructions/skizzles-base.md whitespace=-trailing-space
 plugins/skizzles/instructions/skizzles-base.md whitespace=-trailing-space
 
 # Bun preserves whitespace inside dependency source template literals. The

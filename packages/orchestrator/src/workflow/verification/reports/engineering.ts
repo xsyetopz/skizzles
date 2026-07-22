@@ -1,5 +1,5 @@
-import { isStructuralEvidenceReceipt } from "@skizzles/source-engineering";
-import type { VerificationAuthorityRequest } from "@skizzles/verification-gate";
+import type { VerificationAuthorityRequest } from "@skizzles/acceptance";
+import { isStructuralEvidenceReceipt } from "@skizzles/source-transformation";
 import { digestValue } from "../../../digest.ts";
 import type { WorkflowVerificationMaterialInput } from "../contract.ts";
 

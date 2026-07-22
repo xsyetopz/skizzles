@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import processRuntime from "node:process";
-import type { RunWorkspace } from "@skizzles/run-workspace";
+import type { RunWorkspace } from "@skizzles/scratchspace";
 import type {
   ConfigEdit,
   ConfigLayer,

@@ -1,12 +1,12 @@
 #!/usr/bin/env bun
 // @bun
 
-// packages/command-hook/src/manage-command-output.ts
+// packages/command-routing/src/manage-command-output.ts
 import { lstatSync, realpathSync, statSync } from "fs";
 import { isAbsolute, join } from "path";
 import process from "process";
 
-// packages/command-hook/src/manage-command-output/lexer.ts
+// packages/command-routing/src/manage-command-output/lexer.ts
 var shellControlWords = new Set([
   "case",
   "coproc",
@@ -143,7 +143,7 @@ function simpleCommands(script) {
   return state.commands;
 }
 
-// packages/command-hook/src/manage-command-output/normalize.ts
+// packages/command-routing/src/manage-command-output/normalize.ts
 var rustupToolchains = new Set(["stable", "beta", "nightly"]);
 var xcrunNoArgumentOptions = new Set([
   "--log",
@@ -239,7 +239,7 @@ function normalizeCommand(command) {
   };
 }
 
-// packages/command-hook/src/manage-command-output/policy.ts
+// packages/command-routing/src/manage-command-output/policy.ts
 var containerLabGlobalOptions = new Set([
   "--owner",
   "--state-root",
@@ -350,7 +350,7 @@ function isManagedScript(script) {
   return commands?.every(isRecognized) ?? false;
 }
 
-// packages/command-hook/src/manage-command-output.ts
+// packages/command-routing/src/manage-command-output.ts
 var maximumScriptLength = 64 * 1024;
 function pluginRootFrom(arguments_) {
   if (arguments_.length !== 2 || arguments_[0] !== "--plugin-root" || !arguments_[1] || !isAbsolute(arguments_[1]) || arguments_[1].includes("\x00")) {

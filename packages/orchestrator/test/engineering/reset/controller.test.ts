@@ -6,7 +6,7 @@ import {
   type ResetSettlement,
   TaskContextController,
 } from "../../../src/engineering/reset/controller.ts";
-import { createHarness, repositoryContext } from "../../support.ts";
+import { createHarness, repositoryContext } from "../../facade/support.ts";
 
 describe("task context reset controller", () => {
   it("does not reuse an epoch across authentic repository context drift", async () => {

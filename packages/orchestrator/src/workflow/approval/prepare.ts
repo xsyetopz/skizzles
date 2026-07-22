@@ -1,7 +1,10 @@
 import type { DiscoverySnapshot } from "../../state/discovery.ts";
 import type { ExecutionSession } from "../../state/execution.ts";
 import type { TargetBaseline } from "../../state/target.ts";
-import type { CausalWorkflowConfig, WorkflowFailureCode } from "../contract.ts";
+import type {
+  CausalWorkflowConfig,
+  WorkflowFailureCode,
+} from "../causal/contract.ts";
 import type { WorkflowLifecycle } from "../lifecycle.ts";
 import type { PrepareInput } from "../prepare-input.ts";
 import type { PreparedPublication } from "../publication.ts";

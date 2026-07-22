@@ -2,7 +2,7 @@ import { describe, expect, it } from "bun:test";
 import { digestValue } from "../../../src/digest.ts";
 import type { TaskRuntimeInterruptRequest } from "../../../src/engineering/reset/contract.ts";
 import { TaskContextController } from "../../../src/engineering/reset/controller.ts";
-import { createHarness, repositoryContext } from "../../support.ts";
+import { createHarness, repositoryContext } from "../../facade/support.ts";
 
 type FaultStage = "discover" | "invalidate" | "restore" | "settle";
 

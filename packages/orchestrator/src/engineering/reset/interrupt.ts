@@ -1,5 +1,5 @@
 import { type Digest, digestValue } from "../../digest.ts";
-import { snapshotRecord } from "../snapshot.ts";
+import { snapshotRecord } from "../session/snapshot.ts";
 import type { TaskRuntimeInterruptRequest } from "./contract.ts";
 import type { ResetRecord, TaskResetEnvironment } from "./state.ts";
 
