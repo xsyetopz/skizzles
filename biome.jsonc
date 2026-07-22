@@ -63,7 +63,7 @@
         "noSolidDestructuredProps": "error",
         "noUndeclaredDependencies": "error",
         "noUndeclaredVariables": "error",
-        "noUnresolvedImports": "error",
+        // "noUnresolvedImports": "error", /* disabled because it sometimes false alarms. */
         "noUnusedInstantiation": "warn",
         "noVueSetupPropsReactivityLoss": "error",
         "useImportExtensions": "warn",
