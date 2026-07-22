@@ -14,8 +14,11 @@ describe("source-engineering adapter", () => {
   it("accepts an authentic prepared batch and reads copied candidate bytes", async () => {
     const artifact = Object.freeze({
       path: "src/example.ts",
+      baselineDigest: digest,
+      baselineByteLength: bytes.byteLength,
       digest,
       byteLength: bytes.byteLength,
+      readBaselineBytes: (): Uint8Array => Uint8Array.from(bytes),
       readBytes: (): Uint8Array => Uint8Array.from(bytes),
     });
     const receipt = Object.freeze({

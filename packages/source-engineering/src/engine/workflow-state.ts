@@ -149,6 +149,7 @@ export interface CursorState {
 export interface PreparedState {
   readonly artifacts: readonly SourceEngineeringArtifact[];
   readonly receipt: SourceEngineeringTaskReceipt;
+  readonly baselineBytesByPath: ReadonlyMap<string, readonly number[]>;
   readonly bytesByPath: ReadonlyMap<string, readonly number[]>;
   consumed: boolean;
 }

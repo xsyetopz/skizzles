@@ -1,6 +1,10 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
+import { Buffer } from "node:buffer";
+import { isChangeAssuranceReceipt } from "@skizzles/change-assurance";
+import { snapshotRecord } from "../../src/engineering/snapshot.ts";
 import { createEngineeringWorkflow } from "../../src/engineering/workflow.ts";
+import { createTestChangeDeclaration } from "./assurance-fixture.ts";
 import {
   candidate,
   createFixture,
@@ -36,6 +40,16 @@ describe("engineering workflow with the real source engine", () => {
       const prepared = await fixture.workflow.prepare({
         ...fixture.repository,
         context: described.context,
+        changeDeclaration: createTestChangeDeclaration({
+          requestDigest: fixture.repository.request.intentDigest,
+          repositoryId: fixture.repository.repository.repositoryId,
+          targets: Object.freeze([
+            Object.freeze({
+              path: targetPath,
+              candidateDigest: digest(candidate),
+            }),
+          ]),
+        }),
         targets: [
           {
             path: targetPath,
@@ -69,12 +83,68 @@ describe("engineering workflow with the real source engine", () => {
           candidateDigest: digest(candidate),
         }),
       ]);
+      expect(isChangeAssuranceReceipt(prepared.review.preview.assurance)).toBe(
+        true,
+      );
+      const diff = snapshotRecord(
+        JSON.parse(
+          new TextDecoder().decode(
+            Uint8Array.from(prepared.review.approval.diffBytes),
+          ),
+        ),
+        ["version", "commandAudits", "engineeringEvidence", "targets"],
+      );
+      const engineeringEvidence = snapshotRecord(
+        diff?.["engineeringEvidence"],
+        ["evidenceDigest", "evidenceBase64"],
+      );
+      const evidenceBase64 = engineeringEvidence?.["evidenceBase64"];
+      expect(typeof evidenceBase64).toBe("string");
+      if (typeof evidenceBase64 !== "string") {
+        throw new Error("engineering evidence missing from approval diff");
+      }
+      const evidence = snapshotRecord(
+        JSON.parse(Buffer.from(evidenceBase64, "base64").toString("utf8")),
+        [
+          "version",
+          "contextReceiptDigest",
+          "baselineDigest",
+          "preview",
+          "sourceReceipt",
+          "validationProfile",
+        ],
+      );
+      const evidencePreview = snapshotRecord(evidence?.["preview"], [
+        "evidenceDigest",
+        "candidateDigest",
+        "provenanceDigest",
+        "validationDigest",
+        "observedNegativeTests",
+        "targets",
+        "integrations",
+        "assurance",
+      ]);
+      const assuranceReceipt = snapshotRecord(evidencePreview?.["assurance"], [
+        "requestDigest",
+        "repositoryId",
+        "treeDigest",
+        "baselineDigest",
+        "targetSetDigest",
+        "candidateDigest",
+        "declarationDigest",
+        "extensionReceipts",
+        "receiptDigest",
+      ]);
+      expect(assuranceReceipt?.["receiptDigest"]).toBe(
+        prepared.review.preview.assurance.receiptDigest,
+      );
       expect(fixture.operations).toEqual([
         "source-describe",
         "source-start",
         "source-advance",
         "source-advance",
         "source-advance",
+        "change-assurance",
         "phase2-prepare",
       ]);
       expect(fixture.destination.currentText(targetPath)).toBeUndefined();
@@ -105,6 +175,15 @@ describe("engineering workflow with the real source engine", () => {
       expect(
         createEngineeringWorkflow(
           Object.freeze({ ...fixture.config, sourceEngineering }),
+        ),
+      ).toEqual({ status: "rejected", code: "INVALID_WORKFLOW_CONFIG" });
+      const changeAssurance = Object.freeze({
+        assess: fixture.config.changeAssurance.assess,
+        verify: fixture.config.changeAssurance.verify,
+      });
+      expect(
+        createEngineeringWorkflow(
+          Object.freeze({ ...fixture.config, changeAssurance }),
         ),
       ).toEqual({ status: "rejected", code: "INVALID_WORKFLOW_CONFIG" });
     } finally {

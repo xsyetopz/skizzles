@@ -1,3 +1,4 @@
+import type { ChangeAssuranceReceipt } from "@skizzles/change-assurance";
 import { digestValue } from "../../digest.ts";
 import type {
   EngineeringPreview,
@@ -6,9 +7,10 @@ import type {
 import type { PhysicalIntegrationReceipt } from "../physical.ts";
 import {
   readSourceArtifact,
+  readSourceBaseline,
   type SourceArtifact,
   type SourceReceipt,
-  startSourceEngineering,
+  type startSourceEngineering,
   verifySourceEngineering,
 } from "./adapter.ts";
 
@@ -18,6 +20,7 @@ export interface PreparedBatch {
   readonly receipt: SourceReceipt;
   readonly receiptReference: object;
   readonly candidateBytes: readonly (readonly number[])[];
+  readonly baselineBytes: readonly (readonly number[])[];
 }
 
 export function prepareBatch(
@@ -37,7 +40,12 @@ export function prepareBatch(
     return;
   }
   const bytes = artifacts.map(readSourceArtifact);
-  if (bytes.some((candidate) => candidate === undefined)) return;
+  const baselineBytes = artifacts.map(readSourceBaseline);
+  if (
+    bytes.some((candidate) => candidate === undefined) ||
+    baselineBytes.some((candidate) => candidate === undefined)
+  )
+    return;
   return Object.freeze({
     artifacts: Object.freeze(artifacts),
     artifactReferences: result.artifactReferences,
@@ -48,16 +56,22 @@ export function prepareBatch(
         (candidate): candidate is readonly number[] => candidate !== undefined,
       ),
     ),
+    baselineBytes: Object.freeze(
+      baselineBytes.filter(
+        (candidate): candidate is readonly number[] => candidate !== undefined,
+      ),
+    ),
   });
 }
 
 export function createPreview(
   receipt: SourceReceipt,
+  assurance: ChangeAssuranceReceipt,
   integrations: readonly PhysicalIntegrationReceipt[],
 ): EngineeringPreview {
   const sourceEvidence = sourceEvidenceSummary(receipt);
   return Object.freeze({
-    evidenceDigest: digestValue({ sourceEvidence, integrations }),
+    evidenceDigest: digestValue({ sourceEvidence, assurance, integrations }),
     candidateDigest: receipt.candidateDigest,
     provenanceDigest: receipt.provenanceDigest,
     validationDigest: receipt.validationDigest,
@@ -75,6 +89,7 @@ export function createPreview(
       ),
     ),
     integrations,
+    assurance,
   });
 }
 
@@ -104,7 +119,7 @@ export function createEvidenceBytes(input: {
       }),
     );
   } catch {
-    return;
+    return undefined;
   }
 }
 

@@ -25,6 +25,7 @@ on undeclared root packages.
 
 | Package | Responsibility |
 | --- | --- |
+| `change-assurance` | Authentic pre-publication security, migration, performance, and supply-chain evidence |
 | `command-hook` | Hook event validation and command classification |
 | `command-supervisor` | Bounded process execution, artifacts, retention, and queries |
 | `container-lab` | Container Lab CLI, reaper, durable state, synchronization, and docs |

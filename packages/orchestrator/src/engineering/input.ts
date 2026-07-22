@@ -1,6 +1,11 @@
 import { posix } from "node:path";
+import {
+  isChangeAssurance,
+  isChangeDeclaration,
+} from "@skizzles/change-assurance";
 import { isSourceEngineering } from "@skizzles/source-engineering";
 import { nonempty } from "../codec.ts";
+import { digestValue } from "../digest.ts";
 import { isNormalizedRequest } from "../intent.ts";
 import { isRepositoryContext } from "../repository.ts";
 import type { ContextBudgetAuthorityPort } from "./context.ts";
@@ -43,6 +48,7 @@ export function parseEngineeringConfig(
   const value = snapshotRecord(input, [
     "causal",
     "sourceEngineering",
+    "changeAssurance",
     "contextBudget",
     "physicalIntegration",
     "validationProfiles",
@@ -53,6 +59,7 @@ export function parseEngineeringConfig(
       value !== undefined &&
       hasCausalConfig(value["causal"]) &&
       isSourceEngineering(value["sourceEngineering"]) &&
+      isChangeAssurance(value["changeAssurance"]) &&
       isContextBudget(value["contextBudget"]) &&
       isPhysicalIntegration(value["physicalIntegration"]) &&
       nonempty(value["discoveryRoot"], 1024)
@@ -65,6 +72,7 @@ export function parseEngineeringConfig(
   return Object.freeze({
     causal: value["causal"],
     sourceEngineering: value["sourceEngineering"],
+    changeAssurance: value["changeAssurance"],
     contextBudget: value["contextBudget"],
     physicalIntegration: value["physicalIntegration"],
     validationProfiles: profiles,
@@ -80,6 +88,7 @@ export function parseEngineeringInput(
     "request",
     "repository",
     "context",
+    "changeDeclaration",
     "targets",
     "faultDeclarations",
     "validationProfile",
@@ -90,6 +99,7 @@ export function parseEngineeringInput(
       value !== undefined &&
       isNormalizedRequest(value["request"]) &&
       isRepositoryContext(value["repository"]) &&
+      isChangeDeclaration(value["changeDeclaration"]) &&
       value["request"].intentDigest === value["repository"].requestDigest &&
       typeof value["validationProfile"] === "string"
     )
@@ -108,7 +118,15 @@ export function parseEngineeringInput(
     profile === undefined ||
     (faultDeclarations.negativeTests.length > 0 &&
       profile.negativeTestCommands.length === 0) ||
-    integrations === undefined
+    integrations === undefined ||
+    value["changeDeclaration"].requestDigest !==
+      value["request"].intentDigest ||
+    value["changeDeclaration"].repositoryId !==
+      value["repository"].repositoryId ||
+    value["changeDeclaration"].targetSetDigest !==
+      digestValue(
+        targets.map(({ path }) => Object.freeze({ path, operation: "write" })),
+      )
   ) {
     return;
   }
@@ -116,6 +134,7 @@ export function parseEngineeringInput(
     request: value["request"],
     repository: value["repository"],
     context: value["context"],
+    changeDeclaration: value["changeDeclaration"],
     targets,
     faultDeclarations,
     validationProfile: profile.id,

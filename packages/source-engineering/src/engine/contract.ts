@@ -59,8 +59,11 @@ export interface SourceEngineeringNextStep {
 
 export interface SourceEngineeringArtifact {
   readonly path: string;
+  readonly baselineDigest: Digest;
+  readonly baselineByteLength: number;
   readonly digest: Digest;
   readonly byteLength: number;
+  readonly readBaselineBytes: () => Uint8Array;
   readonly readBytes: () => Uint8Array;
 }
 

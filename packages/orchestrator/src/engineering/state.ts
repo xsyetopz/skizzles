@@ -1,5 +1,6 @@
 import { digestValue } from "../digest.ts";
 import type { TargetBaseline } from "../state/target.ts";
+import type { AssuranceEvidence } from "./assurance/evidence.ts";
 import type { ContextBindings } from "./context.ts";
 import type { ContinuationBindings } from "./continuation.ts";
 import type { ParsedDescribeInput } from "./describe-input.ts";
@@ -29,9 +30,15 @@ export interface PreparationState {
   readonly input: ParsedEngineeringInput;
   readonly context: PreparationContext;
   readonly baseline: TargetBaseline;
-  readonly phase: "source-start" | "source-advance" | "physical" | "phase2";
+  readonly phase:
+    | "source-start"
+    | "source-advance"
+    | "assurance"
+    | "physical"
+    | "phase2";
   readonly cursor: CursorState | null;
   readonly prepared: PreparedBatch | null;
+  readonly assurance: AssuranceEvidence | null;
   readonly integrations: readonly PhysicalIntegrationReceipt[];
   readonly integrationIndex: number;
   readonly budgetEpoch: string | null;
@@ -68,6 +75,7 @@ export function continuationBindingsFor(
       baselineDigest: state.baseline.baselineDigest,
     });
   const provenanceDigest =
+    state.assurance?.receipt.receiptDigest ??
     state.prepared?.receipt.provenanceDigest ??
     state.cursor?.cursor.stateDigest ??
     state.context.receipt.receiptDigest;
@@ -94,6 +102,7 @@ export function continuationBindingsFor(
 export function operationFor(state: PreparationState) {
   if (state.phase === "source-start") return "source-start";
   if (state.phase === "source-advance") return "source-advance";
+  if (state.phase === "assurance") return "change-assurance";
   if (state.phase === "physical") return "physical-integration";
   return "phase2-prepare";
 }

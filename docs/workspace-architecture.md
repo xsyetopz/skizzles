@@ -16,10 +16,12 @@ The current workspace dependency edges are:
 
 <!-- workspace-policy:dependency-edges:start -->
 ```text
+@skizzles/change-assurance -> @skizzles/run-workspace
 @skizzles/installer -> @skizzles/container-lab
 @skizzles/installer -> @skizzles/prompt-layer
 @skizzles/installer -> @skizzles/run-workspace
 @skizzles/model-catalog -> @skizzles/run-workspace
+@skizzles/orchestrator -> @skizzles/change-assurance
 @skizzles/orchestrator -> @skizzles/command-supervisor
 @skizzles/orchestrator -> @skizzles/run-workspace
 @skizzles/orchestrator -> @skizzles/source-engineering
@@ -64,6 +66,13 @@ symbol indexes advisory to compiler results, and binds template, formatter,
 policy, and semantic-diff provenance. The orchestrator composes that evidence
 with approval and publication; source-engineering never writes the canonical
 workspace.
+
+`@skizzles/change-assurance` owns pre-publication non-functional, security,
+migration, secret, performance, dependency, vulnerability, and license
+assurance. Trusted hosts issue authentic change declarations; four dedicated
+domain authorities assess exact baseline and candidate bytes and produce one
+digest-only receipt. The orchestrator runs this boundary after source
+preparation and before physical integration or approval.
 
 ## Run lifecycle ownership
 

@@ -1,6 +1,7 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import process from "node:process";
+import { createChangeDeclaration } from "@skizzles/change-assurance";
 import type { SourceEngineering } from "@skizzles/source-engineering";
 import { createLocalRepositoryLeaseAuthority } from "@skizzles/workspace-transaction";
 import { digestBytes, digestValue } from "../../src/digest.ts";
@@ -14,13 +15,17 @@ import { createCausalWorkflow } from "../../src/workflow/causal-workflow.ts";
 import type { CommandAuditProfile } from "../../src/workflow/contract.ts";
 import { createHarness, repositoryContext } from "../support.ts";
 import { IsolatedDestination } from "../workflow/isolated-destination.ts";
+import {
+  createTestChangeAssurance,
+  createTestChangeDeclaration,
+} from "./assurance-fixture.ts";
 
 const candidate = new TextEncoder().encode(
   "export function run(): boolean { return true; }\n",
 );
 const candidateDigest = digestBytes(candidate);
 
-describe("Phase 3 engineering workflow", () => {
+describe("engineering assurance workflow", () => {
   it("describes context, derives a candidate, and keeps publication behind approval", async () => {
     const fixture = createFixture();
     const repository = await repositoryContext(fixture.orchestrator);
@@ -35,6 +40,13 @@ describe("Phase 3 engineering workflow", () => {
     const prepared = await fixture.workflow.prepare({
       ...repository,
       context: described.context,
+      changeDeclaration: createTestChangeDeclaration({
+        requestDigest: repository.request.intentDigest,
+        repositoryId: repository.repository.repositoryId,
+        targets: Object.freeze([
+          Object.freeze({ path: "src/example.ts", candidateDigest }),
+        ]),
+      }),
       targets: [
         {
           path: "src/example.ts",
@@ -69,6 +81,72 @@ describe("Phase 3 engineering workflow", () => {
     expect(fixture.destination.currentText("src/example.ts")).toBe(
       new TextDecoder().decode(candidate),
     );
+  });
+
+  it("stops rejected assurance before physical integration or Phase 2", async () => {
+    const fixture = createFixture();
+    const repository = await repositoryContext(fixture.orchestrator);
+    const described = await fixture.workflow.describe({
+      ...repository,
+      targets: ["src/example.ts"],
+      validationProfile: "strict",
+    });
+    expect(described.status).toBe("described");
+    if (described.status !== "described") return;
+    const declaration = createChangeDeclaration(
+      Object.freeze({
+        requestDigest: repository.request.intentDigest,
+        repositoryId: repository.repository.repositoryId,
+        targets: Object.freeze([
+          Object.freeze({ path: "src/example.ts", operation: "write" }),
+        ]),
+        plans: Object.freeze({
+          "middleware-security": Object.freeze({}),
+          "migration-configuration-secrets": Object.freeze({
+            migrations: Object.freeze([]),
+          }),
+          performance: Object.freeze({ schemaVersion: 1 }),
+          "supply-chain": Object.freeze({
+            schemaVersion: 1,
+            changes: Object.freeze([]),
+          }),
+        }),
+      }),
+    );
+    expect(declaration.status).toBe("created");
+    if (declaration.status !== "created") return;
+    const result = await fixture.workflow.prepare({
+      ...repository,
+      context: described.context,
+      changeDeclaration: declaration.declaration,
+      targets: [
+        {
+          path: "src/example.ts",
+          operations: [
+            {
+              kind: "replace",
+              selector: {
+                declarationKind: "function",
+                name: "run",
+                expectedNodeDigest: candidateDigest,
+              },
+              templateId: "function-template",
+              nodeSource: "export function run(): boolean { return true; }",
+            },
+          ],
+        },
+      ],
+      faultDeclarations: { declarations: [], negativeTests: [] },
+      validationProfile: "strict",
+      integrations: [],
+    });
+    expect(result).toEqual({
+      status: "rejected",
+      code: "CHANGE_ASSURANCE_REJECTED",
+      cleanup: null,
+    });
+    expect(fixture.physicalCalls()).toBe(0);
+    expect(fixture.destination.currentText("src/example.ts")).toBeUndefined();
   });
 
   it("never accepts whole candidate bytes or caller commands", async () => {
@@ -275,8 +353,11 @@ function createFixture(
   });
   const artifact = Object.freeze({
     path: targetPath,
+    baselineDigest: candidateDigest,
+    baselineByteLength: candidate.byteLength,
     digest: candidateDigest,
     byteLength: candidate.byteLength,
+    readBaselineBytes: (): Uint8Array => Uint8Array.from(candidate),
     readBytes: (): Uint8Array => Uint8Array.from(candidate),
   });
   let reservations = 0;
@@ -453,9 +534,9 @@ function createFixture(
         ]),
       },
       workspaceUsageLimits: {
-        byteLimit: 1_000_000,
-        entryLimit: 100,
-        scanLimit: 100,
+        byteLimit: 2_000_000,
+        entryLimit: 500,
+        scanLimit: 500,
       },
       commandProfiles: Object.freeze([validationCommand]),
       approvalContext: {
@@ -465,6 +546,7 @@ function createFixture(
       },
     },
     sourceEngineering,
+    changeAssurance: createTestChangeAssurance(),
     contextBudget: {
       reserve(input: unknown): unknown {
         reservations += 1;
@@ -532,6 +614,13 @@ function prepareExample(
   return fixture.workflow.prepare({
     ...repository,
     context,
+    changeDeclaration: createTestChangeDeclaration({
+      requestDigest: repository.request.intentDigest,
+      repositoryId: repository.repository.repositoryId,
+      targets: Object.freeze([
+        Object.freeze({ path: "src/example.ts", candidateDigest }),
+      ]),
+    }),
     targets: [
       {
         path: "src/example.ts",

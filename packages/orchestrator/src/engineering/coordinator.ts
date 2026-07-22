@@ -2,6 +2,7 @@ import { digestValue } from "../digest.ts";
 import type { TargetBaseline } from "../state/target.ts";
 import type { CausalWorkflow, WorkflowReview } from "../workflow/contract.ts";
 import { issueWorkflowEvidence } from "../workflow/evidence.ts";
+import { assessChange, verifyAssurance } from "./assurance/evidence.ts";
 import type { ContextBindings } from "./context.ts";
 import { reserveContext } from "./context.ts";
 import { ContinuationLedger } from "./continuation.ts";
@@ -146,6 +147,7 @@ export class EngineeringCoordinator implements EngineeringWorkflow {
         phase: "source-start",
         cursor: null,
         prepared: null,
+        assurance: null,
         integrations: Object.freeze([]),
         integrationIndex: 0,
         budgetEpoch: null,
@@ -281,6 +283,7 @@ export class EngineeringCoordinator implements EngineeringWorkflow {
     if (state.phase === "source-start") return await this.startSource(state);
     if (state.phase === "source-advance")
       return await this.advanceSource(state);
+    if (state.phase === "assurance") return await this.assessAssurance(state);
     if (state.phase === "physical") return await this.attestPhysical(state);
     return await this.preparePhase2(state);
   }
@@ -359,9 +362,35 @@ export class EngineeringCoordinator implements EngineeringWorkflow {
     return {
       state: freezePreparationState({
         ...state,
-        phase: state.input.integrations.length === 0 ? "phase2" : "physical",
+        phase: "assurance",
         cursor: null,
         prepared,
+      }),
+    };
+  }
+
+  private async assessAssurance(state: PreparationState) {
+    if (state.prepared === null)
+      return this.fail(state, "SOURCE_ENGINEERING_REJECTED");
+    const assurance = await assessChange(
+      this.config.changeAssurance,
+      Object.freeze({
+        requestDigest: state.input.request.intentDigest,
+        repositoryId: state.input.repository.repositoryId,
+        treeDigest: state.input.repository.treeDigest,
+        baselineDigest: state.baseline.baselineDigest,
+        declaration: state.input.changeDeclaration,
+      }),
+      state.prepared,
+    );
+    if (assurance === undefined) {
+      return this.fail(state, "CHANGE_ASSURANCE_REJECTED");
+    }
+    return {
+      state: freezePreparationState({
+        ...state,
+        assurance,
+        phase: state.input.integrations.length === 0 ? "phase2" : "physical",
       }),
     };
   }
@@ -420,7 +449,14 @@ export class EngineeringCoordinator implements EngineeringWorkflow {
     if (state.prepared === null)
       return this.fail(state, "SOURCE_ENGINEERING_REJECTED");
     const prepared = state.prepared;
-    const preview = createPreview(prepared.receipt, state.integrations);
+    if (state.assurance === null)
+      return this.fail(state, "CHANGE_ASSURANCE_REJECTED");
+    const assurance = state.assurance;
+    const preview = createPreview(
+      prepared.receipt,
+      assurance.receipt,
+      state.integrations,
+    );
     const evidenceBytes = createEvidenceBytes({
       contextReceiptDigest: state.context.receipt.receiptDigest,
       baselineDigest: state.baseline.baselineDigest,
@@ -436,7 +472,9 @@ export class EngineeringCoordinator implements EngineeringWorkflow {
       return this.fail(state, "ENGINEERING_EVIDENCE_REJECTED");
     const evidence = issueWorkflowEvidence(
       evidenceBytes,
-      async () => await verifyPrepared(this.config, prepared),
+      async () =>
+        (await verifyPrepared(this.config, prepared)) &&
+        verifyAssurance(this.config.changeAssurance, assurance),
     );
     if (evidence === undefined)
       return this.fail(state, "ENGINEERING_EVIDENCE_REJECTED");

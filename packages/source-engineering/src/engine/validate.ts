@@ -64,8 +64,10 @@ export function verifyPrepared(
         return rejectedVerify("ARTIFACT_REJECTED");
       }
       const expected = prepared.bytesByPath.get(artifact.path);
+      const expectedBaseline = prepared.baselineBytesByPath.get(artifact.path);
       if (
         expected === undefined ||
+        expectedBaseline === undefined ||
         prepared.artifacts[index] !== artifact ||
         targetReceipt.path !== artifact.path ||
         targetReceipt.candidateDigest !== artifact.digest
@@ -74,11 +76,18 @@ export function verifyPrepared(
       }
       const first = artifact.readBytes();
       const second = artifact.readBytes();
+      const firstBaseline = artifact.readBaselineBytes();
+      const secondBaseline = artifact.readBaselineBytes();
       if (
         first === second ||
+        firstBaseline === secondBaseline ||
         !sameBytes(first, expected) ||
         !sameBytes(second, expected) ||
+        !sameBytes(firstBaseline, expectedBaseline) ||
+        !sameBytes(secondBaseline, expectedBaseline) ||
         artifact.byteLength !== expected.length ||
+        artifact.baselineByteLength !== expectedBaseline.length ||
+        artifact.baselineDigest !== digestBytes(firstBaseline) ||
         artifact.digest !== digestBytes(first)
       ) {
         return rejectedVerify("ARTIFACT_REJECTED");
@@ -260,15 +269,21 @@ async function validate(
     validationDigest: digestText(JSON.stringify(receiptMaterial)),
   });
   const bytesByPath = new Map<string, readonly number[]>();
+  const baselineBytesByPath = new Map<string, readonly number[]>();
   const artifacts = Object.freeze(
     preparedTargets.map(
       ({ target, candidateBytes, candidateDigest: digest }) => {
         const stored = Object.freeze([...candidateBytes]);
+        const storedBaseline = Object.freeze([...target.baselineBytes]);
         bytesByPath.set(target.path, stored);
+        baselineBytesByPath.set(target.path, storedBaseline);
         const artifact: SourceEngineeringArtifact = Object.freeze({
           path: target.path,
+          baselineDigest: digestBytes(Uint8Array.from(storedBaseline)),
+          baselineByteLength: storedBaseline.length,
           digest,
           byteLength: stored.length,
+          readBaselineBytes: () => Uint8Array.from(storedBaseline),
           readBytes: () => Uint8Array.from(stored),
         });
         return artifact;
@@ -278,6 +293,7 @@ async function validate(
   state.registerPrepared({
     artifacts,
     receipt,
+    baselineBytesByPath: new Map(baselineBytesByPath),
     bytesByPath: new Map(bytesByPath),
   });
   batch.step += 1;

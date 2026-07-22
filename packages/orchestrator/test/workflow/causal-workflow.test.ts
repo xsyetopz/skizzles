@@ -125,8 +125,8 @@ function createFixture(options: FixtureOptions = {}): {
     },
     workspaceUsageLimits: options.workspaceUsageLimits ?? {
       byteLimit: 1_000_000,
-      entryLimit: 100,
-      scanLimit: 100,
+      entryLimit: 200,
+      scanLimit: 200,
     },
     commandProfiles: [
       {
@@ -176,7 +176,7 @@ async function prepare(fixture: ReturnType<typeof createFixture>) {
     commands: ["write-candidate"],
   });
   if (result.status !== "awaiting-approval") {
-    throw new Error(`workflow preparation failed: ${result.status}`);
+    throw new Error(`workflow preparation failed: ${result.code}`);
   }
   return result.review;
 }

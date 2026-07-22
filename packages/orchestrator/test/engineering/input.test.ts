@@ -1,5 +1,6 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
+import { createChangeDeclaration } from "@skizzles/change-assurance";
 import type { EngineeringValidationProfile } from "../../src/engineering/contract.ts";
 import { parseEngineeringInput } from "../../src/engineering/input.ts";
 import { createHarness, repositoryContext } from "../support.ts";
@@ -100,9 +101,28 @@ describe("engineering public input", () => {
 async function validInput() {
   const harness = createHarness();
   const context = await repositoryContext(harness.orchestrator);
+  const declaration = createChangeDeclaration(
+    Object.freeze({
+      requestDigest: context.request.intentDigest,
+      repositoryId: context.repository.repositoryId,
+      targets: Object.freeze([
+        Object.freeze({ path: "src/example.ts", operation: "write" }),
+      ]),
+      plans: Object.freeze({
+        "middleware-security": Object.freeze({}),
+        "migration-configuration-secrets": Object.freeze({}),
+        performance: Object.freeze({}),
+        "supply-chain": Object.freeze({}),
+      }),
+    }),
+  );
+  if (declaration.status !== "created") {
+    throw new Error("change declaration fixture rejected");
+  }
   return Object.freeze({
     ...context,
     context: Object.freeze({ opaque: true }),
+    changeDeclaration: declaration.declaration,
     targets: Object.freeze([
       Object.freeze({
         path: "src/example.ts",

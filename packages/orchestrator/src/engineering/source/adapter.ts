@@ -23,8 +23,11 @@ export interface SourceNextOperation {
 
 export interface SourceArtifact {
   readonly path: string;
+  readonly baselineDigest: Digest;
+  readonly baselineByteLength: number;
   readonly digest: Digest;
   readonly byteLength: number;
+  readonly readBaselineBytes: () => Uint8Array;
   readonly readBytes: () => Uint8Array;
 }
 
@@ -140,6 +143,26 @@ export function readSourceArtifact(
     bytes.byteLength !== artifact.byteLength ||
     bytes.byteLength > maximumSourceBytes ||
     digestBytes(bytes) !== artifact.digest
+  ) {
+    return;
+  }
+  return Object.freeze(Array.from(bytes));
+}
+
+export function readSourceBaseline(
+  artifact: SourceArtifact,
+): readonly number[] | undefined {
+  let bytes: Uint8Array;
+  try {
+    bytes = artifact.readBaselineBytes();
+  } catch {
+    return;
+  }
+  if (
+    !(bytes instanceof Uint8Array) ||
+    bytes.byteLength !== artifact.baselineByteLength ||
+    bytes.byteLength > maximumSourceBytes ||
+    digestBytes(bytes) !== artifact.baselineDigest
   ) {
     return;
   }
@@ -289,19 +312,27 @@ function parseNext(input: unknown): SourceNextOperation | undefined {
 function parseArtifact(input: unknown): SourceArtifact | undefined {
   const value = snapshotRecord(input, [
     "path",
+    "baselineDigest",
+    "baselineByteLength",
     "digest",
     "byteLength",
+    "readBaselineBytes",
     "readBytes",
   ]);
   const reader = value?.["readBytes"];
+  const baselineReader = value?.["readBaselineBytes"];
   if (
     !(
       value !== undefined &&
       typeof value["path"] === "string" &&
       value["path"].length > 0 &&
+      validDigest(value["baselineDigest"]) &&
+      nonnegativeInteger(value["baselineByteLength"]) &&
+      value["baselineByteLength"] <= maximumSourceBytes &&
       validDigest(value["digest"]) &&
       nonnegativeInteger(value["byteLength"]) &&
       value["byteLength"] <= maximumSourceBytes &&
+      typeof baselineReader === "function" &&
       typeof reader === "function"
     )
   ) {
@@ -309,8 +340,17 @@ function parseArtifact(input: unknown): SourceArtifact | undefined {
   }
   return Object.freeze({
     path: value["path"],
+    baselineDigest: value["baselineDigest"],
+    baselineByteLength: value["baselineByteLength"],
     digest: value["digest"],
     byteLength: value["byteLength"],
+    readBaselineBytes: (): Uint8Array => {
+      const result: unknown = Reflect.apply(baselineReader, undefined, []);
+      if (!(result instanceof Uint8Array)) {
+        throw new Error("source artifact returned invalid baseline bytes");
+      }
+      return result;
+    },
     readBytes: (): Uint8Array => {
       const result: unknown = Reflect.apply(reader, undefined, []);
       if (!(result instanceof Uint8Array)) {
@@ -505,6 +545,7 @@ function sameArtifactReceipts(
     (artifact, index) =>
       artifact !== undefined &&
       artifact.path === sortedReceipts[index]?.path &&
+      artifact.baselineDigest === sortedReceipts[index]?.baselineDigest &&
       artifact.digest === sortedReceipts[index]?.candidateDigest,
   );
 }

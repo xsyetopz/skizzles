@@ -8,6 +8,11 @@ template, formatter, compiler, and policy evidence is bound into immutable
 receipts consumed by `@skizzles/orchestrator`. Declared physical integration is
 attested separately by the orchestrator through Container Lab.
 
+Prepared artifacts expose separately authenticated baseline and candidate byte
+readers. Each call returns a fresh copy, and verification binds both channels
+to the target receipt. This lets downstream change assurance measure the exact
+captured baseline without rereading a race-prone workspace pathname.
+
 `createSourceEngineering` accepts only authentic adapters registered by
 language identifier. `createTypeScriptAstLanguageAdapter` supplies the current
 TypeScript 7 AST implementation for TypeScript, JavaScript, and TSX source;

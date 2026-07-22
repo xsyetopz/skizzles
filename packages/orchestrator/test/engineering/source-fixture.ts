@@ -22,6 +22,7 @@ import type { ContextOperation } from "../../src/engineering/context.ts";
 import { createEngineeringWorkflow } from "../../src/engineering/workflow.ts";
 import { createHarness, repositoryContext } from "../support.ts";
 import { IsolatedDestination } from "../workflow/isolated-destination.ts";
+import { createTestChangeAssurance } from "./assurance-fixture.ts";
 
 export const targetPath = "test/value.test.ts";
 const baseline = "export function value(): number { return 1; }\n";
@@ -74,9 +75,9 @@ export async function createFixture() {
         ]),
       }),
       workspaceUsageLimits: Object.freeze({
-        byteLimit: 1_000_000,
-        entryLimit: 100,
-        scanLimit: 100,
+        byteLimit: 2_000_000,
+        entryLimit: 500,
+        scanLimit: 500,
       }),
       commandProfiles: Object.freeze([
         Object.freeze({
@@ -103,6 +104,7 @@ export async function createFixture() {
       }),
     }),
     sourceEngineering,
+    changeAssurance: createTestChangeAssurance(),
     contextBudget: Object.freeze({
       reserve(
         input: Parameters<

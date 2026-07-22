@@ -63,6 +63,7 @@ export class SourceEngineeringState {
   registerPrepared(input: {
     readonly artifacts: readonly SourceEngineeringArtifact[];
     readonly receipt: SourceEngineeringTaskReceipt;
+    readonly baselineBytesByPath: ReadonlyMap<string, readonly number[]>;
     readonly bytesByPath: ReadonlyMap<string, readonly number[]>;
   }): void {
     const state: PreparedState = { ...input, consumed: false };

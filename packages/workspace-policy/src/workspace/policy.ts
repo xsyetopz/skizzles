@@ -20,6 +20,7 @@ import {
 const PATH_SEPARATOR_PATTERN = /[\\/]/u;
 
 const SKIZZLES_PACKAGE_NAMES = [
+  "@skizzles/change-assurance",
   "@skizzles/command-hook",
   "@skizzles/command-supervisor",
   "@skizzles/container-lab",

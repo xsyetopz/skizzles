@@ -1,3 +1,8 @@
+import type {
+  ChangeAssurance,
+  ChangeAssuranceReceipt,
+  ChangeDeclaration,
+} from "@skizzles/change-assurance";
 import type { SourceEngineering } from "@skizzles/source-engineering";
 import type { NormalizedRequest } from "../intent.ts";
 import type { RepositoryContext } from "../repository.ts";
@@ -98,6 +103,7 @@ export interface EngineeringPrepareInput {
   readonly request: NormalizedRequest;
   readonly repository: RepositoryContext;
   readonly context: EngineeringContext;
+  readonly changeDeclaration: ChangeDeclaration;
   readonly targets: readonly EngineeringTarget[];
   readonly faultDeclarations: {
     readonly declarations: readonly EngineeringFaultDeclaration[];
@@ -124,6 +130,7 @@ export interface EngineeringValidationProfile {
 export interface EngineeringWorkflowConfig {
   readonly causal: CausalWorkflowConfig;
   readonly sourceEngineering: SourceEngineeringPort;
+  readonly changeAssurance: ChangeAssurance;
   readonly contextBudget: ContextBudgetAuthorityPort;
   readonly physicalIntegration: PhysicalIntegrationAuthorityPort;
   readonly validationProfiles: readonly EngineeringValidationProfile[];
@@ -144,8 +151,14 @@ export interface EngineeringPreview {
   readonly candidateDigest: string;
   readonly provenanceDigest: string;
   readonly validationDigest: string;
+  readonly observedNegativeTests: readonly Readonly<{
+    productionPath: string;
+    testPath: string;
+    failureCodes: readonly string[];
+  }>[];
   readonly targets: readonly EngineeringPreviewTarget[];
   readonly integrations: readonly PhysicalIntegrationReceipt[];
+  readonly assurance: ChangeAssuranceReceipt;
 }
 
 export interface EngineeringReview extends WorkflowReview {
@@ -155,6 +168,7 @@ export interface EngineeringReview extends WorkflowReview {
 export type EngineeringFailureCode =
   | WorkflowFailureCode
   | "SOURCE_ENGINEERING_REJECTED"
+  | "CHANGE_ASSURANCE_REJECTED"
   | "CONTEXT_BUDGET_REJECTED"
   | "CONTEXT_BUDGET_DRIFTED"
   | "CONTINUATION_REJECTED"
