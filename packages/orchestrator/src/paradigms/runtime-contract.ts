@@ -20,6 +20,8 @@ import type {
   ExecutionObservation,
   ReActController,
 } from "./execution/contract.ts";
+import type { RoutingAssignment } from "./routing-contract.ts";
+import type { RoutingExperimentObserver } from "./routing-observer.ts";
 import type {
   DependencyScheduler,
   SchedulerRunResult,
@@ -38,6 +40,7 @@ export interface ModelDispatchRequest {
   readonly memorySnapshotDigest: Digest;
   readonly context: OutboundContextPayload;
   readonly observation: ExecutionObservation | null;
+  readonly routingAssignment: RoutingAssignment | null;
   readonly requestDigest: Digest;
 }
 
@@ -61,6 +64,7 @@ export interface AgentRuntimeConfig {
   readonly memoryQuery: ReflexionMemoryQuery;
   readonly memoryRecorder: ReflexionMemoryRecorder;
   readonly modelDispatch: ModelDispatchAuthority;
+  readonly routingObserver?: RoutingExperimentObserver;
   readonly skillReferences: readonly ExternalSkillDirectoryReference[];
 }
 
@@ -76,6 +80,7 @@ export interface AgentRuntimeRunRequest {
   readonly faultDeclarations: unknown;
   readonly integrations: readonly unknown[];
   readonly supportingFragments: readonly ContextFragment[];
+  readonly routingAssignment?: RoutingAssignment | null;
   readonly mode?: AgentRuntimeMode;
 }
 
@@ -89,6 +94,9 @@ export interface AgentRuntimeReceipt {
   readonly contextPayloadDigest: Digest | null;
   readonly prioritizationReceiptDigest: Digest | null;
   readonly compressionReceiptDigest: Digest | null;
+  readonly routingAssignmentDigest: Digest | null;
+  readonly routingObservationDigest: Digest | null;
+  readonly routingObservationStatus: "not-configured" | "recorded" | "failed";
   readonly dispatchRequestDigests: readonly Digest[];
   readonly executionId: Digest | null;
   readonly outcome: "completed" | "failed";

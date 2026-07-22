@@ -14,6 +14,14 @@ import { createSpecificationContextAuthority } from "../../src/paradigms/context
 import { createAgentlessExecutor } from "../../src/paradigms/execution/agentless.ts";
 import { createReActController } from "../../src/paradigms/execution/react.ts";
 import { createModelDispatchAuthority } from "../../src/paradigms/model-dispatch.ts";
+import {
+  createRoutingAssignment,
+  type RoutingAssignment,
+} from "../../src/paradigms/routing-contract.ts";
+import {
+  createRoutingExperimentObserver,
+  type RoutingExperimentEvent,
+} from "../../src/paradigms/routing-observer.ts";
 import { createAgentRuntime } from "../../src/paradigms/runtime.ts";
 import type { ModelDispatchRequest } from "../../src/paradigms/runtime-contract.ts";
 import { createSchedulerWorkerAuthority } from "../../src/paradigms/scheduler/authority.ts";
@@ -116,6 +124,46 @@ describe("academic paradigm runtime", () => {
         currentRunId: "run-later",
       });
       expect(laterTask.records).toHaveLength(1);
+    } finally {
+      source.cleanup();
+    }
+  });
+
+  it("binds host routing assignments and isolates observer failure", async () => {
+    const source = await createFixture();
+    const assignment = routingAssignment();
+    let observed: RoutingExperimentEvent | null = null;
+    try {
+      const task = agentlessTask("task-routing");
+      const created = runtimeFixture(source, {
+        events: [],
+        observe: (event) => {
+          observed = event;
+          throw new Error("recorder unavailable");
+        },
+        dispatch: (request) => {
+          expect(request.routingAssignment?.assignmentDigest).toBe(
+            assignment.assignmentDigest,
+          );
+          return Object.freeze({
+            task,
+            proposal: proposalFromContext(request),
+          });
+        },
+      });
+      const result = await created.runtime.run({
+        ...runRequest(source, "task-routing", task.objectiveDigest),
+        routingAssignment: assignment,
+      });
+
+      expect(result.status).toBe("awaiting-approval");
+      if (result.status !== "awaiting-approval") return;
+      expect(result.receipt.routingAssignmentDigest).toBe(
+        assignment.assignmentDigest,
+      );
+      expect(result.receipt.routingObservationStatus).toBe("failed");
+      expect(requireObserved(observed).outcome).toBe("awaiting-approval");
+      await created.runtime.reject({ review: result.review });
     } finally {
       source.cleanup();
     }
@@ -236,6 +284,7 @@ function runtimeFixture(
   input: {
     readonly events: string[];
     readonly dispatch: (request: ModelDispatchRequest) => unknown;
+    readonly observe?: (event: RoutingExperimentEvent) => unknown;
     readonly execute?: Parameters<typeof createCatalogHarness>[0];
     readonly maximumReActSteps?: number | null;
   },
@@ -321,6 +370,18 @@ function runtimeFixture(
   if (model.status !== "created") {
     throw new Error("model setup failed");
   }
+  const routingObserver =
+    input.observe === undefined
+      ? undefined
+      : createRoutingExperimentObserver(
+          Object.freeze({
+            authorityId: "runtime-routing-recorder",
+            record: input.observe,
+          }),
+        );
+  if (routingObserver !== undefined && routingObserver.status !== "created") {
+    throw new Error("routing observer setup failed");
+  }
   const config = {
     agentless: agentless.executor,
     engineering: source.workflow,
@@ -331,6 +392,9 @@ function runtimeFixture(
     memoryQuery: query,
     memoryRecorder: recorder,
     modelDispatch: model.authority,
+    ...(routingObserver === undefined
+      ? {}
+      : { routingObserver: routingObserver.observer }),
     skillReferences: Object.freeze([
       Object.freeze({
         kind: "external-skill-directory" as const,
@@ -385,6 +449,37 @@ function runRequest(
     integrations: Object.freeze([]),
     supportingFragments: Object.freeze([supporting.fragment]),
   };
+}
+
+function routingAssignment(): RoutingAssignment {
+  return createRoutingAssignment({
+    experimentId: "runtime-routing",
+    policyRevision: "policy-v1",
+    safetyFloor: "standard",
+    eligibilityDigest: `sha256:${"b".repeat(64)}`,
+    candidateId: "candidate-a",
+    candidateSet: Object.freeze(["candidate-a", "candidate-b"]),
+    assignmentMethod: "randomized",
+    propensity: 0.5,
+    model: "gpt-5.6-terra",
+    reasoningEffort: "medium",
+    workflow: Object.freeze({
+      topology: "single-agent",
+      decomposition: "sequential",
+      agentCount: 1,
+      maximumParallelism: 1,
+      contextStrategy: "shared",
+    }),
+  });
+}
+
+function requireObserved(
+  value: RoutingExperimentEvent | null,
+): RoutingExperimentEvent {
+  if (value === null) {
+    throw new Error("routing observer did not receive a terminal event");
+  }
+  return value;
 }
 
 function proposalFromContext(request: ModelDispatchRequest) {

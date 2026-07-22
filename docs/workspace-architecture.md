@@ -67,6 +67,13 @@ path-aware scheduling, protected context placement, optional auditable
 compression, and cross-task failure memory before any injected model dispatch.
 It exposes no generic shell and owns no live model endpoint.
 
+Routing experiments remain split across the same boundaries. The host supplies
+an explicit candidate assignment and the orchestrator binds it to dispatch and
+pre-approval digest evidence through an optional observer; it never selects a
+live endpoint. `@skizzles/usage-analyzer` owns the strict in-memory evidence learner,
+which compares complete workflow tokens per independently verified success only
+inside comparable strata and treats AAII/price values as metadata priors.
+
 `@skizzles/workspace-transaction` owns repository-scoped publication leases,
 destination-owned same-filesystem siblings, durable multi-file journals, and
 deterministic recovery. It provides serialized per-file atomic publication and

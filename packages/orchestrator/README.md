@@ -183,6 +183,17 @@ read-only external skill-directory references. Recording failure never changes
 the already-established execution outcome. Model transport, credentials, and
 endpoint selection remain injected host concerns.
 
+Hosts that run comparable routing experiments may provide a validated
+`routingAssignment` on each run. The assignment binds its candidate set,
+propensity/seed, model, reasoning effort, decomposition, topology, role plan,
+context strategy, and policy revision into every model-dispatch digest. An
+optional `createRoutingExperimentObserver()` authority receives one
+pre-approval, digest-only event with context estimates, all dispatch digests,
+execution and engineering evidence, and the failure/awaiting-approval outcome.
+Independent post-approval verification remains host-owned; observer failures
+are reported in the receipt and cannot change execution or approval. The
+runtime does not choose a candidate or own the experiment store.
+
 ## Development
 
 ```sh

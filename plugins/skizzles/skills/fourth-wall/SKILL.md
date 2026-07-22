@@ -19,7 +19,16 @@ Use native MultiAgentV2 with two independent dispatch choices: complexity and ho
 
 Name every child `<role>__<objective>`. Double underscores separate the behavioral role from the objective; use single underscores inside the objective. Examples: `worker__implement_filters`, `triage__map_sync_flow`, and `review__audit_auth_change`. Capability belongs in native spawn fields and the handoff, not in the task name.
 
-Choose the cheapest route likely to succeed. Complexity selects the model class; horizon selects reasoning effort and how much recent context to fork:
+Choose the cheapest route likely to succeed subject to the active task-family
+floor. The matrix below is a capability baseline for initial assignments and
+fallbacks, not a normative winner ranking. Do not derive a routing policy from
+AAII scores, prices, or this table alone. For comparable work, assign from an
+explicit candidate set, record propensity/seed and workflow shape, and let
+verified workflow measurements update the route. See
+[references/routing-learning.md](references/routing-learning.md).
+
+Complexity selects the initial model class; horizon selects initial reasoning
+effort and how much recent context to fork:
 
 | Route | Complexity / horizon | Preferred model | Effort | Availability fallback |
 |---|---|---|---|---|
@@ -101,9 +110,22 @@ Raise the affected task family's floor immediately when a lower-route result fai
 
 Within an active systemic incident, keep diagnostic and acceptance work at the proven elevated floor. Once uncertainty is removed, bounded implementation descendants may use a lower route when the invariant, ownership, and proof are explicit; the elevated reviewer still owns acceptance. Never infer that a lower route would have succeeded merely because a higher-route task completed in one shot.
 
-Consider a one-route cooldown only after three consecutive independently accepted assignments in the same task family. Count a success only when the first implementation passes focused checks and runtime proof, independent review finds no material issue, and neither root repair nor replacement is required. Use only the documented routes: `critical` -> `specialized` -> `complex` -> `standard`. This preserves the model while reducing reasoning wherever the table supports it, then crosses model class once. `broad` is selected by long context rather than elevated difficulty, so move it to `scoped` only when a new assignment is genuinely short-context; likewise move `standard` to `scoped` only after the work becomes independently Luna-eligible. `mechanical` and `scoped` are already baseline routes. Keep the reduced route on probation for three more clean assignments before adopting it as the new baseline. Any material rejection, root rescue, architecture correction, or attributable regression resets the clean-success count and immediately restores the last proven floor. Do not invent model/effort hybrids outside the routing table.
+Consider a one-route cooldown only after three consecutive independently accepted assignments in the same task family. Count a success only when the first implementation passes focused checks and runtime proof, independent review finds no material issue, and neither root repair nor replacement is required. The documented routes are capability fallbacks, not a fixed model/effort policy: a learned candidate may use any host-advertised model and effort after the assignment and evidence gates pass. Keep a reduced route on probation for three more clean assignments before adopting it as the new baseline. Any material rejection, root rescue, architecture correction, or attributable regression resets the clean-success count and immediately restores the last proven floor.
 
 Do not automatically cool down crash investigation, security or authentication, data corruption, migrations, irreversible operations, native window or engine lifecycle, accessibility-engine faults, or final adversarial acceptance. Their sparse samples and high defect cost do not justify downward experiments. Record the task family, current floor, evidence trigger, clean-success count, probation state, and last accepted route in the durable task packet.
+
+## Measurement and Learning
+
+Every experiment records the complete workflow, not just the selected model:
+task stratum, model and effort per stage, topology, decomposition, role plan,
+context inheritance and duplication, tokens, retries, failed loops, escalation,
+replacement, latency, and independently verified success. Join the observation
+to the runtime assignment and receipt by digest. Compare candidates only inside
+a comparable stratum after minimum-sample and reliability gates; minimize
+expected total workflow tokens per verified success, with money and latency
+secondary. A missing join, model completion claim, or guardian allow is not
+success evidence. The host owns assignment and persistence; Fourth Wall records
+evidence and curates policy revisions after independent review.
 
 ## Native Primitives
 

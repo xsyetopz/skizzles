@@ -12,6 +12,8 @@ import { isSpecificationContextAuthority } from "./context/specification.ts";
 import { isAgentlessExecutor } from "./execution/agentless.ts";
 import { isReActController } from "./execution/react.ts";
 import { isModelDispatchAuthority } from "./model-dispatch.ts";
+import { parseRoutingAssignment } from "./routing-contract.ts";
+import { isRoutingExperimentObserver } from "./routing-observer.ts";
 import type {
   AgentRuntimeConfig,
   AgentRuntimeRunRequest,
@@ -37,9 +39,10 @@ export function parseAgentRuntimeConfig(
       "modelDispatch",
       "skillReferences",
     ],
-    ["react"],
+    ["react", "routingObserver"],
   );
   const react = value?.["react"];
+  const routingObserver = value?.["routingObserver"];
   if (
     value === undefined ||
     !isAgentlessExecutor(value["agentless"]) ||
@@ -50,7 +53,9 @@ export function parseAgentRuntimeConfig(
     !isReflexionMemoryQuery(value["memoryQuery"]) ||
     !isReflexionMemoryRecorder(value["memoryRecorder"]) ||
     !isModelDispatchAuthority(value["modelDispatch"]) ||
-    (react !== undefined && !isReActController(react))
+    (react !== undefined && !isReActController(react)) ||
+    (routingObserver !== undefined &&
+      !isRoutingExperimentObserver(routingObserver))
   ) {
     return;
   }
@@ -66,6 +71,7 @@ export function parseAgentRuntimeConfig(
     memoryQuery: value["memoryQuery"],
     memoryRecorder: value["memoryRecorder"],
     modelDispatch: value["modelDispatch"],
+    ...(routingObserver === undefined ? {} : { routingObserver }),
     skillReferences,
   });
 }
@@ -88,12 +94,15 @@ export function parseAgentRuntimeRunRequest(
       "integrations",
       "supportingFragments",
     ],
-    ["mode"],
+    ["mode", "routingAssignment"],
   );
   const fragments = snapshotArray(value?.["supportingFragments"], 256);
   const targets = snapshotArray(value?.["targets"], 256);
   const integrations = snapshotArray(value?.["integrations"], 256);
   const mode = value?.["mode"] ?? "agentless";
+  const routingAssignment = parseRoutingAssignment(
+    value?.["routingAssignment"],
+  );
   if (
     value === undefined ||
     !validIdentifier(value["taskId"]) ||
@@ -105,6 +114,7 @@ export function parseAgentRuntimeRunRequest(
     targets.some((target) => !validIdentifier(target)) ||
     integrations === undefined ||
     !validIdentifier(value["validationProfile"]) ||
+    routingAssignment === undefined ||
     (mode !== "agentless" && mode !== "react")
   ) {
     return;
@@ -134,6 +144,7 @@ export function parseAgentRuntimeRunRequest(
     faultDeclarations: value["faultDeclarations"],
     integrations: Object.freeze([...integrations]),
     supportingFragments: Object.freeze(contextFragments),
+    routingAssignment,
     mode,
   });
 }

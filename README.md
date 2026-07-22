@@ -9,6 +9,8 @@ packages; `plugins/skizzles/` is generated output.
 ## Capabilities
 
 - reusable Codex skills and native Fourth Wall orchestration guidance;
+- evidence-driven routing experiments with independently verified workflow
+  measurements;
 - a permission-neutral command hook and bounded command supervisor;
 - privacy-preserving rollout usage analysis;
 - disposable Docker Compose Container Lab tooling;
@@ -38,7 +40,7 @@ on undeclared root packages.
 | `reflexion-memory` | Immutable cross-task failure memory with separate read and recording authorities |
 | `source-engineering` | TypeScript AST edits, source-policy validation, compiler evidence, and semantic previews |
 | `task-worktree` | Task-scoped Git isolation, sandboxed validation, diff ceilings, and approved commit synthesis |
-| `usage-analyzer` | Read-only rollout discovery, aggregation, and reporting |
+| `usage-analyzer` | Read-only rollout discovery, aggregate reporting, and evidence-driven routing experiments |
 | `verification-gate` | Mutation, property, modified-coverage, original-test, and independent-review acceptance |
 | `workspace-transaction` | Recoverable, lease-serialized publication of approved workspace file sets |
 | `workspace-policy` | Package, dependency, export, lockfile, and source-ownership enforcement |

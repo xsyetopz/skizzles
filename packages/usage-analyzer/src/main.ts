@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+// biome-ignore-all lint/style/useExportsLast: the executable entrypoint also exposes the package API.
 
 import { join } from "node:path";
 import process from "node:process";
@@ -31,3 +32,26 @@ if (import.meta.main) {
     process.exit(1);
   });
 }
+
+export type {
+  RoutingArmSummary,
+  RoutingAssignmentMethod,
+  RoutingAttempts,
+  RoutingCandidate,
+  RoutingObservation,
+  RoutingOverhead,
+  RoutingReasoningEffort,
+  RoutingRecommendation,
+  RoutingStage,
+  RoutingTaskProfile,
+  RoutingUsage,
+  RoutingVerification,
+} from "./routing/learner.ts";
+export {
+  parseRoutingCandidate,
+  parseRoutingObservation,
+  parseRoutingTaskProfile,
+  RoutingLearner,
+  routingStratum,
+  workflowTokens,
+} from "./routing/learner.ts";

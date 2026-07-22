@@ -916,6 +916,499 @@ function printJson(report) {
   console.log(JSON.stringify(report, null, 2));
 }
 
+// packages/usage-analyzer/src/routing/parsers.ts
+var freeze = (value) => Object.freeze(value);
+var digestPattern = /^sha256:[0-9a-f]{64}$/u;
+var finite = (value, name, integer = false) => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || integer && !Number.isSafeInteger(value))
+    throw new Error(`${name} must be a finite non-negative ${integer ? "integer" : "number"}`);
+  return value;
+};
+var text = (value, name) => {
+  if (typeof value !== "string" || value.length === 0 || value.length > 256 || /prompt|path|title|secret|credential|token/i.test(name))
+    throw new Error(`${name} must be a bounded privacy-safe string`);
+  return value;
+};
+var object = (value, name, allowed) => {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new Error(`${name} must be an object`);
+  const entries = Object.entries(value);
+  if (entries.some(([key]) => !allowed.includes(key)))
+    throw new Error(`${name} contains an unknown field`);
+  if (entries.some(([key]) => /prompt|path|title|secret|credential|password|raw.?data/i.test(key)))
+    throw new Error(`${name} contains privacy-sensitive raw data`);
+  return Object.fromEntries(entries);
+};
+function parseRoutingCandidate(value) {
+  const input = object(value, "candidate", [
+    "id",
+    "model",
+    "reasoningEffort",
+    "prior"
+  ]);
+  const id = text(input["id"], "candidate id");
+  const model = text(input["model"], "candidate model");
+  const reasoningEffort = parseEffort(input["reasoningEffort"]);
+  const priorInput = input["prior"];
+  let prior;
+  if (priorInput !== undefined) {
+    const p = object(priorInput, "candidate prior", ["aaii", "price"]);
+    const result = {};
+    if (p["aaii"] !== undefined)
+      result.aaii = finite(p["aaii"], "prior aaii");
+    if (p["price"] !== undefined)
+      result.price = finite(p["price"], "prior price");
+    prior = result;
+  }
+  return freeze({
+    id,
+    model,
+    reasoningEffort,
+    ...prior ? { prior: freeze(prior) } : {}
+  });
+}
+function parseRoutingTaskProfile(value) {
+  const input = object(value, "task profile", [
+    "family",
+    "complexity",
+    "risk",
+    "horizon",
+    "topology",
+    "decomposition",
+    "agentCount",
+    "parallelism",
+    "contextStrategy",
+    "roleIdentifiers"
+  ]);
+  const choose = (key, allowed) => {
+    const item = input[key];
+    if (typeof item !== "string")
+      throw new Error(`invalid task ${key}`);
+    const selected = allowed.find((candidate) => candidate === item);
+    if (selected === undefined)
+      throw new Error(`invalid task ${key}`);
+    return selected;
+  };
+  const complexity = choose("complexity", ["low", "medium", "high"]);
+  const risk = choose("risk", ["low", "medium", "high"]);
+  const horizon = choose("horizon", ["short", "medium", "long"]);
+  const topology = choose("topology", ["single-agent", "multi-agent"]);
+  const decomposition = input["decomposition"] === undefined ? "sequential" : choose("decomposition", ["sequential", "parallel", "hybrid"]);
+  const contextStrategy = input["contextStrategy"] === undefined ? "shared" : choose("contextStrategy", [
+    "minimal",
+    "shared",
+    "duplicated",
+    "isolated"
+  ]);
+  const agentCount = input["agentCount"] === undefined ? 1 : finite(input["agentCount"], "agentCount", true);
+  const parallelism = input["parallelism"] === undefined ? 1 : finite(input["parallelism"], "parallelism", true);
+  if (agentCount < 1 || parallelism < 1 || parallelism > agentCount)
+    throw new Error("invalid workflow agentCount/parallelism");
+  const roleIdentifiers = input["roleIdentifiers"] === undefined ? [] : input["roleIdentifiers"];
+  if (!Array.isArray(roleIdentifiers) || roleIdentifiers.length > 32 || roleIdentifiers.some((role) => typeof role !== "string" || role.length === 0 || role.length > 64))
+    throw new Error("invalid roleIdentifiers");
+  return freeze({
+    family: text(input["family"], "task family"),
+    complexity: complexity === "low" || complexity === "medium" ? complexity : "high",
+    risk: risk === "low" || risk === "medium" ? risk : "high",
+    horizon: horizon === "short" || horizon === "medium" ? horizon : "long",
+    topology,
+    decomposition,
+    agentCount,
+    parallelism,
+    contextStrategy: contextStrategy === "minimal" || contextStrategy === "shared" || contextStrategy === "duplicated" ? contextStrategy : "isolated",
+    roleIdentifiers: Object.freeze([...roleIdentifiers])
+  });
+}
+function parseUsage(value) {
+  const input = object(value, "usage", [
+    "inputTokens",
+    "cachedInputTokens",
+    "uncachedInputTokens",
+    "outputTokens",
+    "reasoningTokens"
+  ]);
+  const inputTokens = finite(input["inputTokens"], "inputTokens", true);
+  const cachedInputTokens = finite(input["cachedInputTokens"], "cachedInputTokens", true);
+  if (cachedInputTokens > inputTokens) {
+    throw new Error("cachedInputTokens cannot exceed inputTokens");
+  }
+  const uncachedInputTokens = input["uncachedInputTokens"] === undefined ? inputTokens - cachedInputTokens : finite(input["uncachedInputTokens"], "uncachedInputTokens", true);
+  if (uncachedInputTokens !== inputTokens - cachedInputTokens) {
+    throw new Error("uncachedInputTokens must equal inputTokens-cachedInputTokens");
+  }
+  return freeze({
+    inputTokens,
+    cachedInputTokens,
+    uncachedInputTokens,
+    outputTokens: finite(input["outputTokens"], "outputTokens", true),
+    reasoningTokens: finite(input["reasoningTokens"], "reasoningTokens", true)
+  });
+}
+function parseOverhead(value) {
+  const input = object(value, "overhead", [
+    "accounting",
+    "duplicatedContextTokens",
+    "repeatedRepositoryReadTokens",
+    "reprocessedToolResultTokens",
+    "coordinatorTokens",
+    "reviewTokens",
+    "correctionTokens",
+    "retryTokens",
+    "failedLoopTokens",
+    "escalationTokens",
+    "replacementTokens"
+  ]);
+  if (input["accounting"] !== "external-and-disjoint-from-model-usage-v1") {
+    throw new Error("overhead accounting must be disjoint from model usage");
+  }
+  return freeze({
+    accounting: "external-and-disjoint-from-model-usage-v1",
+    duplicatedContextTokens: finite(input["duplicatedContextTokens"], "duplicatedContextTokens", true),
+    repeatedRepositoryReadTokens: finite(input["repeatedRepositoryReadTokens"] ?? 0, "repeatedRepositoryReadTokens", true),
+    reprocessedToolResultTokens: finite(input["reprocessedToolResultTokens"] ?? 0, "reprocessedToolResultTokens", true),
+    coordinatorTokens: finite(input["coordinatorTokens"], "coordinatorTokens", true),
+    reviewTokens: finite(input["reviewTokens"] ?? 0, "reviewTokens", true),
+    correctionTokens: finite(input["correctionTokens"] ?? 0, "correctionTokens", true),
+    retryTokens: finite(input["retryTokens"], "retryTokens", true),
+    failedLoopTokens: finite(input["failedLoopTokens"], "failedLoopTokens", true),
+    escalationTokens: finite(input["escalationTokens"], "escalationTokens", true),
+    replacementTokens: finite(input["replacementTokens"], "replacementTokens", true)
+  });
+}
+function workflowTokens(usage, overhead) {
+  if (overhead.accounting !== "external-and-disjoint-from-model-usage-v1" || usage.uncachedInputTokens !== usage.inputTokens - usage.cachedInputTokens) {
+    throw new Error("invalid routing token ledger");
+  }
+  return usage.inputTokens + usage.outputTokens + usage.reasoningTokens + overhead.duplicatedContextTokens + overhead.repeatedRepositoryReadTokens + overhead.reprocessedToolResultTokens + overhead.coordinatorTokens + overhead.reviewTokens + overhead.correctionTokens + overhead.retryTokens + overhead.failedLoopTokens + overhead.escalationTokens + overhead.replacementTokens;
+}
+function parseStages(value) {
+  if (value === undefined)
+    throw new Error("stages are required");
+  if (!Array.isArray(value) || value.length > 64)
+    throw new Error("stages must be a bounded array");
+  return Object.freeze(value.map((item) => {
+    const input = object(item, "stage", [
+      "stage",
+      "role",
+      "model",
+      "reasoningEffort",
+      "dispatchRequestDigest",
+      "usage"
+    ]);
+    const effort = parseEffort(input["reasoningEffort"]);
+    return freeze({
+      stage: text(input["stage"], "stage identifier"),
+      role: text(input["role"], "stage role"),
+      model: text(input["model"], "stage model"),
+      reasoningEffort: effort,
+      dispatchRequestDigest: parseDigest(input["dispatchRequestDigest"]),
+      usage: parseUsage(input["usage"])
+    });
+  }));
+}
+function parseEffort(value) {
+  const effort = value ?? "medium";
+  if (effort === "none" || effort === "minimal" || effort === "low" || effort === "medium" || effort === "high" || effort === "xhigh" || effort === "max" || effort === "ultra") {
+    return effort;
+  }
+  throw new Error("invalid reasoningEffort");
+}
+function parseAttempts(value) {
+  if (value === undefined)
+    throw new Error("attempts are required");
+  const input = object(value, "attempts", [
+    "retries",
+    "failedLoops",
+    "escalations",
+    "replacements",
+    "followUps",
+    "latencyMs"
+  ]);
+  return freeze({
+    retries: finite(input["retries"] ?? 0, "retries", true),
+    failedLoops: finite(input["failedLoops"] ?? 0, "failedLoops", true),
+    escalations: finite(input["escalations"] ?? 0, "escalations", true),
+    replacements: finite(input["replacements"] ?? 0, "replacements", true),
+    followUps: finite(input["followUps"] ?? 0, "followUps", true),
+    latencyMs: finite(input["latencyMs"] ?? 0, "latencyMs")
+  });
+}
+function parseRoutingObservation(value) {
+  const input = object(value, "observation", [
+    "id",
+    "taskId",
+    "runId",
+    "runtimeReceiptDigest",
+    "dispatchRequestDigests",
+    "candidateId",
+    "task",
+    "usage",
+    "overhead",
+    "stages",
+    "attempts",
+    "firstPassCompletion",
+    "terminalCompletion",
+    "verification",
+    "independentlyVerified",
+    "assignment"
+  ]);
+  const assignment = object(input["assignment"], "assignment", [
+    "candidateSetDigest",
+    "candidateSet",
+    "assignmentMethod",
+    "experimentId",
+    "policyRevision",
+    "safetyFloor",
+    "eligibilityDigest",
+    "propensity",
+    "seed"
+  ]);
+  if (typeof input["independentlyVerified"] !== "boolean")
+    throw new Error("independentlyVerified must be boolean");
+  const propensity = assignment["propensity"];
+  if (typeof propensity !== "number" || !Number.isFinite(propensity) || propensity <= 0 || propensity > 1)
+    throw new Error("propensity must be in (0,1]");
+  const assignmentMethod = parseAssignmentMethod(assignment["assignmentMethod"]);
+  const verification = parseVerification(input["verification"]);
+  const candidateId = text(input["candidateId"], "candidate id");
+  const candidateSet = parseIdentifierList(assignment["candidateSet"], "candidate set");
+  if (!candidateSet.includes(candidateId)) {
+    throw new Error("candidate must belong to the assigned candidate set");
+  }
+  const usage = parseUsage(input["usage"]);
+  const stages = parseStages(input["stages"]);
+  const dispatchRequestDigests = parseDigestList(input["dispatchRequestDigests"]);
+  if (stages.some((stage) => !dispatchRequestDigests.includes(stage.dispatchRequestDigest))) {
+    throw new Error("stage dispatch digests must join the observation");
+  }
+  if (!usageMatchesStages(usage, stages)) {
+    throw new Error("stage usage must reconcile with observation usage");
+  }
+  const overhead = parseOverhead(input["overhead"]);
+  const attempts = parseAttempts(input["attempts"]);
+  return freeze({
+    id: text(input["id"], "observation id"),
+    taskId: text(input["taskId"], "task id"),
+    runId: text(input["runId"], "run id"),
+    runtimeReceiptDigest: parseDigest(input["runtimeReceiptDigest"]),
+    dispatchRequestDigests,
+    candidateId,
+    task: parseRoutingTaskProfile(input["task"]),
+    usage,
+    overhead,
+    stages,
+    attempts,
+    firstPassCompletion: booleanField(input, "firstPassCompletion"),
+    verification,
+    terminalCompletion: booleanField(input, "terminalCompletion"),
+    independentlyVerified: input["independentlyVerified"],
+    assignment: freeze({
+      candidateSetDigest: parseDigest(assignment["candidateSetDigest"]),
+      candidateSet,
+      assignmentMethod,
+      experimentId: text(assignment["experimentId"], "experiment id"),
+      policyRevision: text(assignment["policyRevision"], "policy revision"),
+      safetyFloor: text(assignment["safetyFloor"], "safety floor"),
+      eligibilityDigest: parseDigest(assignment["eligibilityDigest"]),
+      propensity,
+      ...assignment["seed"] === undefined ? {} : { seed: text(assignment["seed"], "assignment seed") }
+    })
+  });
+}
+function usageMatchesStages(usage, stages) {
+  const total = stages.reduce((sum, stage) => ({
+    inputTokens: sum.inputTokens + stage.usage.inputTokens,
+    cachedInputTokens: sum.cachedInputTokens + stage.usage.cachedInputTokens,
+    uncachedInputTokens: sum.uncachedInputTokens + stage.usage.uncachedInputTokens,
+    outputTokens: sum.outputTokens + stage.usage.outputTokens,
+    reasoningTokens: sum.reasoningTokens + stage.usage.reasoningTokens
+  }), {
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    uncachedInputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0
+  });
+  return total.inputTokens === usage.inputTokens && total.cachedInputTokens === usage.cachedInputTokens && total.uncachedInputTokens === usage.uncachedInputTokens && total.outputTokens === usage.outputTokens && total.reasoningTokens === usage.reasoningTokens;
+}
+function parseAssignmentMethod(value) {
+  const method = value ?? "observational";
+  if (method === "prior" || method === "randomized" || method === "exploration" || method === "exploitation" || method === "manual" || method === "observational") {
+    return method;
+  }
+  throw new Error("invalid assignmentMethod");
+}
+function parseVerification(value) {
+  if (value === undefined)
+    throw new Error("verification evidence is required");
+  const input = object(value, "verification", [
+    "deterministicChecks",
+    "runtimeSmoke",
+    "independentReview",
+    "rootRescue"
+  ]);
+  const fields = [
+    "deterministicChecks",
+    "runtimeSmoke",
+    "independentReview",
+    "rootRescue"
+  ];
+  if (fields.some((field) => typeof input[field] !== "boolean")) {
+    throw new Error("verification stages must be boolean");
+  }
+  return freeze({
+    deterministicChecks: booleanField(input, "deterministicChecks"),
+    runtimeSmoke: booleanField(input, "runtimeSmoke"),
+    independentReview: booleanField(input, "independentReview"),
+    rootRescue: booleanField(input, "rootRescue")
+  });
+}
+function booleanField(input, key) {
+  const value = input[key];
+  if (typeof value !== "boolean") {
+    throw new Error("verification stages must be boolean");
+  }
+  return value;
+}
+function parseDigest(value) {
+  if (typeof value !== "string" || !digestPattern.test(value)) {
+    throw new Error("candidate set digest must be a SHA-256 digest");
+  }
+  return value;
+}
+function parseDigestList(value) {
+  if (!Array.isArray(value) || value.length > 128) {
+    throw new Error("dispatch digests must be a bounded array");
+  }
+  return Object.freeze(value.map((item) => parseDigest(item)));
+}
+function parseIdentifierList(value, name) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 128) {
+    throw new Error(`${name} must be a bounded non-empty array`);
+  }
+  const identifiers = value.map((item) => text(item, `${name} identifier`));
+  if (new Set(identifiers).size !== identifiers.length) {
+    throw new Error(`${name} identifiers must be unique`);
+  }
+  return Object.freeze(identifiers);
+}
+
+// packages/usage-analyzer/src/routing/learner.ts
+var wilsonZ = 1.96;
+function routingStratum(task) {
+  return [
+    task.family,
+    task.complexity,
+    task.risk,
+    task.horizon,
+    task.topology,
+    task.decomposition ?? "sequential",
+    String(task.agentCount ?? 1),
+    String(task.parallelism ?? 1),
+    task.contextStrategy ?? "shared",
+    [...task.roleIdentifiers ?? []].sort().join(",")
+  ].join("|");
+}
+
+class RoutingLearner {
+  #candidates;
+  #observations = [];
+  #minimumSamples;
+  #minimumVerificationRate;
+  constructor(candidates, options = {}) {
+    if (candidates.length === 0)
+      throw new Error("at least one candidate is required");
+    const map = new Map;
+    for (const candidate of candidates) {
+      const parsed = parseRoutingCandidate(candidate);
+      if (map.has(parsed.id))
+        throw new Error("candidate ids must be unique");
+      map.set(parsed.id, parsed);
+    }
+    this.#candidates = map;
+    this.#minimumSamples = options.minimumSamples ?? 3;
+    this.#minimumVerificationRate = options.minimumVerificationRate ?? 0.8;
+    if (!Number.isInteger(this.#minimumSamples) || this.#minimumSamples < 1)
+      throw new Error("minimumSamples must be a positive integer");
+    if (!Number.isFinite(this.#minimumVerificationRate) || this.#minimumVerificationRate < 0 || this.#minimumVerificationRate > 1)
+      throw new Error("minimumVerificationRate must be between 0 and 1");
+  }
+  addObservation(value) {
+    const observation = parseRoutingObservation(value);
+    if (!this.#candidates.has(observation.candidateId))
+      throw new Error("observation candidate is not eligible");
+    if (this.#observations.some((item) => item.id === observation.id))
+      throw new Error("observation ids must be unique");
+    if (this.#observations.some((item) => item.taskId === observation.taskId && item.runId === observation.runId))
+      throw new Error("task/run observations must be unique");
+    this.#observations.push(observation);
+  }
+  summaries(task) {
+    const strata = routingStratum(task);
+    return [...this.#candidates.values()].sort((a, b) => a.id.localeCompare(b.id)).map((candidate) => {
+      const comparable = this.#observations.filter((item) => routingStratum(item.task) === strata && isCausalAssignment(item.assignment.assignmentMethod));
+      const rows = this.#observations.filter((item) => item.candidateId === candidate.id && routingStratum(item.task) === strata && isCausalAssignment(item.assignment.assignmentMethod));
+      const successes = rows.filter((item) => isVerified(item)).length;
+      const workflow = rows.reduce((sum, item) => sum + workflowTokens(item.usage, item.overhead), 0);
+      const verificationRate = rows.length ? successes / rows.length : 0;
+      const verificationLowerBound = wilsonLowerBound(successes, rows.length);
+      const attempts = rows.flatMap((item) => item.attempts === undefined ? [] : [item.attempts]);
+      const coverage = comparable.length === 0 ? 0 : comparable.filter((item) => item.assignment.candidateSet.includes(candidate.id)).length / comparable.length;
+      return freeze({
+        candidate,
+        strata,
+        samples: rows.length,
+        successes,
+        failures: rows.length - successes,
+        firstPassCompletions: rows.filter((item) => item.firstPassCompletion).length,
+        verificationRate,
+        verificationLowerBound,
+        workflowTokens: workflow,
+        expectedTokensPerSuccess: successes ? workflow / successes : null,
+        candidateSetCoverage: coverage,
+        meanLatencyMs: attempts.length === 0 ? 0 : attempts.reduce((sum, item) => sum + item.latencyMs, 0) / attempts.length,
+        totalRetries: attempts.reduce((sum, item) => sum + item.retries, 0),
+        totalEscalations: attempts.reduce((sum, item) => sum + item.escalations, 0),
+        totalFollowUps: attempts.reduce((sum, item) => sum + item.followUps, 0)
+      });
+    });
+  }
+  recommend(task) {
+    const eligible = this.summaries(task).filter((summary) => summary.samples >= this.#minimumSamples && summary.successes > 0 && summary.verificationLowerBound >= this.#minimumVerificationRate);
+    const best = eligible.sort((a, b) => (a.expectedTokensPerSuccess ?? Number.POSITIVE_INFINITY) - (b.expectedTokensPerSuccess ?? Number.POSITIVE_INFINITY) || a.meanLatencyMs - b.meanLatencyMs || (a.candidate.prior?.price ?? Number.POSITIVE_INFINITY) - (b.candidate.prior?.price ?? Number.POSITIVE_INFINITY) || a.candidate.id.localeCompare(b.candidate.id))[0];
+    return best ? freeze({
+      candidate: best.candidate,
+      strata: best.strata,
+      reason: "empirical",
+      evidence: freeze({
+        samples: best.samples,
+        successes: best.successes,
+        candidateSetCoverage: best.candidateSetCoverage,
+        verificationLowerBound: best.verificationLowerBound
+      })
+    }) : undefined;
+  }
+}
+function wilsonLowerBound(successes, samples) {
+  if (samples === 0)
+    return 0;
+  const proportion = successes / samples;
+  const denominator = 1 + wilsonZ * wilsonZ / samples;
+  const center = proportion + wilsonZ * wilsonZ / (2 * samples);
+  const spread = wilsonZ * Math.sqrt((proportion * (1 - proportion) + wilsonZ * wilsonZ / (4 * samples)) / samples);
+  return Math.max(0, (center - spread) / denominator);
+}
+function isVerified(item) {
+  if (!item.terminalCompletion || !item.independentlyVerified)
+    return false;
+  const verification = item.verification;
+  return verification.deterministicChecks && verification.runtimeSmoke && verification.independentReview && !verification.rootRescue;
+}
+function isCausalAssignment(method) {
+  return method === "randomized" || method === "exploration";
+}
+
 // packages/usage-analyzer/src/main.ts
 async function run(argv, environment) {
   const options = parseArgs(argv);
@@ -935,5 +1428,11 @@ if (import.meta.main) {
   });
 }
 export {
-  run
+  workflowTokens,
+  run,
+  routingStratum,
+  parseRoutingTaskProfile,
+  parseRoutingObservation,
+  parseRoutingCandidate,
+  RoutingLearner
 };

@@ -17,3 +17,18 @@ Append only evidence-backed candidates from completed orchestration work. This i
 - Evidence: the CSR dispatch campaign reached independent fresh-stack and platform acceptance only after task-family escalation; owner review compared GPT-5.6 coding, specialized, and 256K-512K long-context results with model pricing and accepted the revised routing table.
 - Confidence: high
 - Proposed change: raise every tier's reasoning floor, treat Terra as long-context insurance, escalate promptly by risk signature, cool down one dimension only after two three-success acceptance windows, and keep durable routing state in a compact `/tmp` task packet.
+
+## 2026-07-22 - Causal routing evidence boundary
+- Status: promoted
+- Scope: routing | context | proof
+- Observation: rollout aggregates expose model/effort token totals but do not
+  identify verified task success, assignment propensity, context duplication,
+  retries, escalation, replacement, or a causal receipt join.
+- Evidence: `packages/usage-analyzer/src/rollout/parser.ts` records effective
+  model/effort and token deltas; `packages/orchestrator/src/paradigms/runtime-contract.ts`
+  binds dispatch and engineering evidence but had no experiment assignment.
+- Confidence: high
+- Proposed change: require host-owned candidate assignments and digest-bound
+  pre-approval observations, then learn expected workflow tokens per independently
+  verified success inside comparable strata. Treat AAII and price as priors,
+  not policy.

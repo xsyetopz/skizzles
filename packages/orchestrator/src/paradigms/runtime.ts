@@ -17,6 +17,10 @@ import type {
   ReActAdvanceResult,
 } from "./execution/contract.ts";
 import { createModelDispatchRequest } from "./model-dispatch.ts";
+import {
+  createRoutingExperimentEvent,
+  type RoutingExperimentObserver,
+} from "./routing-observer.ts";
 import type {
   AgentRuntime,
   AgentRuntimeConfig,
@@ -234,7 +238,13 @@ async function run(
       prepared.review.verificationGateReceipt.receiptDigest,
   });
   const completedEvidence = { ...evidence, engineeringEvidenceDigest };
-  const receipt = issueReceipt(request, completedEvidence, null, null);
+  const routing = await observeRouting(
+    config,
+    request,
+    completedEvidence,
+    null,
+  );
+  const receipt = issueReceipt(request, completedEvidence, null, null, routing);
   return Object.freeze({
     status: "awaiting-approval" as const,
     review: prepared.review,
@@ -258,6 +268,7 @@ async function runAgentless(
     memorySnapshotDigest: snapshot.snapshotDigest,
     context: payload,
     observation: null,
+    routingAssignment: request.routingAssignment ?? null,
   });
   let task: unknown;
   try {
@@ -331,6 +342,7 @@ async function runReAct(
       memorySnapshotDigest: snapshot.snapshotDigest,
       context: payload,
       observation,
+      routingAssignment: request.routingAssignment ?? null,
     });
     dispatchDigests.push(dispatch.requestDigest);
     let turn: unknown;
@@ -473,8 +485,9 @@ async function failed(
   evidence: RunEvidence,
   recordFailure: boolean,
 ): Promise<AgentRuntimeRunResult> {
+  const routing = await observeRouting(config, request, evidence, code);
   if (!recordFailure) {
-    const receipt = issueReceipt(request, evidence, code, null);
+    const receipt = issueReceipt(request, evidence, code, null, routing);
     return Object.freeze({ status: "failed" as const, code, receipt });
   }
   const baseDigest = digestValue({
@@ -507,10 +520,16 @@ async function failed(
   } catch {
     persistence = null;
   }
-  const receipt = issueReceipt(request, evidence, code, {
-    persistence,
-    status,
-  });
+  const receipt = issueReceipt(
+    request,
+    evidence,
+    code,
+    {
+      persistence,
+      status,
+    },
+    routing,
+  );
   return Object.freeze({ status: "failed" as const, code, receipt });
 }
 
@@ -522,6 +541,7 @@ function issueReceipt(
     persistence: ReflexionPersistenceReceipt | null;
     status: "recorded" | "recording-failed";
   }> | null,
+  routing: RoutingObservationResult,
 ): AgentRuntimeReceipt {
   const body = Object.freeze({
     schema: "skizzles.orchestrator/agent-runtime-receipt/v1" as const,
@@ -535,6 +555,11 @@ function issueReceipt(
       evidence.payload?.prioritization.receiptDigest ?? null,
     compressionReceiptDigest:
       evidence.payload?.compression?.receiptDigest ?? null,
+    routingAssignmentDigest: request.routingAssignment
+      ? request.routingAssignment.assignmentDigest
+      : null,
+    routingObservationDigest: routing.digest,
+    routingObservationStatus: routing.status,
     dispatchRequestDigests: Object.freeze([...evidence.dispatchDigests]),
     executionId: evidence.executionId,
     outcome:
@@ -546,6 +571,49 @@ function issueReceipt(
     engineeringEvidenceDigest: evidence.engineeringEvidenceDigest,
   });
   return Object.freeze({ ...body, receiptDigest: digestValue(body) });
+}
+
+interface RoutingObservationResult {
+  readonly status: "not-configured" | "recorded" | "failed";
+  readonly digest: Digest | null;
+}
+
+async function observeRouting(
+  config: AgentRuntimeConfig,
+  request: AgentRuntimeRunRequest,
+  evidence: RunEvidence,
+  failureCode: string | null,
+): Promise<RoutingObservationResult> {
+  const observer: RoutingExperimentObserver | undefined =
+    config.routingObserver;
+  if (observer === undefined) {
+    return Object.freeze({ status: "not-configured" as const, digest: null });
+  }
+  const event = createRoutingExperimentEvent({
+    taskId: request.taskId,
+    runId: request.runId,
+    objectiveDigest: request.objectiveDigest,
+    mode: request.mode ?? "agentless",
+    assignment: request.routingAssignment ?? null,
+    dispatchRequestDigests: evidence.dispatchDigests,
+    executionId: evidence.executionId,
+    context: evidence.payload,
+    outcome: failureCode === null ? "awaiting-approval" : "failed",
+    failureCode,
+    engineeringEvidenceDigest: evidence.engineeringEvidenceDigest,
+  });
+  try {
+    await observer.record(event);
+    return Object.freeze({
+      status: "recorded" as const,
+      digest: event.eventDigest,
+    });
+  } catch {
+    return Object.freeze({
+      status: "failed" as const,
+      digest: event.eventDigest,
+    });
+  }
 }
 
 function evidenceMaterial(evidence: RunEvidence) {

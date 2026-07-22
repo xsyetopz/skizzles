@@ -24,6 +24,7 @@ rewriting its rationale.
 | [0014](0014-task-worktree-boundary.md) | Accepted | Isolate each task in an authenticated Git worktree with exact write scope, sandboxed commands, bounded diffs, and one approved commit. |
 | [0015](0015-verification-gate.md) | Accepted | Gate publication on exact mutation, property, modified-coverage, original-test, security-review, specification-lock, and task-context-reset evidence. |
 | [0016](0016-academic-paradigm-routing.md) | Accepted | Compose bounded academic agent paradigms through one host-owned execution and context-routing boundary. |
+| [0017](0017-evidence-driven-routing.md) | Accepted | Learn routing from digest-bound, independently verified workflow evidence; keep assignment and endpoints host-owned. |
 
 ## Record contract
 

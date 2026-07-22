@@ -173,6 +173,29 @@ export {
   createModelDispatchAuthority,
   isModelDispatchAuthority,
 } from "./paradigms/model-dispatch.ts";
+export type {
+  RoutingAssignment,
+  RoutingAssignmentMethod,
+  RoutingTopology,
+  RoutingWorkflowShape,
+} from "./paradigms/routing-contract.ts";
+export {
+  createRoutingAssignment,
+  isRoutingAssignment,
+  parseRoutingAssignment,
+} from "./paradigms/routing-contract.ts";
+export type {
+  RoutingExperimentEvent,
+  RoutingExperimentMode,
+  RoutingExperimentObserver,
+  RoutingExperimentObserverCreationResult,
+} from "./paradigms/routing-observer.ts";
+export {
+  createRoutingExperimentEvent,
+  createRoutingExperimentObserver,
+  isRoutingExperimentEvent,
+  isRoutingExperimentObserver,
+} from "./paradigms/routing-observer.ts";
 export { createAgentRuntime, isAgentRuntime } from "./paradigms/runtime.ts";
 export type {
   AgentRuntime,
