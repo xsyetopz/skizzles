@@ -1,6 +1,5 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, test } from "bun:test";
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
+
 import { parse as parseYaml } from "yaml";
 import type { ComposeModel } from "../../src/compose/contract.ts";
 import {
@@ -13,7 +12,7 @@ import { parseLabConfig } from "../../src/config.ts";
 const repoRoot = "/tmp/example-repository";
 
 describe("Compose generation", () => {
-  test("builds one internal service for image and dockerfile shorthand", () => {
+  it("builds one internal service for image and dockerfile shorthand", () => {
     const imageConfig = parseLabConfig(
       `
 image: { name: node:24, service: dev }
@@ -68,7 +67,7 @@ dockerfile: { path: Dockerfile.dev, context: ., service: dev }
     });
   });
 
-  test("generates managed overrides across normalized resources", () => {
+  it("generates managed overrides across normalized resources", () => {
     const config = parseLabConfig(
       `
 compose: { files: [compose.yaml], command_service: api }
@@ -120,7 +119,7 @@ environment: [TERM]
     expect(override.networks.shared).toBeUndefined();
   });
 
-  test("requires the configured command service", () => {
+  it("requires the configured command service", () => {
     const config = parseLabConfig(
       "image: { name: node:24, service: dev }",
       repoRoot,
@@ -139,7 +138,7 @@ environment: [TERM]
     ).toThrow("command service is absent from normalized Compose model: dev");
   });
 
-  test("requires each declared port service in the normalized model", () => {
+  it("requires each declared port service in the normalized model", () => {
     const config = parseLabConfig(
       `
 image: { name: node:24, service: dev }
@@ -162,7 +161,7 @@ ports:
     ).toThrow("declared port web references absent service: missing");
   });
 
-  test("rejects a declared target already published by project Compose", () => {
+  it("rejects a declared target already published by project Compose", () => {
     const config = parseLabConfig(
       `
 image: { name: node:24, service: dev }
@@ -187,7 +186,7 @@ ports:
     ).toThrow("declared port web overlaps a project publication for dev:8080");
   });
 
-  test("preserves project directory and source Compose file order", () => {
+  it("preserves project directory and source Compose file order", () => {
     const config = parseLabConfig(
       `
 compose:

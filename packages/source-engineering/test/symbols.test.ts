@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { describe, expect, it } from "bun:test";
 import { digestText } from "../src/digest.ts";
 import {
@@ -316,7 +315,8 @@ function captureAuthority(value: unknown): TypeScriptSymbolIndexAuthorityPort {
 function indexOf(
   result: Awaited<ReturnType<typeof buildLocalTypeScriptSymbolIndex>>,
 ): LocalTypeScriptSymbolIndex {
-  if (result.status !== "indexed")
+  if (result.status !== "indexed") {
     throw new Error(`expected index, received ${result.code}`);
+  }
   return result.index;
 }

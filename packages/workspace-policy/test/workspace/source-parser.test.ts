@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -181,10 +180,10 @@ describe("source parser lifecycle", () => {
       'const dynamic = await import("node:os");',
       "void dynamic.tmpdir;",
       "void process.env.TMPDIR;",
-      // biome-ignore lint/security/noSecrets: Synthetic source text exercises a generated disposable path, not a credential.
-      "const preview = workspace.path(`preview-$" + "{crypto.randomUUID()}`);",
+
+      "const preview = workspace.path(`preview-${crypto.randomUUID()}`);",
       "rmSync(preview, { recursive: true, force: true });",
-      "export const interpolated = `/tmp/run-$" + "{crypto.randomUUID()}`;",
+      "export const interpolated = `/tmp/run-${crypto.randomUUID()}`;",
       "",
     ].join("\n");
     await writeFile(path, source);

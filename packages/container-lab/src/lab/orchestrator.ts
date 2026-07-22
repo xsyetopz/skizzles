@@ -166,11 +166,8 @@ export class ContainerLabService {
   async run(
     id: string,
     argv: string[],
-    // biome-ignore lint/style/useDefaultParameterLast: Parameter order is part of the existing public call contract.
     cwd = ".",
-    // biome-ignore lint/style/useDefaultParameterLast: Parameter order is part of the existing public call contract.
     environment: Record<string, string> = {},
-    // biome-ignore lint/style/useDefaultParameterLast: Parameter order is part of the existing public call contract.
     timeoutSeconds = 1800,
     output: RunOutput,
     signal?: AbortSignal,
@@ -219,8 +216,8 @@ export class ContainerLabService {
     await this.reconcileOwner();
     return await withFileLock(
       this.activityLock(id),
-      async () => {
-        return await withFileLock(
+      async () =>
+        await withFileLock(
           this.labLock(id),
           async () => {
             const lab = await this.requireReady(id);
@@ -242,8 +239,7 @@ export class ContainerLabService {
             return publicSyncPreview(preview, id, direction);
           },
           { attempts: 600, delayMs: 50 },
-        );
-      },
+        ),
       { attempts: 600, delayMs: 50 },
     );
   }
@@ -252,8 +248,8 @@ export class ContainerLabService {
     await this.reconcileOwner();
     return await withFileLock(
       this.activityLock(id),
-      async () => {
-        return await withFileLock(
+      async () =>
+        await withFileLock(
           this.labLock(id),
           async () => {
             const lab = await this.requireReady(id);
@@ -276,8 +272,7 @@ export class ContainerLabService {
             return { labId: id, direction, applied: result.applied };
           },
           { attempts: 600, delayMs: 50 },
-        );
-      },
+        ),
       { attempts: 600, delayMs: 50 },
     );
   }
@@ -356,5 +351,5 @@ function compactLabStatus(lab: LabMetadata, stack: unknown): unknown {
 }
 
 function publicError(value: string): string {
-  return redactPublicText(value, 2_000, 6);
+  return redactPublicText(value, 2000, 6);
 }

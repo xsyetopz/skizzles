@@ -1,5 +1,3 @@
-// biome-ignore lint/style/noExcessiveLinesPerFile: this is the end-to-end Phase 7 causal integration matrix.
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import {
   createReflexionMemoryQuery,

@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   chmod,
@@ -352,7 +351,9 @@ function crashTransaction(destination: string, point: string): number {
     import.meta.dir,
     "../../../src/plugin/destination/transaction.ts",
   );
-  const source = `import { replaceDirectoryTransaction } from ${JSON.stringify(module)};\nawait replaceDirectoryTransaction(process.env.DEST, async (root) => { await Bun.write(root + "/new", "new\\n"); if (process.env.POINT === "construction") process.exit(72); }, { checkpoint: (point) => { if (point === process.env.POINT) process.exit(71); } });`;
+  const source = `import { replaceDirectoryTransaction } from ${JSON.stringify(
+    module,
+  )};\nawait replaceDirectoryTransaction(process.env.DEST, async (root) => { await Bun.write(root + "/new", "new\\n"); if (process.env.POINT === "construction") process.exit(72); }, { checkpoint: (point) => { if (point === process.env.POINT) process.exit(71); } });`;
   return Bun.spawnSync([process.execPath, "-e", source], {
     env: { ...process.env, DEST: destination, POINT: point },
     stderr: "pipe",

@@ -1,4 +1,3 @@
-// biome-ignore lint/style/noExcessiveLinesPerFile: this module is the single causal composition boundary for all Phase 7 capabilities.
 import type {
   ReflexionMemorySnapshot,
   ReflexionPersistenceReceipt,
@@ -290,7 +289,6 @@ async function runAgentless(
   }
   let session = started.session;
   for (let transition = 0; transition < 3; transition += 1) {
-    // biome-ignore lint/performance/noAwaitInLoops: Agentless stages are causally sequential.
     const advanced = await config.agentless.advance({ session });
     if (advanced.status === "advanced") {
       session = advanced.session;
@@ -347,7 +345,6 @@ async function runReAct(
     dispatchDigests.push(dispatch.requestDigest);
     let turn: unknown;
     try {
-      // biome-ignore lint/performance/noAwaitInLoops: each observation defines the next legal ReAct turn.
       turn = await config.modelDispatch.dispatch(dispatch);
     } catch {
       return executionFailure("MODEL_DISPATCH_FAILED", dispatchDigests);

@@ -282,7 +282,6 @@ export function restorePromptPolicy(
   );
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: State-machine branches are kept together so every preflight precedes mutation.
 async function restorePromptPolicyUnlocked(
   options: RestorePromptPolicyOptions,
 ): Promise<PromptPolicyOutcome> {

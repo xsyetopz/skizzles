@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, test } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -17,7 +16,7 @@ class MockDocker implements DockerRunner {
   spawnCalls: string[][] = [];
   spawnOptions: Array<DockerSpawnOptions | undefined> = [];
   responses: CommandResult[] = [];
-  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
+
   async run(args: string[], _options?: RunOptions): Promise<CommandResult> {
     this.calls.push(args);
     return this.responses.shift() ?? result("");
@@ -33,7 +32,7 @@ class MockDocker implements DockerRunner {
 }
 
 describe("bounded Docker status output", () => {
-  test("service logs enforce both line and hard UTF-8 byte caps", async () => {
+  it("service logs enforce both line and hard UTF-8 byte caps", async () => {
     const docker = new MockDocker();
     docker.responses.push(
       result('{"services":{"dev":{}}}'),
@@ -55,7 +54,7 @@ describe("bounded Docker status output", () => {
     ).toBeLessThan(16 * 1024);
   });
 
-  test("stack status reduces Compose output to purpose-built service summaries", async () => {
+  it("stack status reduces Compose output to purpose-built service summaries", async () => {
     const docker = new MockDocker();
     docker.responses.push(
       result(
@@ -80,7 +79,7 @@ describe("bounded Docker status output", () => {
     });
   });
 
-  test("stack status failures redact internal paths, owner hashes, projects, and image bookkeeping", async () => {
+  it("stack status failures redact internal paths, owner hashes, projects, and image bookkeeping", async () => {
     const docker = new MockDocker();
     docker.responses.push(
       resultWithError(
@@ -137,7 +136,7 @@ function lab(): LabMetadata {
     name: "lab",
     owner: "thread/exact",
     ownerKey: "a".repeat(64),
-    // biome-ignore lint/security/noSecrets: This fixed test/schema token is not a credential.
+
     repoHash: "123456789abc",
     composeProject: "ccl-project",
     state: "failed",

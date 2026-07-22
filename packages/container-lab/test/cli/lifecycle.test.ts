@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   createCliFixtureScope,
@@ -21,7 +20,7 @@ const { attachedFixture, spawnRun, trackTemporaryPath } = fixtures;
 afterEach(fixtures.cleanup);
 
 describe("CLI attached process lifecycle", () => {
-  test("run streams before exit and propagates the attached exit code without a JSON footer", async () => {
+  it("run streams before exit and propagates the attached exit code without a JSON footer", async () => {
     const fixture = await attachedFixture();
     const child = spawnRun(fixture, { FAKE_EXIT: "23" });
     const reader = child.stdout.getReader();
@@ -32,7 +31,7 @@ describe("CLI attached process lifecycle", () => {
     expect(await new Response(child.stderr).text()).toContain("early-error");
   });
 
-  test("SIGINT performs exact attached process-group cleanup and exits 130", async () => {
+  it("SIGINT performs exact attached process-group cleanup and exits 130", async () => {
     const fixture = await attachedFixture();
     const child = spawnRun(fixture);
     const reader = child.stdout.getReader();
@@ -48,7 +47,7 @@ describe("CLI attached process lifecycle", () => {
     expect(await waitForProcessExit(descendant)).toBe(true);
   });
 
-  test("SIGTERM performs exact attached process-group cleanup and exits 143", async () => {
+  it("SIGTERM performs exact attached process-group cleanup and exits 143", async () => {
     const fixture = await attachedFixture();
     const child = spawnRun(fixture);
     const reader = child.stdout.getReader();
@@ -64,7 +63,7 @@ describe("CLI attached process lifecycle", () => {
     expect(await waitForProcessExit(descendant)).toBe(true);
   });
 
-  test("timeout performs exact attached process-group cleanup and exits 124", async () => {
+  it("timeout performs exact attached process-group cleanup and exits 124", async () => {
     const fixture = await attachedFixture();
     const child = spawnRun(fixture, {}, 1);
     const reader = child.stdout.getReader();
@@ -79,7 +78,7 @@ describe("CLI attached process lifecycle", () => {
     expect(await waitForProcessExit(descendant)).toBe(true);
   });
 
-  test("fixture cleanup rejects a current-process PID marker without signaling it or deleting evidence", async () => {
+  it("fixture cleanup rejects a current-process PID marker without signaling it or deleting evidence", async () => {
     const isolated = createCliFixtureScope();
     const fixture = await isolated.attachedFixture();
     trackTemporaryPath(fixture.root);
@@ -102,7 +101,7 @@ describe("CLI attached process lifecycle", () => {
     expect(await Bun.file(fixture.leaderIdentityPath).exists()).toBe(true);
   });
 
-  test("fixture cleanup reaps its exact fake process group after a caught assertion path", async () => {
+  it("fixture cleanup reaps its exact fake process group after a caught assertion path", async () => {
     const isolated = createCliFixtureScope();
     const fixture = await isolated.attachedFixture();
     trackTemporaryPath(fixture.root);
@@ -130,7 +129,7 @@ describe("CLI attached process lifecycle", () => {
     });
   });
 
-  test("SIGINT cancels promptly while waiting for another attached activity", async () => {
+  it("SIGINT cancels promptly while waiting for another attached activity", async () => {
     const fixture = await attachedFixture();
     const activity = join(
       fixture.stateRoot,
@@ -147,7 +146,7 @@ describe("CLI attached process lifecycle", () => {
     child.kill("SIGINT");
     const exit = await Promise.race([
       child.exited,
-      Bun.sleep(2_000).then(() => -1),
+      Bun.sleep(2000).then(() => -1),
     ]);
     gate.resolve();
     await held;
@@ -156,7 +155,7 @@ describe("CLI attached process lifecycle", () => {
     expect(await Bun.file(fixture.pidPath).exists()).toBe(false);
   });
 
-  test("LaunchAgent uses absolute Bun and reaper paths and is valid plist XML", async () => {
+  it("LaunchAgent uses absolute Bun and reaper paths and is valid plist XML", async () => {
     const path = join(
       import.meta.dir,
       "..",

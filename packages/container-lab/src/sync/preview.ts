@@ -22,7 +22,7 @@ import { buildGitManifest, manifestDigest } from "./git-manifest.ts";
 import { readRequiredUnknownJson, syncStatePaths } from "./state.ts";
 import { parseBaselineFile } from "./validation/preview.ts";
 
-const DEFAULT_TTL_MS = 5 * 60 * 1_000;
+const DEFAULT_TTL_MS = 5 * 60 * 1000;
 
 export async function initializeSyncBaseline(
   identity: InitializeSyncOptions,

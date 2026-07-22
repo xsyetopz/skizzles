@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -10,7 +9,7 @@ import { validateWorkflowActionPins } from "../../src/repository-security/workfl
 import { createSecurityFixtureScope } from "./support.ts";
 
 const FULL_COMMIT_PATTERN = /@[a-f0-9]{40}/u;
-// biome-ignore lint/security/noSecrets: Public upstream action commit pin.
+
 const CHECKOUT_COMMIT = "34e114876b0b11c390a56381ad16ebd13914f8d5";
 const fixtures = createSecurityFixtureScope();
 

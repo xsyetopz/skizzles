@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   ContainerLabService,
@@ -15,7 +14,7 @@ const { durableFixture } = fixtures;
 afterEach(fixtures.cleanup);
 
 describe("attached lab commands", () => {
-  test("streams an attached argv run and returns its exact exit status", async () => {
+  it("streams an attached argv run and returns its exact exit status", async () => {
     const fixture = await durableFixture("thread-run", "ready", true);
     const docker = new RecordingDocker();
     const service = new ContainerLabService(
@@ -61,7 +60,7 @@ describe("attached lab commands", () => {
     );
   });
 
-  test("an already-aborted run never launches a container process", async () => {
+  it("an already-aborted run never launches a container process", async () => {
     const fixture = await durableFixture("thread-pre-abort", "ready", true);
     const docker = new RecordingDocker();
     const controller = new AbortController();
@@ -80,7 +79,7 @@ describe("attached lab commands", () => {
     expect(docker.child).toBeUndefined();
   });
 
-  test("run request validation precedes durable-state reconciliation", async () => {
+  it("run request validation precedes durable-state reconciliation", async () => {
     const fixture = await durableFixture(
       "thread-invalid-run-order",
       "ready",
@@ -104,7 +103,7 @@ describe("attached lab commands", () => {
     ).toBe("ready");
   });
 
-  test("SIGTERM after launch terminates the exact attached run and returns 143", async () => {
+  it("SIGTERM after launch terminates the exact attached run and returns 143", async () => {
     const fixture = await durableFixture("thread-term-run", "ready", true);
     const docker = new TerminatingDocker();
     const controller = new AbortController();

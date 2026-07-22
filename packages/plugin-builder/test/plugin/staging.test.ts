@@ -1,12 +1,11 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import process from "node:process";
 import {
   compareTrees,
-  PackagingError,
   packagePaths,
+  PackagingError,
   stagePlugin,
 } from "../../src/plugin/api.ts";
 import {

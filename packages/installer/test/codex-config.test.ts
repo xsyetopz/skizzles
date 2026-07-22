@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   chmodSync,
@@ -78,9 +77,13 @@ mock.module("node:fs", () => ({
 }));
 const previews = () => readdir(tmpdir()).filter((name) => name.startsWith("skizzles-config-preview-")).sort();
 const before = previews();
-const { openConfigRpcSession } = await import(${JSON.stringify(`${import.meta.dir}/../src/codex-config.ts?race=${crypto.randomUUID()}`)});
+const { openConfigRpcSession } = await import(${JSON.stringify(
+        `${import.meta.dir}/../src/codex-config.ts?race=${crypto.randomUUID()}`,
+      )});
 try {
-  await openConfigRpcSession({ codexHome: ${JSON.stringify(f.home)}, codexBinary: ${JSON.stringify(f.binary)}, dryRun: true });
+  await openConfigRpcSession({ codexHome: ${JSON.stringify(
+    f.home,
+  )}, codexBinary: ${JSON.stringify(f.binary)}, dryRun: true });
   process.exit(71);
 } catch (error) {
   const message = error instanceof Error ? error.message : "";

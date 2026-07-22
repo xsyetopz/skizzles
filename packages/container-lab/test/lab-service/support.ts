@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -39,7 +38,7 @@ export class RecordingDocker implements DockerRunner {
   private readonly childSpawned =
     Promise.withResolvers<ChildProcessWithoutNullStreams>();
   model: unknown = { services: { dev: {} } };
-  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
+
   async run(args: string[], options?: RunOptions): Promise<CommandResult> {
     this.calls.push(args);
     this.runCalls.push({ args, ...(options === undefined ? {} : { options }) });
@@ -125,7 +124,7 @@ export class InterruptingDocker extends RecordingDocker {
 
 export class DestructiveDocker extends RecordingDocker {
   private listed = false;
-  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
+
   override async run(
     args: string[],
     _options?: RunOptions,
@@ -303,7 +302,7 @@ async function durableFixture(
     name: "lab",
     owner,
     ownerKey: key,
-    // biome-ignore lint/security/noSecrets: This fixed test/schema token is not a credential.
+
     repoHash: "123456789abc",
     composeProject: "ccl-durable",
     state,

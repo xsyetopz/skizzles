@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -43,7 +42,9 @@ describe("workspace architecture dependency contract", () => {
     const edges = workspaceDependencyEdges(rootManifest, packages);
 
     validateWorkspaceArchitectureDocument(
-      `# Architecture\n\nArbitrary prose is outside the contract.\n\n${edgeDocument(edges)}\nTrailing prose remains outside it.\n`,
+      `# Architecture\n\nArbitrary prose is outside the contract.\n\n${edgeDocument(
+        edges,
+      )}\nTrailing prose remains outside it.\n`,
       rootManifest,
       packages,
       findings,
@@ -113,7 +114,9 @@ describe("workspace architecture dependency contract", () => {
     ],
     [
       "duplicate marker blocks",
-      `${edgeDocument(["@skizzles/one -> @skizzles/two"])}\n${edgeDocument(["@skizzles/one -> @skizzles/two"])}`,
+      `${edgeDocument(["@skizzles/one -> @skizzles/two"])}\n${edgeDocument([
+        "@skizzles/one -> @skizzles/two",
+      ])}`,
     ],
   ])("rejects a malformed contract with %s", (_, document) => {
     const { packages, rootManifest } = topology();
@@ -151,7 +154,9 @@ describe("workspace architecture dependency contract", () => {
 });
 
 function edgeDocument(edges: readonly string[]): string {
-  return `${EDGE_BLOCK_START}\n\`\`\`text\n${edges.join("\n")}\n\`\`\`\n${EDGE_BLOCK_END}`;
+  return `${EDGE_BLOCK_START}\n\`\`\`text\n${edges.join(
+    "\n",
+  )}\n\`\`\`\n${EDGE_BLOCK_END}`;
 }
 
 function topology(): {

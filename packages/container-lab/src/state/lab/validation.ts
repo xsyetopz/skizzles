@@ -28,13 +28,13 @@ import {
 import type { LabMetadata, PersistedLabRuntime } from "./contract.ts";
 
 const LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
-const LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
-const REPOSITORY_HASH = /^[a-f0-9]{12}$/;
-const SOURCE_REPOSITORY_IDENTITY = /^[a-f0-9]{64}$/;
-const COMPOSE_PROJECT = /^ccl-[a-z0-9][a-z0-9-]{0,62}$/;
-const SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
-const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const URL_SCHEME = /^[a-z][a-z0-9+.-]*$/;
+const LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/u;
+const REPOSITORY_HASH = /^[a-f0-9]{12}$/u;
+const SOURCE_REPOSITORY_IDENTITY = /^[a-f0-9]{64}$/u;
+const COMPOSE_PROJECT = /^ccl-[a-z0-9][a-z0-9-]{0,62}$/u;
+const SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/u;
+const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+const URL_SCHEME = /^[a-z][a-z0-9+.-]*$/u;
 const FINDING_SURFACES = new Set([
   "host-bind",
   "socket-bind",
@@ -158,7 +158,7 @@ export function assertLabMetadata(
     }
     if (
       value["error"] !== undefined &&
-      !isBoundedString(value["error"], 4_000)
+      !isBoundedString(value["error"], 4000)
     ) {
       throw new Error("invalid error");
     }
@@ -183,22 +183,23 @@ export function assertLabMetadata(
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Validates persisted runtime invariants as one fail-closed trust-boundary pass.
 function validatePersistedRuntime(
   lab: Record<string, unknown>,
   runtime: unknown,
 ): asserts runtime is PersistedLabRuntime {
   if (
-    !isRecord(runtime) ||
-    !hasOnlyKeys(runtime, [
-      "config",
-      "composeArgs",
-      "baseFile",
-      "sourceFile",
-      "overrideFile",
-      "findings",
-    ]) ||
-    !isRecord(runtime["config"])
+    !(
+      isRecord(runtime) &&
+      hasOnlyKeys(runtime, [
+        "config",
+        "composeArgs",
+        "baseFile",
+        "sourceFile",
+        "overrideFile",
+        "findings",
+      ]) &&
+      isRecord(runtime["config"])
+    )
   ) {
     throw new Error("invalid persisted runtime");
   }
@@ -290,7 +291,7 @@ function validatedPersistedConfig(
   if (
     !(
       hasOnlyKeys(runtime, ["workspace", "shell"]) &&
-      isBoundedString(runtime["workspace"], 1_024) &&
+      isBoundedString(runtime["workspace"], 1024) &&
       posix.isAbsolute(runtime["workspace"])
     ) ||
     posix.normalize(runtime["workspace"]) !== runtime["workspace"] ||
@@ -391,7 +392,7 @@ function validatedPersistedMode(
     if (
       !(
         hasOnlyKeys(mode, ["kind", "image", "commandService"]) &&
-        isBoundedString(mode["image"], 1_024)
+        isBoundedString(mode["image"], 1024)
       ) ||
       mode["image"].includes("\0") ||
       mode["image"].trim() !== mode["image"]
@@ -479,7 +480,7 @@ function isEndpoint(value: unknown): boolean {
     Number.isInteger(value["target"]) &&
     value["target"] >= 1 &&
     value["target"] <= 65_535 &&
-    isBoundedString(value["url"], 2_048)
+    isBoundedString(value["url"], 2048)
   );
 }
 
@@ -506,7 +507,7 @@ function isRuntimeShell(value: unknown): value is string[] {
     value.length > 0 &&
     value.length <= 64 &&
     value.every(
-      (part) => isBoundedString(part, 4_096) && !part.includes("\0"),
+      (part) => isBoundedString(part, 4096) && !part.includes("\0"),
     ) &&
     posix.isAbsolute(value[0]) &&
     posix.normalize(value[0]) === value[0]
@@ -528,7 +529,7 @@ function isFinding(value: unknown): boolean {
       isBoundedString(value["service"], 128)) &&
     typeof value["surface"] === "string" &&
     FINDING_SURFACES.has(value["surface"]) &&
-    isBoundedString(value["detail"], 1_024)
+    isBoundedString(value["detail"], 1024)
   );
 }
 

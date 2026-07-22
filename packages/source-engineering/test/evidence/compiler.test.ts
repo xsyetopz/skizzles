@@ -1,14 +1,13 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { digestText } from "../../src/digest.ts";
 import {
+  captureCompilerEvidence,
   type CompilerCandidateOverlay,
   type CompilerEvidenceInput,
   type CompilerSymbolAuthorityPort,
-  captureCompilerEvidence,
   createTypeScriptCompilerAuthority,
   isTypeScriptCompilerAuthority,
 } from "../../src/evidence/compiler.ts";
@@ -27,8 +26,9 @@ describe("factory-issued TypeScript compiler evidence", () => {
       );
 
       expect(result.status).toBe("accepted");
-      if (result.status !== "accepted")
+      if (result.status !== "accepted") {
         throw new Error("valid compilation failed");
+      }
       expect(result.receipt.compiler).toMatchObject({
         passed: true,
         exitCode: 0,
@@ -48,8 +48,9 @@ describe("factory-issued TypeScript compiler evidence", () => {
       );
 
       expect(result.status).toBe("rejected");
-      if (result.status !== "rejected")
+      if (result.status !== "rejected") {
         throw new Error("invalid compilation passed");
+      }
       expect(result.code).toBe("COMPILER_REJECTED");
       expect(result.diagnostics?.some(({ code }) => code === "TS2322")).toBe(
         true,
@@ -72,8 +73,9 @@ describe("factory-issued TypeScript compiler evidence", () => {
       );
 
       expect(result.status).toBe("accepted");
-      if (result.status !== "accepted")
+      if (result.status !== "accepted") {
         throw new Error("overlay import did not resolve");
+      }
       expect(result.receipt.targets.map(({ path }) => path)).toEqual([
         "src/main.ts",
         "src/value.ts",
@@ -163,8 +165,9 @@ describe("factory-issued TypeScript compiler evidence", () => {
         input([overlay("src/value.ts", "export const value = 'ok';\n")]),
       );
       expect(accepted.status).toBe("accepted");
-      if (accepted.status !== "accepted")
+      if (accepted.status !== "accepted") {
         throw new Error("advisory evidence overruled compiler");
+      }
       expect(accepted.receipt.symbolIndex).toMatchObject({
         status: "failed",
         discrepancy: true,
@@ -219,8 +222,9 @@ describe("factory-issued TypeScript compiler evidence", () => {
         foreignAuthority,
         input(targets),
       );
-      if (foreign.status !== "accepted")
+      if (foreign.status !== "accepted") {
         throw new Error("foreign epoch failed");
+      }
       await expect(
         captureCompilerEvidence(
           authority,
@@ -291,8 +295,9 @@ async function withProject(
           },
           ...(symbols === undefined ? {} : { symbols }),
         });
-        if (registration.status !== "created")
+        if (registration.status !== "created") {
           throw new Error("compiler authority registration failed");
+        }
         if (!isTypeScriptCompilerAuthority(registration.authority)) {
           throw new Error("issued compiler authority was not authentic");
         }

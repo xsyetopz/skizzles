@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import type { ChangeAssuranceExtensionInput } from "../src/contract.ts";
 import { createChangeDeclaration } from "../src/declaration.ts";
@@ -40,8 +39,9 @@ describe("supply-chain assurance", () => {
       assessment(plan("safe", metadata.version)),
     );
     expect(result.status).toBe("accepted");
-    if (result.status !== "accepted")
+    if (result.status !== "accepted") {
       throw new Error("safe package was rejected");
+    }
     expect(result.receipt.sbom.bomFormat).toBe("CycloneDX");
     expect(result.receipt.sbom.components[0]?.purl).toBe("pkg:npm/safe@1.0.0");
     expect(result.receipt.packages[0]?.metadataDigest).toBe(
@@ -158,8 +158,9 @@ describe("supply-chain assurance", () => {
         authority: authorities.supply,
       }),
     );
-    if (supplyExtension.status !== "created")
+    if (supplyExtension.status !== "created") {
       throw new Error("supply extension failed");
+    }
     const otherExtensions = [
       extension("middleware-security"),
       extension("migration-configuration-secrets"),
@@ -249,8 +250,9 @@ function makeAuthorities(
       lookup: () => registryLookup?.() ?? metadata,
     }),
   );
-  if (registry.status !== "created")
+  if (registry.status !== "created") {
     throw new Error("registry authority failed");
+  }
   const vulnerabilities = createVulnerabilityAuthority(
     Object.freeze({
       authorityId: "vulnerability-authority",
@@ -259,8 +261,9 @@ function makeAuthorities(
       lookup: () => vulnerabilityLookup?.() ?? emptyReport(metadata),
     }),
   );
-  if (vulnerabilities.status !== "created")
+  if (vulnerabilities.status !== "created") {
     throw new Error("vulnerability authority failed");
+  }
   const licenses = createLicensePolicyAuthority(
     Object.freeze({
       policyId: "license-policy",

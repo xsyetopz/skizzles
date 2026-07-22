@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import {
   createIndependentSecurityReviewAuthority,
@@ -102,8 +101,9 @@ export function handle(request: unknown) {
     const second = await gateFixture({ "src/entry.ts": acceptedSource });
     const firstLint = await first.linter.lint(lintInput(first));
     const secondLint = await second.linter.lint(lintInput(second));
-    if (firstLint.status !== "completed" || secondLint.status !== "completed")
+    if (firstLint.status !== "completed" || secondLint.status !== "completed") {
       throw new Error("lint fixture rejected");
+    }
     expect(
       first.reviewer.review(
         Object.freeze({
@@ -204,8 +204,9 @@ export function handle(request: unknown) {
     });
     const first = await fixture.linter.lint(lintInput(fixture));
     const second = await fixture.linter.lint(lintInput(fixture));
-    if (first.status !== "completed" || second.status !== "completed")
+    if (first.status !== "completed" || second.status !== "completed") {
       throw new Error("lint fixture rejected");
+    }
     expect(first.receipt).toEqual(second.receipt);
     const encoded = JSON.stringify(first.receipt);
     expect(encoded).not.toContain("candidateBytes");

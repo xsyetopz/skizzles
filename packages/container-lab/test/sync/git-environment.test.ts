@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, expect, test } from "bun:test";
 import { chmod, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -37,7 +36,7 @@ function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
-test("Git manifest discovery strips ambient controls and disables repository executable config", async () => {
+it("Git manifest discovery strips ambient controls and disables repository executable config", async () => {
   const root = await repo("container-lab-git-environment-");
   await writeFile(path.join(root, "tracked.txt"), "tracked\n");
   await writeFile(path.join(root, "untracked.txt"), "untracked\n");
@@ -78,13 +77,19 @@ test("Git manifest discovery strips ambient controls and disables repository exe
     .map((name) => {
       const present = `\${${name}+present}`;
       const value = `\${${name}-}`;
-      return `if test "${present}" = present; then printf '%s=%s\\n' ${shellQuote(name)} "${value}"; fi`;
+      return `if test "${present}" = present; then printf '%s=%s\\n' ${shellQuote(
+        name,
+      )} "${value}"; fi`;
     })
     .join("\n");
   const gitShim = path.join(shimRoot, "git");
   await writeFile(
     gitShim,
-    `#!/bin/sh\n{\n${captureLines}\n} > ${shellQuote(capturedEnvironment)}\nprintf '%s\\n' "$@" > ${shellQuote(capturedArguments)}\nexec ${shellQuote(realGit)} "$@"\n`,
+    `#!/bin/sh\n{\n${captureLines}\n} > ${shellQuote(
+      capturedEnvironment,
+    )}\nprintf '%s\\n' "$@" > ${shellQuote(capturedArguments)}\nexec ${shellQuote(
+      realGit,
+    )} "$@"\n`,
   );
   await chmod(gitShim, 0o755);
 
@@ -119,7 +124,7 @@ test("Git manifest discovery strips ambient controls and disables repository exe
   });
 });
 
-test("baseline, preview, and apply use the injected service environment", async () => {
+it("baseline, preview, and apply use the injected service environment", async () => {
   const source = await repo("container-lab-git-source-");
   const target = await repo("container-lab-git-target-");
   for (const root of [source, target]) {
@@ -140,7 +145,9 @@ test("baseline, preview, and apply use the injected service environment", async 
   const gitShim = path.join(shimRoot, "git");
   await writeFile(
     gitShim,
-    `#!/bin/sh\nprintf 'invocation\\n' >> ${shellQuote(invocations)}\nexec ${shellQuote(realGit)} "$@"\n`,
+    `#!/bin/sh\nprintf 'invocation\\n' >> ${shellQuote(invocations)}\nexec ${shellQuote(
+      realGit,
+    )} "$@"\n`,
   );
   await chmod(gitShim, 0o755);
   const identity = {
@@ -174,22 +181,24 @@ test("baseline, preview, and apply use the injected service environment", async 
   );
 });
 
-test("Git discovery rejects a complete NUL-terminated prefix followed by overflow", async () => {
+it("Git discovery rejects a complete NUL-terminated prefix followed by overflow", async () => {
   const root = await repo("container-lab-git-overflow-");
   const shimRoot = trackTemporaryPath(
     await mkdtemp(path.join(os.tmpdir(), "container-lab-git-overflow-shim-")),
   );
   const gitShim = path.join(shimRoot, "git");
   const fullPathCount = 17_202;
-  const fullPathBytes = 3_900;
-  const boundaryPathBytes = 3_861;
+  const fullPathBytes = 3900;
+  const boundaryPathBytes = 3861;
   const outputLimit = 64 * 1024 * 1024;
   expect(fullPathCount * (fullPathBytes + 1) + boundaryPathBytes + 1).toBe(
     outputLimit,
   );
   await writeFile(
     gitShim,
-    `#!${process.execPath}\nconst write = async (value) => {\n  if (!process.stdout.write(value)) await new Promise((resolve) => process.stdout.once("drain", resolve));\n};\nfor (let index = 0; index < ${fullPathCount}; index++) {\n  await write(String(index).padStart(5, "0") + "a".repeat(${fullPathBytes - 5}) + "\\0");\n}\nawait write("z".repeat(${boundaryPathBytes}) + "\\0");\nawait write("tail-entry\\0");\nawait Bun.sleep(30_000);\n`,
+    `#!${process.execPath}\nconst write = async (value) => {\n  if (!process.stdout.write(value)) await new Promise((resolve) => process.stdout.once("drain", resolve));\n};\nfor (let index = 0; index < ${fullPathCount}; index++) {\n  await write(String(index).padStart(5, "0") + "a".repeat(${
+      fullPathBytes - 5
+    }) + "\\0");\n}\nawait write("z".repeat(${boundaryPathBytes}) + "\\0");\nawait write("tail-entry\\0");\nawait Bun.sleep(30_000);\n`,
   );
   await chmod(gitShim, 0o755);
 

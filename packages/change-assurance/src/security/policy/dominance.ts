@@ -413,7 +413,6 @@ function middlewareFor(
   if (rateNames.has(identity.name)) return "rate-limit";
   if (auditNames.has(identity.name)) return "audit-log";
   if (sanitizerNames.has(identity.name)) return "sanitize";
-  return undefined;
 }
 
 function sinkFor(

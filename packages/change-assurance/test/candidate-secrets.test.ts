@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import {
   createConfigurationRegistry,
@@ -28,7 +27,6 @@ describe("candidate secret gate", () => {
     ).join("");
     const result = scanCandidateSecrets({
       candidates: [
-        // biome-ignore lint/security/noSecrets: Synthetic placeholder exercises blocked environment paths.
         { path: ".env", bytes: bytes("TOKEN=placeholder") },
         { path: "config/production.json", bytes: bytes('{"mode":"prod"}\n') },
         {

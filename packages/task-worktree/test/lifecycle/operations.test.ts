@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun provides its test module at runtime.
 import { afterEach, describe, expect, it } from "bun:test";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -117,10 +116,11 @@ describe("task-scoped Git worktree lifecycle operations", () => {
       Object.freeze({ version: 1 as const, session: prepared.session }),
     );
     expect(closed.status).toBe("closed");
-    if (closed.status === "closed")
+    if (closed.status === "closed") {
       expect(closed.receipt.candidateManifestDigest).toBe(
         candidateManifestDigest,
       );
+    }
     expect(worktreePaths(fixture.repository)).toEqual([fixture.repository]);
     expect(await readdir(fixture.worktreeParent)).toEqual([]);
     expect(
@@ -157,8 +157,9 @@ describe("task-scoped Git worktree lifecycle operations", () => {
     const authority = createAuthority(fixture);
     const input = prepareInput("replay");
     const prepared = await authority.prepare(input);
-    if (prepared.status !== "prepared")
+    if (prepared.status !== "prepared") {
       throw new Error("fixture allocation failed");
+    }
     expect(await authority.prepare(input)).toEqual({
       status: "rejected",
       code: "ALREADY_PREPARED",

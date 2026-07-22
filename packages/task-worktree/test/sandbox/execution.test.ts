@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun provides its test module at runtime.
 import { describe, expect, it } from "bun:test";
 import { digestTaskWorktreeValue } from "../../src/digest.ts";
 import {
@@ -23,8 +22,9 @@ describe("portable OS sandbox execution", () => {
       };
     });
     const negotiated = await sandbox.negotiate(["src/a.ts"]);
-    if (negotiated.status !== "accepted")
+    if (negotiated.status !== "accepted") {
       throw new Error("negotiation rejected");
+    }
     const objective = Object.freeze({
       kind: "coverage" as const,
       structuralReceiptDigest: digestTaskWorktreeValue("structural"),
@@ -82,8 +82,9 @@ describe("portable OS sandbox execution", () => {
   it("executes only through the authority bound to the exact attestation and request", async () => {
     const sandbox = broker(fullAttestation);
     const negotiated = await sandbox.negotiate(["src/a.ts"]);
-    if (negotiated.status !== "accepted")
+    if (negotiated.status !== "accepted") {
       throw new Error("negotiation rejected");
+    }
     const command = {
       profile: "test",
       executable: "bun",
@@ -142,8 +143,9 @@ describe("portable OS sandbox execution", () => {
   it("requires disjoint sibling worktree and write roots", async () => {
     const sandbox = broker(fullAttestation);
     const negotiated = await sandbox.negotiate(["src/a.ts"]);
-    if (negotiated.status !== "accepted")
+    if (negotiated.status !== "accepted") {
       throw new Error("negotiation rejected");
+    }
     const command = {
       profile: "read-only",
       executable: "git",
@@ -203,8 +205,9 @@ describe("portable OS sandbox execution", () => {
     ]) {
       const sandbox = broker(fullAttestation, execute);
       const negotiated = await sandbox.negotiate(["src/a.ts"]);
-      if (negotiated.status !== "accepted")
+      if (negotiated.status !== "accepted") {
         throw new Error("negotiation rejected");
+      }
       expect(
         (
           await sandbox.execute({
@@ -244,11 +247,13 @@ describe("portable OS sandbox execution", () => {
     const second = createPortableSandboxBroker({
       authority: authority.authority,
     });
-    if (first.status !== "created" || second.status !== "created")
+    if (first.status !== "created" || second.status !== "created") {
       throw new Error("broker rejected");
+    }
     const negotiated = await first.broker.negotiate(["src/a.ts"]);
-    if (negotiated.status !== "accepted")
+    if (negotiated.status !== "accepted") {
       throw new Error("negotiation rejected");
+    }
     expect(
       await second.broker.execute({
         attestation: negotiated.receipt,
@@ -278,8 +283,9 @@ describe("portable OS sandbox execution", () => {
       };
     });
     const negotiated = await sandbox.negotiate(["src/a.ts"]);
-    if (negotiated.status !== "accepted")
+    if (negotiated.status !== "accepted") {
       throw new Error("negotiation rejected");
+    }
     const limits = Object.freeze({
       timeoutMilliseconds: 120_000,
       maximumOutputBytes: 2_000_000,
@@ -322,8 +328,9 @@ describe("portable OS sandbox execution", () => {
   it("rejects missing, out-of-range, and mismatched execution limits", async () => {
     const sandbox = broker(fullAttestation);
     const negotiated = await sandbox.negotiate(["src/a.ts"]);
-    if (negotiated.status !== "accepted")
+    if (negotiated.status !== "accepted") {
       throw new Error("negotiation rejected");
+    }
     const command = {
       profile: "test" as const,
       executable: "bun" as const,
@@ -360,8 +367,9 @@ describe("portable OS sandbox execution", () => {
       stderrBytes: 0,
     }));
     const mismatchNegotiated = await mismatchSandbox.negotiate(["src/a.ts"]);
-    if (mismatchNegotiated.status !== "accepted")
+    if (mismatchNegotiated.status !== "accepted") {
       throw new Error("negotiation rejected");
+    }
     expect(
       await mismatchSandbox.execute({
         ...base,

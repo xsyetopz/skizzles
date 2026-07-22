@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { expect } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdir, rename, symlink, unlink, writeFile } from "node:fs/promises";
@@ -22,7 +21,6 @@ function pinnedFixture(name: string): Promise<string> {
 }
 
 async function rejectsMetadata(root: string, needle: string): Promise<void> {
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from test cases.
   await expect(validateCanonicalSkillMetadata(root)).rejects.toThrow(needle);
 }
 
@@ -34,47 +32,46 @@ async function assertPinnedProvenance(): Promise<void> {
   const provenance = await Bun.file(
     `${import.meta.dir}/provenance.json`,
   ).json();
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+
   expect(provenance.version).toBe(SKILL_METADATA_CONTRACT_VERSION);
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+
   expect(provenance.observedCodexCliVersion).toBe(
     SKILL_METADATA_CONTRACT_PROVENANCE.observedCodexCliVersion,
   );
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+
   expect(provenance.executableSource).toEqual(
     SKILL_METADATA_CONTRACT_PROVENANCE.executableSource,
   );
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+
   expect(provenance.sources).toEqual(
     SKILL_METADATA_CONTRACT_PROVENANCE.artifacts,
   );
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+
   expect(provenance.approvedMcpEndpoints).toEqual(APPROVED_MCP_ENDPOINTS);
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+
   expect(provenance.approvedBareMcpIdentities).toEqual(
     APPROVED_BARE_MCP_IDENTITIES,
   );
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+
   expect(provenance.approvedCliIdentities).toEqual(APPROVED_CLI_IDENTITIES);
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+
   expect(provenance.approvedLocalMcpCommands).toEqual(
     APPROVED_LOCAL_MCP_COMMANDS,
   );
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+
   expect(provenance.networkLimitation).toBe(
     SKILL_METADATA_CONTRACT_PROVENANCE.networkLimitation,
   );
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+
   expect(provenance.filesystemLimitation).toBe(
     SKILL_METADATA_CONTRACT_PROVENANCE.filesystemLimitation,
   );
-  // biome-ignore lint/suspicious/noMisplacedAssertion: assertion helper is called only from the pinned-provenance test.
+
   expect(provenance.repositoryNarrowing).toBe(
     SKILL_METADATA_CONTRACT_PROVENANCE.repositoryNarrowing,
   );
   assertExactSkillMetadataFixtureBindings(provenance.fixtures);
   for (const fixture of SKILL_METADATA_FIXTURE_BINDINGS) {
-    // biome-ignore lint/performance/noAwaitInLoops: each declared fixture is independently bound to its recorded digest.
     const bytes = await Bun.file(`${import.meta.dir}/${fixture.file}`).bytes();
     assertPinnedFixtureContent(fixture.file, bytes);
   }
@@ -143,7 +140,6 @@ async function runAncestorSwapProbe(
   const attacker = (async () => {
     try {
       for (let index = 0; index < 150; index += 1) {
-        // biome-ignore lint/performance/noAwaitInLoops: the race probe requires serialized complete swap cycles.
         await swapOnce();
       }
     } finally {
@@ -161,7 +157,6 @@ async function runAncestorSwapProbe(
       { expected: canonical.icon, path: "skills/example/assets/icon.png" },
     ]) {
       try {
-        // biome-ignore lint/performance/noAwaitInLoops: each read races the same adversarial filesystem transition.
         const value = await readStableRegularFile(root, probe.path, 65_536);
         accepted.push({ expected: probe.expected, value });
       } catch {

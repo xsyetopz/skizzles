@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { expect, test } from "bun:test";
 import { launchDockerRun, terminateDockerRun } from "../../src/docker.ts";
 import {
@@ -8,7 +7,7 @@ import {
   RecordingDocker,
 } from "./support.ts";
 
-test("attached process transport preserves workdir, argv, and explicit environment ordering", () => {
+it("attached process transport preserves workdir, argv, and explicit environment ordering", () => {
   const docker = new RecordingDocker();
   const runtime = dockerRuntime(dockerLab({ secretEnvironment: ["TOKEN"] }));
   launchDockerRun(
@@ -56,7 +55,7 @@ test("attached process transport preserves workdir, argv, and explicit environme
   expect(invocation?.options?.env).toEqual({ PATH: "/usr/bin:/bin" });
 });
 
-test("termination maps unknown or failed Docker transport to unconfirmed states", async () => {
+it("termination maps unknown or failed Docker transport to unconfirmed states", async () => {
   const unknown = new RecordingDocker();
   unknown.responses.push(commandResult("unexpected transcript\n"));
   await expect(

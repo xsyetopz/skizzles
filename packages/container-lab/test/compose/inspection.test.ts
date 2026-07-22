@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, test } from "bun:test";
 import {
   inspectComposeModel,
@@ -10,7 +9,7 @@ function composeVariable(expression: string): string {
 }
 
 describe("inspectComposeModel", () => {
-  test("reports notable privilege surfaces and redacts sensitive details", () => {
+  it("reports notable privilege surfaces and redacts sensitive details", () => {
     const findings = inspectComposeModel({
       services: {
         api: {
@@ -57,7 +56,7 @@ describe("inspectComposeModel", () => {
     expect(serialized).not.toContain("3000");
   });
 
-  test("does not flag random loopback publication", () => {
+  it("does not flag random loopback publication", () => {
     expect(
       inspectComposeModel({
         services: { api: { ports: ["127.0.0.1::8080"] } },
@@ -65,7 +64,7 @@ describe("inspectComposeModel", () => {
     ).toEqual([]);
   });
 
-  test("reports engine API and build credential forwarding without exposing identities", () => {
+  it("reports engine API and build credential forwarding without exposing identities", () => {
     const findings = inspectComposeModel({
       services: {
         api: {
@@ -85,7 +84,7 @@ describe("inspectComposeModel", () => {
 });
 
 describe("validateComposeEnvironmentModel", () => {
-  test("accepts an allowlisted present top-level environment secret source", () => {
+  it("accepts an allowlisted present top-level environment secret source", () => {
     expect(() =>
       validateComposeEnvironmentModel(
         {
@@ -99,7 +98,7 @@ describe("validateComposeEnvironmentModel", () => {
     ).not.toThrow();
   });
 
-  test("rejects undeclared and unavailable environment secret sources using names only", () => {
+  it("rejects undeclared and unavailable environment secret sources using names only", () => {
     expect(() =>
       validateComposeEnvironmentModel(
         {
@@ -122,7 +121,7 @@ describe("validateComposeEnvironmentModel", () => {
     ).toThrow("unavailable: MISSING_TOKEN");
   });
 
-  test("rejects unused secret capabilities and plaintext secret variable names", () => {
+  it("rejects unused secret capabilities and plaintext secret variable names", () => {
     expect(() =>
       validateComposeEnvironmentModel(
         { services: { api: {} } },
@@ -145,7 +144,7 @@ describe("validateComposeEnvironmentModel", () => {
     ).toThrow("api:REGISTRY_TOKEN");
   });
 
-  test("recognizes braced, unbraced, nested, default, and escaped interpolation", () => {
+  it("recognizes braced, unbraced, nested, default, and escaped interpolation", () => {
     const model = {
       services: {
         api: {
@@ -187,7 +186,7 @@ describe("validateComposeEnvironmentModel", () => {
     ).not.toThrow();
   });
 
-  test("requires source authorization for null service environment and build arguments", () => {
+  it("requires source authorization for null service environment and build arguments", () => {
     const model = {
       services: {
         api: {
@@ -205,11 +204,11 @@ describe("validateComposeEnvironmentModel", () => {
       ),
     ).not.toThrow();
     expect(() => validateComposeEnvironmentModel(model, [], [], {})).toThrow(
-      /reads undeclared environment/,
+      /reads undeclared environment/u,
     );
   });
 
-  test("rejects environment-backed configs", () => {
+  it("rejects environment-backed configs", () => {
     expect(() =>
       validateComposeEnvironmentModel(
         { configs: { source: { environment: "CONFIG_VALUE" } } },
@@ -220,7 +219,7 @@ describe("validateComposeEnvironmentModel", () => {
     ).toThrow("configs.environment is not supported");
   });
 
-  test("rejects unresolved service environment files", () => {
+  it("rejects unresolved service environment files", () => {
     expect(() =>
       validateComposeEnvironmentModel(
         {

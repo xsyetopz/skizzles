@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import { createChangeDeclaration } from "@skizzles/change-assurance";
 import type { EngineeringValidationProfile } from "../../src/engineering/contract.ts";

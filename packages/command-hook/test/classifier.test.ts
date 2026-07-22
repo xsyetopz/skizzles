@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, test } from "bun:test";
 import type { SimpleCommand } from "../src/manage-command-output/contract.ts";
 import { simpleCommands } from "../src/manage-command-output/lexer.ts";
@@ -17,7 +16,7 @@ function command(words: string[]): SimpleCommand {
 }
 
 describe("managed command output classifier", () => {
-  test("lexes separate unquoted top-level commands", () => {
+  it("lexes separate unquoted top-level commands", () => {
     expect(simpleCommands("echo header; flutter test && cargo check")).toEqual([
       command(["echo", "header"]),
       command(["flutter", "test"]),
@@ -25,7 +24,7 @@ describe("managed command output classifier", () => {
     ]);
   });
 
-  test("rejects shell syntax outside its supported subset", () => {
+  it("rejects shell syntax outside its supported subset", () => {
     for (const script of [
       "echo 'flutter test'",
       'echo "flutter test"',
@@ -53,7 +52,7 @@ describe("managed command output classifier", () => {
     }
   });
 
-  test("normalizes only canonical literal tool launcher prefixes", () => {
+  it("normalizes only canonical literal tool launcher prefixes", () => {
     expect(
       normalizeCommand(command(["rustup", "run", "nightly", "cargo", "test"])),
     ).toEqual(command(["cargo", "test"]));
@@ -84,7 +83,7 @@ describe("managed command output classifier", () => {
     ).toBeUndefined();
   });
 
-  test("recognizes high-value build and test commands", () => {
+  it("recognizes high-value build and test commands", () => {
     for (const script of [
       "bun test",
       "bun run test",
@@ -104,7 +103,7 @@ describe("managed command output classifier", () => {
     }
   });
 
-  test("recognizes only supported literal Container Lab run prefixes", () => {
+  it("recognizes only supported literal Container Lab run prefixes", () => {
     for (const script of [
       "codex-container-lab --owner thread-1 --state-root /tmp/state --runtime-root /tmp/runtime run --lab experiment -- echo hello",
     ]) {
@@ -125,7 +124,7 @@ describe("managed command output classifier", () => {
     }
   });
 
-  test("leaves low-value, unknown, and partial commands alone", () => {
+  it("leaves low-value, unknown, and partial commands alone", () => {
     for (const script of [
       "echo flutter test",
       "dart format .",
@@ -141,7 +140,7 @@ describe("managed command output classifier", () => {
     }
   });
 
-  test("requires every simple command in the rewritten script to be recognized", () => {
+  it("requires every simple command in the rewritten script to be recognized", () => {
     expect(isManagedScript("flutter test && cargo check; bun test")).toBe(true);
     expect(isManagedScript("echo header; flutter test")).toBe(false);
     expect(isManagedScript("flutter test; rm -rf target")).toBe(false);

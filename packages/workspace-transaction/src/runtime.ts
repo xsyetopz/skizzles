@@ -289,7 +289,6 @@ function commitmentSnapshot(
       priorFailure: result.cause,
     };
   }
-  return undefined;
 }
 
 function priorFailureCode(
@@ -302,7 +301,7 @@ function priorFailureCode(
     result.code === "PUBLICATION_RECOVERY_REQUIRED" ||
     result.code === "LEASE_RELEASE_FAILED_AFTER_PUBLICATION_STARTED"
   ) {
-    return undefined;
+    return;
   }
   return result.code;
 }

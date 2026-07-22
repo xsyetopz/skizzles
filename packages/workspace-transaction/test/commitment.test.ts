@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, test } from "bun:test";
 import {
   createLocalRepositoryLeaseAuthority,
@@ -39,7 +38,7 @@ function rejectingReleaseAuthority(
 }
 
 describe("durable commitment outcomes", () => {
-  test("contains the fifth journal write rejection after target publication", async () => {
+  it("contains the fifth journal write rejection after target publication", async () => {
     const destination = new IsolatedDestinationFixture();
     destination.writeJournalFailureAt = 5;
     const approval = new ApprovalFixture();
@@ -99,7 +98,7 @@ describe("durable commitment outcomes", () => {
     expect(await destination.readJournal()).toBeUndefined();
   });
 
-  test("contains target-two rejection after a partial multi-target publication", async () => {
+  it("contains target-two rejection after a partial multi-target publication", async () => {
     const destination = new IsolatedDestinationFixture();
     const first = destination.setFile("src/a.ts", "old-a");
     const second = destination.setFile("src/b.ts", "old-b");
@@ -171,7 +170,7 @@ describe("durable commitment outcomes", () => {
     expect(destination.renameCount).toBe(2);
   });
 
-  test("contains cleanup inspection rejection after durable commit", async () => {
+  it("contains cleanup inspection rejection after durable commit", async () => {
     const destination = new IsolatedDestinationFixture();
     destination.inspectSiblingFailureAt = 2;
     const approval = new ApprovalFixture();
@@ -228,7 +227,7 @@ describe("durable commitment outcomes", () => {
     expect(await destination.readJournal()).toBeUndefined();
   });
 
-  test("reports committed publication when post-commit lease cleanup fails", async () => {
+  it("reports committed publication when post-commit lease cleanup fails", async () => {
     const destination = new IsolatedDestinationFixture();
     const approval = new ApprovalFixture();
     const transaction = createWorkspaceTransaction({
@@ -274,7 +273,7 @@ describe("durable commitment outcomes", () => {
     expect(destination.renameCount).toBe(1);
   });
 
-  test("keeps release failure before commit distinct and causal", async () => {
+  it("keeps release failure before commit distinct and causal", async () => {
     const destination = new IsolatedDestinationFixture();
     const approval = new ApprovalFixture();
     approval.mismatch = true;
@@ -301,7 +300,7 @@ describe("durable commitment outcomes", () => {
     expect(await destination.readJournal()).toBeUndefined();
   });
 
-  test("preserves cleanup-pending commitment when lease cleanup also fails", async () => {
+  it("preserves cleanup-pending commitment when lease cleanup also fails", async () => {
     const destination = new IsolatedDestinationFixture();
     const baseline = destination.setFile("src/delete.ts", "old-delete");
     const approval = new ApprovalFixture();

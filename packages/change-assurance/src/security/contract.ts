@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: TypeScript 7 exposes AST types through an unstable package export.
 import type { SourceFile } from "typescript/unstable/ast";
 import type {
   ChangeAssuranceExtension,

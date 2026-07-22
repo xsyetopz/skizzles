@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-// biome-ignore lint/correctness/noUnresolvedImports: TypeScript 7's parser is an unstable package export.
+
 import { API } from "typescript/unstable/async";
 import {
   analyzeSourcePolicy,

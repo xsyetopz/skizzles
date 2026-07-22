@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, test } from "bun:test";
 import {
   type CrashStep,
@@ -80,7 +79,7 @@ async function crashAt(step: CrashStep) {
 }
 
 describe("deterministic crash recovery", () => {
-  test("reports recovered commitment when its lease cleanup fails", async () => {
+  it("reports recovered commitment when its lease cleanup fails", async () => {
     const fixture = new IsolatedDestinationFixture();
     const baseline = fixture.setFile("src/file.ts", "old");
     const approval = new ApprovalFixture();
@@ -138,7 +137,7 @@ describe("deterministic crash recovery", () => {
     "candidate-created",
     "journal-prepared",
   ] as const) {
-    test(`recovers the old state after ${step}`, async () => {
+    it(`recovers the old state after ${step}`, async () => {
       const { fixture, approval, transactionId } = await crashAt(step);
       const recovered = await transactionHarness(fixture, approval).recover(
         recoveryRequest(approval, transactionId),
@@ -155,7 +154,7 @@ describe("deterministic crash recovery", () => {
     "target-published",
     "journal-committed",
   ] as const) {
-    test(`recovers the new state after ${step}`, async () => {
+    it(`recovers the new state after ${step}`, async () => {
       const { fixture, approval, transactionId } = await crashAt(step);
       const recovered = await transactionHarness(fixture, approval).recover(
         recoveryRequest(approval, transactionId),
@@ -167,7 +166,7 @@ describe("deterministic crash recovery", () => {
     });
   }
 
-  test("rolls a partially published multi-file target set forward", async () => {
+  it("rolls a partially published multi-file target set forward", async () => {
     const fixture = new IsolatedDestinationFixture();
     const first = fixture.setFile("src/a.ts", "old-a");
     const second = fixture.setFile("src/b.ts", "old-b");
@@ -220,7 +219,7 @@ describe("deterministic crash recovery", () => {
     expect(fixture.currentText("src/b.ts")).toBe("new-b");
   });
 
-  test("rejects recovery replay with different request bindings", async () => {
+  it("rejects recovery replay with different request bindings", async () => {
     const { fixture, approval, transactionId } =
       await crashAt("journal-publishing");
     const request = {
@@ -238,7 +237,7 @@ describe("deterministic crash recovery", () => {
     expect(fixture.renameCount).toBe(0);
   });
 
-  test("rejects malformed canonical journals without touching targets", async () => {
+  it("rejects malformed canonical journals without touching targets", async () => {
     const fixture = new IsolatedDestinationFixture();
     fixture.setFile("src/file.ts", "old");
     fixture.corruptJournal(
@@ -259,7 +258,7 @@ describe("deterministic crash recovery", () => {
     expect(fixture.renameCount).toBe(0);
   });
 
-  test("records cleanup-pending evidence and preserves a rebound foreign artifact", async () => {
+  it("records cleanup-pending evidence and preserves a rebound foreign artifact", async () => {
     const fixture = new IsolatedDestinationFixture();
     const baseline = fixture.setFile("src/delete.ts", "old-delete");
     const approval = new ApprovalFixture();

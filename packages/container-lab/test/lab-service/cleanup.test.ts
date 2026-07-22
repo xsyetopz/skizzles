@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   ContainerLabService,
@@ -25,7 +24,7 @@ const { durableFixture } = fixtures;
 afterEach(fixtures.cleanup);
 
 describe("lab cleanup and state trust", () => {
-  test("destroy removes exact containers first, then waits for attached activity before filesystem cleanup", async () => {
+  it("destroy removes exact containers first, then waits for attached activity before filesystem cleanup", async () => {
     const fixture = await durableFixture(
       "thread-destroy-active",
       "ready",
@@ -55,7 +54,7 @@ describe("lab cleanup and state trust", () => {
     ).toBe(true);
   });
 
-  test("a tampered runtime path fails closed before destroy touches Docker or outside data", async () => {
+  it("a tampered runtime path fails closed before destroy touches Docker or outside data", async () => {
     const fixture = await durableFixture("thread-tampered", "failed");
     const sentinel = join(fixture.root, "outside", "sentinel.txt");
     await mkdir(join(fixture.root, "outside"), { recursive: true });
@@ -79,7 +78,7 @@ describe("lab cleanup and state trust", () => {
     expect(docker.calls).toEqual([]);
   });
 
-  test("a symlinked owner runtime parent fails closed before cleanup", async () => {
+  it("a symlinked owner runtime parent fails closed before cleanup", async () => {
     const fixture = await durableFixture(
       "thread-destroy-symlink",
       "ready",
@@ -98,7 +97,7 @@ describe("lab cleanup and state trust", () => {
     expect(docker.calls).toEqual([]);
   });
 
-  test("destroy accepts an already-missing runtime but still removes exact state", async () => {
+  it("destroy accepts an already-missing runtime but still removes exact state", async () => {
     const fixture = await durableFixture("thread-destroy-missing", "failed");
     const docker = new RecordingDocker();
 
@@ -121,7 +120,7 @@ describe("lab cleanup and state trust", () => {
     ).toEqual({ labId: fixture.lab.id, destroyed: false });
   });
 
-  test("a replaced owner state directory fails closed before Docker or outside cleanup", async () => {
+  it("a replaced owner state directory fails closed before Docker or outside cleanup", async () => {
     const fixture = await durableFixture(
       "thread-destroy-replaced-state",
       "ready",
@@ -144,7 +143,7 @@ describe("lab cleanup and state trust", () => {
     expect(docker.calls).toEqual([]);
   });
 
-  test("health and status reject a symlinked durable lab file before Docker", async () => {
+  it("health and status reject a symlinked durable lab file before Docker", async () => {
     for (const operation of ["health", "status"] as const) {
       const fixture = await durableFixture(
         `thread-read-${operation}`,
@@ -169,7 +168,7 @@ describe("lab cleanup and state trust", () => {
     }
   });
 
-  test("provisioning rejects a symlinked durable-state parent before source or Docker access", async () => {
+  it("provisioning rejects a symlinked durable-state parent before source or Docker access", async () => {
     const fixture = await durableFixture("thread-read-provision", "failed");
     const labs = labsDirectory(fixture.roots.stateRoot, fixture.owner);
     const outside = join(fixture.root, "outside-labs");
@@ -186,7 +185,7 @@ describe("lab cleanup and state trust", () => {
     expect(docker.calls).toEqual([]);
   });
 
-  test("provisioning rejects a symlinked reaped-owner marker parent before source or Docker access", async () => {
+  it("provisioning rejects a symlinked reaped-owner marker parent before source or Docker access", async () => {
     const fixture = await durableFixture("thread-read-marker", "failed");
     const outside = join(fixture.root, "outside-reaped");
     await mkdir(outside);
@@ -202,7 +201,7 @@ describe("lab cleanup and state trust", () => {
     expect(docker.calls).toEqual([]);
   });
 
-  test("run rejects a symlinked durable lab file before attached execution", async () => {
+  it("run rejects a symlinked durable lab file before attached execution", async () => {
     const fixture = await durableFixture("thread-read-run", "failed");
     await replaceLabWithSymlink(fixture);
     const docker = new RecordingDocker();
@@ -220,7 +219,7 @@ describe("lab cleanup and state trust", () => {
     expect(docker.calls).toEqual([]);
   });
 
-  test("public lab views omit internal persistence fields", async () => {
+  it("public lab views omit internal persistence fields", async () => {
     const fixture = await durableFixture("thread-output", "failed");
     const service = new ContainerLabService(
       fixture.owner,
@@ -241,7 +240,7 @@ describe("lab cleanup and state trust", () => {
     expect(Buffer.byteLength(encoded)).toBeLessThan(16 * 1024);
   });
 
-  test("durable runtime validation rejects invalid and overlapping environment names", async () => {
+  it("durable runtime validation rejects invalid and overlapping environment names", async () => {
     const fixture = await durableFixture("thread-secret-state", "ready", true);
     const runtime = fixture.lab.runtime;
     if (!runtime) {

@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   copyFile,
@@ -177,7 +176,6 @@ describe("plugin shipped-language filesystem and resource boundaries", () => {
     await write(
       root,
       "language-stage/assets/example.plist",
-      // biome-ignore lint/security/noSecrets: Deliberate prohibited-language CDATA fixture, not a credential.
       "<plist><dict><key><![CDATA[I am sentient]]></key></dict></plist>\n",
     );
     await expect(validateStagedShippedLanguage(root, staged)).rejects.toThrow(
@@ -185,9 +183,8 @@ describe("plugin shipped-language filesystem and resource boundaries", () => {
     );
 
     for (const splitClaim of [
-      // biome-ignore lint/security/noSecrets: Deliberate split prohibited-language plist fixture, not a credential.
       "<plist><string>I am sen<![CDATA[ti]]>ent</string></plist>\n",
-      // biome-ignore lint/security/noSecrets: Deliberate adjacent-CDATA prohibited-language fixture, not a credential.
+
       "<plist><string>I am <![CDATA[sen]]><![CDATA[tient]]></string></plist>\n",
     ]) {
       await write(root, "language-stage/assets/example.plist", splitClaim);
@@ -209,7 +206,7 @@ describe("plugin shipped-language filesystem and resource boundaries", () => {
       "<plist><string>neutral</plist>\n",
       '<!DOCTYPE plist SYSTEM "file:///etc/passwd"><plist/>\n',
       '<!ENTITY hidden SYSTEM "file:///etc/passwd"><plist/>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate unresolved entity fixture, not a credential.
+
       "<plist><string>&custom;</string></plist>\n",
     ]) {
       await write(root, "language-stage/assets/example.plist", malformed);
@@ -297,10 +294,16 @@ describe("plugin shipped-language filesystem and resource boundaries", () => {
     await prepareLanguageStage(root, staged);
     const path = "language-stage/assets/bounded.plist";
     const cases = [
-      `<plist>${"<array>".repeat(65)}<string>neutral</string>${"</array>".repeat(65)}</plist>\n`,
-      `<plist>${"<array>".repeat(1_000)}<string>neutral</string>${"</array>".repeat(1_000)}</plist>\n`,
+      `<plist>${"<array>".repeat(65)}<string>neutral</string>${"</array>".repeat(
+        65,
+      )}</plist>\n`,
+      `<plist>${"<array>".repeat(1_000)}<string>neutral</string>${"</array>".repeat(
+        1_000,
+      )}</plist>\n`,
       `<plist>${"<true/>".repeat(500_000)}</plist>\n`,
-      `<plist ${Array.from({ length: 65 }, (_, index) => `a${index}="x"`).join(" ")}/>\n`,
+      `<plist ${Array.from({ length: 65 }, (_, index) => `a${index}="x"`).join(
+        " ",
+      )}/>\n`,
       `<plist><string>${"x".repeat(8 * 1024 * 1024 + 1)}</string></plist>\n`,
     ];
     for (const content of cases) {

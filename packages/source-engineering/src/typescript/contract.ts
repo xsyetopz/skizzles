@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: TypeScript 7 exposes its parsed source contract through this unstable package export.
 import type { Node, SourceFile } from "typescript/unstable/ast";
 import type { Digest } from "../digest.ts";
 

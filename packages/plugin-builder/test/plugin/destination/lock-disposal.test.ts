@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   mkdir,
@@ -40,7 +39,14 @@ describe("plugin destination lock disposal", () => {
     await mkdir(cleanup, { mode: 0o700 });
     await writeFile(
       join(cleanup, "owner.json"),
-      `${JSON.stringify({ version: 2, controllerPid: 999_999_999, controllerStartIdentity: "dead", pid: 999_999_999, processStartIdentity: "dead", token: TOKEN_Y })}\n`,
+      `${JSON.stringify({
+        version: 2,
+        controllerPid: 999_999_999,
+        controllerStartIdentity: "dead",
+        pid: 999_999_999,
+        processStartIdentity: "dead",
+        token: TOKEN_Y,
+      })}\n`,
     );
     await writeFile(join(cleanup, "unrelated"), "preserved\n");
 
@@ -196,14 +202,13 @@ describe("plugin destination lock disposal", () => {
       const destination = join(parent, "plugin");
       const { key } = await inspectTarget(destination);
       for (const [suffix, mode] of candidates) {
-        // biome-ignore lint/performance/noAwaitInLoops: each candidate is an ordered filesystem fixture.
         await mkdir(
           join(parent, `.skizzles-package-${key}-cleanup-${suffix}`),
           { mode },
         );
       }
       let constructed = false;
-      // biome-ignore lint/performance/noAwaitInLoops: each namespace case is isolated and verified before cleanup.
+
       await expect(
         replaceDirectoryTransaction(destination, () => {
           constructed = true;

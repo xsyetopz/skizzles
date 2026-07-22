@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import process from "node:process";
 import type { DirectoryIdentity } from "../../src/sync/contract.ts";
@@ -57,7 +56,9 @@ async function crashRecovery(
 ): Promise<void> {
   const modulePath = path.join(import.meta.dir, "../../src/sync/recovery.ts");
   const script = `
-    const { recoverSyncTransactions } = await import(${JSON.stringify(modulePath)});
+    const { recoverSyncTransactions } = await import(${JSON.stringify(
+      modulePath,
+    )});
     const options = JSON.parse(process.env.SYNC_RECOVERY_OPTIONS);
     const point = process.env.SYNC_RECOVERY_POINT;
     let visited = 0;
@@ -126,7 +127,7 @@ describe("prepared directory retirement replay", () => {
     "after-removal",
     "after-parent-sync",
   ] as const) {
-    test(`replays a crash ${point} at the deepest directory`, async () => {
+    it(`replays a crash ${point} at the deepest directory`, async () => {
       const { state, crash } = await preparedDirectoryCrash();
       await crashRecovery(state, point);
 
@@ -153,7 +154,7 @@ describe("prepared directory retirement replay", () => {
     });
   }
 
-  test("replays a crash after every removal and before the durable rolledBack journal", async () => {
+  it("replays a crash after every removal and before the durable rolledBack journal", async () => {
     const { state, crash } = await preparedDirectoryCrash();
     await crashRecovery(state, "after-all-retirements");
 
@@ -169,7 +170,7 @@ describe("prepared directory retirement replay", () => {
     await expectAbsent(crash.journalPath);
   });
 
-  test("re-fsyncs a present parent when replay finds its retired child absent", async () => {
+  it("re-fsyncs a present parent when replay finds its retired child absent", async () => {
     const { state, crash } = await preparedDirectoryCrash();
     await crashRecovery(state, "after-removal");
     await expectAbsent(path.join(state.target, "nested", "deep"));
@@ -185,7 +186,7 @@ describe("prepared directory retirement replay", () => {
   });
 
   for (const replacement of ["directory", "symlink", "file"] as const) {
-    test(`preserves a retired directory replaced by a ${replacement}`, async () => {
+    it(`preserves a retired directory replaced by a ${replacement}`, async () => {
       const { state, crash } = await preparedDirectoryCrash();
       await crashRecovery(state, "after-parent-sync");
       const retired = path.join(state.target, "nested", "deep");
@@ -218,7 +219,7 @@ describe("prepared directory retirement replay", () => {
     });
   }
 
-  test("preserves an unsafe recreated ancestor", async () => {
+  it("preserves an unsafe recreated ancestor", async () => {
     const { state, crash } = await preparedDirectoryCrash();
     await crashRecovery(state, "after-all-retirements");
     const outside = trackTemporaryPath(
@@ -236,7 +237,7 @@ describe("prepared directory retirement replay", () => {
     );
   });
 
-  test("rejects absence caused by an unrecorded preexisting ancestor", async () => {
+  it("rejects absence caused by an unrecorded preexisting ancestor", async () => {
     const state = await fixture();
     await mkdir(path.join(state.source, "nested", "deep"), { recursive: true });
     await mkdir(path.join(state.target, "nested"));
@@ -258,7 +259,7 @@ describe("prepared directory retirement replay", () => {
     expect((await lstat(crash.journalPath)).isFile()).toBe(true);
   });
 
-  test("preserves an exact journal-owned directory that became nonempty", async () => {
+  it("preserves an exact journal-owned directory that became nonempty", async () => {
     const { state, crash } = await preparedDirectoryCrash();
     await crashRecovery(state, "before-removal");
     const retained = path.join(state.target, "nested", "deep", "sentinel.txt");
@@ -271,7 +272,7 @@ describe("prepared directory retirement replay", () => {
     expect((await lstat(crash.journalPath)).isFile()).toBe(true);
   });
 
-  test("validates publication provenance before replay writes", async () => {
+  it("validates publication provenance before replay writes", async () => {
     const { state, crash } = await preparedDirectoryCrash();
     await crashRecovery(state, "after-all-retirements");
     firstBackup(crash.journal).publication = path.join(
@@ -287,7 +288,7 @@ describe("prepared directory retirement replay", () => {
     expect((await lstat(crash.journalPath)).isFile()).toBe(true);
   });
 
-  test("keeps missing created directories strict for applied journals", async () => {
+  it("keeps missing created directories strict for applied journals", async () => {
     const state = await fixture();
     await mkdir(path.join(state.source, "nested"));
     await writeFile(path.join(state.source, "nested", "new.txt"), "new\n");
@@ -300,7 +301,7 @@ describe("prepared directory retirement replay", () => {
     expect((await lstat(crash.journalPath)).isFile()).toBe(true);
   });
 
-  test("direct retirement is idempotent for journal-owned identities", async () => {
+  it("direct retirement is idempotent for journal-owned identities", async () => {
     const state = await fixture();
     const parent = path.join(state.target, "nested");
     const child = path.join(parent, "deep");

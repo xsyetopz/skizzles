@@ -1,12 +1,12 @@
 import { posix } from "node:path";
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
+
 import { parse as parseYaml } from "yaml";
 import { parseManifestEnvironmentLists } from "./environment.ts";
 
 export const manifestName = ".codex-container-lab.yaml";
 
-const serviceNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
-const uriSchemePattern = /^[a-z][a-z0-9+.-]*$/;
+const serviceNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/u;
+const uriSchemePattern = /^[a-z][a-z0-9+.-]*$/u;
 
 type IssuePath = Array<string | number>;
 interface ValidationIssue {
@@ -103,7 +103,7 @@ function asObject(
 ): Record<string, unknown> | undefined {
   if (!isRecord(value)) {
     addIssue(issues, path, "must be an object");
-    return undefined;
+    return;
   }
   return value;
 }
@@ -119,7 +119,7 @@ function requiredString(
   const fieldPath = [...path, key];
   if (!hasOwn(value, key)) {
     addIssue(issues, fieldPath, "is required");
-    return undefined;
+    return;
   }
   const parsed = validate(value[key]);
   if (parsed === undefined) {
@@ -150,7 +150,7 @@ function optionalString(
 
 function parseServiceName(value: unknown): string | undefined {
   if (typeof value !== "string") {
-    return undefined;
+    return;
   }
   const parsed = value.trim();
   return serviceNamePattern.test(parsed) ? parsed : undefined;
@@ -158,7 +158,7 @@ function parseServiceName(value: unknown): string | undefined {
 
 function parseRelativePath(value: unknown): string | undefined {
   if (typeof value !== "string") {
-    return undefined;
+    return;
   }
   const parsed = value.trim();
   return parsed.length > 0 ? parsed : undefined;
@@ -166,14 +166,14 @@ function parseRelativePath(value: unknown): string | undefined {
 
 function parseShellArgument(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length === 0 || value.includes("\0")) {
-    return undefined;
+    return;
   }
   return value;
 }
 
 function parseNonEmptyTrimmedString(value: unknown): string | undefined {
   if (typeof value !== "string") {
-    return undefined;
+    return;
   }
   const parsed = value.trim();
   return parsed.length > 0 ? parsed : undefined;
@@ -219,7 +219,7 @@ function parseCompose(
 ): ComposeManifest | undefined {
   const record = asObject(value, path, issues);
   if (!record) {
-    return undefined;
+    return;
   }
   rejectUnknownKeys(record, ["files", "command_service"], path, issues);
   let files: string[] = [];
@@ -255,7 +255,7 @@ function parseDockerfile(
 ): DockerfileManifest | undefined {
   const record = asObject(value, path, issues);
   if (!record) {
-    return undefined;
+    return;
   }
   rejectUnknownKeys(record, ["path", "context", "service"], path, issues);
   const dockerfilePath = requiredString(
@@ -295,7 +295,7 @@ function parseImage(
 ): ImageManifest | undefined {
   const record = asObject(value, path, issues);
   if (!record) {
-    return undefined;
+    return;
   }
   rejectUnknownKeys(record, ["name", "service"], path, issues);
   const name = requiredString(
@@ -361,7 +361,7 @@ function parsePort(
 ): PortManifest | undefined {
   const record = asObject(value, path, issues);
   if (!record) {
-    return undefined;
+    return;
   }
   rejectUnknownKeys(record, ["service", "target", "scheme"], path, issues);
   const service = requiredString(
@@ -379,7 +379,7 @@ function parsePort(
     typeof record["target"] !== "number" ||
     !Number.isInteger(record["target"]) ||
     record["target"] < 1 ||
-    record["target"] > 65535
+    record["target"] > 65_535
   ) {
     addIssue(
       issues,

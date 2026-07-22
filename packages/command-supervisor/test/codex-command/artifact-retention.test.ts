@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   chmodSync,
@@ -192,7 +191,7 @@ describe("artifact-store safety and retention", () => {
       : undefined;
 
     process.kill(active.pid, "SIGTERM");
-    const exitCode = await exitWithin(active, 1_500);
+    const exitCode = await exitWithin(active, 1500);
     if (exitCode === undefined) {
       stopProcess(active.pid);
     }

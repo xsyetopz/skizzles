@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, it } from "bun:test";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -32,7 +31,7 @@ describe("signal forwarding and descendant supervision", () => {
     await waitForFile(shellPidPath);
     const shellPid = Number.parseInt(readFileSync(shellPidPath, "utf8"), 10);
     process.kill(child.pid, "SIGTERM");
-    const exitCode = await exitWithin(child, 1_500);
+    const exitCode = await exitWithin(child, 1500);
     if (exitCode === undefined) {
       stopProcess(shellPid);
       stopProcess(child.pid);
@@ -66,7 +65,7 @@ describe("signal forwarding and descendant supervision", () => {
     await waitForFile(shellPidPath);
     const shellPid = Number.parseInt(readFileSync(shellPidPath, "utf8"), 10);
     process.kill(child.pid, "SIGTERM");
-    const exitCode = await exitWithin(child, 1_500);
+    const exitCode = await exitWithin(child, 1500);
     if (exitCode === undefined) {
       stopProcess(shellPid);
       stopProcess(child.pid);
@@ -136,7 +135,7 @@ describe("signal forwarding and descendant supervision", () => {
     expect(await waitForProcessExit(shellPid)).toBe(true);
 
     process.kill(child.pid, "SIGTERM");
-    const exitCode = await exitWithin(child, 1_500);
+    const exitCode = await exitWithin(child, 1500);
     const descendantExited = await waitForProcessExit(descendantPid);
     if (!descendantExited) {
       stopProcess(descendantPid);
@@ -185,7 +184,7 @@ describe("signal forwarding and descendant supervision", () => {
         10,
       );
       process.kill(child.pid, signal);
-      const exitCode = await exitWithin(child, 1_500);
+      const exitCode = await exitWithin(child, 1500);
       const descendantExited = await waitForProcessExit(descendantPid);
       if (!descendantExited) {
         stopProcess(descendantPid);

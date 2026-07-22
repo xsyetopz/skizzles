@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import { JSON_LIMITS, parseJsonBytes } from "../src/codec.ts";
 

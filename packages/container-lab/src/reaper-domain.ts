@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { Database } from "bun:sqlite";
 import { lstat, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -52,7 +51,6 @@ export type ReaperOptions = {
   stateReader?: (database: Database, owner: string) => ThreadState;
 };
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 export async function reapArchivedOwners(
   options: ReaperOptions,
 ): Promise<ReaperResult> {
@@ -180,7 +178,6 @@ export async function reapArchivedOwners(
         await options.beforeOwnerLock?.(owner.ownerKey);
         await withFileLock(
           ownerLockPath(roots.stateRoot, owner.owner),
-          // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
           async () => {
             await assertOwnerStateDirectory(
               roots.stateRoot,
@@ -298,7 +295,6 @@ export async function reapArchivedOwners(
 }
 
 export function validateThreadsSchema(database: Database): void {
-  // biome-ignore lint/security/noSecrets: This fixed test/schema token is not a credential.
   const rows = database.query("PRAGMA table_info(threads)").all() as Record<
     string,
     unknown
@@ -417,7 +413,7 @@ async function cleanupExactLab(
       current.state = "destroying";
       current.updatedAt = new Date().toISOString();
       await writeLab(roots, current);
-      // biome-ignore lint/style/noParameterAssign: The local mutation is confined to this existing state-transition implementation.
+
       lab = current;
     },
     { attempts: 600, delayMs: 50 },
@@ -453,7 +449,6 @@ async function cleanupExactLab(
       await withFileLock(
         labLock,
         async () => {
-          // biome-ignore lint/style/noParameterAssign: The local mutation is confined to this existing state-transition implementation.
           lab = await readLab(roots, lab.owner, lab.id);
           await validateReaperLab(roots, lab.owner, lab.ownerKey, lab);
           await authorize();

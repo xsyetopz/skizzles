@@ -58,7 +58,9 @@ async function bundleCanonicalEntrypoint(
   if (!result.success || result.outputs.length !== 1 || output === undefined) {
     const diagnostics = result.logs.map((log) => log.message).join("; ");
     throw new PackagingError(
-      `Unable to create the dependency-self-contained ${entrypoint.label} bundle${diagnostics === "" ? "." : `: ${diagnostics}`}`,
+      `Unable to create the dependency-self-contained ${entrypoint.label} bundle${
+        diagnostics === "" ? "." : `: ${diagnostics}`
+      }`,
     );
   }
   const destination = join(pluginRoot, entrypoint.destination);
@@ -188,7 +190,11 @@ async function writeInstallerRuntimeManifest(
   await mkdir(dirname(destination), { recursive: true });
   await Bun.write(
     destination,
-    `${JSON.stringify({ name, version, private: true, type: "module" }, null, 2)}\n`,
+    `${JSON.stringify(
+      { name, version, private: true, type: "module" },
+      null,
+      2,
+    )}\n`,
   );
 }
 
@@ -270,5 +276,3 @@ async function assertContainedNonSymlinkFile(
     throw new PackagingError("Resolved package import is not a file.");
   }
 }
-
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.

@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { createCandidateManifest } from "@skizzles/candidate-manifest";
@@ -160,8 +159,9 @@ describe("change assurance facade", () => {
     ]);
     const firstDeclaration = declarationTargets[0];
     const secondDeclaration = declarationTargets[1];
-    if (firstDeclaration === undefined || secondDeclaration === undefined)
+    if (firstDeclaration === undefined || secondDeclaration === undefined) {
       throw new Error("candidate manifest fixture targets missing");
+    }
     const targets = Object.freeze([
       Object.freeze({
         ...firstDeclaration,
@@ -176,8 +176,9 @@ describe("change assurance facade", () => {
     ]);
     const firstTarget = targets[0];
     const secondTarget = targets[1];
-    if (firstTarget === undefined || secondTarget === undefined)
+    if (firstTarget === undefined || secondTarget === undefined) {
       throw new Error("candidate manifest assessment targets missing");
+    }
     const assessment = Object.freeze({
       requestDigest: digest("a"),
       repositoryId: "repository",
@@ -302,5 +303,7 @@ async function assessSingleTarget(
 }
 
 function sha256(bytes: readonly number[]) {
-  return `sha256:${createHash("sha256").update(Uint8Array.from(bytes)).digest("hex")}` as const;
+  return `sha256:${createHash("sha256")
+    .update(Uint8Array.from(bytes))
+    .digest("hex")}` as const;
 }

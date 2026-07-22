@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { expect, it } from "bun:test";
 import descriptor from "../assets/integrations/container-lab.json" with {
   type: "json",

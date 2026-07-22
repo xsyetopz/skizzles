@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import { createHarness, repositoryContext } from "../support.ts";
 
@@ -22,8 +21,9 @@ describe("host-owned execution budgets", () => {
             ? { causalFailureId: "same-root-cause" }
             : {}),
         });
-        if (result.status !== "accepted")
+        if (result.status !== "accepted") {
           throw new Error("exact bound rejected");
+        }
         execution = result.execution;
       }
       expect(
@@ -87,8 +87,9 @@ describe("host-owned execution budgets", () => {
     const incompleteContext = await repositoryContext(incomplete.orchestrator);
     const incompleteStart =
       incomplete.orchestrator.startExecution(incompleteContext);
-    if (incompleteStart.status !== "accepted")
+    if (incompleteStart.status !== "accepted") {
       throw new Error("start rejected");
+    }
     await expect(
       incomplete.orchestrator.completeExecution({
         execution: incompleteStart.execution,

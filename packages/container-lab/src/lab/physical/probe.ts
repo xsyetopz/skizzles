@@ -62,9 +62,7 @@ export async function destroyAndProveAbsent(
       labAbsent: true,
       terminal: true,
     });
-  } catch {
-    return;
-  }
+  } catch {}
 }
 
 class BoundedObservation {

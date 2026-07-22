@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, it } from "bun:test";
 import { existsSync } from "node:fs";
 import { createRunnerFixture } from "./runner-fixture.ts";

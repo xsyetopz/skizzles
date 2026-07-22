@@ -23,7 +23,7 @@ const OWNER_NAME = "owner.json";
 const DEFAULT_INCOMPLETE_GRACE_MS = 5_000;
 const TOKEN_PATTERN = /^[0-9a-f-]{36}$/;
 const ORPHAN_NAME_PATTERN = /^(?:stale|release|failed)-[0-9a-f-]{36}$/;
-// biome-ignore lint/security/noSecrets: This persisted schema key names Unix timestamp metadata, not credential material.
+
 const CREATED_AT_UNIX_MS_FIELD = "createdAtUnixMs";
 const LINE_BREAK_PATTERN = /[\r\n]/;
 const WHITESPACE_PATTERN = /\s+/;
@@ -136,7 +136,6 @@ function acquireLock(
   return reclaimStaleLock(parent, path, owner, options);
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Orphan validation deliberately keeps every fail-closed shape and identity check together.
 function cleanupLockOrphans(
   parent: string,
   lockPath: string,
@@ -218,7 +217,6 @@ function createLock(
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Stale reclaim is one ordered identity-checked transaction.
 async function reclaimStaleLock(
   parent: string,
   path: string,

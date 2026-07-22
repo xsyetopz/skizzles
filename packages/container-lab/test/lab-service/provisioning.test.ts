@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmod } from "node:fs/promises";
 import {
@@ -10,9 +9,9 @@ import {
   mkdir,
   mkdtemp,
   process,
-  RecordingDocker,
   readFileSync,
   readLab,
+  RecordingDocker,
   runCommand,
   SecretDiagnosticDocker,
   tmpdir,

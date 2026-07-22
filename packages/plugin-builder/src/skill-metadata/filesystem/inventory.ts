@@ -25,10 +25,9 @@ async function readSkillAssetInventory(
   const assets: SkillAssetBinding[] = [];
   for (const record of records) {
     const assetsPath = `skills/${record.directoryName}/assets`;
-    // biome-ignore lint/performance/noAwaitInLoops: sorted skill ownership preserves deterministic diagnostics.
+
     const exists = await assetDirectoryExists(root, assetsPath);
     if (exists) {
-      // biome-ignore lint/performance/noAwaitInLoops: each skill asset tree is validated as one ordered boundary.
       await readAssetDirectory(root, assetsPath, 0, assets, mode);
     }
   }
@@ -92,16 +91,17 @@ async function readAssetDirectory(
       );
     }
     if (entry.isDirectory()) {
-      // biome-ignore lint/performance/noAwaitInLoops: ordered traversal preserves deterministic first-failure diagnostics.
       await readAssetDirectory(root, entryPath, depth + 1, assets, mode);
       continue;
     }
     if (!entry.isFile()) {
       throw new SkillMetadataError(
-        `${diagnosticPath(entryPath)}: asset entries must be regular files or directories.`,
+        `${diagnosticPath(
+          entryPath,
+        )}: asset entries must be regular files or directories.`,
       );
     }
-    // biome-ignore lint/performance/noAwaitInLoops: stable reads bind every asset in deterministic path order.
+
     const bytes = await readStableRegularFile(
       root,
       entryPath,
@@ -135,7 +135,9 @@ function validateAssetDirectory(
 ): void {
   if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
     throw new SkillMetadataError(
-      `${diagnosticPath(relativePath)}: assets must be a self-contained directory.`,
+      `${diagnosticPath(
+        relativePath,
+      )}: assets must be a self-contained directory.`,
     );
   }
 }

@@ -1,6 +1,5 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { Database } from "bun:sqlite";
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
+
 import { afterEach, expect, it } from "bun:test";
 import { join } from "node:path";
 import {

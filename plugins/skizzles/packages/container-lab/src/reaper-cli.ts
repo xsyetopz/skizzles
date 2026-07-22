@@ -7117,7 +7117,7 @@ var manifestName = ".codex-container-lab.yaml";
 var manifestName2 = manifestName;
 
 // packages/container-lab/src/docker/cleanup.ts
-var IMMUTABLE_IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
+var IMMUTABLE_IMAGE_ID = /^sha256:[0-9a-f]{64}$/u;
 async function cleanupLabLabelsInDocker(metadata, removeInternalImage, runner, environment) {
   const dockerEnvironment = dockerClientEnvironment(environment);
   const exactFilters = [
@@ -8380,13 +8380,13 @@ import {
   sep as sep2
 } from "path";
 var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
-var LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
-var REPOSITORY_HASH = /^[a-f0-9]{12}$/;
-var SOURCE_REPOSITORY_IDENTITY = /^[a-f0-9]{64}$/;
-var COMPOSE_PROJECT = /^ccl-[a-z0-9][a-z0-9-]{0,62}$/;
-var SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
-var ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-var URL_SCHEME = /^[a-z][a-z0-9+.-]*$/;
+var LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/u;
+var REPOSITORY_HASH = /^[a-f0-9]{12}$/u;
+var SOURCE_REPOSITORY_IDENTITY = /^[a-f0-9]{64}$/u;
+var COMPOSE_PROJECT = /^ccl-[a-z0-9][a-z0-9-]{0,62}$/u;
+var SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/u;
+var ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+var URL_SCHEME = /^[a-z][a-z0-9+.-]*$/u;
 var FINDING_SURFACES = new Set([
   "host-bind",
   "socket-bind",
@@ -8484,14 +8484,14 @@ function assertLabMetadata(value, roots, owner, labId) {
   }
 }
 function validatePersistedRuntime(lab, runtime) {
-  if (!isRecord4(runtime) || !hasOnlyKeys(runtime, [
+  if (!(isRecord4(runtime) && hasOnlyKeys(runtime, [
     "config",
     "composeArgs",
     "baseFile",
     "sourceFile",
     "overrideFile",
     "findings"
-  ]) || !isRecord4(runtime["config"])) {
+  ]) && isRecord4(runtime["config"]))) {
     throw new Error("invalid persisted runtime");
   }
   const persistedConfig = runtime["config"];

@@ -1,8 +1,7 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { expect, test } from "bun:test";
 import { gitProcessEnvironment, runLocalGit } from "../../src/process/git.ts";
 
-test("Git process environment excludes ambient repository and credential controls", () => {
+it("Git process environment excludes ambient repository and credential controls", () => {
   const ambient = {
     PATH: "/usr/bin:/bin",
     TMPDIR: "/tmp/exact",
@@ -31,7 +30,7 @@ test("Git process environment excludes ambient repository and credential control
   expect(ambient.GIT_DIR).toBe("/attacker/repository");
 });
 
-test("Git adapter rejects non-local clone sources before spawn", async () => {
+it("Git adapter rejects non-local clone sources before spawn", async () => {
   await expect(
     runLocalGit(
       ["clone", "https://example.invalid/repository.git", "/tmp/destination"],

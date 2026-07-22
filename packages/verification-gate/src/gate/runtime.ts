@@ -16,9 +16,9 @@ import {
 } from "../fuzz.ts";
 import { boundedInteger } from "../object.ts";
 import {
-  modifiedLineCount as countModifiedLines,
   coverageObjectiveFailures,
   createCoverageObjective,
+  modifiedLineCount as countModifiedLines,
   parseCoverageReport,
 } from "./coverage.ts";
 import {
@@ -34,7 +34,6 @@ import { bindingDigest } from "./report.ts";
 import { authorizeExclusion, parseReviewer } from "./review.ts";
 import { deriveMutationInventory, parseSourceReport } from "./source.ts";
 
-// biome-ignore lint/security/noSecrets: This is a public receipt field name, not secret material.
 const productionOverlayDigestField = "productionOverlayDigest";
 
 const gates = new WeakSet<object>();
@@ -53,8 +52,9 @@ export function createVerificationGate(
   } catch {
     config = undefined;
   }
-  if (config === undefined)
+  if (config === undefined) {
     return { status: "rejected", code: "INVALID_CONFIG" };
+  }
   const owner = Object.freeze({});
   const gate: VerificationGate = Object.freeze({
     evaluate: async (raw: unknown) => await evaluate(owner, config, raw),
@@ -120,8 +120,9 @@ async function evaluate(
     !isDigest(assurance["evidenceDigest"]) ||
     assurance["candidateDigest"] !== bindings.candidateDigest ||
     assurance["candidateManifestDigest"] !== bindings.candidateManifestDigest
-  )
+  ) {
     return rejection("CHANGE_ASSURANCE_REJECTED");
+  }
 
   const taskRaw = await safeInvoke(
     config.taskWorktree,
@@ -159,8 +160,9 @@ async function evaluate(
     !isDigest(physical["evidenceDigest"]) ||
     physical["candidateDigest"] !== bindings.candidateDigest ||
     !isDigest(physical["isolationDigest"])
-  )
+  ) {
     return rejection("AUTHORITY_REJECTED");
+  }
 
   const originalRaw = await safeInvoke(
     config.originalTests,
@@ -198,8 +200,9 @@ async function evaluate(
     original["profileReceiptDigest"] !==
       task.profileReceiptDigests.originalTests ||
     original["viewDigest"] !== task.viewDigest
-  )
+  ) {
     return rejection("AUTHORITY_REJECTED");
+  }
 
   const inventory = deriveMutationInventory(source);
   if (inventory.length < 1) return rejection("MUTATION_INVENTORY_REJECTED");
@@ -308,8 +311,9 @@ async function evaluate(
       property.properties.some(
         ({ counterexampleDigest }) => counterexampleDigest !== null,
       )
-    )
+    ) {
       failures.push("PROPERTY_COUNTEREXAMPLE");
+    }
     const reachedNodes = new Set(
       property.properties.flatMap(({ nodeIds }) => nodeIds),
     );
@@ -323,8 +327,9 @@ async function evaluate(
       source.modifiedNodes.some(({ branchIds }) =>
         branchIds.some((branchId) => !reachedBranches.has(branchId)),
       )
-    )
+    ) {
       failures.push("MODIFIED_BRANCH_UNCOVERED");
+    }
   }
   if (coverage === undefined) {
     failures.push("COVERAGE_REJECTED");

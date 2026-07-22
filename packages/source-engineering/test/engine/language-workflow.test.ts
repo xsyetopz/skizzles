@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { afterEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -19,8 +18,9 @@ import {
 
 const roots: string[] = [];
 afterEach(() => {
-  for (const root of roots.splice(0))
+  for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
+  }
 });
 
 describe("language adapter public workflows", () => {
@@ -102,8 +102,9 @@ describe("language adapter public workflows", () => {
           templates: Object.freeze([{ id: "declaration", language }]),
         }),
       );
-      if (sourceEvidenceResult.status !== "created")
+      if (sourceEvidenceResult.status !== "created") {
         throw new Error(sourceEvidenceResult.code);
+      }
       const formatterCalls: number[] = [];
       const formatterAuthority: FormatterAuthorityPort = Object.freeze({
         format: (request: Parameters<FormatterAuthorityPort["format"]>[0]) => {
@@ -125,8 +126,9 @@ describe("language adapter public workflows", () => {
           authority: formatterAuthority,
         }),
       );
-      if (formatterResult.status !== "registered")
+      if (formatterResult.status !== "registered") {
         throw new Error(formatterResult.code);
+      }
       const compilerResult = createTypeScriptCompilerAuthority(
         Object.freeze({
           repository: Object.freeze({
@@ -144,8 +146,9 @@ describe("language adapter public workflows", () => {
           }),
         }),
       );
-      if (compilerResult.status !== "created")
+      if (compilerResult.status !== "created") {
         throw new Error(compilerResult.code);
+      }
       const indexAuthority: TypeScriptSymbolIndexAuthorityPort = Object.freeze({
         capture: (
           input: Parameters<TypeScriptSymbolIndexAuthorityPort["capture"]>[0],
@@ -179,8 +182,9 @@ describe("language adapter public workflows", () => {
           symbolIndexAuthority: indexAuthority,
         }),
       );
-      if (adapterResult.status !== "created")
+      if (adapterResult.status !== "created") {
         throw new Error(adapterResult.code);
+      }
       expect(adapterResult.adapter.supportsPath(path)).toBe(true);
       const directParse = await adapterResult.adapter.parse(
         Object.freeze({ targetPath: path, sourceText: baseline }),
@@ -188,7 +192,10 @@ describe("language adapter public workflows", () => {
       expect(directParse).toMatchObject({ status: "parsed" });
       const candidateText =
         language === "tsx"
-          ? `${baseline.slice(0, baseline.indexOf("export function"))}${replacement}\n`
+          ? `${baseline.slice(
+              0,
+              baseline.indexOf("export function"),
+            )}${replacement}\n`
           : `${replacement}\n`;
       const replacementParse = await adapterResult.adapter.parse(
         Object.freeze({ targetPath: path, sourceText: candidateText }),

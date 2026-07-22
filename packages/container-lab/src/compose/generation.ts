@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
 import { stringify as stringifyYaml } from "yaml";
 import type { LabConfig } from "../config.ts";
 import type { ComposeModel } from "./contract.ts";
@@ -15,7 +14,7 @@ export const emptyComposeEnvironmentFile = "/dev/null";
 
 export function generateBaseCompose(config: LabConfig): string | undefined {
   if (config.mode.kind === "compose") {
-    return undefined;
+    return;
   }
   const service: Record<string, unknown> = {
     working_dir: config.runtime.workspace,
@@ -194,7 +193,6 @@ function publishedTarget(port: unknown): number | undefined {
     const parsed = Number(port["target"]);
     return Number.isInteger(parsed) ? parsed : undefined;
   }
-  return undefined;
 }
 
 function asArray(value: unknown): unknown[] {

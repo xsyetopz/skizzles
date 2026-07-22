@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun provides its test module at runtime.
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -56,8 +55,9 @@ describe("protected task paths", () => {
     const fixture = await protectedFixture();
     const base = protectedConfig(fixture, "implementation");
     for (const specificationRoot of ["missing-spec", "empty-spec"]) {
-      if (specificationRoot === "empty-spec")
+      if (specificationRoot === "empty-spec") {
         await mkdir(join(fixture.repository, specificationRoot));
+      }
       const created = createTaskWorktree(
         Object.freeze({
           ...base,

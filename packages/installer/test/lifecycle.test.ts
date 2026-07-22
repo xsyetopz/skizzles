@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in module.
 import { describe, expect, it } from "bun:test";
 import { lstat } from "node:fs/promises";
 import process from "node:process";

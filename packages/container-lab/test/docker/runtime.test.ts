@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { expect, test } from "bun:test";
 import {
   composeInvocationEnvironment,
@@ -18,7 +17,7 @@ import {
   RecordingDocker,
 } from "./support.ts";
 
-test("Docker availability uses only exact client environment capabilities", async () => {
+it("Docker availability uses only exact client environment capabilities", async () => {
   const docker = new RecordingDocker();
   docker.responses.push(commandResult("", 1));
   const environment = {
@@ -47,7 +46,7 @@ test("Docker availability uses only exact client environment capabilities", asyn
   });
 });
 
-test("Docker and Compose environment builders are exact and non-mutating", () => {
+it("Docker and Compose environment builders are exact and non-mutating", () => {
   const ambient = {
     PATH: "/usr/bin:/bin",
     HOME: "/home/reviewed",
@@ -125,7 +124,7 @@ test("Docker and Compose environment builders are exact and non-mutating", () =>
   expect(Object.getPrototypeOf(prototypeResult)).toBe(Object.prototype);
 });
 
-test("Compose transport preserves exact arguments and bounded execution options", async () => {
+it("Compose transport preserves exact arguments and bounded execution options", async () => {
   const docker = new RecordingDocker();
   const controller = new AbortController();
   await composeCommand(
@@ -159,7 +158,7 @@ test("Compose transport preserves exact arguments and bounded execution options"
   });
 });
 
-test("persisted runtime hydration retains metadata and rejects absent runtime", () => {
+it("persisted runtime hydration retains metadata and rejects absent runtime", () => {
   const missing = dockerLab();
   expect(() => runtimeFromLab(missing)).toThrow(
     "lab runtime is unavailable: lab-1",
@@ -178,7 +177,7 @@ test("persisted runtime hydration retains metadata and rejects absent runtime", 
   });
 });
 
-test("malformed Compose JSON stays inside the fixed redaction boundary", async () => {
+it("malformed Compose JSON stays inside the fixed redaction boundary", async () => {
   const sentinel = "sentinel-yaml-source-5ea61a";
   const docker = new RecordingDocker();
   docker.responses.push(commandResult(`{"services":"${sentinel}"`));
@@ -194,7 +193,7 @@ test("malformed Compose JSON stays inside the fixed redaction boundary", async (
   expect(docker.calls).toHaveLength(1);
 });
 
-test("null and wrong-shape normalized output stay inside the fixed redaction boundary", async () => {
+it("null and wrong-shape normalized output stay inside the fixed redaction boundary", async () => {
   const sentinel = "sentinel-wrong-shape-a1c70b";
   for (const output of ["null", "[]", `{"services":"${sentinel}"}`]) {
     const docker = new RecordingDocker();

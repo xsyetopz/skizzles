@@ -288,7 +288,6 @@ async function readyRuntimeProblem(
 ): Promise<string | undefined> {
   try {
     await assertReadyLabFilesystem(roots, lab);
-    return undefined;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return "runtime or workspace is missing";

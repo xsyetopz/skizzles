@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   chmodSync,
@@ -168,7 +167,7 @@ describe("command execution and stream capture", () => {
       readFileSync(descendantPidPath, "utf8"),
       10,
     );
-    const exitCode = await exitWithin(child, 1_500);
+    const exitCode = await exitWithin(child, 1500);
     const descendantExited = await waitForProcessExit(descendantPid, 500);
     if (!descendantExited) {
       stopProcess(descendantPid);

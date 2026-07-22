@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import type { JsonValue } from "../../src/agent-contract/json/value.ts";
 import { createTestWorkspace } from "../plugin/fixture.ts";

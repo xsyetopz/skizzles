@@ -1,10 +1,9 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-// biome-ignore lint/correctness/noUnresolvedImports: This test proves the declared package self-reference.
+
 import * as stagingApi from "@skizzles/plugin-builder";
-// biome-ignore lint/correctness/noUnresolvedImports: This test proves the declared package subpath.
+
 import {
   ContractRejection,
   evaluateAgentContract,

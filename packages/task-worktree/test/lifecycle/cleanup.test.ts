@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun provides its test module at runtime.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   chmod,
@@ -172,7 +171,7 @@ function ambiguousGitWrapper(realGit: string): string {
     '  if [ "$previous" = "worktree" ] && [ "$argument" = "add" ]; then is_add=1; fi',
     '  if [ "$take_root" = "1" ]; then root="$argument"; take_root=0; fi',
     '  if [ "$argument" = "--" ]; then take_root=1; fi',
-    // biome-ignore lint/security/noSecrets: shell fixture assignment, not a credential
+
     '  previous="$argument"',
     "done",
     '"$real_git" "$@"',

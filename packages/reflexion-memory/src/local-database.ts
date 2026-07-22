@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies its built-in SQLite module.
 import { Database } from "bun:sqlite";
 import { isAbsolute, normalize } from "node:path";
 import { digestCanonical } from "./canonical.ts";

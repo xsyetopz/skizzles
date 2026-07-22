@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import { parseTypeScriptSource } from "../src/typescript/parser.ts";
 import { analyzeModifiedExecutables } from "../src/typescript/structural.ts";

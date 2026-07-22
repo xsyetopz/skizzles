@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
@@ -8,13 +7,13 @@ import { createTestWorkspace } from "../fixture.ts";
 import {
   collectMessages,
   crashAt,
-  temporaryRoot as createTemporaryRoot,
   currentClaim,
   expectProcessGone,
   nonAllocatorArtifacts,
   seededDestination,
   spawnTransaction,
   startWorker,
+  temporaryRoot as createTemporaryRoot,
   waitForFile,
   writeWorkerModule,
 } from "./claim-fixture.ts";

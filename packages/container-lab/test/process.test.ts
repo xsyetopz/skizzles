@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, it } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -110,7 +109,7 @@ describe("runCommand POSIX lifecycle", () => {
     for (let index = 0; index < 10; index += 1) {
       await runCommand("/usr/bin/true", []);
     }
-    expect(performance.now() - started).toBeLessThan(2_000);
+    expect(performance.now() - started).toBeLessThan(2000);
   });
 
   it("retries an empty process marker until canonical publication", async () => {

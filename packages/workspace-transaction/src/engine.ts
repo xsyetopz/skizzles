@@ -183,7 +183,6 @@ export function validateAllTargets(
       return invalid;
     }
   }
-  return undefined;
 }
 
 export function validateJournalSnapshot(
@@ -220,7 +219,6 @@ export function validateJournalSnapshot(
       "destination returned a malformed journal snapshot",
     );
   }
-  return undefined;
 }
 
 export function expectedOwnership(
@@ -278,7 +276,6 @@ export function validateSibling(
       },
     );
   }
-  return undefined;
 }
 
 export function bindingsEqual(
@@ -605,5 +602,4 @@ export async function cleanupOwnedSiblings(
       });
     }
   }
-  return undefined;
 }

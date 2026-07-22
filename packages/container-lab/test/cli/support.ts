@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
@@ -26,7 +25,7 @@ import { labManifestPath, ownerKey } from "../../src/state/layout.ts";
 import { ensureOwner } from "../../src/state/owner-store.ts";
 import { initializeSyncBaseline } from "../../src/sync/api.ts";
 
-export const canonicalPositivePid = /^[1-9][0-9]*$/;
+export const canonicalPositivePid = /^[1-9][0-9]*$/u;
 
 export function fixtureLab(root: string, owner: string): LabMetadata {
   const key = ownerKey(owner);
@@ -37,7 +36,7 @@ export function fixtureLab(root: string, owner: string): LabMetadata {
     name: "lab",
     owner,
     ownerKey: key,
-    // biome-ignore lint/security/noSecrets: This fixed test/schema token is not a credential.
+
     repoHash: "123456789abc",
     composeProject: "ccl-process",
     state: "failed",
@@ -184,7 +183,17 @@ async function attachedFixture(trackTemporaryPath: (root: string) => string) {
   const descendantIdentityPath = `${descendantPath}.identity.json`;
   await writeFile(
     dockerPath,
-    `#!${process.execPath}\nconst args = process.argv.slice(2);\nconst joined = args.join(" ");\nconst pidPath = ${JSON.stringify(pidPath)};\nconst descendantPath = ${JSON.stringify(descendantPath)};\nconst token = ${JSON.stringify(testToken)};\nconst identity = (pid) => {\n  const result = Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(pid)]);\n  const processGroup = Number(result.stdout.toString().trim());\n  if (!Number.isSafeInteger(processGroup) || processGroup <= 0) throw new Error("invalid process group");\n  return JSON.stringify({ version: 1, pid, processGroup, token });\n};\nif (joined.includes("termination_result()")) {\n  let pid; try { const text = await Bun.file(pidPath).text(); if (!/^[1-9][0-9]*$/.test(text)) throw new Error("invalid PID"); pid = Number(text); if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("invalid PID"); } catch { console.log("codex-container-lab-termination:unavailable"); process.exit(0); }\n  const signal = joined.includes("kill -INT") ? "SIGINT" : joined.includes("kill -TERM") ? "SIGTERM" : "SIGKILL";\n  try { process.kill(-pid, signal); console.log("codex-container-lab-termination:signaled"); } catch { console.log("codex-container-lab-termination:absent"); }\n  process.exit(0);\n}\nconsole.log("early-output"); console.error("early-error");\nif (process.env.BUILDKIT_PROGRESS?.startsWith("fixture-exit:")) process.exit(Number(process.env.BUILDKIT_PROGRESS.slice(13)));\nconst running = Bun.spawn(["/bin/sh", "-c", "trap 'exit 130' INT; trap 'exit 143' TERM; (trap '' INT TERM; while :; do sleep 1; done) & printf '%s\\n' $!; while :; do sleep 1; done", token], { detached: true, stdin: "ignore", stdout: "pipe", stderr: "inherit" });\nconst reader = running.stdout.getReader();\nconst published = await reader.read();\nconst descendant = Number(new TextDecoder().decode(published.value).trim());\nif (!Number.isSafeInteger(descendant) || descendant <= 0) throw new Error("invalid descendant PID");\nawait Bun.write(${JSON.stringify(leaderIdentityPath)}, identity(running.pid));\nawait Bun.write(${JSON.stringify(descendantIdentityPath)}, identity(descendant));\nawait Bun.write(pidPath, String(running.pid));\nawait Bun.write(descendantPath, String(descendant));\nconst code = await running.exited;\ntry { process.kill(-running.pid, "SIGTERM"); } catch {}\nfor (let i = 0; i < 100; i++) {\n  try { process.kill(-running.pid, 0); } catch { break; }\n  await Promise.resolve();\n}\ntry { process.kill(-running.pid, 0); process.kill(-running.pid, "SIGKILL"); } catch {}\nprocess.exit(code);\n`,
+    `#!${process.execPath}\nconst args = process.argv.slice(2);\nconst joined = args.join(" ");\nconst pidPath = ${JSON.stringify(
+      pidPath,
+    )};\nconst descendantPath = ${JSON.stringify(
+      descendantPath,
+    )};\nconst token = ${JSON.stringify(
+      testToken,
+    )};\nconst identity = (pid) => {\n  const result = Bun.spawnSync(["ps", "-o", "pgid=", "-p", String(pid)]);\n  const processGroup = Number(result.stdout.toString().trim());\n  if (!Number.isSafeInteger(processGroup) || processGroup <= 0) throw new Error("invalid process group");\n  return JSON.stringify({ version: 1, pid, processGroup, token });\n};\nif (joined.includes("termination_result()")) {\n  let pid; try { const text = await Bun.file(pidPath).text(); if (!/^[1-9][0-9]*$/.test(text)) throw new Error("invalid PID"); pid = Number(text); if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error("invalid PID"); } catch { console.log("codex-container-lab-termination:unavailable"); process.exit(0); }\n  const signal = joined.includes("kill -INT") ? "SIGINT" : joined.includes("kill -TERM") ? "SIGTERM" : "SIGKILL";\n  try { process.kill(-pid, signal); console.log("codex-container-lab-termination:signaled"); } catch { console.log("codex-container-lab-termination:absent"); }\n  process.exit(0);\n}\nconsole.log("early-output"); console.error("early-error");\nif (process.env.BUILDKIT_PROGRESS?.startsWith("fixture-exit:")) process.exit(Number(process.env.BUILDKIT_PROGRESS.slice(13)));\nconst running = Bun.spawn(["/bin/sh", "-c", "trap 'exit 130' INT; trap 'exit 143' TERM; (trap '' INT TERM; while :; do sleep 1; done) & printf '%s\\n' $!; while :; do sleep 1; done", token], { detached: true, stdin: "ignore", stdout: "pipe", stderr: "inherit" });\nconst reader = running.stdout.getReader();\nconst published = await reader.read();\nconst descendant = Number(new TextDecoder().decode(published.value).trim());\nif (!Number.isSafeInteger(descendant) || descendant <= 0) throw new Error("invalid descendant PID");\nawait Bun.write(${JSON.stringify(
+      leaderIdentityPath,
+    )}, identity(running.pid));\nawait Bun.write(${JSON.stringify(
+      descendantIdentityPath,
+    )}, identity(descendant));\nawait Bun.write(pidPath, String(running.pid));\nawait Bun.write(descendantPath, String(descendant));\nconst code = await running.exited;\ntry { process.kill(-running.pid, "SIGTERM"); } catch {}\nfor (let i = 0; i < 100; i++) {\n  try { process.kill(-running.pid, 0); } catch { break; }\n  await Promise.resolve();\n}\ntry { process.kill(-running.pid, 0); process.kill(-running.pid, "SIGKILL"); } catch {}\nprocess.exit(code);\n`,
   );
   await chmod(dockerPath, 0o755);
   return {
@@ -321,9 +330,9 @@ function observeProcess(pid: number): ObservedProcessIdentity | undefined {
       { encoding: "utf8" },
     ).trim();
   } catch {
-    return undefined;
+    return;
   }
-  const match = /^(\d+)\s+(\d+)\s+(.+)$/.exec(output);
+  const match = /^(\d+)\s+(\d+)\s+(.+)$/u.exec(output);
   if (!match) {
     throw new Error(`Could not parse observed identity for PID ${pid}`);
   }
@@ -359,10 +368,10 @@ async function validatePublishedProcess(
     Bun.file(pidPath).exists(),
     Bun.file(identityPath).exists(),
   ]);
-  if (!pidExists && !identityExists) {
-    return undefined;
+  if (!(pidExists || identityExists)) {
+    return;
   }
-  if (!pidExists || !identityExists) {
+  if (!(pidExists && identityExists)) {
     throw new Error(`Incomplete attached process identity for ${pidPath}`);
   }
   const pid = parsePublishedPid(await readFile(pidPath, "utf8"));
@@ -398,7 +407,7 @@ function processGroupExists(processGroup: number): boolean {
 }
 
 async function waitForProcessGroupExit(processGroup: number): Promise<boolean> {
-  const deadline = Date.now() + 1_000;
+  const deadline = Date.now() + 1000;
   while (Date.now() < deadline) {
     if (!processGroupExists(processGroup)) {
       return true;
@@ -424,7 +433,7 @@ async function validateAttachedGroup(
     ),
   ]);
   if (leader === undefined && descendant === undefined) {
-    return undefined;
+    return;
   }
   if (leader === undefined || descendant === undefined) {
     throw new Error(`Incomplete attached process group for ${fixture.root}`);
@@ -465,7 +474,7 @@ async function terminateAttachedGroup(fixture: AttachedFixture): Promise<void> {
     return;
   }
   if (revalidatedGroup !== processGroup) {
-    throw new Error(`Attached process group identity changed before SIGKILL`);
+    throw new Error("Attached process group identity changed before SIGKILL");
   }
   process.kill(-processGroup, "SIGKILL");
   if (!(await waitForProcessGroupExit(processGroup))) {
@@ -540,7 +549,7 @@ export async function drain(
 
 export function parsePublishedPid(text: string): number | undefined {
   if (text !== text.trim() || !canonicalPositivePid.test(text)) {
-    return undefined;
+    return;
   }
   const pid = Number(text);
   return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;

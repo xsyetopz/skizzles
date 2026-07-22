@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -32,12 +31,12 @@ afterEach(async () => {
 });
 
 describe("workspace policy", () => {
-  test("accepts an owned, contained package topology", async () => {
+  it("accepts an owned, contained package topology", async () => {
     const root = await fixture();
     expect(await validateWorkspace(root)).toEqual([]);
   });
 
-  test("normalizes an omitted optional bin to an empty surface", async () => {
+  it("normalizes an omitted optional bin to an empty surface", async () => {
     const root = await fixture();
     const manifest = packageManifest();
     const { bin: _, ...withoutBin } = manifest;
@@ -49,7 +48,7 @@ describe("workspace policy", () => {
     expect(await validateWorkspace(root)).toEqual([]);
   });
 
-  test("rejects ambient, escaping, root-owned, and nested-lock contracts", async () => {
+  it("rejects ambient, escaping, root-owned, and nested-lock contracts", async () => {
     const root = await fixture();
     const packageRoot = join(root, "packages/example");
     await writeFile(
@@ -72,7 +71,7 @@ describe("workspace policy", () => {
     expect(codes).toContain("undeclared-dependency");
   });
 
-  test("rejects missing and overexposed package entrypoints", async () => {
+  it("rejects missing and overexposed package entrypoints", async () => {
     const root = await fixture();
     const packageRoot = join(root, "packages/example");
     const manifest = packageManifest();
@@ -88,7 +87,7 @@ describe("workspace policy", () => {
     expect(codes).toContain("missing-bin-target");
   });
 
-  test("compiles every declared optional binary entrypoint", async () => {
+  it("compiles every declared optional binary entrypoint", async () => {
     const root = await fixture();
     const packageRoot = join(root, "packages/example");
     const manifest = packageManifest();
@@ -103,7 +102,7 @@ describe("workspace policy", () => {
     expect(codes).toContain("entrypoint-build-failed");
   });
 
-  test("resolves TypeScript exports through the package exports map", async () => {
+  it("resolves TypeScript exports through the package exports map", async () => {
     const root = await fixture();
     const packageRoot = join(root, "packages/example");
     const manifest = packageManifest();
@@ -118,7 +117,7 @@ describe("workspace policy", () => {
     expect(codes).toContain("unsafe-export-import");
   });
 
-  test("accepts a clean export import beyond the former observation deadline", async () => {
+  it("accepts a clean export import beyond the former observation deadline", async () => {
     const root = await fixture();
     await writeFile(
       join(root, "packages/example/src/index.ts"),
@@ -131,7 +130,7 @@ describe("workspace policy", () => {
     );
   });
 
-  test.each([
+  it.each([
     ["process exit", "process.exit(23);\n"],
     ["stdout output", 'console.log("import side effect");\n'],
     ["stdin consumption", "await Bun.stdin.text();\n"],
@@ -144,9 +143,9 @@ describe("workspace policy", () => {
   });
 
   if (process.platform === "win32") {
-    test.skip("kills a silent same-group descendant that inherits export-import pipes (skipped because POSIX process groups are unavailable on Windows)", () => {});
+    it.skip("kills a silent same-group descendant that inherits export-import pipes (skipped because POSIX process groups are unavailable on Windows)", () => {});
   } else {
-    test("kills a silent same-group descendant that inherits export-import pipes", async () => {
+    it("kills a silent same-group descendant that inherits export-import pipes", async () => {
       const root = await fixture();
       const marker = registerPidMarker(root, "inherited-pipes.pid");
       await writeFile(
@@ -167,9 +166,9 @@ describe("workspace policy", () => {
   }
 
   if (process.platform === "win32") {
-    test.skip("kills a noisy same-group descendant while its export leader hangs without accumulating output (skipped because POSIX process groups are unavailable on Windows)", () => {});
+    it.skip("kills a noisy same-group descendant while its export leader hangs without accumulating output (skipped because POSIX process groups are unavailable on Windows)", () => {});
   } else {
-    test("kills a noisy same-group descendant while its export leader hangs without accumulating output", async () => {
+    it("kills a noisy same-group descendant while its export leader hangs without accumulating output", async () => {
       const root = await fixture();
       const marker = registerPidMarker(root, "noisy-descendant.pid");
       await writeFile(
@@ -191,9 +190,9 @@ describe("workspace policy", () => {
   }
 
   if (process.platform === "win32") {
-    test.skip("kills a silent ignored-stdio same-group descendant after its export leader exits (skipped because POSIX process groups are unavailable on Windows)", () => {});
+    it.skip("kills a silent ignored-stdio same-group descendant after its export leader exits (skipped because POSIX process groups are unavailable on Windows)", () => {});
   } else {
-    test("kills a silent ignored-stdio same-group descendant after its export leader exits", async () => {
+    it("kills a silent ignored-stdio same-group descendant after its export leader exits", async () => {
       const root = await fixture();
       const marker = registerPidMarker(root, "ignored-stdio.pid");
       await writeFile(
@@ -213,7 +212,7 @@ describe("workspace policy", () => {
     });
   }
 
-  test("rejects local Biome tooling and a check without inherited config", async () => {
+  it("rejects local Biome tooling and a check without inherited config", async () => {
     const root = await fixture();
     const packageRoot = join(root, "packages/example");
     const manifest = packageManifest();
@@ -229,7 +228,7 @@ describe("workspace policy", () => {
     expect(codes).toContain("invalid-biome-command");
   });
 
-  test.each([
+  it.each([
     "bunx @biomejs/biome@2.5.3 check --config-path ../../biome.jsonc .",
     "bunx @biomejs/biome@2.5.4 check .",
     "bunx @biomejs/biome@2.5.4 check --config-path ./biome.jsonc .",
@@ -254,7 +253,7 @@ describe("workspace policy", () => {
     });
   });
 
-  test("accepts the portable FastMCP template's local Biome config command", async () => {
+  it("accepts the portable FastMCP template's local Biome config command", async () => {
     const root = await fixture();
     const portableRoot = join(
       root,
@@ -284,7 +283,7 @@ describe("workspace policy", () => {
     expect(await validateWorkspace(root)).toEqual([]);
   });
 
-  test("rejects the portable local Biome command in an ordinary package", async () => {
+  it("rejects the portable local Biome command in an ordinary package", async () => {
     const root = await fixture();
     const packageRoot = join(root, "packages/example");
     const manifest = packageManifest();
@@ -325,7 +324,11 @@ function descendantExportSource(
     ? 'const chunk = "x".repeat(65536); setInterval(() => process.stdout.write(chunk), 0);'
     : "setInterval(() => {}, 1000);";
   return [
-    `const descendant = Bun.spawn([process.execPath, "--eval", ${JSON.stringify(descendantScript)}], { stdin: "ignore", stdout: ${JSON.stringify(stdio)}, stderr: ${JSON.stringify(stdio)} });`,
+    `const descendant = Bun.spawn([process.execPath, "--eval", ${JSON.stringify(
+      descendantScript,
+    )}], { stdin: "ignore", stdout: ${JSON.stringify(stdio)}, stderr: ${JSON.stringify(
+      stdio,
+    )} });`,
     `await Bun.write(${JSON.stringify(marker)}, String(descendant.pid));`,
     "descendant.unref();",
     options.leaderWaitsOnStdin ? "await Bun.stdin.text();" : "",
@@ -338,7 +341,7 @@ async function validateWithin(
 ): Promise<Awaited<ReturnType<typeof validateWorkspace>>> {
   const validation = validateWorkspace(root);
   const timeout = Promise.withResolvers<"deadline">();
-  const timer = setTimeout(() => timeout.resolve("deadline"), 7_500);
+  const timer = setTimeout(() => timeout.resolve("deadline"), 7500);
   const outcome = await Promise.race([
     validation.then((findings) => ({ findings })),
     timeout.promise,
@@ -351,7 +354,7 @@ async function validateWithin(
   if (pid !== undefined) {
     killPid(pid);
   }
-  await Promise.race([validation, Bun.sleep(1_000)]);
+  await Promise.race([validation, Bun.sleep(1000)]);
   throw new Error("workspace validation exceeded the 7500ms test bound");
 }
 
@@ -369,7 +372,7 @@ async function readPidMarker(marker: string): Promise<number | undefined> {
     return Number.isSafeInteger(pid) && pid > 0 ? pid : undefined;
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return undefined;
+      return;
     }
     throw error;
   }
@@ -388,7 +391,7 @@ function killPid(pid: number): void {
 }
 
 async function pidGone(pid: number): Promise<boolean> {
-  const deadline = performance.now() + 1_000;
+  const deadline = performance.now() + 1000;
   while (pidExists(pid) && performance.now() < deadline) {
     await Bun.sleep(10);
   }

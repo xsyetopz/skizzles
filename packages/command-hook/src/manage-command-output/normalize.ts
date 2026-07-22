@@ -16,8 +16,8 @@ const xcrunNoArgumentOptions = new Set([
 ]);
 const xcrunSdkOptions = new Set(["--sdk", "-sdk"]);
 const xcrunSdks = new Set(["macosx", "iphonesimulator"]);
-const canonicalWord = /^[A-Za-z0-9][A-Za-z0-9+._-]*$/;
-const assignment = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const canonicalWord = /^[A-Za-z0-9][A-Za-z0-9+._-]*$/u;
+const assignment = /^[A-Za-z_][A-Za-z0-9_]*=/u;
 
 function current(cursor: Cursor, offset = 0): string | undefined {
   return cursor.command.words[cursor.index + offset];
@@ -101,15 +101,15 @@ export function normalizeCommand(
   const cursor: Cursor = { command, index: 0 };
   const first = current(cursor);
   if (!first || assignment.test(first) || first === "env") {
-    return undefined;
+    return;
   }
   if (!consumeLauncher(cursor)) {
-    return undefined;
+    return;
   }
 
   const program = current(cursor);
   if (!(isCanonicalWord(program) && isCertain(cursor))) {
-    return undefined;
+    return;
   }
   return {
     words: [program, ...command.words.slice(cursor.index + 1)],

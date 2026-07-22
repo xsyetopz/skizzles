@@ -103,7 +103,7 @@ async function snapshotAncestors(
     if (part !== "") {
       cursor = join(cursor, part);
     }
-    // biome-ignore lint/performance/noAwaitInLoops: each ancestor must be checked before resolving the next path component.
+
     const metadata = await lstat(cursor).catch((error: unknown) => {
       throw filesystemBoundaryError(error, relativePath);
     });
@@ -122,7 +122,6 @@ async function revalidateAncestors(
   relativePath: string,
 ): Promise<void> {
   for (const snapshot of snapshots) {
-    // biome-ignore lint/performance/noAwaitInLoops: the ordered identity chain is the filesystem security boundary.
     const actual = await lstat(snapshot.absolutePath).catch(
       (error: unknown) => {
         throw filesystemBoundaryError(error, relativePath);
@@ -181,7 +180,9 @@ function validateRegularFile(
   }
   if (metadata.size === 0 || metadata.size > maximumBytes) {
     throw new SkillMetadataError(
-      `${diagnosticPath(relativePath)}: size must be between 1 and ${maximumBytes} bytes.`,
+      `${diagnosticPath(
+        relativePath,
+      )}: size must be between 1 and ${maximumBytes} bytes.`,
     );
   }
 }
@@ -224,7 +225,9 @@ function assertContainedRelativePath(relativePath: string): void {
 
 function changedDuringValidation(relativePath: string): SkillMetadataError {
   return new SkillMetadataError(
-    `${diagnosticPath(relativePath)}: changed while its identity was being validated.`,
+    `${diagnosticPath(
+      relativePath,
+    )}: changed while its identity was being validated.`,
   );
 }
 

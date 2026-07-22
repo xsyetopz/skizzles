@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: This type contract intentionally resolves the package's declared self-reference export.
 import type { ContainerLabService, RunOutput } from "@skizzles/container-lab";
 
 type Assert<Condition extends true> = Condition;

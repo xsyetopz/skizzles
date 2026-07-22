@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import { createHarness, repositoryContext } from "../support.ts";
 
@@ -48,8 +47,9 @@ describe("target baseline authority", () => {
       }),
     ).resolves.toEqual({ status: "rejected", code: "TARGET_RESERVED" });
     expect(counts.targetCapture).toBe(1);
-    if (release === undefined || authorityInput === undefined)
+    if (release === undefined || authorityInput === undefined) {
       throw new Error("authority was not invoked");
+    }
     release(captureResult(authorityInput));
     await expect(first).resolves.toMatchObject({ status: "accepted" });
   });
@@ -84,13 +84,15 @@ describe("target baseline authority", () => {
           const result = captureResult(input, state);
           if (state !== "renamed") return result;
           const statuses = result["statuses"];
-          if (!Array.isArray(statuses))
+          if (!Array.isArray(statuses)) {
             throw new Error("fixture statuses missing");
+          }
           return {
             ...result,
             statuses: statuses.map((entry) => {
-              if (typeof entry !== "object" || entry === null)
+              if (typeof entry !== "object" || entry === null) {
                 throw new Error("fixture status invalid");
+              }
               return {
                 ...entry,
                 renamedFrom: "packages/orchestrator/src/old.ts",

@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import { digestValue } from "../../../src/digest.ts";
 import {
@@ -15,8 +14,9 @@ describe("host-owned ReAct middleware", () => {
       exitCode: 0,
     }));
     const created = createReActController(harness.catalog, 3);
-    if (created.status !== "created")
+    if (created.status !== "created") {
       throw new Error("controller setup failed");
+    }
     const started = created.controller.start({
       taskId: "task-react",
       objectiveDigest: digestValue("react-objective"),
@@ -55,8 +55,9 @@ describe("host-owned ReAct middleware", () => {
   it("allows a final turn at the boundary but rejects another action", async () => {
     const harness = createCatalogHarness();
     const created = createReActController(harness.catalog, 1);
-    if (created.status !== "created")
+    if (created.status !== "created") {
       throw new Error("controller setup failed");
+    }
     const start = (taskId: string) =>
       created.controller.start({
         taskId,
@@ -107,8 +108,9 @@ describe("host-owned ReAct middleware", () => {
   it("rejects forged loop counters, stale sessions, and invalid generic tools", async () => {
     const harness = createCatalogHarness();
     const created = createReActController(harness.catalog, 2);
-    if (created.status !== "created")
+    if (created.status !== "created") {
       throw new Error("controller setup failed");
+    }
     const started = created.controller.start({
       taskId: "host-owned",
       objectiveDigest: digestValue("host-owned"),
@@ -159,8 +161,9 @@ describe("host-owned ReAct middleware", () => {
       return { stdout: "ok", stderr: "", exitCode: 0 };
     });
     const created = createReActController(harness.catalog, 2);
-    if (created.status !== "created")
+    if (created.status !== "created") {
       throw new Error("controller setup failed");
+    }
     const started = created.controller.start({
       taskId: "race",
       objectiveDigest: digestValue("race"),

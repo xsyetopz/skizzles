@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import { digestBytes, digestValue } from "../src/digest.ts";
 import { invokeExtension } from "../src/extension.ts";
@@ -180,8 +179,9 @@ function createAuthority(
         runCandidate(input),
     }),
   );
-  if (registration.status !== "created")
+  if (registration.status !== "created") {
     throw new Error("authority registration failed");
+  }
   return registration.authority;
 }
 

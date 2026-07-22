@@ -117,8 +117,7 @@ function parseArguments(value: unknown): readonly string[] | undefined {
   const snapshot = snapshotObject(value, [Array.prototype]);
   const length = snapshot?.values.get("length");
   if (
-    !snapshot ||
-    !isBoundedInteger(length, 1, maximumArguments) ||
+    !(snapshot && isBoundedInteger(length, 1, maximumArguments)) ||
     snapshot.values.size !== length + 1
   ) {
     return;
@@ -251,20 +250,22 @@ export function parseCommandObservationSpec(
   try {
     const snapshot = snapshotObject(value, [Object.prototype, null]);
     if (
-      !snapshot ||
-      !hasExactKeys(
-        snapshot,
-        [
-          "argv",
-          "cwd",
-          "drainMilliseconds",
-          "env",
-          "maximumOutputBytes",
-          "signalGraceMilliseconds",
-          "timeoutMilliseconds",
-          "version",
-        ],
-        ["abortSignal"],
+      !(
+        snapshot &&
+        hasExactKeys(
+          snapshot,
+          [
+            "argv",
+            "cwd",
+            "drainMilliseconds",
+            "env",
+            "maximumOutputBytes",
+            "signalGraceMilliseconds",
+            "timeoutMilliseconds",
+            "version",
+          ],
+          ["abortSignal"],
+        )
       )
     ) {
       return invalidParseResult;

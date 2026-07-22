@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { createEngineeringWorkflow, createOrchestrator } from "../src/index.ts";
@@ -16,18 +15,18 @@ describe("package facade and fail-closed controller", () => {
     expect(Object.keys(facade).sort()).toEqual(
       [
         "ANCHOR_PRECEDENCE",
-        // biome-ignore lint/security/noSecrets: public exported symbol name
+
         "TaskWorktreeApprovalBridge",
         "createAgentRuntime",
         "createAgentlessExecutor",
         "createCodeActExecutor",
-        // biome-ignore lint/security/noSecrets: public exported symbol name
+
         "createCodeActSandboxCapability",
         "createContextFragment",
         "createDependencyScheduler",
         "createEngineeringWorkflow",
         "createExecutionCommandCatalog",
-        // biome-ignore lint/security/noSecrets: public exported symbol name
+
         "createModelDispatchAuthority",
         "createOrchestrator",
         "createOutboundContextMiddleware",
@@ -42,26 +41,26 @@ describe("package facade and fail-closed controller", () => {
         "isAgentlessExecutor",
         "isAgentlessSession",
         "isCodeActExecutor",
-        // biome-ignore lint/security/noSecrets: public exported symbol name
+
         "isCodeActSandboxCapability",
         "isContextFragment",
         "isDependencyScheduler",
         "isExecutionCommandCatalog",
         "isEngineeringWorkflow",
-        // biome-ignore lint/security/noSecrets: public exported symbol name
+
         "isModelDispatchAuthority",
-        // biome-ignore lint/security/noSecrets: public exported symbol name
+
         "isOutboundContextMiddleware",
         "isReActController",
-        // biome-ignore lint/security/noSecrets: public exported symbol name
+
         "isReActSession",
         "isRoutingAssignment",
         "isRoutingExperimentEvent",
         "isRoutingExperimentObserver",
         "isSpecificationContextAuthority",
-        // biome-ignore lint/security/noSecrets: public exported symbol name
+
         "isTaskWorktreeApprovalBridge",
-        // biome-ignore lint/security/noSecrets: public exported symbol name
+
         "isWorkflowVerificationAuthority",
         "parseRoutingAssignment",
         "recoverDiagnosticBytes",

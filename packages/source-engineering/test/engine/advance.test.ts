@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { afterEach, describe, expect, it } from "bun:test";
 import { digestText } from "../../src/digest.ts";
 import { advanceBatch, startBatch } from "../../src/engine/advance.ts";

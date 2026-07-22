@@ -97,7 +97,6 @@ function readQuoted(
     value += character;
     cursor += 1;
   }
-  return undefined;
 }
 
 export function tokenizeSql(source: string): SqlTokenizationResult {

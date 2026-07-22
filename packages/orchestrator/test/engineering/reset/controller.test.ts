@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import type { TaskCheckpointRestoration } from "../../../src/checkpoint.ts";
 import { type Digest, digestValue } from "../../../src/digest.ts";

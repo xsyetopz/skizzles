@@ -48,7 +48,7 @@ export function reclaimClaimValue(value: unknown): ReclaimClaim {
       "pid",
       "processStartIdentity",
       "token",
-      // biome-ignore lint/security/noSecrets: This is a lock-protocol field name, not a credential.
+
       "createdAtUnixMs",
     ],
     "prompt lock reclaim claim",
@@ -62,7 +62,6 @@ export function reclaimClaimValue(value: unknown): ReclaimClaim {
     ),
     token: stringValue(object["token"], "reclaim token"),
     createdAtUnixMs: numberValue(
-      // biome-ignore lint/security/noSecrets: This is a lock-protocol field name, not a credential.
       object["createdAtUnixMs"],
       "reclaim creation time",
     ),
@@ -91,7 +90,7 @@ export function lockOwnerValue(value: unknown): MutationLockOwner {
       "pid",
       "processStartIdentity",
       "token",
-      // biome-ignore lint/security/noSecrets: This is a lock-protocol field name, not a credential.
+
       "createdAtUnixMs",
     ],
     "prompt mutation lock owner",
@@ -105,7 +104,6 @@ export function lockOwnerValue(value: unknown): MutationLockOwner {
   );
   const token = stringValue(object["token"], "lock token");
   const createdAtUnixMs = numberValue(
-    // biome-ignore lint/security/noSecrets: This is a lock-protocol field name, not a credential.
     object["createdAtUnixMs"],
     "lock creation time",
   );

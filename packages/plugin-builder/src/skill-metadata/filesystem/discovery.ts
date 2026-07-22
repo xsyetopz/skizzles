@@ -43,7 +43,7 @@ async function readSkillMetadata(
         `${entryPath}: distributed skills root may contain only skill directories.`,
       );
     }
-    // biome-ignore lint/performance/noAwaitInLoops: sorted sequential reads preserve deterministic first-failure diagnostics.
+
     const skill = await readBoundedFile(
       root,
       `${entryPath}/SKILL.md`,

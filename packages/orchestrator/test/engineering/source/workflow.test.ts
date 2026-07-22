@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import { Buffer } from "node:buffer";
 import { isChangeAssuranceReceipt } from "@skizzles/change-assurance";
@@ -75,7 +74,9 @@ describe("engineering workflow with the real source engine", () => {
 
       if (prepared.status !== "awaiting-approval") {
         throw new Error(
-          `prepare failed: ${prepared.code}; operations=${fixture.operations.join(",")}`,
+          `prepare failed: ${prepared.code}; operations=${fixture.operations.join(
+            ",",
+          )}`,
         );
       }
       expect(prepared.review.preview.targets).toEqual([

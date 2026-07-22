@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import {
   analyzeLiteralCases,
@@ -37,7 +36,7 @@ describe("central literal policy", () => {
             'if (tenant === "tenant-a") connect("tenant-a", 2500);',
             "items.at(-1);",
             "if (status === 0) recover();",
-            // biome-ignore lint/security/noSecrets: source text is an HTTP method policy fixture.
+
             'request("GET");',
             'throw new Error("tenant-a");',
           ].join("\n"),

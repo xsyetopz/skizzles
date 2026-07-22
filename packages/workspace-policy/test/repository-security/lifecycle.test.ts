@@ -1,11 +1,10 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
 import { lstat, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   type CleanupReport,
-  type CreateOptions,
   create,
+  type CreateOptions,
   type RunWorkspace,
   RunWorkspaceAbortedError,
 } from "@skizzles/run-workspace";

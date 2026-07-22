@@ -154,7 +154,6 @@ export function installSkills(options: SkillsOptions): SkillsReceipt {
   return receipt;
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 export function uninstallSkills(
   codexHomeInput: string,
   dryRun = false,
@@ -211,7 +210,6 @@ export function uninstallSkills(
   }
   try {
     rmSync(quarantine, { recursive: true, force: true });
-    // biome-ignore lint/suspicious/noEmptyBlockStatements: The operation intentionally ignores this best-effort failure.
   } catch {}
   return receipt;
 }

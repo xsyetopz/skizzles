@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -27,7 +26,7 @@ afterEach(async () => {
 });
 
 describe("owner resolution and durable state", () => {
-  test("uses an explicit exact owner before CODEX_THREAD_ID and never invents one", () => {
+  it("uses an explicit exact owner before CODEX_THREAD_ID and never invents one", () => {
     expect(
       resolveOwner("explicit/owner", { CODEX_THREAD_ID: "environment" }),
     ).toBe("explicit/owner");
@@ -38,7 +37,7 @@ describe("owner resolution and durable state", () => {
     expect(() => resolveOwner("", {})).toThrow("owner is required");
   });
 
-  test("keys arbitrary exact owners by a collision-resistant hash and persists across readers", async () => {
+  it("keys arbitrary exact owners by a collision-resistant hash and persists across readers", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-state-"));
     temporary.push(root);
     const owner = "thread/with spaces:and?characters";
@@ -54,7 +53,7 @@ describe("owner resolution and durable state", () => {
     expect(await listLabs(roots, owner)).toEqual([lab]);
   });
 
-  test("creates only the owner and lab state directories", async () => {
+  it("creates only the owner and lab state directories", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-state-"));
     temporary.push(root);
     const owner = "thread-minimal-state";
@@ -67,7 +66,7 @@ describe("owner resolution and durable state", () => {
     ]);
   });
 
-  test("derives owner, lab, and activity locks from the hashed owner boundary", () => {
+  it("derives owner, lab, and activity locks from the hashed owner boundary", () => {
     const root = "/state";
     const owner = "thread/with spaces";
     const locks = join(ownerDirectory(root, owner), ".locks");
@@ -84,7 +83,7 @@ describe("owner resolution and durable state", () => {
     );
   });
 
-  test("accepts synchronous provisioning manifests without worker identity", async () => {
+  it("accepts synchronous provisioning manifests without worker identity", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-state-"));
     temporary.push(root);
     const owner = "synchronous-provisioning";
@@ -99,7 +98,7 @@ describe("owner resolution and durable state", () => {
     expect(Object.keys(persisted).sort()).toEqual(Object.keys(lab).sort());
   });
 
-  test("round-trips validated persisted Compose argument inputs for every lab mode", async () => {
+  it("round-trips validated persisted Compose argument inputs for every lab mode", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-state-runtime-"));
     temporary.push(root);
     const owner = "validated-runtime-inputs";
@@ -113,7 +112,7 @@ describe("owner resolution and durable state", () => {
     }
   });
 
-  test("rejects tampered persisted fields used to construct Compose arguments", async () => {
+  it("rejects tampered persisted fields used to construct Compose arguments", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-state-tamper-"));
     temporary.push(root);
     const owner = "tampered-runtime-inputs";
@@ -371,7 +370,7 @@ function fixtureLab(root: string, owner: string): LabMetadata {
     name: "lab",
     owner,
     ownerKey: key,
-    // biome-ignore lint/security/noSecrets: This fixed test/schema token is not a credential.
+
     repoHash: "123456789abc",
     composeProject: "ccl-test-lab",
     state: "failed",

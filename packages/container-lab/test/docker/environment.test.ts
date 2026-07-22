@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -90,7 +89,7 @@ class SecretDocker implements DockerRunner {
 }
 
 describe("raw Compose environment boundary", () => {
-  test("rejects undeclared HOME before generating an override", async () => {
+  it("rejects undeclared HOME before generating an override", async () => {
     const root = await temporaryRoot();
     const docker = new ModelDocker({
       services: { dev: { command: "echo ${HOME}" } },
@@ -124,7 +123,7 @@ describe("raw Compose environment boundary", () => {
     });
   });
 
-  test("forwarding alone cannot authorize source interpolation", async () => {
+  it("forwarding alone cannot authorize source interpolation", async () => {
     const root = await temporaryRoot();
     const model = { services: { dev: { command: "echo $PROJECT_VALUE" } } };
     const docker = new ModelDocker(model);
@@ -143,7 +142,7 @@ describe("raw Compose environment boundary", () => {
     );
   });
 
-  test("rejects raw implicit reads and environment-backed configs", async () => {
+  it("rejects raw implicit reads and environment-backed configs", async () => {
     for (const model of [
       { services: { dev: { environment: { IMPLICIT_VALUE: null } } } },
       {
@@ -168,12 +167,12 @@ describe("raw Compose environment boundary", () => {
           IMPLICIT_VALUE: "ambient",
           CONFIG_VALUE: "ambient",
         }),
-      ).rejects.toThrow(/undeclared environment|not supported/);
+      ).rejects.toThrow(/undeclared environment|not supported/u);
       expect(docker.calls).toHaveLength(1);
     }
   });
 
-  test("declared Compose environment authorizes raw reads and reaches no other names", async () => {
+  it("declared Compose environment authorizes raw reads and reaches no other names", async () => {
     const root = await temporaryRoot();
     const raw = {
       services: {
@@ -209,7 +208,7 @@ describe("raw Compose environment boundary", () => {
 });
 
 describe("secret environment materialization", () => {
-  test("rejects service env_file before secret values or durable materialization", async () => {
+  it("rejects service env_file before secret values or durable materialization", async () => {
     const root = await temporaryRoot();
     const docker = new ModelDocker({
       services: {
@@ -236,7 +235,7 @@ describe("secret environment materialization", () => {
     expect(docker.calls.some((call) => call.args.includes("up"))).toBe(false);
   });
 
-  test("keeps values ephemeral and supplies them only to Compose up", async () => {
+  it("keeps values ephemeral and supplies them only to Compose up", async () => {
     const root = await temporaryRoot();
     const sentinel = "sentinel-registry-token-8fca7b";
     const docker = new SecretDocker(sentinel);
@@ -297,7 +296,7 @@ describe("secret environment materialization", () => {
     ).toBe(false);
   });
 
-  test("replaces secret-bearing Compose diagnostics with fixed errors", async () => {
+  it("replaces secret-bearing Compose diagnostics with fixed errors", async () => {
     const root = await temporaryRoot();
     const sentinel = "sentinel-error-token-290ea1";
     const config = parseLabConfig(

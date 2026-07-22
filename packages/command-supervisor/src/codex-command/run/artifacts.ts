@@ -27,7 +27,7 @@ import {
 import type { RunStatus } from "./status.ts";
 import { serializeRunStatus } from "./status-codec.ts";
 
-export const retainedOutputTailBytes = 1_200;
+export const retainedOutputTailBytes = 1200;
 
 export type RunArtifacts = {
   directory: string | undefined;
@@ -125,7 +125,7 @@ function statusIdentity(path: string): FileIdentity | undefined {
     return identity(info);
   } catch (error) {
     if (missingPath(error)) {
-      return undefined;
+      return;
     }
     throw error;
   }

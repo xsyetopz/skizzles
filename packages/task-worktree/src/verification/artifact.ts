@@ -15,7 +15,7 @@ import { parseCoverageArtifactReport } from "./coverage-report.ts";
 
 const reportIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
-// biome-ignore lint/security/noSecrets: This is a public digest field name, not a credential.
+
 const productionOverlayDigestKey = "productionOverlayDigest";
 
 export async function prepareArtifactDestination(
@@ -39,8 +39,9 @@ export async function prepareArtifactDestination(
         !metadata.isDirectory() ||
         metadata.isSymbolicLink() ||
         !within(root, await realpath(cursor))
-      )
+      ) {
         return false;
+      }
     } catch {
       return false;
     }
@@ -66,8 +67,9 @@ export async function readVerificationArtifact(
   if (
     binding.objectiveDigest !==
     sandboxVerificationObjectiveDigest(binding.objective)
-  )
+  ) {
     return;
+  }
   const noFollow = fsConstants.O_NOFOLLOW;
   if (typeof noFollow !== "number") return;
   const target = join(root, profile.artifact.relativePath);
@@ -81,8 +83,9 @@ export async function readVerificationArtifact(
       pathStat.size <= 0 ||
       pathStat.size > profile.artifact.maximumBytes ||
       !within(root, await realpath(target))
-    )
+    ) {
       return;
+    }
     handle = await open(target, fsConstants.O_RDONLY | noFollow);
     const before = await handle.stat();
     if (!sameFile(before, pathStat) || before.nlink !== 1) return;
@@ -93,8 +96,9 @@ export async function readVerificationArtifact(
       !(sameFile(before, after) && sameFile(after, finalPathStat)) ||
       after.size !== bytes.byteLength ||
       after.nlink !== 1
-    )
+    ) {
       return;
+    }
     const report = parseArtifactJson(
       bytes,
       profile.artifact.schema,
@@ -144,8 +148,9 @@ function parseArtifactJson(
     raw["schema"] !== expectedSchema ||
     !Object.hasOwn(raw, "result") ||
     Object.keys(raw).some((key) => key !== "schema" && key !== "result")
-  )
+  ) {
     return;
+  }
   return parseReport(raw["result"], expectedKind, objective);
 }
 
@@ -158,8 +163,9 @@ function parseReport(
     !isPlainDataRecord(value) ||
     value["kind"] !== kind ||
     objective.kind !== kind
-  )
+  ) {
     return;
+  }
   const outcome = parseOutcome(value["outcome"]);
   if (outcome === undefined) return;
   if (kind === "original-tests") {
@@ -176,8 +182,9 @@ function parseReport(
         productionOverlayDigestKey,
         "testIds",
       ])
-    )
+    ) {
       return;
+    }
     const passedCount = count(value["passedCount"]);
     const failedCount = count(value["failedCount"]);
     const testIds = ids(value["testIds"]);
@@ -192,8 +199,9 @@ function parseReport(
       value["containerEvidenceDigest"] !== objective.containerEvidenceDigest ||
       passedCount + failedCount !== testIds.length ||
       (outcome === "passed") !== (failedCount === 0)
-    )
+    ) {
       return;
+    }
     return Object.freeze({
       kind,
       outcome,
@@ -209,8 +217,9 @@ function parseReport(
   if (kind === "mutation") {
     if (
       !hasExactKeys(value, ["inventoryDigest", "kind", "outcome", "outcomes"])
-    )
+    ) {
       return;
+    }
     const inventoryDigest = digest(value["inventoryDigest"]);
     const outcomes = mutationOutcomes(value["outcomes"]);
     if (
@@ -225,8 +234,9 @@ function parseReport(
       ) ||
       (outcome === "passed") !==
         outcomes.every((entry) => entry.outcome === "killed")
-    )
+    ) {
       return;
+    }
     return Object.freeze({ kind, outcome, inventoryDigest, outcomes });
   }
   if (kind === "property") {
@@ -239,8 +249,9 @@ function parseReport(
         "requiredCaseCount",
         "seedScheduleDigest",
       ])
-    )
+    ) {
       return;
+    }
     const seedScheduleDigest = digest(value["seedScheduleDigest"]);
     const requiredCaseCount = count(value["requiredCaseCount"]);
     const extremeVectorInventoryDigest = digest(
@@ -285,8 +296,9 @@ function parseReport(
       ) ||
       (outcome === "passed") !==
         properties.every((entry) => entry.counterexampleDigest === null)
-    )
+    ) {
       return;
+    }
     return Object.freeze({
       kind,
       outcome,
@@ -339,8 +351,9 @@ function mutationOutcomes(
         isPlainDataRecord(raw) &&
         hasExactKeys(raw, ["evidenceDigest", "mutantId", "outcome"])
       )
-    )
+    ) {
       return;
+    }
     const mutantId = digest(raw["mutantId"]);
     const evidenceDigest = digest(raw["evidenceDigest"]);
     const mutantOutcome = raw["outcome"];
@@ -354,8 +367,9 @@ function mutationOutcomes(
         mutantOutcome === "survived" ||
         mutantOutcome === "timeout"
       )
-    )
+    ) {
       return;
+    }
     seen.add(mutantId);
     results.push(
       Object.freeze({ mutantId, outcome: mutantOutcome, evidenceDigest }),
@@ -398,8 +412,9 @@ function propertyResults(
           "propertyId",
         ])
       )
-    )
+    ) {
       return;
+    }
     const propertyId = identifier(raw["propertyId"]);
     const nodeIds = digests(raw["nodeIds"]);
     const branchIds = digests(raw["branchIds"]);
@@ -425,8 +440,9 @@ function propertyResults(
       executedExtremeCases === undefined ||
       executedExtremeVectorDigests === undefined ||
       (rawCounterexample !== null && counterexampleDigest === undefined)
-    )
+    ) {
       return;
+    }
     propertyIds.add(propertyId);
     results.push(
       Object.freeze({
@@ -485,8 +501,9 @@ function ids(value: unknown): readonly string[] | undefined {
   const parsed: string[] = [];
   let previous = "";
   for (const id of value) {
-    if (typeof id !== "string" || !reportIdPattern.test(id) || id <= previous)
+    if (typeof id !== "string" || !reportIdPattern.test(id) || id <= previous) {
       return;
+    }
     previous = id;
     parsed.push(id);
   }

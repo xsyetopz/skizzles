@@ -3,8 +3,8 @@ import { lstat, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ShippedLanguageFinding } from "@skizzles/prompt-layer";
 import {
-  PROMPT_LAYER_PACKAGE_FILES,
   parseShippedLanguagePolicy,
+  PROMPT_LAYER_PACKAGE_FILES,
   SHIPPED_LANGUAGE_POLICY_PATHS,
   validateShippedLanguageText,
 } from "@skizzles/prompt-layer";
@@ -32,7 +32,7 @@ const CANONICAL_LOGO_PATH = "packages/plugin-builder/template/assets/logo.png";
 const STAGED_LOGO_PATH = "assets/logo.png";
 const PINNED_LOGO = {
   bytes: 398_251,
-  // biome-ignore lint/security/noSecrets: public binary asset integrity digest.
+
   sha256: "935cff1f26724714b784b26a4601bf46f96a673f94efeed26b9f2d833f7ab961",
 } as const;
 const CANONICAL_EXCLUSIONS = new Set([
@@ -187,7 +187,9 @@ async function addTree(
       const metadata = await lstat(absolutePath);
       if (metadata.isSymbolicLink()) {
         throw new PackagingError(
-          `${safeLanguageDiagnosticPath(`${relativeRoot}/${relativePath}`)} is an unsupported symlink.`,
+          `${safeLanguageDiagnosticPath(
+            `${relativeRoot}/${relativePath}`,
+          )} is an unsupported symlink.`,
         );
       }
       if (metadata.isDirectory()) {
@@ -196,7 +198,9 @@ async function addTree(
         paths.add(`${relativeRoot}/${relativePath}`);
       } else {
         throw new PackagingError(
-          `${safeLanguageDiagnosticPath(`${relativeRoot}/${relativePath}`)} is not a regular file or directory.`,
+          `${safeLanguageDiagnosticPath(
+            `${relativeRoot}/${relativePath}`,
+          )} is not a regular file or directory.`,
         );
       }
     }
@@ -216,7 +220,9 @@ async function validateFile(
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     throw new PackagingError(
-      `Shipped language surface ${safeLanguageDiagnosticPath(path)} is not valid UTF-8.`,
+      `Shipped language surface ${safeLanguageDiagnosticPath(
+        path,
+      )} is not valid UTF-8.`,
     );
   }
   const semanticTexts = semanticSurfaceTexts(path, text, mode);
@@ -241,7 +247,9 @@ function firstFinding(
     return validateShippedLanguageText(policy, text, path)[0];
   } catch {
     throw new PackagingError(
-      `Shipped language surface ${safeLanguageDiagnosticPath(path)} has unsafe path or text controls.`,
+      `Shipped language surface ${safeLanguageDiagnosticPath(
+        path,
+      )} has unsafe path or text controls.`,
     );
   }
 }

@@ -53,9 +53,11 @@ export function parseDeclarationInput(
   const probeProfileId = record.get("probeProfileId");
   const connections = parseConnections(record.get("connections"));
   if (
-    !boundedString(labId, 128) ||
-    !isDigest(manifestDigest) ||
-    !boundedString(probeProfileId, 128) ||
+    !(
+      boundedString(labId, 128) &&
+      isDigest(manifestDigest) &&
+      boundedString(probeProfileId, 128)
+    ) ||
     connections === undefined
   )
     return;
@@ -103,12 +105,14 @@ export function parseBindings(
   const candidateDigest = record?.get("candidateDigest");
   const provenanceDigest = record?.get("provenanceDigest");
   if (
-    !isDigest(requestDigest) ||
-    !boundedString(repositoryId, 512) ||
-    !isDigest(treeDigest) ||
-    !isDigest(baselineDigest) ||
-    !isDigest(candidateDigest) ||
-    !isDigest(provenanceDigest)
+    !(
+      isDigest(requestDigest) &&
+      boundedString(repositoryId, 512) &&
+      isDigest(treeDigest) &&
+      isDigest(baselineDigest) &&
+      isDigest(candidateDigest) &&
+      isDigest(provenanceDigest)
+    )
   )
     return;
   return Object.freeze({
@@ -126,9 +130,7 @@ export function parseCandidateTargets(
 ): readonly PhysicalCandidateTarget[] | undefined {
   try {
     return parseCandidateTargetArray(value);
-  } catch {
-    return;
-  }
+  } catch {}
 }
 
 export function parseProbeProfiles(
@@ -209,8 +211,7 @@ function parseCandidateTargetArray(
     const byteLength = record.get("byteLength");
     const bytes = parseFrozenBytes(record.get("bytes"));
     if (
-      !candidatePath(path) ||
-      !isDigest(expectedDigest) ||
+      !(candidatePath(path) && isDigest(expectedDigest)) ||
       typeof byteLength !== "number" ||
       !Number.isSafeInteger(byteLength) ||
       byteLength < 0 ||
@@ -254,8 +255,7 @@ function parseConnections(
     const target = record?.get("target");
     const scheme = record?.get("scheme");
     if (
-      !boundedString(name, 128) ||
-      !boundedString(service, 128) ||
+      !(boundedString(name, 128) && boundedString(service, 128)) ||
       typeof target !== "number" ||
       !Number.isSafeInteger(target) ||
       target < 1 ||
@@ -346,7 +346,9 @@ function boundedEnvironment(
   if (record === undefined || record.size > 64) return;
   const output: Record<string, string> = {};
   for (const [name, item] of record) {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name) || !boundedString(item, 16_384))
+    if (
+      !(/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name) && boundedString(item, 16_384))
+    )
       return;
     output[name] = item;
   }
@@ -421,9 +423,7 @@ function snapshotUnknownRecord(
       record.set(key, descriptor.value);
     }
     return record;
-  } catch {
-    return;
-  }
+  } catch {}
 }
 
 function boundedString(value: unknown, maximumBytes: number): value is string {

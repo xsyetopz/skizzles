@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   mkdir,
@@ -31,7 +30,7 @@ afterEach(async () => {
 });
 
 describe("trusted filesystem boundary", () => {
-  test("canonical root follows only the explicitly configured root link", async () => {
+  it("canonical root follows only the explicitly configured root link", async () => {
     const root = await temporaryRoot();
     const target = join(root, "target");
     const linked = join(root, "linked");
@@ -49,7 +48,7 @@ describe("trusted filesystem boundary", () => {
     );
   });
 
-  test("exact directory chains distinguish present, missing, and unsafe paths", async () => {
+  it("exact directory chains distinguish present, missing, and unsafe paths", async () => {
     const root = await temporaryRoot();
     await mkdir(join(root, "owner", "lab"), { recursive: true });
 
@@ -82,7 +81,7 @@ describe("trusted filesystem boundary", () => {
     ).rejects.toThrow("lab runtime contains an unsafe path segment");
   });
 
-  test("real files and directories must remain inside their canonical trust root", async () => {
+  it("real files and directories must remain inside their canonical trust root", async () => {
     const root = await temporaryRoot();
     const inside = join(root, "inside");
     const outside = await temporaryRoot();
@@ -118,7 +117,7 @@ describe("trusted filesystem boundary", () => {
     ).rejects.toThrow("file is not a real file");
   });
 
-  test("trusted JSON reads reject replaced parents and final-file indirection", async () => {
+  it("trusted JSON reads reject replaced parents and final-file indirection", async () => {
     const root = await temporaryRoot();
     const parent = join(root, "owners", "owner", "labs");
     await mkdir(parent, { recursive: true });

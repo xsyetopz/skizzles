@@ -1,13 +1,12 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { expect, it } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 import type { RunWorkspace } from "@skizzles/run-workspace";
 import {
+  clientVersion,
   CodexChildError,
   type CodexRuntime,
-  clientVersion,
 } from "../src/codex-child.ts";
 import {
   codexSupervisorGroup,

@@ -650,7 +650,7 @@ function terminalLifecycle(state, startedAt, completedAt, exitCode, cancellation
   };
 }
 function parseRunLifecycle(value) {
-  if (!isRecord(value) || !hasExactLifecycleKeys(value) || !isIsoTimestamp(value["startedAt"])) {
+  if (!(isRecord(value) && hasExactLifecycleKeys(value) && isIsoTimestamp(value["startedAt"]))) {
     return;
   }
   const state = value["state"];
@@ -687,7 +687,7 @@ function isSafeInteger2(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 }
 function parseEvidence(value, reference, maximumBytes) {
-  if (!isRecord2(value) || !hasExactKeys(value, [
+  if (!(isRecord2(value) && hasExactKeys(value, [
     "integrity",
     "observedBytes",
     "redaction",
@@ -696,7 +696,7 @@ function parseEvidence(value, reference, maximumBytes) {
     "sha256",
     "storedBytes",
     "truncated"
-  ])) {
+  ]))) {
     return;
   }
   const observedBytes = value["observedBytes"];
@@ -728,7 +728,7 @@ function parseRunStatus(content, id) {
   } catch {
     throw new Error("status is not valid JSON");
   }
-  if (!isRecord2(value) || !hasExactKeys(value, [
+  if (!(isRecord2(value) && hasExactKeys(value, [
     "action",
     "artifactCapture",
     "evidence",
@@ -738,14 +738,14 @@ function parseRunStatus(content, id) {
     "retention",
     "schema",
     "version"
-  ]) || value["schema"] !== runStatusSchema || value["version"] !== runStatusVersion || value["id"] !== id || value["artifactCapture"] !== "active") {
+  ])) || value["schema"] !== runStatusSchema || value["version"] !== runStatusVersion || value["id"] !== id || value["artifactCapture"] !== "active") {
     throw new Error("status schema is unsupported");
   }
   const action = value["action"];
   const execution = value["execution"];
   const retention = value["retention"];
   const evidence = value["evidence"];
-  if (!isRecord2(action) || !hasExactKeys(action, ["label", "redaction", "sensitivity", "sha256"]) || action["label"] !== operatorActionLabel || action["sensitivity"] !== "secret-bearing" || action["redaction"] !== "content-omitted" || typeof action["sha256"] !== "string" || !sha256Pattern.test(action["sha256"]) || !isRecord2(execution) || !hasExactKeys(execution, ["shell"]) || typeof execution["shell"] !== "string" || !execution["shell"].startsWith("/") || execution["shell"].length > 4096 || !isRecord2(retention) || !hasExactKeys(retention, [
+  if (!(isRecord2(action) && hasExactKeys(action, ["label", "redaction", "sensitivity", "sha256"])) || action["label"] !== operatorActionLabel || action["sensitivity"] !== "secret-bearing" || action["redaction"] !== "content-omitted" || typeof action["sha256"] !== "string" || !sha256Pattern.test(action["sha256"]) || !isRecord2(execution) || !hasExactKeys(execution, ["shell"]) || typeof execution["shell"] !== "string" || !execution["shell"].startsWith("/") || execution["shell"].length > 4096 || !isRecord2(retention) || !hasExactKeys(retention, [
     "cleanupThresholdBytes",
     "directoryMode",
     "fileMode",
@@ -793,7 +793,7 @@ function serializeRunStatus(status) {
 }
 
 // packages/command-supervisor/src/codex-command/run/retention.ts
-var generatedRunIdPattern = /^[a-f0-9]{12}$/;
+var generatedRunIdPattern = /^[a-f0-9]{12}$/u;
 var artifactNames = ["status.json", "stderr.log", "stdout.log"];
 function exactArtifactEntries(path) {
   try {
@@ -831,9 +831,7 @@ function inspectCompletedRun(path, id) {
         "stdout.log": identity(stdoutInfo)
       }
     };
-  } catch {
-    return;
-  }
+  } catch {}
 }
 function sameRunIdentity(left, right) {
   return left.id === right.id && sameIdentity(left.directoryIdentity, right.directoryIdentity) && artifactNames.every((name) => sameIdentity(left.artifactIdentities[name], right.artifactIdentities[name]));
@@ -1192,7 +1190,7 @@ async function runCommand(script) {
 // packages/command-supervisor/src/codex-command/run/queries.ts
 import { lstatSync as lstatSync4, readdirSync as readdirSync2, readFileSync as readFileSync3 } from "fs";
 import { join as join6 } from "path";
-var queryRunIdPattern = /^[A-Za-z0-9._-]+$/;
+var queryRunIdPattern = /^[A-Za-z0-9._-]+$/u;
 function validateQueryRunId(id) {
   if (id === "." || id === ".." || !queryRunIdPattern.test(id)) {
     throw new Error("invalid run id");
@@ -1300,7 +1298,7 @@ class RunStoreQueries {
 
 // packages/command-supervisor/src/codex-command/cli.ts
 var usage = "usage: codex-command run --base64url <script> | status <run-id> | tail <run-id> [stdout|stderr] | errors <run-id> | search <text> [run-id]";
-var base64UrlPattern = /^[A-Za-z0-9_-]+$/;
+var base64UrlPattern = /^[A-Za-z0-9_-]+$/u;
 function decodeScript(value) {
   if (!base64UrlPattern.test(value)) {
     throw new Error("encoded script is not base64url");
@@ -1359,7 +1357,6 @@ function executeQuery(subcommand, arguments_) {
     }
     return 0;
   }
-  return;
 }
 function execute(subcommand, arguments_) {
   return subcommand === "run" ? executeRun(arguments_) : executeQuery(subcommand, arguments_);

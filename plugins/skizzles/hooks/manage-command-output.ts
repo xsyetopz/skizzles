@@ -155,8 +155,8 @@ var xcrunNoArgumentOptions = new Set([
 ]);
 var xcrunSdkOptions = new Set(["--sdk", "-sdk"]);
 var xcrunSdks = new Set(["macosx", "iphonesimulator"]);
-var canonicalWord = /^[A-Za-z0-9][A-Za-z0-9+._-]*$/;
-var assignment = /^[A-Za-z_][A-Za-z0-9_]*=/;
+var canonicalWord = /^[A-Za-z0-9][A-Za-z0-9+._-]*$/u;
+var assignment = /^[A-Za-z_][A-Za-z0-9_]*=/u;
 function current(cursor, offset = 0) {
   return cursor.command.words[cursor.index + offset];
 }
@@ -367,9 +367,7 @@ function pluginRootFrom(arguments_) {
       return;
     }
     return pluginRoot;
-  } catch {
-    return;
-  }
+  } catch {}
 }
 function shellWord(value) {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
@@ -400,7 +398,6 @@ function commandFrom(input) {
       return { key, value };
     }
   }
-  return;
 }
 function rewrittenCommand(event, pluginRoot) {
   if (event.hook_event_name !== "PreToolUse") {

@@ -18,7 +18,7 @@ import {
 } from "./root.ts";
 import { maximumStatusBytes, parseRunStatus } from "./status-codec.ts";
 
-const generatedRunIdPattern = /^[a-f0-9]{12}$/;
+const generatedRunIdPattern = /^[a-f0-9]{12}$/u;
 const artifactNames = ["status.json", "stderr.log", "stdout.log"] as const;
 
 type ArtifactName = (typeof artifactNames)[number];
@@ -51,7 +51,7 @@ function inspectCompletedRun(
   try {
     const directory = lstatSync(path);
     if (!(isOwnedDirectory(directory, 0o700) && exactArtifactEntries(path))) {
-      return undefined;
+      return;
     }
     const statusInfo = lstatSync(join(path, "status.json"));
     const stderrInfo = lstatSync(join(path, "stderr.log"));
@@ -62,7 +62,7 @@ function inspectCompletedRun(
       !isOwnedRegularFile(stderrInfo, 0o600) ||
       !isOwnedRegularFile(stdoutInfo, 0o600)
     ) {
-      return undefined;
+      return;
     }
     const status = parseRunStatus(
       readFileSync(join(path, "status.json"), "utf8"),
@@ -80,7 +80,7 @@ function inspectCompletedRun(
         readFileSync(join(path, "stderr.log")),
       )
     ) {
-      return undefined;
+      return;
     }
     return {
       id,
@@ -94,9 +94,7 @@ function inspectCompletedRun(
         "stdout.log": identity(stdoutInfo),
       },
     };
-  } catch {
-    return undefined;
-  }
+  } catch {}
 }
 
 function sameRunIdentity(left: RetainedRun, right: RetainedRun): boolean {

@@ -100,7 +100,7 @@ async function constructPlugin(
 
   for (const [sourcePath, destinationPath] of CANONICAL_TREE_INPUTS) {
     const source = join(paths.repoRoot, sourcePath);
-    // biome-ignore lint/performance/noAwaitInLoops: canonical inputs are copied in declared order for deterministic failures.
+
     const sourceExists = await exists(source);
     if (sourceExists) {
       await copyCanonicalTree(
@@ -112,7 +112,6 @@ async function constructPlugin(
   }
 
   for (const [sourcePath, destinationPath] of CANONICAL_FILE_INPUTS) {
-    // biome-ignore lint/performance/noAwaitInLoops: canonical inputs are copied in declared order for deterministic failures.
     await copyCanonicalFile(
       join(paths.repoRoot, sourcePath),
       join(destination, destinationPath),

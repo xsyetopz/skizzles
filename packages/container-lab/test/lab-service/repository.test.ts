@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, it } from "bun:test";
 import { chmod, readFile, rm } from "node:fs/promises";
 import {
@@ -169,7 +168,11 @@ describe("source repository isolation", () => {
     const wrapper = join(wrapperDirectory, "git");
     await writeFile(
       wrapper,
-      `#!/bin/sh\nclone=0\ndestination=\nfor argument in "$@"; do\n  if [ "$argument" = clone ]; then clone=1; fi\n  destination=$argument\ndone\n${JSON.stringify(git)} "$@"\nstatus=$?\nif [ "$status" -eq 0 ] && [ "$clone" -eq 1 ]; then\n  mkdir -p "$destination/.git/objects/info"\n  printf '%s\\n' ${JSON.stringify(`file://${root}/host-objects`)} > "$destination/.git/objects/info/http-alternates"\nfi\nexit "$status"\n`,
+      `#!/bin/sh\nclone=0\ndestination=\nfor argument in "$@"; do\n  if [ "$argument" = clone ]; then clone=1; fi\n  destination=$argument\ndone\n${JSON.stringify(
+        git,
+      )} "$@"\nstatus=$?\nif [ "$status" -eq 0 ] && [ "$clone" -eq 1 ]; then\n  mkdir -p "$destination/.git/objects/info"\n  printf '%s\\n' ${JSON.stringify(
+        `file://${root}/host-objects`,
+      )} > "$destination/.git/objects/info/http-alternates"\nfi\nexit "$status"\n`,
     );
     await chmod(wrapper, 0o755);
     const roots = {

@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { posix } from "node:path";
 import { create as createRunWorkspace } from "@skizzles/run-workspace";
-// biome-ignore lint/correctness/noUnresolvedImports: TypeScript 7 exposes its parser through this unstable package export.
+
 import { API, type Diagnostic } from "typescript/unstable/async";
 import type { ParsedTypeScriptSource } from "./contract.ts";
 

@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, it } from "bun:test";
 import {
   chmod,
@@ -21,8 +20,9 @@ async function oldWorkspace(
   runtime: Runtime,
 ): Promise<{ root: string; identity: ProcessIdentity }> {
   const identity = await runtime.processIdentity(runtime.pid);
-  if (identity === undefined)
+  if (identity === undefined) {
     throw new Error("Process identity unavailable in test");
+  }
   const creation = runtimeWith(runtime, { now: () => 1 });
   const workspace = await createWithRuntime({}, creation);
   return { root: workspace.path(), identity };
@@ -265,8 +265,9 @@ describe("stale workspace cleanup", () => {
       const parent = managedParent(runtime);
       await mkdir(parent, { recursive: true, mode: 0o700 });
       await chmod(parent, 0o700);
-      for (const suffix of ["a", "b", "c"])
+      for (const suffix of ["a", "b", "c"]) {
         await mkdir(join(parent, `run-${suffix}`));
+      }
       const report = await cleanupStaleWithRuntime(
         { minimumAgeMs: 0, scanLimit: 1 },
         runtime,

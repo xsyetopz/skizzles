@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -20,22 +19,22 @@ describe("plugin shipped-language composition and structured formats", () => {
       "<span>unterminated\n",
       "<script>neutral</script>\n",
       "<!--unterminated\n",
-      // biome-ignore lint/security/noSecrets: Deliberate active HTML fixture, not a credential.
+
       '<img src="x" onerror="alert(1)">\n',
-      // biome-ignore lint/security/noSecrets: Deliberate executable namespace fixture, not a credential.
+
       '<svg onload="alert(1)"></svg>\n',
       '<a href="javascript:alert(1)">neutral</a>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate entity-obfuscated URL fixture, not a credential.
+
       '<a href="java&#x73;cript:alert(1)">neutral</a>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate semicolonless entity-obfuscated URL fixture, not a credential.
+
       '<a href="jav&#x61script:alert(1)">neutral</a>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate semicolonless entity-obfuscated URL fixture, not a credential.
+
       '<a href="jav&#97script:alert(1)">neutral</a>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate semicolonless entity-obfuscated URL fixture, not a credential.
+
       '<a href="javascript&#58alert(1)">neutral</a>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate NFKC-obfuscated URL fixture, not a credential.
+
       '<a href="ｊａｖａｓｃｒｉｐｔ：alert(1)">neutral</a>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate duplicate attribute fixture, not a credential.
+
       '<img alt="neutral" alt="duplicate">\n',
       '<img alt="neutral&#xfe0f;">\n',
       '<span style="color:red">neutral</span>\n',
@@ -50,18 +49,17 @@ describe("plugin shipped-language composition and structured formats", () => {
   test("rejects active rendered HTML through full staging without mutation", async () => {
     const { stagePlugin } = await import("../../src/plugin/api.ts");
     for (const markup of [
-      // biome-ignore lint/security/noSecrets: Deliberate active HTML fixture, not a credential.
       '<img src="x" onerror="alert(1)">\n',
-      // biome-ignore lint/security/noSecrets: Deliberate executable namespace fixture, not a credential.
+
       '<svg onload="alert(1)"></svg>\n',
       '<a href="javascript:alert(1)">neutral</a>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate entity-obfuscated URL fixture, not a credential.
+
       '<a href="java&#x73;cript:alert(1)">neutral</a>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate semicolonless entity-obfuscated URL fixture, not a credential.
+
       '<a href="jav&#x61script:alert(1)">neutral</a>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate semicolonless entity-obfuscated URL fixture, not a credential.
+
       '<a href="jav&#97script:alert(1)">neutral</a>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate semicolonless entity-obfuscated URL fixture, not a credential.
+
       '<a href="javascript&#58alert(1)">neutral</a>\n',
     ]) {
       const root = await fixture();
@@ -95,7 +93,7 @@ describe("plugin shipped-language composition and structured formats", () => {
         '![neutral alt](./image.png "neutral image")',
         "- [x] neutral task",
         '<span aria-label="neutral label">neutral</span>',
-        // biome-ignore lint/security/noSecrets: Deliberate greedy semicolonless numeric-reference fixture, not a credential.
+
         '<span title="I am &#x73entient">neutral</span>',
         '<span title="I am &amp;#115;entient">neutral</span>',
         '<span title="neutral &#128; value">neutral</span>',
@@ -141,13 +139,12 @@ describe("plugin shipped-language composition and structured formats", () => {
     ).toContain("| :--- | :----: | ----: |");
 
     for (const markup of [
-      // biome-ignore lint/security/noSecrets: Deliberate misplaced table alignment fixture, not a credential.
       '<table align="left"><tr><td>neutral</td></tr></table>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate misplaced table alignment fixture, not a credential.
+
       '<table><tr align="center"><td>neutral</td></tr></table>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate invalid table alignment fixture, not a credential.
+
       '<table><tr><td align="justify">neutral</td></tr></table>\n',
-      // biome-ignore lint/security/noSecrets: Deliberate noncanonical table alignment fixture, not a credential.
+
       '<table><tr><td align="LEFT">neutral</td></tr></table>\n',
     ]) {
       const root = await fixture();
@@ -179,7 +176,7 @@ describe("plugin shipped-language composition and structured formats", () => {
         "I am your friend&#x92s coding assistant.",
         "I am your friend&#X00092;s coding assistant.",
         "I am your friend&#8217;s coding assistant.",
-        // biome-ignore lint/security/noSecrets: Deliberate encoded apostrophe fixture, not a credential.
+
         "I am your friend&#x2019s coding assistant.",
         `I am your friend&#${longZeros}8217;s coding assistant.`,
         `I am your friend&#X${longZeros}2019s coding assistant.`,

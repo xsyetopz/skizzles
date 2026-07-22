@@ -7453,7 +7453,6 @@ function publishedTarget(port) {
     const parsed = Number(port["target"]);
     return Number.isInteger(parsed) ? parsed : undefined;
   }
-  return;
 }
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -7748,8 +7747,8 @@ import process2 from "process";
 // packages/container-lab/src/lab/manifest.ts
 import { posix } from "path";
 var manifestName = ".codex-container-lab.yaml";
-var serviceNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
-var uriSchemePattern = /^[a-z][a-z0-9+.-]*$/;
+var serviceNamePattern = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/u;
+var uriSchemePattern = /^[a-z][a-z0-9+.-]*$/u;
 function isValidContainerPath(value, allowRoot) {
   if (!value.startsWith("/") || value.includes("\x00") || !allowRoot && value === "/") {
     return false;
@@ -8174,8 +8173,8 @@ function immutableComposeArguments(runtime) {
 }
 
 // packages/container-lab/src/docker/runtime.ts
-var LOOPBACK_PORT = /^127\.0\.0\.1:(\d+)$/;
-var LEADING_REPLACEMENT_CHARACTER = /^\uFFFD/;
+var LOOPBACK_PORT = /^127\.0\.0\.1:(\d+)$/u;
+var LEADING_REPLACEMENT_CHARACTER = /^\uFFFD/u;
 var COMPOSE_CONFIGURATION_FAILURE = "Docker Compose configuration failed; secret-bearing diagnostics redacted";
 var COMPOSE_SOURCE_CHANGED = "Docker Compose source changed during inspection; retry lab creation";
 async function dockerAvailableInRuntime(runner, environment) {
@@ -8284,9 +8283,7 @@ function parseNormalizedModel(parse) {
   try {
     const value = parse();
     return isComposeModel(value) ? value : undefined;
-  } catch {
-    return;
-  }
+  } catch {}
 }
 function isComposeModel(value) {
   if (!isRecord(value)) {
@@ -8469,7 +8466,7 @@ function numericProperty(value, key) {
   return typeof candidate === "number" ? candidate : Number(candidate);
 }
 function boundedLogTail(value, maxLines, maxBytes) {
-  const sanitized = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "\uFFFD").trimEnd();
+  const sanitized = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "\uFFFD").trimEnd();
   const lines = sanitized.split(`
 `);
   let selected = lines.slice(-maxLines).join(`
@@ -8582,7 +8579,7 @@ async function terminateAttachedDockerProcess(runtime, identity2, signal, runner
 }
 
 // packages/container-lab/src/docker/cleanup.ts
-var IMMUTABLE_IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
+var IMMUTABLE_IMAGE_ID = /^sha256:[0-9a-f]{64}$/u;
 async function destroyLabStackInDocker(runtime, runner, environment) {
   await cleanupLabLabelsInDocker(runtime.metadata, runtime.config.mode.kind === "dockerfile", runner, environment);
 }
@@ -9821,13 +9818,13 @@ import {
   sep as sep2
 } from "path";
 var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
-var LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
-var REPOSITORY_HASH = /^[a-f0-9]{12}$/;
-var SOURCE_REPOSITORY_IDENTITY = /^[a-f0-9]{64}$/;
-var COMPOSE_PROJECT = /^ccl-[a-z0-9][a-z0-9-]{0,62}$/;
-var SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
-var ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-var URL_SCHEME = /^[a-z][a-z0-9+.-]*$/;
+var LAB_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/u;
+var REPOSITORY_HASH = /^[a-f0-9]{12}$/u;
+var SOURCE_REPOSITORY_IDENTITY = /^[a-f0-9]{64}$/u;
+var COMPOSE_PROJECT = /^ccl-[a-z0-9][a-z0-9-]{0,62}$/u;
+var SERVICE_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/u;
+var ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/u;
+var URL_SCHEME = /^[a-z][a-z0-9+.-]*$/u;
 var FINDING_SURFACES = new Set([
   "host-bind",
   "socket-bind",
@@ -9925,14 +9922,14 @@ function assertLabMetadata(value, roots, owner, labId) {
   }
 }
 function validatePersistedRuntime(lab, runtime) {
-  if (!isRecord7(runtime) || !hasOnlyKeys(runtime, [
+  if (!(isRecord7(runtime) && hasOnlyKeys(runtime, [
     "config",
     "composeArgs",
     "baseFile",
     "sourceFile",
     "overrideFile",
     "findings"
-  ]) || !isRecord7(runtime["config"])) {
+  ]) && isRecord7(runtime["config"]))) {
     throw new Error("invalid persisted runtime");
   }
   const persistedConfig = runtime["config"];
@@ -12287,7 +12284,6 @@ async function failReadyLab(roots, snapshot, problem) {
 async function readyRuntimeProblem(roots, lab) {
   try {
     await assertReadyLabFilesystem(roots, lab);
-    return;
   } catch (error) {
     if (error.code === "ENOENT") {
       return "runtime or workspace is missing";
@@ -12922,48 +12918,44 @@ class ContainerLabService {
   }
   async preview(id, direction) {
     await this.reconcileOwner();
-    return await withFileLock(this.activityLock(id), async () => {
-      return await withFileLock(this.labLock(id), async () => {
-        const lab = await this.requireReady(id);
-        await assertSourceRepositoryIdentity(lab, this.environment);
-        await recoverLabSync(this.roots, lab, this.environment);
-        const sourceRoot = direction === "push" ? lab.sourceRoot : lab.workspace;
-        const targetRoot = direction === "push" ? lab.workspace : lab.sourceRoot;
-        const preview = await previewSync({
-          stateRoot: lab.runtimeRoot,
-          labId: lab.id,
-          direction,
-          sourceRoot,
-          targetRoot,
-          maxEntries: 100,
-          environment: this.environment
-        });
-        return publicSyncPreview(preview, id, direction);
-      }, { attempts: 600, delayMs: 50 });
-    }, { attempts: 600, delayMs: 50 });
+    return await withFileLock(this.activityLock(id), async () => await withFileLock(this.labLock(id), async () => {
+      const lab = await this.requireReady(id);
+      await assertSourceRepositoryIdentity(lab, this.environment);
+      await recoverLabSync(this.roots, lab, this.environment);
+      const sourceRoot = direction === "push" ? lab.sourceRoot : lab.workspace;
+      const targetRoot = direction === "push" ? lab.workspace : lab.sourceRoot;
+      const preview = await previewSync({
+        stateRoot: lab.runtimeRoot,
+        labId: lab.id,
+        direction,
+        sourceRoot,
+        targetRoot,
+        maxEntries: 100,
+        environment: this.environment
+      });
+      return publicSyncPreview(preview, id, direction);
+    }, { attempts: 600, delayMs: 50 }), { attempts: 600, delayMs: 50 });
   }
   async apply(id, direction, token) {
     await this.reconcileOwner();
-    return await withFileLock(this.activityLock(id), async () => {
-      return await withFileLock(this.labLock(id), async () => {
-        const lab = await this.requireReady(id);
-        await assertSourceRepositoryIdentity(lab, this.environment);
-        await recoverLabSync(this.roots, lab, this.environment);
-        const sourceRoot = direction === "push" ? lab.sourceRoot : lab.workspace;
-        const targetRoot = direction === "push" ? lab.workspace : lab.sourceRoot;
-        const result = await applySync({
-          stateRoot: lab.runtimeRoot,
-          labId: lab.id,
-          direction,
-          token,
-          sourceRoot,
-          targetRoot,
-          idleGuard: () => true,
-          environment: this.environment
-        });
-        return { labId: id, direction, applied: result.applied };
-      }, { attempts: 600, delayMs: 50 });
-    }, { attempts: 600, delayMs: 50 });
+    return await withFileLock(this.activityLock(id), async () => await withFileLock(this.labLock(id), async () => {
+      const lab = await this.requireReady(id);
+      await assertSourceRepositoryIdentity(lab, this.environment);
+      await recoverLabSync(this.roots, lab, this.environment);
+      const sourceRoot = direction === "push" ? lab.sourceRoot : lab.workspace;
+      const targetRoot = direction === "push" ? lab.workspace : lab.sourceRoot;
+      const result = await applySync({
+        stateRoot: lab.runtimeRoot,
+        labId: lab.id,
+        direction,
+        token,
+        sourceRoot,
+        targetRoot,
+        idleGuard: () => true,
+        environment: this.environment
+      });
+      return { labId: id, direction, applied: result.applied };
+    }, { attempts: 600, delayMs: 50 }), { attempts: 600, delayMs: 50 });
   }
   async destroyLab(id) {
     return await destroyManagedLab(this.domainContext(), id);
@@ -13058,11 +13050,11 @@ var package_default = {
 var CONTAINER_LAB_VERSION = package_default.version;
 
 // packages/container-lab/src/cli.ts
-var processIO = {
+var processIo = {
   stdout: (value) => process11.stdout.write(value),
   stderr: (value) => process11.stderr.write(value)
 };
-async function cliMain(args = process11.argv.slice(2), environment = process11.env, io = processIO) {
+async function cliMain(args = process11.argv.slice(2), environment = process11.env, io = processIo) {
   try {
     const global = parseGlobalArguments(args);
     if (global.help) {

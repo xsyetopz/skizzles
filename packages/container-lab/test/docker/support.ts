@@ -56,7 +56,7 @@ export function dockerLab(overrides: Partial<LabMetadata> = {}): LabMetadata {
     name: "lab",
     owner: "thread/exact",
     ownerKey: "a".repeat(64),
-    // biome-ignore lint/security/noSecrets: This fixed test/schema token is not a credential.
+
     repoHash: "123456789abc",
     composeProject: "ccl-project",
     state: "failed",

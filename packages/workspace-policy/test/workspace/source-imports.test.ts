@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -225,7 +224,9 @@ describe("TypeScript source dependency fitness", () => {
       `value + +${fakeRegex("fake-unary-plus")};`,
       `value - -${fakeRegex("fake-unary-minus")};`,
       `function sameLineReturn() { return ${fakeRegex("fake-return")}; }`,
-      `function newlineReturn() { return\n${fakeRegex("fake-return-newline")}; }`,
+      `function newlineReturn() { return\n${fakeRegex(
+        "fake-return-newline",
+      )}; }`,
       `const arrow = () => ${fakeRegex("fake-arrow")};`,
       `if (ok) ${fakeRegex("fake-if")};`,
       `while (ok) ${fakeRegex("fake-while")};`,
@@ -233,7 +234,9 @@ describe("TypeScript source dependency fitness", () => {
       `if (ok) {} ${fakeRegex("fake-block")};`,
       `class RegexClass {} ${fakeRegex("fake-class")};`,
       `const frozen = { value: 1 } as const; ${fakeRegex("fake-as-const")};`,
-      `interface RegexInterface { value: string } ${fakeRegex("fake-interface")};`,
+      `interface RegexInterface { value: string } ${fakeRegex(
+        "fake-interface",
+      )};`,
       `@decorator class Decorated {} ${fakeRegex("fake-decorator")};`,
       `while (ok) { break\n${fakeRegex("fake-break")}; }`,
       `while (ok) { continue\n${fakeRegex("fake-continue")}; }`,

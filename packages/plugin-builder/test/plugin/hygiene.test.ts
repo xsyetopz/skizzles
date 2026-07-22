@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -48,7 +47,7 @@ describe("plugin distribution hygiene", () => {
 
   it("rejects environment and credential artifacts", async () => {
     const root = await fixture();
-    // biome-ignore lint/security/noSecrets: Deliberate fake credential content exercises rejection.
+
     await write(root, "skills/example/.env.production", "TOKEN=secret\n");
     expect(stagePlugin(root, join(root, "stage"))).rejects.toThrow(
       "looks like local or live state",

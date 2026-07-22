@@ -161,10 +161,8 @@ function executable(name: string, pathValue: string): string | undefined {
     try {
       accessSync(candidate, constants.X_OK);
       return candidate;
-      // biome-ignore lint/suspicious/noEmptyBlockStatements: The operation intentionally ignores this best-effort failure.
     } catch {}
   }
-  return undefined;
 }
 
 function adminJson(

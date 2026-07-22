@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { afterEach, describe, expect, it } from "bun:test";
 import { createCausalWorkflow } from "../../../src/workflow/causal-workflow.ts";
 import { TaskWorktreeApprovalBridge } from "../../../src/workflow/worktree/approval.ts";
@@ -154,7 +153,10 @@ describe("real engineering workflow publication", () => {
   }, 30_000);
 
   it("retries failed split cleanup after restoring the injected task worktree lock", async () => {
-    const preparedFixture = await fixture({ cleanupFault: true, split: true });
+    const preparedFixture = await fixture({
+      cleanupFault: true,
+      split: true,
+    });
     const prepared = await prepareSourceFixture(preparedFixture);
     if (prepared.status !== "cleanup-pending") {
       throw new Error(`expected cleanup-pending, received ${prepared.status}`);

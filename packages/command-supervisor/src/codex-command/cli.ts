@@ -6,7 +6,7 @@ import { runRoot } from "./settings.ts";
 
 const usage =
   "usage: codex-command run --base64url <script> | status <run-id> | tail <run-id> [stdout|stderr] | errors <run-id> | search <text> [run-id]";
-const base64UrlPattern = /^[A-Za-z0-9_-]+$/;
+const base64UrlPattern = /^[A-Za-z0-9_-]+$/u;
 
 function decodeScript(value: string): string {
   if (!base64UrlPattern.test(value)) {
@@ -44,7 +44,7 @@ function requiredArgument(arguments_: string[], index: number): string {
 
 function executeRun(arguments_: string[]): Promise<number> | undefined {
   if (arguments_.length !== 2 || arguments_[0] !== "--base64url") {
-    return undefined;
+    return;
   }
   return runCommand(decodeScript(requiredArgument(arguments_, 1)));
 }
@@ -86,7 +86,6 @@ function executeQuery(
     }
     return 0;
   }
-  return undefined;
 }
 
 function execute(

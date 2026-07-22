@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { describe, expect, it } from "bun:test";
 import { applyLunaV2Overlay } from "../../src/index.ts";
 import { model, source } from "./harness.ts";
@@ -26,7 +25,7 @@ describe("Luna V2 model catalog overlay", () => {
     if (invalidLuna === undefined) {
       throw new Error("missing Luna fixture");
     }
-    // biome-ignore lint/complexity/useLiteralKeys: the external catalog schema uses snake_case keys.
+
     invalidLuna["multi_agent_version"] = null;
     expect(() => applyLunaV2Overlay(invalid)).toThrow("unexpected");
   });

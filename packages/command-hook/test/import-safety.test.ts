@@ -1,11 +1,10 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { expect, test } from "bun:test";
 import { resolve } from "node:path";
 import process from "node:process";
 
 const packageRoot = resolve(import.meta.dir, "..");
 
-test("the package facade imports without executing the stdin hook", async () => {
+it("the package facade imports without executing the stdin hook", async () => {
   const child = Bun.spawn(
     [
       process.execPath,
@@ -19,7 +18,7 @@ test("the package facade imports without executing the stdin hook", async () => 
       stderr: "pipe",
     },
   );
-  const deadline = Bun.sleep(1_000).then(() => "deadline" as const);
+  const deadline = Bun.sleep(1000).then(() => "deadline" as const);
   const outcome = await Promise.race([child.exited, deadline]);
   if (outcome === "deadline") {
     child.kill("SIGKILL");

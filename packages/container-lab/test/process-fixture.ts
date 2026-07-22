@@ -136,8 +136,6 @@ async function cleanupFixtureGroup([processGroup, identities]: [
       return asError(error);
     }
   }
-  // biome-ignore lint/complexity/noUselessReturn: TypeScript's noImplicitReturns requires the explicit undefined outcome.
-  return;
 }
 
 function stubbornGroupScript(afterRelease = "wait"): string {

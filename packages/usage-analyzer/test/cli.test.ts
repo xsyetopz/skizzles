@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { describe, expect, test } from "bun:test";
 import { parseArgs, parseDate } from "../src/cli.ts";
 

@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun provides its test module at runtime.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   mkdir,
@@ -162,8 +161,9 @@ describe("task-scoped Git worktree lifecycle isolation", () => {
     const firstAuthority = createAuthority(first);
     const secondAuthority = createAuthority(second);
     const prepared = await firstAuthority.prepare(prepareInput("dirty-close"));
-    if (prepared.status !== "prepared")
+    if (prepared.status !== "prepared") {
       throw new Error("fixture allocation failed");
+    }
     const allocation = worktreeAllocation(first.repository);
     await writeFile(join(allocation.root, "tracked.txt"), "modified\n");
     expect(

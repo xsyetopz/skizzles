@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   crashServiceApply,
@@ -15,7 +14,7 @@ const { provisionedSyncFixture } = fixtures;
 afterEach(fixtures.cleanup);
 
 describe("service synchronization recovery", () => {
-  test("recovers a crash journal before issuing a new service preview", async () => {
+  it("recovers a crash journal before issuing a new service preview", async () => {
     const fixture = await provisionedSyncFixture(
       "thread-sync-preview-recovery",
     );
@@ -37,7 +36,7 @@ describe("service synchronization recovery", () => {
     expect(await syncJournals(fixture.lab)).toEqual([]);
   });
 
-  test("recovers a crash journal before consuming an existing service apply token", async () => {
+  it("recovers a crash journal before consuming an existing service apply token", async () => {
     const fixture = await provisionedSyncFixture("thread-sync-apply-recovery");
     await writeFile(join(fixture.lab.sourceRoot, "tracked.txt"), "changed\n");
     const crashed = await fixture.service.preview(fixture.lab.id, "push");
@@ -53,7 +52,7 @@ describe("service synchronization recovery", () => {
     expect(await syncJournals(fixture.lab)).toEqual([]);
   });
 
-  test("serializes concurrent preview and apply with activity then lab lock ordering", async () => {
+  it("serializes concurrent preview and apply with activity then lab lock ordering", async () => {
     const fixture = await provisionedSyncFixture("thread-sync-lock-order");
     const token = (await fixture.service.preview(fixture.lab.id, "push")).token;
     const entered = Promise.withResolvers<void>();

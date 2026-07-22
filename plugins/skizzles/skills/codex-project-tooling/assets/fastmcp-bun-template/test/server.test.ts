@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { expect, test } from "bun:test";
 import { createServer } from "../src/server.ts";
 

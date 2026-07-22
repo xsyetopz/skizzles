@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {

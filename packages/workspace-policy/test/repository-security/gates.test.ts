@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
 import { lstat, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -371,7 +370,9 @@ function descendantToolSource(record: string, succeed: boolean): string {
     'import process from "node:process";',
     "const descendant = Bun.spawn([process.execPath, '--eval', `process.on('SIGTERM', () => undefined); console.log('descendant stdout'); console.error('descendant stderr'); setInterval(() => undefined, 1000);`], { stdout: 'inherit', stderr: 'inherit' });",
     "const pgidText = await new Response(Bun.spawn(['/bin/ps', '-o', 'pgid=', '-p', String(process.pid)], { stdout: 'pipe' }).stdout).text();",
-    `await writeFile(${JSON.stringify(record)}, JSON.stringify({ descendant: descendant.pid, pgid: Number(pgidText.trim()), supervisor: process.ppid }));`,
+    `await writeFile(${JSON.stringify(
+      record,
+    )}, JSON.stringify({ descendant: descendant.pid, pgid: Number(pgidText.trim()), supervisor: process.ppid }));`,
     "await Bun.sleep(75);",
     succeed
       ? "process.exit(0);"

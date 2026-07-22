@@ -1,6 +1,6 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-// biome-ignore lint/correctness/noUnresolvedImports: TypeScript 7 exposes version metadata through its package root.
+
 import { version as typeScriptVersion } from "typescript";
 import { digestBytes } from "../../digest.ts";
 import type { TrustedCompilerState } from "./authority-state.ts";

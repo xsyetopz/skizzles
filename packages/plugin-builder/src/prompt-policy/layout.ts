@@ -20,10 +20,10 @@ export const PACKAGED_LICENSE = "third_party/openai-codex/LICENSE";
 export const PACKAGED_NOTICE = "third_party/openai-codex/NOTICE";
 export const EXPECTED_UPSTREAM = {
   repository: "https://github.com/openai/codex",
-  // biome-ignore lint/security/noSecrets: This is a public upstream commit digest.
+
   commit: "bc5c9161b46feddc13282652fd2cfdf1e5bab4a9",
   path: "codex-rs/protocol/src/prompts/base_instructions/default.md",
-  // biome-ignore lint/security/noSecrets: This is an integrity digest for public prompt content.
+
   sha256: "ac8ae107a0d72fe3476b430afb161ea4e67da2e446d778aefc44828160559807",
   bytes: 20_903,
 } as const;

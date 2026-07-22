@@ -1,5 +1,5 @@
 // biome-ignore-all lint/correctness/noUnresolvedImports: TypeScript 7 exposes AST APIs through unstable package exports.
-import { type CallExpression, type Node } from "typescript/unstable/ast";
+import type { CallExpression, Node } from "typescript/unstable/ast";
 import type {
   ParsedSecuritySource,
   SecurityFinding,

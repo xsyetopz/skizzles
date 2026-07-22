@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, test } from "bun:test";
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
@@ -18,9 +17,9 @@ import {
 import type { CommandResult, RunOptions } from "../../src/process.ts";
 import type { LabMetadata } from "../../src/state/lab/contract.ts";
 
-const OWNERSHIP_ERROR = /ownership|exact ownership labels/;
+const OWNERSHIP_ERROR = /ownership|exact ownership labels/u;
 
-test("Docker domain facade exposes its supported runtime surface", () => {
+it("Docker domain facade exposes its supported runtime surface", () => {
   expect(Object.keys(dockerFacade).sort()).toEqual([
     "cleanupLabLabels",
     "composeCommand",
@@ -42,7 +41,7 @@ class MockDocker implements DockerRunner {
   spawnCalls: string[][] = [];
   spawnOptions: Array<DockerSpawnOptions | undefined> = [];
   responses: CommandResult[] = [];
-  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
+
   async run(args: string[], _options?: RunOptions): Promise<CommandResult> {
     this.calls.push(args);
     return this.responses.shift() ?? result("");
@@ -58,7 +57,7 @@ class MockDocker implements DockerRunner {
 }
 
 describe("exact Docker cleanup", () => {
-  test("uses managed + exact owner + exact lab filters and Compose ownership filters", async () => {
+  it("uses managed + exact owner + exact lab filters and Compose ownership filters", async () => {
     const docker = new MockDocker();
     await cleanupLabLabels(lab(), false, docker);
     const listCalls = docker.calls.filter((args) => args.includes("--filter"));
@@ -81,7 +80,7 @@ describe("exact Docker cleanup", () => {
     }
   });
 
-  test("refuses a volume whose inspected labels do not prove exact ownership", async () => {
+  it("refuses a volume whose inspected labels do not prove exact ownership", async () => {
     const docker = new MockDocker();
     docker.responses.push(
       result(""),
@@ -105,7 +104,7 @@ describe("exact Docker cleanup", () => {
     ).toBe(false);
   });
 
-  test("refuses more than 1000 exact-labelled resources", async () => {
+  it("refuses more than 1000 exact-labelled resources", async () => {
     const docker = new MockDocker();
     docker.responses.push(
       result(
@@ -118,7 +117,7 @@ describe("exact Docker cleanup", () => {
     expect(docker.calls.some((args) => args.includes("rm"))).toBe(false);
   });
 
-  test("verifies exact image labels and removes only the immutable image identity", async () => {
+  it("verifies exact image labels and removes only the immutable image identity", async () => {
     const docker = new MockDocker();
     const imageId = `sha256:${"b".repeat(64)}`;
     docker.responses.push(
@@ -149,7 +148,7 @@ describe("exact Docker cleanup", () => {
     ).toEqual([["image", "rm", imageId]]);
   });
 
-  test("refuses malformed or mismatched internal image inspection", async () => {
+  it("refuses malformed or mismatched internal image inspection", async () => {
     for (const inspection of [
       "not-json",
       JSON.stringify({ id: "mutable-tag", labels: exactImageLabels() }),
@@ -172,7 +171,7 @@ describe("exact Docker cleanup", () => {
     }
   });
 
-  test("tolerates only an exact missing-image inspection response", async () => {
+  it("tolerates only an exact missing-image inspection response", async () => {
     const tag = `codex-container-lab:${"a".repeat(24)}-lab-1`;
     const absent = new MockDocker();
     absent.responses.push(
@@ -199,7 +198,7 @@ describe("exact Docker cleanup", () => {
     ).toBe(false);
   });
 
-  test("binds cancellation to an ephemeral run identity and removes the pid file on normal completion", async () => {
+  it("binds cancellation to an ephemeral run identity and removes the pid file on normal completion", async () => {
     const docker = new MockDocker();
     const identity = {
       runId: "11111111-1111-4111-8111-111111111111",
@@ -260,7 +259,7 @@ describe("exact Docker cleanup", () => {
     expect(killScript).toContain('kill -TERM -- -"$pid"');
   });
 
-  test("preserves redirected stdin for the background attached command", async () => {
+  it("preserves redirected stdin for the background attached command", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-stdin-"));
     try {
       const setsid = join(root, "setsid");
@@ -311,7 +310,7 @@ describe("exact Docker cleanup", () => {
     }
   });
 
-  test("reports token mismatch and Docker exec failure as unconfirmed termination", async () => {
+  it("reports token mismatch and Docker exec failure as unconfirmed termination", async () => {
     const mismatch = new MockDocker();
     mismatch.responses.push(
       result("codex-container-lab-termination:identity-mismatch\n"),
@@ -333,7 +332,7 @@ describe("exact Docker cleanup", () => {
     });
   });
 
-  test("reports an exact recorded process group absence as confirmed", async () => {
+  it("reports an exact recorded process group absence as confirmed", async () => {
     const docker = new MockDocker();
     docker.responses.push(result("codex-container-lab-termination:absent\n"));
     expect(
@@ -394,7 +393,7 @@ function lab(): LabMetadata {
     name: "lab",
     owner: "thread/exact",
     ownerKey: "a".repeat(64),
-    // biome-ignore lint/security/noSecrets: This fixed test/schema token is not a credential.
+
     repoHash: "123456789abc",
     composeProject: "ccl-project",
     state: "failed",

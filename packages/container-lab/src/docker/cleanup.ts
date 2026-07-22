@@ -4,7 +4,7 @@ import type { LabMetadata } from "../state/lab/contract.ts";
 import type { DockerRunner, LabRuntime } from "./contract.ts";
 import { dockerClientEnvironment, isRecord } from "./environment.ts";
 
-const IMMUTABLE_IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
+const IMMUTABLE_IMAGE_ID = /^sha256:[0-9a-f]{64}$/u;
 
 export async function destroyLabStackInDocker(
   runtime: LabRuntime,
@@ -211,7 +211,7 @@ async function listBounded(
     throw new Error(`failed to list managed lab ${kind}s`);
   }
   const ids = listed.stdout.toString().trim().split("\n").filter(Boolean);
-  if (ids.length > 1_000) {
+  if (ids.length > 1000) {
     throw new Error(`managed lab ${kind}s exceed cleanup bound`);
   }
   return ids;

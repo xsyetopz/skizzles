@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import { unlinkSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -17,7 +16,7 @@ afterEach(async () => {
 });
 
 describe("crash-recoverable file locks", () => {
-  test("recovers stale missing and malformed owner records without inspecting an unrelated PID", async () => {
+  it("recovers stale missing and malformed owner records without inspecting an unrelated PID", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-lock-"));
     temporary.push(root);
     for (const [name, contents] of [
@@ -32,7 +31,6 @@ describe("crash-recoverable file locks", () => {
       let entered = false;
       await withFileLock(
         path,
-        // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
         async () => {
           entered = true;
         },
@@ -43,21 +41,20 @@ describe("crash-recoverable file locks", () => {
     }
   });
 
-  test("does not confuse an EEXIST thrown by the protected operation with lock contention", async () => {
+  it("does not confuse an EEXIST thrown by the protected operation with lock contention", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-lock-operation-"));
     temporary.push(root);
     const error = Object.assign(new Error("operation collision"), {
       code: "EEXIST",
     });
     await expect(
-      // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
       withFileLock(join(root, "lock"), async () => {
         throw error;
       }),
     ).rejects.toThrow("operation collision");
   });
 
-  test("does not remove a new lock that replaces the inspected stale lock", async () => {
+  it("does not remove a new lock that replaces the inspected stale lock", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-lock-replaced-"));
     temporary.push(root);
     const path = join(root, "lock");
@@ -73,7 +70,6 @@ describe("crash-recoverable file locks", () => {
     await expect(
       withFileLock(
         path,
-        // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
         async () => {
           entered = true;
         },
@@ -95,7 +91,7 @@ describe("crash-recoverable file locks", () => {
     expect(await readFile(path, "utf8")).toBe(replacement);
   });
 
-  test("recovers an orphaned deterministic reclaim claim after its claimant crashed", async () => {
+  it("recovers an orphaned deterministic reclaim claim after its claimant crashed", async () => {
     const root = await mkdtemp(
       join(tmpdir(), "container-lab-lock-orphan-claim-"),
     );
@@ -109,7 +105,6 @@ describe("crash-recoverable file locks", () => {
 
     await withFileLock(
       path,
-      // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
       async () => {
         entered = true;
       },

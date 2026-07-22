@@ -1,5 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
-// biome-ignore lint/performance/noNamespaceImport: strict validation uses the parser's document, node predicates, and visitor as one boundary.
 import * as Yaml from "yaml";
 import { SkillMetadataError } from "../contract.ts";
 

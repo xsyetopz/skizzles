@@ -25,8 +25,8 @@ import {
 } from "./environment.ts";
 import { immutableComposeArguments } from "./source.ts";
 
-const LOOPBACK_PORT = /^127\.0\.0\.1:(\d+)$/;
-const LEADING_REPLACEMENT_CHARACTER = /^�/;
+const LOOPBACK_PORT = /^127\.0\.0\.1:(\d+)$/u;
+const LEADING_REPLACEMENT_CHARACTER = /^�/u;
 const COMPOSE_CONFIGURATION_FAILURE =
   "Docker Compose configuration failed; secret-bearing diagnostics redacted";
 const COMPOSE_SOURCE_CHANGED =
@@ -215,9 +215,7 @@ function parseNormalizedModel(parse: () => unknown): ComposeModel | undefined {
   try {
     const value = parse();
     return isComposeModel(value) ? value : undefined;
-  } catch {
-    return undefined;
-  }
+  } catch {}
 }
 
 function isComposeModel(value: unknown): value is ComposeModel {
@@ -491,13 +489,13 @@ function summarizeServices(values: unknown[]): ServiceSummary[] {
 
 function summarizeService(value: unknown): ServiceSummary | undefined {
   if (!isRecord(value)) {
-    return undefined;
+    return;
   }
   const service =
     stringProperty(value, "Service") ?? stringProperty(value, "Name");
   const state = stringProperty(value, "State");
   if (!(service && state)) {
-    return undefined;
+    return;
   }
   const summary: ServiceSummary = {
     service: service.slice(0, 128),
@@ -533,8 +531,7 @@ function boundedLogTail(
   maxBytes: number,
 ): { text: string; truncated: boolean } {
   const sanitized = value
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: strips unsafe terminal control bytes while retaining tabs and line breaks.
-    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "�")
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/gu, "�")
     .trimEnd();
   const lines = sanitized.split("\n");
   let selected = lines.slice(-maxLines).join("\n");
@@ -551,5 +548,5 @@ function boundedLogTail(
 }
 
 function compactError(value: string): string {
-  return redactPublicText(value.trim(), 2_000, 6);
+  return redactPublicText(value.trim(), 2000, 6);
 }

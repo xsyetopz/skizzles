@@ -59,7 +59,6 @@ export function statementKind(
   if (startsWith(tokens, ["DROP", "TABLE"])) return "drop-table";
   if (startsWith(tokens, ["DROP", "INDEX"])) return "drop-index";
   if (startsWith(tokens, ["DROP", "TYPE"])) return "drop-type";
-  return undefined;
 }
 
 export function canonicalTokens(tokens: readonly SqlToken[]): string {

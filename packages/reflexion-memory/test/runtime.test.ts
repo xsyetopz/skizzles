@@ -1,5 +1,3 @@
-// biome-ignore lint/style/noExcessiveLinesPerFile: this file is an adversarial trust-boundary matrix.
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 
 import type {

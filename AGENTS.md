@@ -1,4 +1,4 @@
-# Skizzles maintainer guide
+# AGENTS.md
 
 Skizzles is a Bun/TypeScript packaging workspace, not a live installation.
 Canonical packages are portable; `plugins/skizzles/` is their deterministic

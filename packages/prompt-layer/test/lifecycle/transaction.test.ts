@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import { cp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -15,8 +14,8 @@ import {
   fixtureDirectory,
   leaveCrashedAuthorTransaction,
   MACHINE_PATH,
-  SYMLINK_ERROR,
   snapshot,
+  SYMLINK_ERROR,
   type TransactionEntryFixture,
   type TransactionJournalFixture,
 } from "./fixture.ts";

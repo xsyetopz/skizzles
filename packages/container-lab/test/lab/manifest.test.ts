@@ -1,9 +1,8 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, test } from "bun:test";
 import { parseLabManifest } from "../../src/lab/manifest.ts";
 
 describe("parseLabManifest", () => {
-  test("preserves schema diagnostic ordering across manifest domains", () => {
+  it("preserves schema diagnostic ordering across manifest domains", () => {
     expect(() =>
       parseLabManifest(
         `
@@ -28,7 +27,7 @@ secret_environment: [TOKEN, TOKEN]
     );
   });
 
-  test("attributes YAML syntax errors to the caller-provided source path", () => {
+  it("attributes YAML syntax errors to the caller-provided source path", () => {
     expect(() =>
       parseLabManifest("image: [", "/tmp/project/custom-lab.yaml"),
     ).toThrow("invalid YAML in /tmp/project/custom-lab.yaml:");

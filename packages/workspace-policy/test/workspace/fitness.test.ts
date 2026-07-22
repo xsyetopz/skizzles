@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -252,7 +251,9 @@ describe("mandatory workspace architecture fitness", () => {
     const root = await fixture();
     await writeFile(
       join(root, "packages/example/src/cli.ts"),
-      `#!/usr/bin/env bun\n${"// orchestration\n".repeat(THICK_ENTRYPOINT_BODY_LINES)}export {};\n`,
+      `#!/usr/bin/env bun\n${"// orchestration\n".repeat(
+        THICK_ENTRYPOINT_BODY_LINES,
+      )}export {};\n`,
     );
 
     const codes = (await validateWorkspace(root)).map(({ code }) => code);

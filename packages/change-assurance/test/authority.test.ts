@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import { invokeExtension } from "../src/extension.ts";
 import { createMigrationConfigurationSecretsExtension } from "../src/migration/authority.ts";

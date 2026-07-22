@@ -14,7 +14,6 @@ import process from "node:process";
 type LockRecord = { pid: number; createdAt: string };
 type LockIdentity = { dev: bigint; ino: bigint };
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 export async function withFileLock<T>(
   path: string,
   operation: () => Promise<T>,
@@ -94,7 +93,6 @@ export async function withFileLock<T>(
   throw new Error("state is busy; another process holds the operation lock");
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 async function removeConfirmedStaleLock(
   path: string,
   staleMs: number,
@@ -191,7 +189,6 @@ async function reclaimSameLock(
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 async function claimAndRemoveLock(
   path: string,
   inspected: LockIdentity | undefined,
@@ -341,7 +338,7 @@ function identity(info: {
   ino: bigint;
 }): LockIdentity | undefined {
   if (info.dev < 0n || info.ino <= 0n) {
-    return undefined;
+    return;
   }
   return { dev: info.dev, ino: info.ino };
 }

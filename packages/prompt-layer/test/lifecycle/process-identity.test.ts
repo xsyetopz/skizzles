@@ -1,12 +1,11 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import process from "node:process";
 import { buildPrompt, type ProcessIdentityProvider } from "../../src/cli.ts";
 import {
-  CURRENT_PROCESS_IDENTITY_ERROR,
   cleanupFixtures,
+  CURRENT_PROCESS_IDENTITY_ERROR,
   fixture,
   identityProvider,
   LIVE_PID_ERROR,

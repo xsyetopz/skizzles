@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   cpSync,
@@ -133,9 +132,9 @@ class FakeRpc implements ConfigRpc {
         "configVersionConflict",
       );
     }
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This RPC double centralizes protocol assertions for tests.
+
     expect(params.expectedVersion).toBe(this.version);
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This RPC double centralizes protocol assertions for tests.
+
     expect(params.reloadUserConfig).toBe(true);
     this.lastEdits = structuredClone(params.edits);
     for (const edit of params.edits) {

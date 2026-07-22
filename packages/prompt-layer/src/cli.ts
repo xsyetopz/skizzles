@@ -71,7 +71,6 @@ async function runCli(): Promise<void> {
       break;
     default:
       throw new PromptLayerError(
-        // biome-ignore lint/security/noSecrets: This is the public CLI usage string, not a credential.
         "Usage: skizzles-prompt-layer <build|check|patch|rebase>",
       );
   }

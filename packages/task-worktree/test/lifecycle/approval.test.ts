@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun provides its test module at runtime.
 import { afterEach, describe, expect, it } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -41,8 +40,9 @@ describe("task-worktree promotion permits", () => {
     );
     const first = await authority.prepare(prepareInput("array-first"));
     const second = await authority.prepare(prepareInput("array-second"));
-    if (first.status !== "prepared" || second.status !== "prepared")
+    if (first.status !== "prepared" || second.status !== "prepared") {
       throw new Error("parallel prepare failed");
+    }
     await runValidation(authority, first.session);
     await runValidation(authority, second.session);
     expect(

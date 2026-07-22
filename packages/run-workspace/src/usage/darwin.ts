@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun provides this runtime module and @types/bun provides its contract.
 import { dlopen, FFIType, ptr } from "bun:ffi";
 import { constants } from "node:fs";
 import type { FileHandle } from "node:fs/promises";

@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun provides its test module at runtime.
 import { describe, expect, it } from "bun:test";
 import {
   createDependencyResolutionService,
@@ -51,8 +50,9 @@ describe("structured dependency resolution", () => {
       resolvedVersion: null,
       registry: "mirror.example",
     })).resolve({ ecosystem: "npm", name: "lib", requestedRange: "^1.0.0" });
-    if (unavailable.status === "resolved")
+    if (unavailable.status === "resolved") {
       expect(unavailable.receipt.outcome).toBe("unavailable");
+    }
   });
 
   it("rejects caller success facts, forged authorities, proxies, and malformed records", async () => {

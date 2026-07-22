@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun provides its test module at runtime.
 import { describe, expect, it } from "bun:test";
 import {
   createTaskWorktreeDiffAuthority,
@@ -48,8 +47,9 @@ function authority(
       maxChangedBytes: overrides.maxChangedBytes ?? 10_000,
     }),
   );
-  if (created.status !== "created")
+  if (created.status !== "created") {
     throw new Error("diff authority setup failed");
+  }
   return created.authority;
 }
 

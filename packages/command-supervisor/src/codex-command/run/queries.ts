@@ -10,7 +10,7 @@ import {
 } from "./root.ts";
 import { maximumStatusBytes, parseRunStatus } from "./status-codec.ts";
 
-const queryRunIdPattern = /^[A-Za-z0-9._-]+$/;
+const queryRunIdPattern = /^[A-Za-z0-9._-]+$/u;
 
 function validateQueryRunId(id: string): void {
   if (id === "." || id === ".." || !queryRunIdPattern.test(id)) {

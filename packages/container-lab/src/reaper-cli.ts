@@ -7,7 +7,7 @@ import { type ReaperResult, reapArchivedOwners } from "./reaper-domain.ts";
 import { resolveRoots } from "./state/layout.ts";
 import { CONTAINER_LAB_VERSION } from "./version.ts";
 
-export const REAPER_OUTPUT_MAX_BYTES = 1_536;
+export const REAPER_OUTPUT_MAX_BYTES = 1536;
 
 export type ReaperCliOutput = {
   ok: boolean;
@@ -68,7 +68,7 @@ export function reaperOutput(
     result.errors.length === 0 &&
     exceptionalRetentions.length === 0
   ) {
-    return undefined;
+    return;
   }
 
   const issues = distinctBounded([

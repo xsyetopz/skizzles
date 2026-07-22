@@ -17,13 +17,13 @@ export function compareCanonicalText(left: string, right: string): number {
 function hasLoneSurrogate(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
     const codeUnit = value.charCodeAt(index);
-    if (codeUnit >= 0xd800 && codeUnit <= 0xdbff) {
+    if (codeUnit >= 0xd8_00 && codeUnit <= 0xdb_ff) {
       const next = value.charCodeAt(index + 1);
-      if (next < 0xdc00 || next > 0xdfff) {
+      if (next < 0xdc_00 || next > 0xdf_ff) {
         return true;
       }
       index += 1;
-    } else if (codeUnit >= 0xdc00 && codeUnit <= 0xdfff) {
+    } else if (codeUnit >= 0xdc_00 && codeUnit <= 0xdf_ff) {
       return true;
     }
   }
@@ -218,7 +218,7 @@ export function normalizeTargetPath(value: unknown): string | undefined {
     hasLoneSurrogate(value) ||
     WINDOWS_DRIVE.test(value)
   ) {
-    return undefined;
+    return;
   }
   const normalized = posix.normalize(value.normalize("NFC"));
   if (
@@ -227,7 +227,7 @@ export function normalizeTargetPath(value: unknown): string | undefined {
     normalized.startsWith("../") ||
     posix.isAbsolute(normalized)
   ) {
-    return undefined;
+    return;
   }
   return normalized;
 }

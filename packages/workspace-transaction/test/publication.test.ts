@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, test } from "bun:test";
 import {
   type CrashStep,
@@ -41,7 +40,7 @@ function harness(
 }
 
 describe("workspace publication", () => {
-  test("uses locale-independent canonical ordering for non-ASCII paths", async () => {
+  it("uses locale-independent canonical ordering for non-ASCII paths", async () => {
     const publishFixture = async (paths: readonly string[]) => {
       const destination = new IsolatedDestinationFixture();
       const approval = new ApprovalFixture();
@@ -102,7 +101,7 @@ describe("workspace publication", () => {
     expect(decomposed.destination.files.has("src/é.ts")).toBe(true);
   });
 
-  test("publishes writes and deletions through owned siblings", async () => {
+  it("publishes writes and deletions through owned siblings", async () => {
     const fixture = new IsolatedDestinationFixture();
     const oldWrite = fixture.setFile("src/write.ts", "old-write");
     const oldDelete = fixture.setFile("src/delete.ts", "old-delete");
@@ -132,7 +131,7 @@ describe("workspace publication", () => {
     expect(await fixture.readJournal()).toBeUndefined();
   });
 
-  test("normalizes targets before rejecting duplicates and escapes", async () => {
+  it("normalizes targets before rejecting duplicates and escapes", async () => {
     const { destination, transaction } = harness();
     const missing: ExpectedSnapshot = { state: "missing" };
     const duplicate = await transaction.publish({
@@ -166,7 +165,7 @@ describe("workspace publication", () => {
     expect(destination.captureCount).toBe(0);
   });
 
-  test("performs zero renames when a target drifts before publication", async () => {
+  it("performs zero renames when a target drifts before publication", async () => {
     const fixture = new IsolatedDestinationFixture();
     const baseline = fixture.setFile("src/file.ts", "old");
     fixture.onInspect = (current) => {
@@ -182,7 +181,7 @@ describe("workspace publication", () => {
     expect(fixture.currentText("src/file.ts")).toBe("manual-change");
   });
 
-  test("rejects symlinks, hardlinks, and cross-device targets", async () => {
+  it("rejects symlinks, hardlinks, and cross-device targets", async () => {
     const cases = [
       {
         kind: "symlink" as const,
@@ -229,7 +228,7 @@ describe("workspace publication", () => {
     }
   });
 
-  test("fails closed on an authority approval binding mismatch", async () => {
+  it("fails closed on an authority approval binding mismatch", async () => {
     const approval = new ApprovalFixture();
     approval.mismatch = true;
     const { transaction } = harness(new IsolatedDestinationFixture(), approval);
@@ -242,7 +241,7 @@ describe("workspace publication", () => {
     });
   });
 
-  test("rejects consumed approval replay after old-state recovery", async () => {
+  it("rejects consumed approval replay after old-state recovery", async () => {
     const fixture = new IsolatedDestinationFixture();
     const approval = new ApprovalFixture();
     const { transaction } = harness(fixture, approval, "journal-preparing");
@@ -274,7 +273,7 @@ describe("workspace publication", () => {
 });
 
 describe("repository lease exclusion", () => {
-  test("returns BUSY for concurrent publishers", async () => {
+  it("returns BUSY for concurrent publishers", async () => {
     const { leases, transaction } = harness();
     const held = await leases.acquirePublication({
       repositoryId: "repo-1",
@@ -290,7 +289,7 @@ describe("repository lease exclusion", () => {
     }
   });
 
-  test("publication excludes active indexing and indexing excludes publication", async () => {
+  it("publication excludes active indexing and indexing excludes publication", async () => {
     const { leases, transaction } = harness();
     const index = await leases.acquireIndexing({
       repositoryId: "repo-1",
@@ -322,7 +321,7 @@ describe("repository lease exclusion", () => {
     }
   });
 
-  test("rejects unknown owners before destination mutation", async () => {
+  it("rejects unknown owners before destination mutation", async () => {
     const request = {
       ...writeRequest({ state: "missing" }),
       ownerId: "stranger",
@@ -337,7 +336,7 @@ describe("repository lease exclusion", () => {
 });
 
 describe("hostile public inputs", () => {
-  test("contains proxy traps for publish and recover", async () => {
+  it("contains proxy traps for publish and recover", async () => {
     const { transaction } = harness();
     const hostile = new Proxy(
       {},
@@ -360,7 +359,7 @@ describe("hostile public inputs", () => {
     });
   });
 
-  test("rejects accessors without invoking their getters", async () => {
+  it("rejects accessors without invoking their getters", async () => {
     const { destination, transaction } = harness();
     let publishReads = 0;
     const publishInput = Object.defineProperty({}, "version", {
@@ -392,7 +391,7 @@ describe("hostile public inputs", () => {
     expect(destination.captureCount).toBe(0);
   });
 
-  test("snapshots proxy data descriptors exactly once", async () => {
+  it("snapshots proxy data descriptors exactly once", async () => {
     const { transaction } = harness();
     const target = writeRequest({ state: "missing" });
     let versionSnapshots = 0;
@@ -420,7 +419,7 @@ describe("hostile public inputs", () => {
     expect(propertyReads).toBe(0);
   });
 
-  test("contains hostile nested target and byte-array proxies", async () => {
+  it("contains hostile nested target and byte-array proxies", async () => {
     const nestedTarget = new Proxy(
       {},
       {

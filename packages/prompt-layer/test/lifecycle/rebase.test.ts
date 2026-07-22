@@ -1,12 +1,11 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   authorPromptPatch,
   checkPrompt,
-  PromptLayerError,
   parseImmutableCommit,
+  PromptLayerError,
   rebasePrompt,
 } from "../../src/cli.ts";
 import {
@@ -88,11 +87,7 @@ describe("immutable upstream rebase contracts", () => {
         ),
         "utf8",
       )
-    ).replace(
-      // biome-ignore lint/security/noSecrets: This is a public upstream commit digest fixture.
-      "bc5c9161b46feddc13282652fd2cfdf1e5bab4a9",
-      commit,
-    );
+    ).replace("bc5c9161b46feddc13282652fd2cfdf1e5bab4a9", commit);
     await writeFile(candidatePath, candidate);
     await rebasePrompt(root, commit, { candidatePath, fetcher });
     await checkPrompt(root);

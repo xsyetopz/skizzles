@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,7 +19,7 @@ afterEach(async () => {
 });
 
 describe("parseLabConfig", () => {
-  test("normalizes compose mode while preserving file order and applying defaults", () => {
+  it("normalizes compose mode while preserving file order and applying defaults", () => {
     const config = parseLabConfig(
       `
 compose:
@@ -59,7 +58,7 @@ secret_environment: [REGISTRY_TOKEN]
     expect(config.secretEnvironment).toEqual(["REGISTRY_TOKEN"]);
   });
 
-  test("normalizes dockerfile and image shorthand modes", () => {
+  it("normalizes dockerfile and image shorthand modes", () => {
     const dockerfile = parseLabConfig(
       `
 dockerfile:
@@ -90,7 +89,7 @@ runtime:
     });
   });
 
-  test("trims service names in record keys like other service fields", () => {
+  it("trims service names in record keys like other service fields", () => {
     const config = parseLabConfig(
       `
 image: { name: node:24, service: dev }
@@ -108,7 +107,7 @@ ports:
     ]);
   });
 
-  test("requires exactly one mode", () => {
+  it("requires exactly one mode", () => {
     expect(() => parseLabConfig("runtime: {}", root)).toThrow("exactly one");
     expect(() =>
       parseLabConfig(
@@ -121,7 +120,7 @@ compose: { files: [compose.yaml], command_service: dev }
     ).toThrow("exactly one");
   });
 
-  test("rejects unknown keys at every manifest level", () => {
+  it("rejects unknown keys at every manifest level", () => {
     expect(() =>
       parseLabConfig(
         `
@@ -159,7 +158,7 @@ secret_environments: [TOKEN]
     ).toThrow("secret_environments: unknown key");
   });
 
-  test("rejects repository traversal and absolute project paths", () => {
+  it("rejects repository traversal and absolute project paths", () => {
     expect(() =>
       parseLabConfig(
         `
@@ -173,7 +172,7 @@ compose: { files: [../compose.yaml], command_service: dev }
     );
   });
 
-  test("validates runtime paths and environment forwarding names", () => {
+  it("validates runtime paths and environment forwarding names", () => {
     expect(() =>
       parseLabConfig(
         `
@@ -269,7 +268,10 @@ secret_environment: [TOKEN]
     expect(() =>
       parseLabConfig(
         `image: { name: node:24, service: dev }
-compose_environment: [${Array.from({ length: 65 }, (_, index) => `VALUE_${index}`).join(", ")}]
+compose_environment: [${Array.from(
+          { length: 65 },
+          (_, index) => `VALUE_${index}`,
+        ).join(", ")}]
 `,
         root,
       ),
@@ -287,7 +289,7 @@ ports:
     ).toThrow("service and target pairs must be unique");
   });
 
-  test("validates malformed service, path, shell, and port values", () => {
+  it("validates malformed service, path, shell, and port values", () => {
     expect(() =>
       parseLabConfig('image: { name: node:24, service: "bad service" }', root),
     ).toThrow("image.service: must be a Compose service name");
@@ -308,7 +310,7 @@ ports:
     ).toThrow("runtime.shell: must contain at least 1 item");
   });
 
-  test("rejects project paths that escape through symlinks", async () => {
+  it("rejects project paths that escape through symlinks", async () => {
     const repository = await mkdtemp(join(tmpdir(), "container-lab-config-"));
     const outside = await mkdtemp(join(tmpdir(), "container-lab-outside-"));
     temporaryRoots.push(repository, outside);
@@ -326,7 +328,7 @@ ports:
     );
   });
 
-  test("rejects a manifest symlink resolving outside the repository", async () => {
+  it("rejects a manifest symlink resolving outside the repository", async () => {
     const repository = await mkdtemp(join(tmpdir(), "container-lab-manifest-"));
     const outside = await mkdtemp(
       join(tmpdir(), "container-lab-manifest-outside-"),
@@ -346,7 +348,7 @@ ports:
     );
   });
 
-  test("rejects an implicit project .env interpolation source", async () => {
+  it("rejects an implicit project .env interpolation source", async () => {
     const repository = await mkdtemp(join(tmpdir(), "container-lab-dotenv-"));
     temporaryRoots.push(repository);
     await Bun.write(
@@ -357,7 +359,7 @@ ports:
       join(repository, "compose.yaml"),
       "services: { app: { image: node:24 } }\n",
     );
-    // biome-ignore lint/security/noSecrets: This is a fixed non-secret interpolation fixture.
+
     await Bun.write(join(repository, ".env"), "PROJECT_VALUE=ambient\n");
 
     await expect(loadLabConfig(repository)).rejects.toThrow(

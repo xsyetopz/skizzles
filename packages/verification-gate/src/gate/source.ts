@@ -12,7 +12,6 @@ import { digestValue, isDigest } from "../digest.ts";
 import { dataRecord, frozenArray, identifier } from "../object.ts";
 import { digests, identifierArray, validReport } from "./report.ts";
 
-// biome-ignore lint/security/noSecrets: This is a public receipt field name, not secret material.
 const compilerChainDigestField = "compilerChainDigest";
 
 export interface MutationSite {

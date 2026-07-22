@@ -63,7 +63,6 @@ async function validateRecords(
     }
     names.add(skillName);
     if (record.openai !== undefined) {
-      // biome-ignore lint/performance/noAwaitInLoops: sorted sequential validation preserves deterministic first-failure diagnostics.
       const recordAssets = await validateOpenAiMetadata(
         root,
         record.directoryName,

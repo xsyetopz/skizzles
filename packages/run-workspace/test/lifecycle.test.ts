@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, it } from "bun:test";
 import {
   lstat,
@@ -253,8 +252,9 @@ describe("run workspace lifecycle", () => {
         forceStop: () =>
           Promise.reject(new Error("asynchronous force failure")),
         waitForExit: () => {
-          if (!confirmsExit)
+          if (!confirmsExit) {
             throw new Error("synchronous exit observation failure");
+          }
           return Promise.resolve();
         },
       });
@@ -437,8 +437,9 @@ describe("run workspace lifecycle", () => {
           await runtime.chmod(path, mode);
         },
         removeRoot: async (path) => {
-          if (path === createdRoot)
+          if (path === createdRoot) {
             throw new Error("locked initialization residue");
+          }
           await runtime.removeRoot(path);
         },
       });

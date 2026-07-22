@@ -48,7 +48,7 @@ function runningLifecycle(
     drain !== "pending" ||
     cleanup !== "pending"
   ) {
-    return undefined;
+    return;
   }
   return {
     state: "running",
@@ -71,7 +71,7 @@ function terminalLifecycle(
   cleanup: RunStatus["lifecycle"]["cleanup"],
 ): RunStatus["lifecycle"] | undefined {
   if (completedAt < startedAt) {
-    return undefined;
+    return;
   }
   if (state === "failed-to-start") {
     if (
@@ -80,7 +80,7 @@ function terminalLifecycle(
       drain !== "complete" ||
       cleanup !== "not-required"
     ) {
-      return undefined;
+      return;
     }
     return {
       state,
@@ -98,7 +98,7 @@ function terminalLifecycle(
     cleanup === "pending" ||
     (cancellationSignal !== null && cleanup === "not-required")
   ) {
-    return undefined;
+    return;
   }
   return {
     state,
@@ -115,11 +115,13 @@ export function parseRunLifecycle(
   value: unknown,
 ): RunStatus["lifecycle"] | undefined {
   if (
-    !isRecord(value) ||
-    !hasExactLifecycleKeys(value) ||
-    !isIsoTimestamp(value["startedAt"])
+    !(
+      isRecord(value) &&
+      hasExactLifecycleKeys(value) &&
+      isIsoTimestamp(value["startedAt"])
+    )
   ) {
-    return undefined;
+    return;
   }
   const state = value["state"];
   const completedAt = value["completedAt"];
@@ -138,7 +140,7 @@ export function parseRunLifecycle(
     cleanup === "terminated" ||
     cleanup === "killed";
   if (!(validSignal && validCleanup)) {
-    return undefined;
+    return;
   }
   if (state === "running") {
     return runningLifecycle(
@@ -151,7 +153,7 @@ export function parseRunLifecycle(
     );
   }
   if (!(isIsoTimestamp(completedAt) && isSafeInteger(exitCode))) {
-    return undefined;
+    return;
   }
   return terminalLifecycle(
     state,

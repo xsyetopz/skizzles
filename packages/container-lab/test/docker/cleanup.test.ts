@@ -1,9 +1,8 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { expect, test } from "bun:test";
 import { cleanupLabLabels } from "../../src/docker.ts";
 import { commandResult, dockerLab, RecordingDocker } from "./support.ts";
 
-test("cleanup strips secret material from every Docker operation without mutating caller input", async () => {
+it("cleanup strips secret material from every Docker operation without mutating caller input", async () => {
   const docker = new RecordingDocker();
   const metadata = dockerLab({ secretEnvironment: ["TOKEN"] });
   const environment = { PATH: "/usr/bin:/bin", TOKEN: "sentinel" };
@@ -17,7 +16,7 @@ test("cleanup strips secret material from every Docker operation without mutatin
   expect(environment).toEqual({ PATH: "/usr/bin:/bin", TOKEN: "sentinel" });
 });
 
-test("cleanup confirms exact resources are absent after each removal phase", async () => {
+it("cleanup confirms exact resources are absent after each removal phase", async () => {
   const docker = new RecordingDocker();
   docker.responses.push(commandResult(""), commandResult("container-left\n"));
 
@@ -27,7 +26,7 @@ test("cleanup confirms exact resources are absent after each removal phase", asy
   expect(docker.calls.some((call) => call.args.includes("rm"))).toBe(false);
 });
 
-test("cleanup rejects a successful null ownership inspection with a fixed diagnostic", async () => {
+it("cleanup rejects a successful null ownership inspection with a fixed diagnostic", async () => {
   const docker = new RecordingDocker();
   docker.responses.push(
     commandResult(""),

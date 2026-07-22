@@ -139,7 +139,6 @@ export function validateMarketplaceEntry(
   }
 }
 
-// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Existing cohesive control flow is outside this type-and-lint baseline migration.
 export function validateHookCommands(value: unknown, path: string): void {
   if (Array.isArray(value)) {
     value.forEach((item, index) => {

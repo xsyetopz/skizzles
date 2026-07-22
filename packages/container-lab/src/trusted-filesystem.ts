@@ -124,7 +124,7 @@ export async function readTrustedDirectory(
     options,
   );
   if (!before) {
-    return undefined;
+    return;
   }
   const entries = await readdir(join(resolve(root), ...segments), {
     withFileTypes: true,
@@ -150,7 +150,7 @@ async function exactDirectoryChainIdentity(
   let candidate = resolve(root);
   const rootInfo = await lstatBigIntIfPresent(candidate);
   if (!rootInfo) {
-    return undefined;
+    return;
   }
   assertRealDirectory(rootInfo, `configured ${label}`);
   let expected = await realpath(candidate);
@@ -163,7 +163,7 @@ async function exactDirectoryChainIdentity(
     expected = join(expected, segment);
     const identity = await exactDirectory(candidate, expected, label, options);
     if (!identity) {
-      return undefined;
+      return;
     }
     identities.push({ path: candidate, ...identity });
   }
@@ -226,7 +226,7 @@ async function lstatBigIntIfPresent(
     return await lstat(candidate, { bigint: true });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return undefined;
+      return;
     }
     throw error;
   }
@@ -240,7 +240,7 @@ async function exactDirectory(
 ): Promise<FileIdentity | undefined> {
   const info = await lstatBigIntIfPresent(candidate);
   if (!info) {
-    return undefined;
+    return;
   }
   assertRealDirectory(info, label);
   let canonical: string;
@@ -248,7 +248,7 @@ async function exactDirectory(
     canonical = await realpath(candidate);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return undefined;
+      return;
     }
     throw error;
   }

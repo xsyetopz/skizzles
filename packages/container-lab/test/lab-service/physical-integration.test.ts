@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome does not resolve Bun built-in modules.
 import { afterEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";

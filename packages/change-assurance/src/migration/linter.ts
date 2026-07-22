@@ -49,7 +49,6 @@ function dataValue(input: object, key: string): unknown {
   if (descriptor !== undefined && "value" in descriptor) {
     return descriptor.value;
   }
-  return undefined;
 }
 
 function normalizeSource(value: unknown): MigrationSource | undefined {

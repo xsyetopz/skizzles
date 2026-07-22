@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -197,7 +196,7 @@ describe("plugin shipped-language composition and structured formats", () => {
       ],
       [
         "skills/example/alt-semicolonless-attribute.md",
-        // biome-ignore lint/security/noSecrets: Deliberate entity-obfuscated visible claim fixture, not a credential.
+
         '<img alt="I am &#115entient">\n',
       ],
       [

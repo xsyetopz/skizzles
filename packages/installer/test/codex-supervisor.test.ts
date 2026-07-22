@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in module.
 import { describe, expect, it } from "bun:test";
 import { lstat, readFile } from "node:fs/promises";
 import process from "node:process";
@@ -53,7 +52,9 @@ describe("Codex app-server supervisor ownership", () => {
     const record = workspace.path("survivors.txt");
     const shell = [
       `echo "$$" > ${shellQuote(record)}`,
-      `(trap '' TERM HUP; while :; do sleep 1; done) & echo "$!" >> ${shellQuote(record)}`,
+      `(trap '' TERM HUP; while :; do sleep 1; done) & echo "$!" >> ${shellQuote(
+        record,
+      )}`,
       "sleep 0.1",
       `kill -KILL "$PPID"`,
       "wait",
@@ -98,8 +99,9 @@ async function waitForExit(pids: readonly number[]): Promise<void> {
   while (pids.some(processExists) && Date.now() < deadline) {
     await Bun.sleep(10);
   }
-  if (pids.some(processExists))
+  if (pids.some(processExists)) {
     throw new Error("fixture survivor did not exit");
+  }
 }
 
 function shellQuote(value: string): string {

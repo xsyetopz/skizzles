@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import {
   existsSync,
@@ -111,7 +110,7 @@ const neutralRewriteContract = {
 };
 
 describe("managed command output hook", () => {
-  test("ships the stable generated hook asset", async () => {
+  it("ships the stable generated hook asset", async () => {
     const asset: unknown = await Bun.file(hookAsset).json();
     expect(asset).toEqual({
       hooks: {
@@ -133,7 +132,7 @@ describe("managed command output hook", () => {
     });
   });
 
-  test("passes through unknown commands and comments or quoted lookalikes", () => {
+  it("passes through unknown commands and comments or quoted lookalikes", () => {
     for (const cmd of [
       "echo flutter test",
       "# bun test\necho okay",
@@ -150,7 +149,7 @@ describe("managed command output hook", () => {
     }
   });
 
-  test("rewrites through a concrete safely quoted runner with a round-trippable encoding", () => {
+  it("rewrites through a concrete safely quoted runner with a round-trippable encoding", () => {
     const cmd = "flutter test --reporter expanded && cargo check --workspace";
     const result = invoke(
       JSON.stringify({
@@ -169,7 +168,7 @@ describe("managed command output hook", () => {
     expect(hookUpdatedInput(payload)["workdir"]).toBe("/tmp");
   });
 
-  test("passes through when launch context is missing, relative, or incomplete", () => {
+  it("passes through when launch context is missing, relative, or incomplete", () => {
     const input = JSON.stringify({
       hook_event_name: "PreToolUse",
       tool_input: { cmd: "bun test" },
@@ -208,7 +207,7 @@ describe("managed command output hook", () => {
     }
   });
 
-  test("quotes shell metacharacters in the concrete runner path without injection", () => {
+  it("quotes shell metacharacters in the concrete runner path without injection", () => {
     const cmd = "bun test";
     const result = invoke(
       JSON.stringify({
@@ -244,7 +243,7 @@ describe("managed command output hook", () => {
     expect(existsSync(injectionMarker)).toBe(false);
   });
 
-  test("preserves an entire script when every simple command is recognized", () => {
+  it("preserves an entire script when every simple command is recognized", () => {
     const command = "flutter test; cargo check; bun test";
     const result = invoke(
       JSON.stringify({
@@ -262,7 +261,7 @@ describe("managed command output hook", () => {
     expect(hookUpdatedInput(payload)["timeout"]).toBe(120_000);
   });
 
-  test("does not classify quoted, commented, substitution, or heredoc-like lookalikes", () => {
+  it("does not classify quoted, commented, substitution, or heredoc-like lookalikes", () => {
     for (const command of [
       "echo 'header; flutter test'",
       "echo header; # flutter test\necho footer",
@@ -279,7 +278,7 @@ describe("managed command output hook", () => {
     }
   });
 
-  test("recognizes high-value build and test commands through common launchers", () => {
+  it("recognizes high-value build and test commands through common launchers", () => {
     for (const command of [
       "cargo build --workspace",
       "cargo +nightly test --workspace",
@@ -309,7 +308,7 @@ describe("managed command output hook", () => {
     }
   });
 
-  test("recognizes canonical literal Container Lab launchers before run", () => {
+  it("recognizes canonical literal Container Lab launchers before run", () => {
     for (const command of [
       "codex-container-lab --owner thread-1 --state-root /tmp/state --runtime-root /tmp/runtime run --lab experiment -- echo hello",
     ]) {
@@ -326,7 +325,7 @@ describe("managed command output hook", () => {
     }
   });
 
-  test("rewrites effectful recognized commands without elevating permission", () => {
+  it("rewrites effectful recognized commands without elevating permission", () => {
     for (const command of [
       "cargo install arbitrary-package",
       "xcodebuild -scheme App archive",
@@ -351,7 +350,7 @@ describe("managed command output hook", () => {
     }
   });
 
-  test("does not rewrite path, environment, config, or compound-command injection", () => {
+  it("does not rewrite path, environment, config, or compound-command injection", () => {
     for (const command of [
       "/usr/bin/xcodebuild -scheme App build",
       "./gradlew test",
@@ -384,7 +383,7 @@ describe("managed command output hook", () => {
       "flutter test > result.txt",
       "flutter test *.dart",
       "cargo\u00a0test",
-      // biome-ignore lint/security/noSecrets: This fixed test/schema token is not a credential.
+
       "cargo\u2003test",
     ]) {
       const result = invoke(
@@ -398,7 +397,7 @@ describe("managed command output hook", () => {
     }
   });
 
-  test("does not mistake Container Lab lookalikes or unsupported global options for attached runs", () => {
+  it("does not mistake Container Lab lookalikes or unsupported global options for attached runs", () => {
     for (const command of [
       "echo /tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab --owner thread run",
       "'/tmp/plugin/skills/codex-container-lab/scripts/codex-container-lab' run --lab experiment -- echo hello",
@@ -431,7 +430,7 @@ describe("managed command output hook", () => {
     }
   });
 
-  test("leaves low-value formatter and informational commands alone", () => {
+  it("leaves low-value formatter and informational commands alone", () => {
     for (const command of [
       "dart format .",
       "cargo metadata --format-version 1",

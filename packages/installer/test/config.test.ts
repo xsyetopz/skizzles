@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
@@ -23,8 +22,8 @@ import {
 } from "../src/codex-config.ts";
 import {
   type ConfigEdit,
-  type ConfigRpc,
   configReceiptPath,
+  type ConfigRpc,
   configureCodex,
   desiredConfigEdits,
   unconfigureCodex,
@@ -113,7 +112,6 @@ class FakeRpc implements ConfigRpc {
     this.config = structuredClone(initial) as { [key: string]: Value };
   }
 
-  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
   async read() {
     return {
       layers: [
@@ -130,7 +128,6 @@ class FakeRpc implements ConfigRpc {
     };
   }
 
-  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
   async batchWrite(params: {
     edits: ConfigEdit[];
     filePath: string;
@@ -150,7 +147,7 @@ class FakeRpc implements ConfigRpc {
     if (this.writeError) {
       throw this.writeError;
     }
-    // biome-ignore lint/suspicious/noMisplacedAssertion: This helper is invoked only from test cases and centralizes their assertion.
+
     expect(params.reloadUserConfig).toBe(true);
     for (const edit of params.edits) {
       setValue(this.config, edit.keyPath, edit.value);
@@ -163,7 +160,6 @@ class FakeRpc implements ConfigRpc {
     return { status: "ok", version: this.version, filePath: params.filePath };
   }
 
-  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
   async close() {
     this.closed = true;
   }
@@ -288,11 +284,11 @@ describe("Codex configuration lifecycle", () => {
     const files = {
       "base.md": "top base\n",
       "compact.md": "top compact file\n",
-      // biome-ignore lint/security/noSecrets: This is a synthetic model-catalog fixture with no credential material.
+
       "catalog.json": '{"models":[{"slug":"fixture"}]}\n',
       "profiles/base.md": "profile base\n",
       "profiles/compact.md": "profile compact\n",
-      // biome-ignore lint/security/noSecrets: This is a synthetic model-catalog fixture with no credential material.
+
       "profiles/catalog.json": '{"models":[{"slug":"profile"}]}\n',
       "agents/reviewer.toml":
         'model_instructions_file = "role-base.md"\ndeveloper_instructions = "Review"\n',
@@ -323,7 +319,11 @@ describe("Codex configuration lifecycle", () => {
     );
     writeFileSync(
       fakeCodex,
-      `#!${process.execPath}\nimport { existsSync, readFileSync, writeFileSync } from "node:fs";\nimport { createInterface } from "node:readline";\nimport { join } from "node:path";\nconst home = process.env.CODEX_HOME;\nwriteFileSync(${JSON.stringify(locator)}, home);\nfor (const path of ${JSON.stringify(Object.keys(files))}) { if (!existsSync(join(home, path))) process.exit(71); }\nconst lines = createInterface({ input: process.stdin });\nlines.on("line", (line) => {\n  const message = JSON.parse(line);\n  if (message.id === undefined) return;\n  const config = {\n    model_instructions_file: join(home, "base.md"),\n    developer_instructions: "inline developer",\n    compact_prompt: "inline compact",\n    experimental_compact_prompt_file: join(home, "compact.md"),\n    model_catalog_json: join(home, "catalog.json"),\n    profiles: { work: { model_instructions_file: join(home, "profiles/base.md"), experimental_compact_prompt_file: join(home, "profiles/compact.md") } },\n    agents: { reviewer: { config_file: join(home, "agents/reviewer.toml") } },\n  };\n  const result = message.method === "initialize" ? {} : { config: { ...config, model_instructions_file: join(home, "profiles/base.md") }, layers: [{ name: { type: "user", file: join(home, "config.toml"), profile: null }, version: "sha256:1", config }] };\n  process.stdout.write(JSON.stringify({ id: message.id, result }) + "\\n");\n});\nlines.on("close", () => process.exit(0));\n`,
+      `#!${process.execPath}\nimport { existsSync, readFileSync, writeFileSync } from "node:fs";\nimport { createInterface } from "node:readline";\nimport { join } from "node:path";\nconst home = process.env.CODEX_HOME;\nwriteFileSync(${JSON.stringify(
+        locator,
+      )}, home);\nfor (const path of ${JSON.stringify(
+        Object.keys(files),
+      )}) { if (!existsSync(join(home, path))) process.exit(71); }\nconst lines = createInterface({ input: process.stdin });\nlines.on("line", (line) => {\n  const message = JSON.parse(line);\n  if (message.id === undefined) return;\n  const config = {\n    model_instructions_file: join(home, "base.md"),\n    developer_instructions: "inline developer",\n    compact_prompt: "inline compact",\n    experimental_compact_prompt_file: join(home, "compact.md"),\n    model_catalog_json: join(home, "catalog.json"),\n    profiles: { work: { model_instructions_file: join(home, "profiles/base.md"), experimental_compact_prompt_file: join(home, "profiles/compact.md") } },\n    agents: { reviewer: { config_file: join(home, "agents/reviewer.toml") } },\n  };\n  const result = message.method === "initialize" ? {} : { config: { ...config, model_instructions_file: join(home, "profiles/base.md") }, layers: [{ name: { type: "user", file: join(home, "config.toml"), profile: null }, version: "sha256:1", config }] };\n  process.stdout.write(JSON.stringify({ id: message.id, result }) + "\\n");\n});\nlines.on("close", () => process.exit(0));\n`,
     );
     chmodSync(fakeCodex, 0o755);
     const before = snapshotTree(f.codexHome);
@@ -376,7 +376,9 @@ describe("Codex configuration lifecycle", () => {
       if (kind === "escape") {
         writeFileSync(
           join(f.codexHome, "config.toml"),
-          `model_instructions_file = "../${basename(f.codexHome)}-${kind}.md"\n`,
+          `model_instructions_file = "../${basename(
+            f.codexHome,
+          )}-${kind}.md"\n`,
         );
       } else {
         symlinkSync(outside, join(f.codexHome, "linked.md"));

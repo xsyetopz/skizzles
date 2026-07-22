@@ -142,7 +142,6 @@ function hasExpectRoot(node: Node): boolean {
   );
 }
 
-// biome-ignore lint/nursery/noMisleadingReturnType: the recursive visitor mutates the captured match state.
 function conditionIsErrorRelated(node: Node): boolean {
   let related = false;
   visitNodes(node, (candidate) => {

@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import type { RoutingObservation } from "../../src/routing/contracts.ts";
 import {
@@ -169,10 +168,12 @@ describe("routing learner", () => {
       minimumSamples: 2,
       minimumVerificationRate: 0,
     });
-    for (const id of ["1", "2"])
+    for (const id of ["1", "2"]) {
       learner.addObservation(observation(id, "a", 30));
-    for (const id of ["3", "4"])
+    }
+    for (const id of ["3", "4"]) {
       learner.addObservation(observation(id, "b", 10));
+    }
     expect(learner.recommend(task)?.candidate.id).toBe("b");
     expect(learner.recommend(task)).toEqual(learner.recommend(task));
   });

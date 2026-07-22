@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import { digestValue, type VerificationDigest } from "../src/digest.ts";
 import {
@@ -348,8 +347,9 @@ describe("verification gate", () => {
     expect(secondReviewer.status).toBe("created");
 
     const fixture = createGateFixture();
-    if (reviewer.status !== "created" || secondReviewer.status !== "created")
+    if (reviewer.status !== "created" || secondReviewer.status !== "created") {
       return;
+    }
     const invalid = Object.freeze({
       ...fixture.config,
       exclusions: reviewer.authority as never,

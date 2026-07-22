@@ -1,5 +1,4 @@
 import process from "node:process";
-// biome-ignore lint/correctness/noUnresolvedImports: Biome does not follow FastMCP's package export map.
 import { FastMCP } from "fastmcp";
 import { createLifecycle, type ProjectLifecycle } from "./lifecycle.ts";
 import { registerHealthTool } from "./tools/health.ts";

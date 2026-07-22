@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   createCliFixtureScope,
@@ -17,7 +16,7 @@ const { trackTemporaryPath } = fixtures;
 afterEach(fixtures.cleanup);
 
 describe("CLI argument and serialization validation", () => {
-  test("reports the package version without requiring an owner", async () => {
+  it("reports the package version without requiring an owner", async () => {
     const child = Bun.spawn(
       [
         process.execPath,
@@ -41,7 +40,7 @@ describe("CLI argument and serialization validation", () => {
     expect(JSON.parse(stdout)).toEqual({ version: "0.1.0" });
   });
 
-  test("does not treat an empty PID publication as ready", async () => {
+  it("does not treat an empty PID publication as ready", async () => {
     const root = await mkdtemp(
       join(tmpdir(), "container-lab-pid-publication-"),
     );
@@ -58,10 +57,10 @@ describe("CLI argument and serialization validation", () => {
     ).toBe("waiting");
 
     await writeFile(pidPath, "12345");
-    await expect(pending).resolves.toBe(12345);
+    await expect(pending).resolves.toBe(12_345);
   });
 
-  test("accepts only canonical positive safe-integer PID publications", () => {
+  it("accepts only canonical positive safe-integer PID publications", () => {
     for (const text of [
       "",
       " ",
@@ -78,10 +77,10 @@ describe("CLI argument and serialization validation", () => {
     }
 
     expect(parsePublishedPid("1")).toBe(1);
-    expect(parsePublishedPid("9007199254740991")).toBe(9007199254740991);
+    expect(parsePublishedPid("9007199254740991")).toBe(9_007_199_254_740_991);
   });
 
-  test("real public serialization clips worst-case escaped transcripts to 16 KiB", () => {
+  it("real public serialization clips worst-case escaped transcripts to 16 KiB", () => {
     const encoded = serializePublicJson({
       labId: "lab-1",
       service: "dev",

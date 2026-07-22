@@ -104,19 +104,19 @@ function consumeSeparator(
 ): number | undefined {
   const separator = script[index];
   if (state.words.length === 0 && !state.wordStarted) {
-    return undefined;
+    return;
   }
   if (separator === ";" && script[index + 1] === ";") {
-    return undefined;
+    return;
   }
   if (
     (separator === "&" || separator === "|") &&
     script[index + 1] !== separator
   ) {
-    return undefined;
+    return;
   }
   if (!finishCommand(state)) {
-    return undefined;
+    return;
   }
   state.atWordStart = true;
   state.requiresCommand = separator === "&" || separator === "|";
@@ -162,23 +162,23 @@ export function simpleCommands(script: string): SimpleCommand[] | undefined {
   for (let index = 0; index < script.length; index += 1) {
     const character = script.charAt(index);
     if (isUnsupportedSyntax(character)) {
-      return undefined;
+      return;
     }
     if (character === "#" && state.atWordStart) {
-      return undefined;
+      return;
     }
     const nextIndex = consumeCharacter(state, script, index, character);
     if (nextIndex === undefined) {
-      return undefined;
+      return;
     }
     index = nextIndex;
   }
 
   if (state.requiresCommand || !finishCommand(state)) {
-    return undefined;
+    return;
   }
   if (state.commands.length === 0 || containsControlWord(state.commands)) {
-    return undefined;
+    return;
   }
   return state.commands;
 }

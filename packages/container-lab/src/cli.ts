@@ -14,12 +14,12 @@ import { redactPublicText } from "./public/output.ts";
 import { resolveOwner, resolveRoots } from "./state/layout.ts";
 import { CONTAINER_LAB_VERSION } from "./version.ts";
 
-type CliIO = {
+type CliIo = {
   stdout: (value: string) => void;
   stderr: (value: string) => void;
 };
 
-const processIO: CliIO = {
+const processIo: CliIo = {
   stdout: (value) => process.stdout.write(value),
   stderr: (value) => process.stderr.write(value),
 };
@@ -27,7 +27,7 @@ const processIO: CliIO = {
 export async function cliMain(
   args = process.argv.slice(2),
   environment: NodeJS.ProcessEnv = process.env,
-  io: CliIO = processIO,
+  io: CliIo = processIo,
 ): Promise<number> {
   try {
     const global = parseGlobalArguments(args);
@@ -98,7 +98,7 @@ async function runAttached(
   service: ContainerLabService,
   run: ReturnType<typeof parseRunArguments>,
   signal: AbortSignal,
-  io: CliIO,
+  io: CliIo,
 ): Promise<number> {
   const stdoutDecoder = new StringDecoder("utf8");
   const stderrDecoder = new StringDecoder("utf8");
@@ -129,12 +129,12 @@ async function runAttached(
 function boundedError(error: unknown): string {
   return redactPublicText(
     error instanceof Error ? error.message : String(error),
-    4_000,
+    4000,
     8,
   );
 }
 
-function writePublicJson(io: CliIO, value: unknown): void {
+function writePublicJson(io: CliIo, value: unknown): void {
   io.stdout(serializePublicJson(value));
 }
 

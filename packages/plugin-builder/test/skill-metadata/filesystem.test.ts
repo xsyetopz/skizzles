@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   copyFile,
@@ -83,7 +82,6 @@ describe("canonical skill metadata filesystem boundaries", () => {
   it("rejects Unicode-invisible, comment-only, and punctuation-only bodies", async () => {
     const root = await fixture();
     for (const body of ["<!-- hidden only -->", "# *** ---", "🧪✨"]) {
-      // biome-ignore lint/performance/noAwaitInLoops: every invisible class is an independent adversarial fixture.
       await writeSkill(
         root,
         `---\nname: example\ndescription: Visible body fixture.\n---\n${body}\n`,
@@ -92,12 +90,10 @@ describe("canonical skill metadata filesystem boundaries", () => {
     }
 
     for (const body of [
-      // biome-ignore lint/security/noSecrets: explicit Unicode-invisible adversarial fixture, not a credential.
       "\u200B\u200D\uFEFF\u0301\uFE0F",
-      // biome-ignore lint/security/noSecrets: explicit bidi-control adversarial fixture, not a credential.
+
       "visible\u202Einstructions",
     ]) {
-      // biome-ignore lint/performance/noAwaitInLoops: each unsafe Unicode class is an independent body probe.
       await writeSkill(
         root,
         `---\nname: example\ndescription: Visible body fixture.\n---\n${body}\n`,
@@ -124,7 +120,6 @@ describe("canonical skill metadata filesystem boundaries", () => {
   it("redacts attacker-controlled path components in diagnostics", async () => {
     expect.hasAssertions();
     for (const unsafeName of ["bad\nsecret", "名前", "x".repeat(128)]) {
-      // biome-ignore lint/performance/noAwaitInLoops: each hostile name uses an isolated filesystem fixture.
       const root = await fixture();
       await mkdir(join(root, "skills", unsafeName));
       const error = await validateCanonicalSkillMetadata(root).then(
@@ -200,7 +195,6 @@ describe("staged skill metadata", () => {
       "hardlink",
       "excluded",
     ] as const) {
-      // biome-ignore lint/performance/noAwaitInLoops: each parity failure needs an isolated canonical/staged tree.
       const root = await fixture();
       await write(root, "skills/example/assets/unreferenced.bin", "canonical");
       const staged = join(root, "stage");
@@ -236,7 +230,7 @@ describe("staged skill metadata", () => {
           "rogue",
         );
       }
-      // biome-ignore lint/performance/noAwaitInLoops: each isolated mutation is asserted before fixture cleanup.
+
       await expect(validateStagedSkillMetadata(root, staged)).rejects.toThrow();
     }
   });

@@ -1,5 +1,5 @@
 // biome-ignore-all lint/security/noSecrets: Public upstream commits and release digests are test fixtures.
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
+
 import { afterEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";

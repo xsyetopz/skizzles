@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import type {
   ApprovalRequest,
@@ -176,8 +175,9 @@ describe("single-use external approval gate", () => {
     ).toEqual({
       status: "cancelled",
     });
-    if (resolveAuth === undefined || challenge == null)
+    if (resolveAuth === undefined || challenge == null) {
       throw new Error("authentication did not begin");
+    }
     resolveAuth({
       challengeDigest: challenge.challengeDigest,
       taskId: challenge.taskId,

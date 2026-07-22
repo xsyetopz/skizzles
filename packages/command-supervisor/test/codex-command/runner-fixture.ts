@@ -23,11 +23,11 @@ import { emptyCaptureState } from "../../src/codex-command/stream-capture.ts";
 
 export const packageRoot = resolve(import.meta.dir, "../..");
 export const runner = join(packageRoot, "src/codex-command.ts");
-export const artifactPathPattern = /\[codex-command\] artifact: ([^\n]+)/;
-export const artifactCountPattern = /\[codex-command\] artifact:/g;
-export const progressPattern = /\| \d+s \| \d+B \| \d+B \|/;
-export const completionPattern = /\[codex-command\] exit 0 in \d+s\n$/;
-export const generatedRunIdPattern = /^[a-f0-9]{12}$/;
+export const artifactPathPattern = /\[codex-command\] artifact: ([^\n]+)/u;
+export const artifactCountPattern = /\[codex-command\] artifact:/gu;
+export const progressPattern = /\| \d+s \| \d+B \| \d+B \|/u;
+export const completionPattern = /\[codex-command\] exit 0 in \d+s\n$/u;
+export const generatedRunIdPattern = /^[a-f0-9]{12}$/u;
 const fixtureSettings: RunSettings = {
   root: "/tmp/codex-command-fixture",
   maximumBytes: 1024 * 1024,
@@ -89,7 +89,7 @@ export function artifactPath(output: string): string {
   return path;
 }
 
-export async function waitForFile(path: string, timeoutMilliseconds = 2_000) {
+export async function waitForFile(path: string, timeoutMilliseconds = 2000) {
   const deadline = performance.now() + timeoutMilliseconds;
   while (performance.now() < deadline) {
     if (await Bun.file(path).exists()) {
@@ -121,7 +121,7 @@ export function processExists(pid: number): boolean {
 
 export async function waitForProcessExit(
   pid: number,
-  timeoutMilliseconds = 1_000,
+  timeoutMilliseconds = 1000,
 ): Promise<boolean> {
   const deadline = performance.now() + timeoutMilliseconds;
   while (performance.now() < deadline) {
@@ -162,7 +162,7 @@ export function spawnRunner(
 
 export async function waitForRunDirectory(
   root: string,
-  timeoutMilliseconds = 2_000,
+  timeoutMilliseconds = 2000,
 ): Promise<string> {
   const deadline = performance.now() + timeoutMilliseconds;
   while (performance.now() < deadline) {

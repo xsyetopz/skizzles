@@ -1,9 +1,8 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, test } from "bun:test";
 import { compareManifests, file } from "./support.ts";
 
 describe("three-way comparison", () => {
-  test("emits source-only updates and deletes", () => {
+  it("emits source-only updates and deletes", () => {
     const baseline = { a: file("a", "1"), b: file("b", "1") };
     const result = compareManifests(baseline, { a: file("a", "2") }, baseline);
     expect(result.changes.map(({ path, action }) => [path, action])).toEqual([
@@ -13,7 +12,7 @@ describe("three-way comparison", () => {
     expect(result.conflicts).toEqual([]);
   });
 
-  test("reports divergent edits but leaves target-only edits alone", () => {
+  it("reports divergent edits but leaves target-only edits alone", () => {
     const baselineB = file("b", "1");
     const baseline = { a: file("a", "1"), b: baselineB };
     const result = compareManifests(
@@ -28,7 +27,7 @@ describe("three-way comparison", () => {
     expect(result.changes).toEqual([]);
   });
 
-  test("treats identical concurrent edits as synchronized and ignores target-only deletion", () => {
+  it("treats identical concurrent edits as synchronized and ignores target-only deletion", () => {
     const baselineB = file("b", "1");
     const baseline = { a: file("a", "1"), b: baselineB };
     const synchronizedSource = file("a", "2");

@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import { digestValue } from "../../../src/digest.ts";
 import {
@@ -174,8 +173,9 @@ describe("dependency-aware scheduler", () => {
     expect(Object.isFrozen(result.receipt)).toBe(true);
     expect(Object.isFrozen(result.receipt.entries)).toBe(true);
     expect(created.scheduler.verify(result.receipt).status).toBe("valid");
-    if (issuedRequest === undefined)
+    if (issuedRequest === undefined) {
       throw new Error("dispatch was not captured");
+    }
     await expect(authority.dispatch(issuedRequest)).resolves.toMatchObject({
       status: "failed",
       code: "UNTRUSTED_DISPATCH_REQUEST",

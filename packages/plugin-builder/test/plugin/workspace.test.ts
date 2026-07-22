@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -285,7 +284,9 @@ const descendant = Bun.spawn(
   [process.execPath, "--eval", "process.on('SIGTERM', () => undefined); setInterval(() => undefined, 1000);"],
   { stdin: "ignore", stdout: "inherit", stderr: "inherit" },
 );
-await Bun.write(${JSON.stringify(recordPath)}, JSON.stringify({ supervisor: process.pid, descendant: descendant.pid }));
+await Bun.write(${JSON.stringify(
+    recordPath,
+  )}, JSON.stringify({ supervisor: process.pid, descendant: descendant.pid }));
 process.send?.({ type: "invalid", unexpected: true });
 `;
 }

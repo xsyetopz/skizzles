@@ -51,12 +51,12 @@ export function expressionLocation<Value>(
   }
   if (isPropertyAccessExpression(expression)) {
     const base = expressionLocation(expression.expression, environment);
-    if (base === undefined) return undefined;
+    if (base === undefined) return;
     return `${base}.${expression.name.text}`;
   }
   if (isElementAccessExpression(expression)) {
     const base = expressionLocation(expression.expression, environment);
-    if (base === undefined) return undefined;
+    if (base === undefined) return;
     const argument = expression.argumentExpression;
     if (argument === undefined) return `${base}.*`;
     if (isStringLiteral(argument) || isNumericLiteral(argument)) {
@@ -64,7 +64,6 @@ export function expressionLocation<Value>(
     }
     return `${base}.*`;
   }
-  return undefined;
 }
 
 export function locationValues<Value>(

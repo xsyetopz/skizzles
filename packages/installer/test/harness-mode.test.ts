@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   existsSync,
@@ -43,7 +42,7 @@ afterEach(() => {
 
 describe("harness installer", () => {
   for (const transfer of ["link", "copy"] as const) {
-    test(`${transfer} install/uninstall round trip`, () => {
+    it(`${transfer} install/uninstall round trip`, () => {
       const f = fixture();
       installHarness({ ...f, transfer });
       expect(
@@ -66,7 +65,7 @@ describe("harness installer", () => {
     });
   }
 
-  test("requires an absent marketplace for isolated harness mode", () => {
+  it("requires an absent marketplace for isolated harness mode", () => {
     const f = fixture();
     const path = join(f.home, ".agents/plugins/marketplace.json");
     mkdirSync(join(f.home, ".agents/plugins"), { recursive: true });
@@ -78,7 +77,7 @@ describe("harness installer", () => {
     expect(readFileSync(path, "utf8")).toBe(before);
   });
 
-  test("dry run and conflicts are fail closed", () => {
+  it("dry run and conflicts are fail closed", () => {
     const f = fixture();
     installHarness({ ...f, transfer: "copy", dryRun: true });
     expect(existsSync(f.home)).toBe(false);
@@ -88,7 +87,7 @@ describe("harness installer", () => {
     );
   });
 
-  test("preflight preserves a foreign dangling plugin symlink", () => {
+  it("preflight preserves a foreign dangling plugin symlink", () => {
     const f = fixture();
     mkdirSync(join(f.home, "plugins"), { recursive: true });
     const target = join(f.home, "plugins/skizzles");
@@ -99,7 +98,7 @@ describe("harness installer", () => {
     expect(lstatSync(target).isSymbolicLink()).toBe(true);
   });
 
-  test("rejects symlinked managed parents", () => {
+  it("rejects symlinked managed parents", () => {
     const f = fixture();
     const outside = join(f.home, "outside");
     mkdirSync(outside, { recursive: true });
@@ -111,7 +110,7 @@ describe("harness installer", () => {
     expect(existsSync(join(outside, "skizzles"))).toBe(false);
   });
 
-  test("uninstall rolls back staged moves on failure", () => {
+  it("uninstall rolls back staged moves on failure", () => {
     const f = fixture();
     installHarness({ ...f, transfer: "link" });
     let calls = 0;
@@ -133,7 +132,7 @@ describe("harness installer", () => {
     expect(existsSync(harnessReceiptPath(f.home))).toBe(true);
   });
 
-  test("uninstall refuses marketplace drift", () => {
+  it("uninstall refuses marketplace drift", () => {
     const f = fixture();
     installHarness({ ...f, transfer: "link" });
     writeFileSync(

@@ -1,6 +1,5 @@
 import { basename, extname } from "node:path";
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not follow yaml's package exports; yaml is a declared runtime dependency.
-// biome-ignore lint/performance/noNamespaceImport: semantic scanning uses the parser's document, node predicates, and visitor as one boundary.
+
 import * as Yaml from "yaml";
 import { PackagingError } from "../plugin/contract.ts";
 import { safeLanguageDiagnosticPath } from "./file-boundary.ts";
@@ -351,12 +350,16 @@ function classificationError(
 ): PackagingError {
   const owner = mode === "canonical" ? "Canonical candidate" : "Staged shipped";
   return new PackagingError(
-    `${owner} file ${safeLanguageDiagnosticPath(path)} has no explicit language-policy surface classification.`,
+    `${owner} file ${safeLanguageDiagnosticPath(
+      path,
+    )} has no explicit language-policy surface classification.`,
   );
 }
 
 function parseError(path: string, format: string): PackagingError {
   return new PackagingError(
-    `Shipped language surface ${safeLanguageDiagnosticPath(path)} is not valid bounded ${format}.`,
+    `Shipped language surface ${safeLanguageDiagnosticPath(
+      path,
+    )} is not valid bounded ${format}.`,
   );
 }

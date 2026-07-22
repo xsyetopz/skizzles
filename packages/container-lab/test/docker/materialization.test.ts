@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -31,8 +30,7 @@ afterEach(async () => {
   );
 });
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: The causal Compose fixture and post-mutation assertions form one integration scenario.
-test("materialized normalized source expands include and extends and ignores later source mutation", async () => {
+it("materialized normalized source expands include and extends and ignores later source mutation", async () => {
   if (!composeAvailable) {
     return;
   }
@@ -123,8 +121,7 @@ services:
   expect(after.stdout.toString()).not.toContain("injected");
 });
 
-// biome-ignore lint/complexity/noExcessiveLinesPerFunction: The direct Compose comparison and finding assertions form one integration scenario.
-test("normalized materialized source reports interpolated privilege and port surfaces", async () => {
+it("normalized materialized source reports interpolated privilege and port surfaces", async () => {
   if (!composeAvailable) {
     return;
   }

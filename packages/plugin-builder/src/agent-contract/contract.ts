@@ -42,12 +42,9 @@ export type AgentContractAsset = (typeof AGENT_CONTRACT_ASSETS)[number];
 
 export const PINNED_SCHEMA_DIGESTS = {
   "skills/completion-contract/contracts/acceptance.schema.json":
-    // biome-ignore lint/security/noSecrets: Public schema SHA-256 pin, not a credential.
     "238b29b5d0f9e5b7b2b1018ffefcb472edf86b1be28add634c8c22801a04a0ae",
   "skills/fourth-wall/contracts/context-envelope.schema.json":
-    // biome-ignore lint/security/noSecrets: Public schema SHA-256 pin, not a credential.
     "b5484817093732b5aa41699b24bc2a09b607bc9a16b0d991e084edcc3bc9322f",
   "skills/fourth-wall/contracts/handoff-review.schema.json":
-    // biome-ignore lint/security/noSecrets: Public schema SHA-256 pin, not a credential.
     "7eaf35d2ea0d77f7bcc7d65f1a201c9e0f279c8c4020cd5e1439cf46f59e6a7a",
 } as const;

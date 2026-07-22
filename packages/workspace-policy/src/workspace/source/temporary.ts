@@ -339,8 +339,9 @@ function disposableRootExpression(node: Node | undefined): boolean {
 function recursiveDisposal(call: Node): boolean {
   if (!isCallExpression(call)) return false;
   const options = call.arguments[1];
-  if (options === undefined || !isObjectLiteralExpression(options))
+  if (options === undefined || !isObjectLiteralExpression(options)) {
     return false;
+  }
   return options.properties.some(
     (property) =>
       isPropertyAssignment(property) &&
@@ -393,7 +394,7 @@ function bindingName(
   if (local !== undefined && isIdentifier(local)) {
     return local.text;
   }
-  // biome-ignore lint/complexity/noUselessUndefined: TypeScript noImplicitReturns requires the explicit absent branch.
+
   return undefined;
 }
 
@@ -418,7 +419,7 @@ function forbiddenExport(
   if (module === NODE_OS_MODULE && name === "tmpdir") {
     return "tmpdir";
   }
-  // biome-ignore lint/complexity/noUselessUndefined: TypeScript noImplicitReturns requires the explicit absent branch.
+
   return undefined;
 }
 
@@ -474,7 +475,7 @@ function loadedModule(node: Node): string | undefined {
   ) {
     return argument.text;
   }
-  // biome-ignore lint/complexity/noUselessUndefined: noImplicitReturns requires an explicit absent module.
+
   return undefined;
 }
 

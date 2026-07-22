@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   createCliFixtureScope,
@@ -20,7 +19,7 @@ const { oversizedPreviewFixture, trackTemporaryPath } = fixtures;
 afterEach(fixtures.cleanup);
 
 describe("CLI state and synchronization runtime", () => {
-  test("reads durable lab state from a fresh Bun process and emits one JSON value", async () => {
+  it("reads durable lab state from a fresh Bun process and emits one JSON value", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-cli-"));
     trackTemporaryPath(root);
     const stateRoot = join(root, "state");
@@ -60,7 +59,7 @@ describe("CLI state and synchronization runtime", () => {
     expect(stdout).not.toContain("runtimeRoot");
   });
 
-  test("health rejects an environment-selected symlinked lab state file", async () => {
+  it("health rejects an environment-selected symlinked lab state file", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-cli-trust-"));
     trackTemporaryPath(root);
     const stateRoot = join(root, "state");
@@ -100,7 +99,7 @@ describe("CLI state and synchronization runtime", () => {
     );
   });
 
-  test("status serializes a compact redacted DTO under the public byte ceiling", async () => {
+  it("status serializes a compact redacted DTO under the public byte ceiling", async () => {
     const root = await mkdtemp(join(tmpdir(), "container-lab-status-"));
     trackTemporaryPath(root);
     const owner = "thread-status";
@@ -161,7 +160,7 @@ describe("CLI state and synchronization runtime", () => {
     }
   });
 
-  test("refuses to invent an owner when neither override nor CODEX_THREAD_ID exists", async () => {
+  it("refuses to invent an owner when neither override nor CODEX_THREAD_ID exists", async () => {
     const child = Bun.spawn(
       [
         process.execPath,
@@ -183,7 +182,7 @@ describe("CLI state and synchronization runtime", () => {
     expect(JSON.parse(stderr).error.message).toContain("owner is required");
   });
 
-  test("sync preview fails closed before persisting a token when 100 visible long paths exceed the public budget", async () => {
+  it("sync preview fails closed before persisting a token when 100 visible long paths exceed the public budget", async () => {
     const fixture = await oversizedPreviewFixture();
     const child = Bun.spawn(
       [

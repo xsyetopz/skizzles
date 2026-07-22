@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun provides its test module at runtime.
 import { describe, expect, it } from "bun:test";
 import {
   createTaskWorktreeCommitAuthority,
@@ -19,8 +18,9 @@ function diffFor(paths: readonly string[]) {
       maxChangedBytes: 10_000,
     }),
   );
-  if (created.status !== "created")
+  if (created.status !== "created") {
     throw new Error("diff authority setup failed");
+  }
   const result = created.authority.inspect(
     Object.freeze({
       baseline: Object.freeze([]),
@@ -31,8 +31,9 @@ function diffFor(paths: readonly string[]) {
       ),
     }),
   );
-  if (result.status !== "accepted")
+  if (result.status !== "accepted") {
     throw new Error("expected one atomic task slice");
+  }
   return result;
 }
 
@@ -47,8 +48,9 @@ function commitAuthority(
       ownedPackagePaths: paths,
     }),
   );
-  if (created.status !== "created")
+  if (created.status !== "created") {
     throw new Error("commit authority setup failed");
+  }
   return created.authority;
 }
 

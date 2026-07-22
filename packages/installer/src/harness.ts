@@ -235,7 +235,6 @@ export function uninstallHarness(
   }
   try {
     rmSync(quarantine, { recursive: true, force: true });
-    // biome-ignore lint/suspicious/noEmptyBlockStatements: The operation intentionally ignores this best-effort failure.
   } catch {}
   return receipt;
 }

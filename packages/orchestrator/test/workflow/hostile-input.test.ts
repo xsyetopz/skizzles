@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { expect, it } from "bun:test";
 import { createLocalRepositoryLeaseAuthority } from "@skizzles/workspace-transaction";
 import { createCausalWorkflow } from "../../src/workflow/causal-workflow.ts";

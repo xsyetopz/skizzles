@@ -65,7 +65,7 @@ function parseConfig(
     "formatterProfiles",
     "compilerAuthority",
     "compilerProfile",
-    // biome-ignore lint/security/noSecrets: This is a public authority field name, not credential material.
+
     "symbolIndexAuthority",
   ]);
   if (record === undefined) return;
@@ -76,7 +76,7 @@ function parseConfig(
   );
   const compilerAuthority = record.get("compilerAuthority");
   const compilerProfile = parseCompilerProfile(record.get("compilerProfile"));
-  // biome-ignore lint/security/noSecrets: This is a public authority field name, not credential material.
+
   const symbolIndexAuthority = record.get("symbolIndexAuthority");
   if (
     !isLanguage(language) ||

@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
@@ -23,7 +22,7 @@ async function repository(): Promise<string> {
 }
 
 describe("Git manifests", () => {
-  test("includes tracked and nonignored untracked regular files and symlinks", async () => {
+  it("includes tracked and nonignored untracked regular files and symlinks", async () => {
     const root = await repository();
     await writeFile(path.join(root, ".gitignore"), "ignored.txt\n");
     await writeFile(path.join(root, "tracked.txt"), "tracked\n");
@@ -51,7 +50,7 @@ describe("Git manifests", () => {
     expect(manifest.digest).toHaveLength(64);
   });
 
-  test("records mode changes in the digest", async () => {
+  it("records mode changes in the digest", async () => {
     const root = await repository();
     const file = path.join(root, "tool.sh");
     await writeFile(file, "#!/bin/sh\n");
@@ -64,7 +63,7 @@ describe("Git manifests", () => {
     expect(after.digest).not.toBe(before.digest);
   });
 
-  test("preserves tracked prototype-shaped paths as manifest files", async () => {
+  it("preserves tracked prototype-shaped paths as manifest files", async () => {
     const root = await repository();
     for (const name of ["__proto__", "constructor", "prototype"]) {
       await writeFile(path.join(root, name), `${name}\n`);
@@ -95,7 +94,7 @@ describe("Git manifests", () => {
 });
 
 describe("path guards", () => {
-  test("reject traversal, absolute paths, backslashes, and normalization tricks", () => {
+  it("reject traversal, absolute paths, backslashes, and normalization tricks", () => {
     for (const value of [
       "../escape",
       "/escape",
@@ -110,7 +109,7 @@ describe("path guards", () => {
     }
   });
 
-  test("rejects an existing symlink parent", async () => {
+  it("rejects an existing symlink parent", async () => {
     const root = await repository();
     const outside = await mkdtemp(
       path.join(os.tmpdir(), "container-lab-outside-"),

@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   mkdir,
@@ -130,7 +129,6 @@ describe("plugin destination cleanup safety", () => {
     await symlink(outside, linked);
     await writeFile(file, "not a directory\n");
     for (const destination of [linked, file]) {
-      // biome-ignore lint/performance/noAwaitInLoops: each path kind is independently rejected.
       await expect(
         replaceDirectoryTransaction(destination, () => Promise.resolve()),
       ).rejects.toThrow("must be a real directory or absent");

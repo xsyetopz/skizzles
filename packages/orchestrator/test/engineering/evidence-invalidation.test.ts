@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   createFixture,

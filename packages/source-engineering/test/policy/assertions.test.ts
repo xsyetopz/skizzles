@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import {
   analyzeSourcePolicy,
@@ -46,7 +45,7 @@ describe("semantic assertion policy", () => {
       [
         'expect({ ok: true }).toBe("ready");',
         'assert.strictEqual([1, 2], "ready");',
-        // biome-ignore lint/security/noSecrets: source text is an assertion-policy fixture.
+
         'expect(JSON.parse(text)).toEqual("ready");',
         'expect(new Map()).toBe("ready");',
         "assert.strictEqual({ ok: true }, { ok: true });",
@@ -72,7 +71,7 @@ describe("semantic assertion policy scalar boundaries", () => {
         'expect(diagnostic).toEqual("exact failure");',
         'assert.strictEqual(code, "SERVICE_DOWN");',
         'expect(version).toMatch("v1");',
-        // biome-ignore lint/security/noSecrets: source text is an assertion-policy fixture.
+
         'expect(JSON.stringify("ready")).toBe(\'"ready"\');',
         'expect(payloadText).toBe("[not serialized JSON]");',
         "expect(actual).toStrictEqual({ ok: true });",
@@ -91,7 +90,7 @@ describe("semantic assertion policy scalar boundaries", () => {
         `assert.strictEqual(payload, ("[" + "1]"));`,
         'expect(payload).toEqual(`{"ok":${true}}`);',
         "assert(payload === `[` + 1 + `]`);",
-        // biome-ignore lint/security/noSecrets: source text is an assertion-policy fixture.
+
         "expect(payload).toStrictEqual(`{\"ok\":${'true'}}`);",
       ].join("\n"),
     );
@@ -129,7 +128,7 @@ describe("semantic assertion policy scalar boundaries", () => {
     const findings = await analyzeCandidate(
       [
         "expect(status).toBe('status:' + statusCode);",
-        // biome-ignore lint/suspicious/noTemplateCurlyInString: source text intentionally contains a template substitution.
+
         "expect(diagnostic).toEqual(`error: \${detail}`);",
         "assert.strictEqual(message, prefix + detail);",
         "expect(status).toBe(statusPrefix + statusCode);",

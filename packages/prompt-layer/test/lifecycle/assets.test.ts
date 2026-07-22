@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -21,8 +20,8 @@ import {
   gitBlobId,
   type ManifestFixture,
   PATCH_NEW_IDENTITY,
-  PROVENANCE_ERROR,
   pathExistsForTest,
+  PROVENANCE_ERROR,
   snapshot,
   updateManifestFact,
 } from "./fixture.ts";
@@ -94,7 +93,6 @@ describe("prompt asset and patch contracts", () => {
       ),
     ).toEqual(firstReceipt);
     expect(firstPrompt.toString()).toStartWith(
-      // biome-ignore lint/security/noSecrets: This is a public upstream commit digest fixture.
       canonicalHeader("bc5c9161b46feddc13282652fd2cfdf1e5bab4a9"),
     );
     expect(firstPrompt.toString()).toContain("# How you work");
@@ -294,36 +292,31 @@ describe("prompt asset and patch contracts", () => {
         "pinned generic upstream compatibility baseline; not a claim about any selected model's active baseline",
       upstream: {
         repository: "https://github.com/openai/codex",
-        // biome-ignore lint/security/noSecrets: This is a public upstream commit digest fixture.
+
         commit: "bc5c9161b46feddc13282652fd2cfdf1e5bab4a9",
         path: "codex-rs/protocol/src/prompts/base_instructions/default.md",
         sha256:
-          // biome-ignore lint/security/noSecrets: This is an integrity digest for public prompt content.
           "ac8ae107a0d72fe3476b430afb161ea4e67da2e446d778aefc44828160559807",
         bytes: 20_903,
       },
       patch: {
         sha256:
-          // biome-ignore lint/security/noSecrets: This is an integrity digest for public patch content.
           "3ec67df5ea32791b217b63ff4f0731c914e21a8a0d4717b56e0a5e0eb0c4667d",
         bytes: 9306,
       },
       output: {
         sha256:
-          // biome-ignore lint/security/noSecrets: This is an integrity digest for generated prompt content.
           "3412f9c3bf51311e7ffbf8874955e1f60b823dec71be2a53e7acb7cd7475b1c0",
         bytes: 21_888,
       },
       legal: {
         license: {
           sha256:
-            // biome-ignore lint/security/noSecrets: This is an integrity digest for public license content.
             "d17f227e4df5da1600391338865ce0f3055211760a36688f816941d58232d8dc",
           bytes: 10_926,
         },
         notice: {
           sha256:
-            // biome-ignore lint/security/noSecrets: This is an integrity digest for public notice content.
             "9d71575ecfd9a843fc1677b0efb08053c6ba9fd686a0de1a6f5382fd3c220915",
           bytes: 242,
         },
@@ -366,15 +359,13 @@ describe("prompt asset and patch contracts", () => {
     const mutations = [
       (current: string) =>
         current.replace(
-          // biome-ignore lint/security/noSecrets: This is a public upstream commit digest fixture.
           "Commit: bc5c9161b46feddc13282652fd2cfdf1e5bab4a9",
           `Commit: ${"0".repeat(40)}`,
-        ) +
-        // biome-ignore lint/security/noSecrets: This is a public upstream commit digest fixture.
-        canonicalHeader("bc5c9161b46feddc13282652fd2cfdf1e5bab4a9"),
+        ) + canonicalHeader("bc5c9161b46feddc13282652fd2cfdf1e5bab4a9"),
       (current: string) =>
-        // biome-ignore lint/security/noSecrets: This is a public upstream commit digest fixture.
-        `${current}\n${canonicalHeader("bc5c9161b46feddc13282652fd2cfdf1e5bab4a9")}`,
+        `${current}\n${canonicalHeader(
+          "bc5c9161b46feddc13282652fd2cfdf1e5bab4a9",
+        )}`,
       (current: string) => `${current}\n<!--\nCommit: ${"0".repeat(40)}\n-->\n`,
       (current: string) =>
         `${current}\n<!--\n\t  Commit:\t${"0".repeat(40)}\n-->\n`,

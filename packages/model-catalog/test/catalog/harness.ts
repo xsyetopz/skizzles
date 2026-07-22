@@ -347,7 +347,9 @@ if (${JSON.stringify(behavior)} === "probe") {
   const home = process.env.HOME;
   const runRoot = dirname(home);
   const marker = JSON.parse(await Bun.file(runRoot + "/.skizzles-run-workspace.json").text());
-  const observationPath = ${JSON.stringify(join(path, "child-observations.ndjson"))};
+  const observationPath = ${JSON.stringify(
+    join(path, "child-observations.ndjson"),
+  )};
   const observationFile = Bun.file(observationPath);
   const previous = await observationFile.exists() ? await observationFile.text() : "";
   const observation = {
@@ -360,10 +362,7 @@ if (${JSON.stringify(behavior)} === "probe") {
     tmpdir: process.env.TMPDIR,
     sentinel: process.env.SKIZZLES_CHILD_SENTINEL ?? null,
     ambientHome: home === ${JSON.stringify(path)},
-    realHome: home === ${
-      // biome-ignore lint/complexity/useLiteralKeys: Node's ProcessEnv is an index-signature boundary under strict TypeScript.
-      JSON.stringify(process.env["HOME"] ?? null)
-    },
+    realHome: home === ${JSON.stringify(process.env["HOME"] ?? null)},
     authPresent: await Bun.file(home + "/auth.json").exists(),
     ipcAvailable: typeof process.send === "function",
     environmentKeys: Object.keys(process.env).sort(),
@@ -378,7 +377,9 @@ if (args.includes("--version")) { console.log(${JSON.stringify(
     `codex-cli ${version}`,
   )}); process.exit(0); }
 if (${JSON.stringify(behavior)}.endsWith("hang")) {
-  await Bun.write(${JSON.stringify(join(path, "failed-child-home"))}, process.env.HOME);
+  await Bun.write(${JSON.stringify(
+    join(path, "failed-child-home"),
+  )}, process.env.HOME);
   await Bun.sleep(10_000);
   process.exit(0);
 }
@@ -399,7 +400,9 @@ if (!candidate.models.every((entry) => typeof entry.display_name === "string")) 
   process.exit(1);
 }
 if (${JSON.stringify(behavior)} === "cleanup-failure") {
-  await Bun.write(${JSON.stringify(join(path, "failed-run-root"))}, isolatedRoot);
+  await Bun.write(${JSON.stringify(
+    join(path, "failed-run-root"),
+  )}, isolatedRoot);
   await unlink(isolatedRoot + "/.skizzles-run-workspace.json");
 }
 console.log(JSON.stringify(candidate));

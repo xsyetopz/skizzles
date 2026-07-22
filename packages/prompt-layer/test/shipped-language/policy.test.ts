@@ -1,11 +1,10 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
   checkPrompt,
-  PROMPT_LAYER_PACKAGE_FILES,
   parseShippedLanguagePolicy,
+  PROMPT_LAYER_PACKAGE_FILES,
   SHIPPED_LANGUAGE_POLICY_PATHS,
   validateShippedLanguageText,
 } from "../../src/cli.ts";
@@ -169,7 +168,7 @@ describe("versioned shipped-language policy", () => {
       "I am your friend&#39;s coding assistant.",
       "I am your friend&#x27s coding assistant.",
       "I am your friend&#8217;s coding assistant.",
-      // biome-ignore lint/security/noSecrets: Deliberate encoded apostrophe fixture, not a credential.
+
       "I am your friend&#x2019s coding assistant.",
       `I am your friend&#${longZeros}8217;s coding assistant.`,
       `I am your friend&#X${longZeros}2019s coding assistant.`,
@@ -279,7 +278,7 @@ describe("versioned shipped-language policy", () => {
       "nested/zero\u200bwidth.md",
       "nested/mid\ufeffword.md",
       "nested/variation\ufe0fselector.md",
-      // biome-ignore lint/security/noSecrets: Deliberate default-ignorable diagnostic-path fixture, not a credential.
+
       "nested/grapheme\u034fjoiner.md",
     ]) {
       expect(() =>

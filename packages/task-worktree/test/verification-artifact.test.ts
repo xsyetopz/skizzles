@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun provides its test module at runtime.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   link,
@@ -253,10 +252,12 @@ describe("verification artifact ingestion", () => {
       );
       expect(artifact?.report).toEqual(report);
       expect(Object.isFrozen(artifact?.report)).toBe(true);
-      if (artifact?.report.kind === "mutation")
+      if (artifact?.report.kind === "mutation") {
         expect(Object.isFrozen(artifact.report.outcomes[0])).toBe(true);
-      if (artifact?.report.kind === "property")
+      }
+      if (artifact?.report.kind === "property") {
         expect(Object.isFrozen(artifact.report.properties[0])).toBe(true);
+      }
       if (artifact?.report.kind === "coverage") {
         expect(Object.isFrozen(artifact.report.nodes[0])).toBe(true);
         expect(Object.isFrozen(artifact.report.nodes[0]?.branches[0])).toBe(
@@ -293,8 +294,9 @@ describe("verification artifact ingestion", () => {
     });
     const firstLine = lineIds[0];
     const secondLine = lineIds[1];
-    if (firstLine === undefined || secondLine === undefined)
+    if (firstLine === undefined || secondLine === undefined) {
       throw new Error("line fixture missing");
+    }
     const invalidLines = [
       [{ lineId: firstLine, hits: 2 }],
       [

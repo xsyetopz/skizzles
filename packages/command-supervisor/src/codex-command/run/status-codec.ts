@@ -35,19 +35,21 @@ function parseEvidence(
   maximumBytes: number,
 ): EvidenceReference | undefined {
   if (
-    !isRecord(value) ||
-    !hasExactKeys(value, [
-      "integrity",
-      "observedBytes",
-      "redaction",
-      "reference",
-      "sensitivity",
-      "sha256",
-      "storedBytes",
-      "truncated",
-    ])
+    !(
+      isRecord(value) &&
+      hasExactKeys(value, [
+        "integrity",
+        "observedBytes",
+        "redaction",
+        "reference",
+        "sensitivity",
+        "sha256",
+        "storedBytes",
+        "truncated",
+      ])
+    )
   ) {
-    return undefined;
+    return;
   }
   const observedBytes = value["observedBytes"];
   const storedBytes = value["storedBytes"];
@@ -67,7 +69,7 @@ function parseEvidence(
     typeof digest === "string" &&
     sha256Pattern.test(digest);
   if (!valid || typeof digest !== "string") {
-    return undefined;
+    return;
   }
   return {
     reference,
@@ -92,18 +94,20 @@ export function parseRunStatus(content: string, id: string): RunStatus {
     throw new Error("status is not valid JSON");
   }
   if (
-    !isRecord(value) ||
-    !hasExactKeys(value, [
-      "action",
-      "artifactCapture",
-      "evidence",
-      "execution",
-      "id",
-      "lifecycle",
-      "retention",
-      "schema",
-      "version",
-    ]) ||
+    !(
+      isRecord(value) &&
+      hasExactKeys(value, [
+        "action",
+        "artifactCapture",
+        "evidence",
+        "execution",
+        "id",
+        "lifecycle",
+        "retention",
+        "schema",
+        "version",
+      ])
+    ) ||
     value["schema"] !== runStatusSchema ||
     value["version"] !== runStatusVersion ||
     value["id"] !== id ||
@@ -116,8 +120,10 @@ export function parseRunStatus(content: string, id: string): RunStatus {
   const retention = value["retention"];
   const evidence = value["evidence"];
   if (
-    !isRecord(action) ||
-    !hasExactKeys(action, ["label", "redaction", "sensitivity", "sha256"]) ||
+    !(
+      isRecord(action) &&
+      hasExactKeys(action, ["label", "redaction", "sensitivity", "sha256"])
+    ) ||
     action["label"] !== operatorActionLabel ||
     action["sensitivity"] !== "secret-bearing" ||
     action["redaction"] !== "content-omitted" ||
@@ -127,7 +133,7 @@ export function parseRunStatus(content: string, id: string): RunStatus {
     !hasExactKeys(execution, ["shell"]) ||
     typeof execution["shell"] !== "string" ||
     !execution["shell"].startsWith("/") ||
-    execution["shell"].length > 4_096 ||
+    execution["shell"].length > 4096 ||
     !isRecord(retention) ||
     !hasExactKeys(retention, [
       "cleanupThresholdBytes",

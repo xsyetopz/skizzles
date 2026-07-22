@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import process from "node:process";
@@ -49,7 +48,6 @@ function expectInvalid(receipt: CommandObservationReceipt): void {
 describe("direct argv command observation", () => {
   it("treats stderr from a zero exit as evidence rather than failure", async () => {
     const receipt = await observeCommand(
-      // biome-ignore lint/security/noSecrets: This is executable test-fixture source, not a credential.
       specification('Bun.stderr.write("warning\\n")'),
     );
 
@@ -83,7 +81,6 @@ describe("direct argv command observation", () => {
     const environment = { ["OBSERVED"]: "explicit" };
     const receipt = await observeCommand(
       specification(
-        // biome-ignore lint/security/noSecrets: This is executable test-fixture source, not a credential.
         'Bun.stdout.write(process.cwd()+"\\n"+(process.env["OBSERVED"] ?? "missing"))',
         { env: environment },
       ),
@@ -167,7 +164,6 @@ describe("direct argv command observation", () => {
 
   it("stops on overflow while retaining a digest-bound prefix", async () => {
     const receipt = await observeCommand(
-      // biome-ignore lint/security/noSecrets: This is executable test-fixture source, not a credential.
       specification("Bun.stdout.write(new Uint8Array(1024).fill(97))", {
         maximumOutputBytes: 16,
       }),
@@ -214,7 +210,6 @@ describe("direct argv command observation", () => {
   });
 
   it("binds a frozen receipt to the parsed invocation and terminal evidence", async () => {
-    // biome-ignore lint/security/noSecrets: This is executable test-fixture source, not a credential.
     const argv = [process.execPath, "--eval", 'Bun.stdout.write("bound")'];
     const input = specification("", { argv });
     const observed = observeCommand(input);
@@ -315,7 +310,6 @@ describe("direct argv command observation", () => {
     const argvReads = new Map<PropertyKey, number>();
     const environmentReads = new Map<PropertyKey, number>();
     const argv = new Proxy(
-      // biome-ignore lint/security/noSecrets: This is executable test-fixture source, not a credential.
       [process.execPath, "--eval", 'Bun.stdout.write(process.env["VALUE"])'],
       {
         get: () => {

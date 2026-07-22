@@ -47,10 +47,7 @@ function pluginRootFrom(arguments_: string[]): string | undefined {
       return;
     }
     return pluginRoot;
-  } catch {
-    // Missing or inaccessible launch context fails closed.
-    return undefined;
-  }
+  } catch {}
 }
 
 function shellWord(value: string): string {
@@ -63,11 +60,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function hookEvent(value: unknown): HookEvent | undefined {
   if (!isRecord(value)) {
-    return undefined;
+    return;
   }
   const toolInput = value["tool_input"];
   if (toolInput !== undefined && !isRecord(toolInput)) {
-    return undefined;
+    return;
   }
   return {
     hook_event_name: value["hook_event_name"],
@@ -79,7 +76,7 @@ function commandFrom(
   input: Record<string, unknown> | undefined,
 ): { key: "cmd" | "command"; value: string } | undefined {
   if (!input) {
-    return undefined;
+    return;
   }
 
   for (const key of ["cmd", "command"] as const) {
@@ -88,7 +85,6 @@ function commandFrom(
       return { key, value };
     }
   }
-  return undefined;
 }
 
 function rewrittenCommand(
@@ -96,7 +92,7 @@ function rewrittenCommand(
   pluginRoot: string,
 ): string | undefined {
   if (event.hook_event_name !== "PreToolUse") {
-    return undefined;
+    return;
   }
 
   const command = commandFrom(event.tool_input);
@@ -106,7 +102,7 @@ function rewrittenCommand(
     command.value.length > maximumScriptLength ||
     !isManagedScript(command.value)
   ) {
-    return undefined;
+    return;
   }
 
   const encoded = Buffer.from(command.value, "utf8").toString("base64url");

@@ -19,12 +19,10 @@ const VERSION_COMMENT_PATTERN = /^\s*(?:#\s*(?<version>\S+)\s*)?$/u;
 const CARRIAGE_RETURN_PATTERN = /\r$/u;
 const REQUIRED_ACTION_PINS = {
   "actions/checkout": {
-    // biome-ignore lint/security/noSecrets: Public upstream action commit pin.
     commit: "34e114876b0b11c390a56381ad16ebd13914f8d5",
     version: "v4.3.1",
   },
   "oven-sh/setup-bun": {
-    // biome-ignore lint/security/noSecrets: Public upstream action commit pin.
     commit: "0c5077e51419868618aeaa5fe8019c62421857d6",
     version: "v2.2.0",
   },

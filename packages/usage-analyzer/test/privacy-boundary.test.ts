@@ -1,5 +1,5 @@
 // biome-ignore-all lint/style/useNamingConvention: Rollout fixtures preserve the external snake_case wire schema.
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun built-in modules.
+
 import { afterEach, expect, it } from "bun:test";
 import { join } from "node:path";
 import {

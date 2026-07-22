@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -69,7 +68,6 @@ describe("canonical skill metadata", () => {
       "allowed-tools: Bash(git:*) Read",
       'metadata:\n  author: OpenAI\n  version: "1.0"',
     ]) {
-      // biome-ignore lint/performance/noAwaitInLoops: each field gets an independent workspace and causal validation.
       const root = await fixture();
       await writeSkill(
         root,
@@ -253,13 +251,12 @@ describe("canonical skill metadata", () => {
     await rejectsMetadata(root, "must explicitly mention $example");
 
     for (const continuation of ["_", ":", "A", "z", "0", "-"]) {
-      // biome-ignore lint/performance/noAwaitInLoops: each runtime continuation byte is an independent mention-boundary contract.
       await write(
         root,
         "skills/example/agents/openai.yaml",
         `interface:\n  default_prompt: "Use $example${continuation}other now."\n`,
       );
-      // biome-ignore lint/performance/noAwaitInLoops: deterministic fixture validation is intentionally sequential.
+
       await rejectsMetadata(root, "must explicitly mention $example");
     }
 
@@ -295,13 +292,12 @@ describe("canonical skill metadata", () => {
     );
 
     for (const invisible of ["\u200B", "\u2060", "\uFEFF"]) {
-      // biome-ignore lint/performance/noAwaitInLoops: each default-ignorable code point is an independent UI spoofing probe.
       await write(
         root,
         "skills/example/agents/openai.yaml",
         `interface:\n  display_name: "Example${invisible} Skill"\n`,
       );
-      // biome-ignore lint/performance/noAwaitInLoops: deterministic fixture validation is intentionally sequential.
+
       await rejectsMetadata(
         root,
         "display_name must be a nonempty bounded string",
@@ -394,7 +390,6 @@ describe("canonical skill metadata", () => {
       "https://127.0.0.1.nip.io/mcp",
       "https://developers-openai.example/mcp",
     ]) {
-      // biome-ignore lint/performance/noAwaitInLoops: every alias is an independent closed-policy probe.
       await write(
         root,
         "skills/example/agents/openai.yaml",

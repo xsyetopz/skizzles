@@ -46,7 +46,9 @@ export function createTestWorkspace(): {
       const report = await owned.close();
       if (report.state === "cleanup-failed") {
         throw new Error(
-          `Test run workspace cleanup failed: ${report.error ?? "unknown failure"}.`,
+          `Test run workspace cleanup failed: ${
+            report.error ?? "unknown failure"
+          }.`,
         );
       }
     },
@@ -340,7 +342,7 @@ async function fixture(
       ownership: {
         runtimeOwner: "skizzles",
         canonicalSource: "packages/container-lab",
-        // biome-ignore lint/security/noSecrets: This is a public source-provenance commit digest.
+
         provenanceCommit: "a2f44416ef467d9f54b3cb228e3bd050987a3c4c",
       },
       bundled: {

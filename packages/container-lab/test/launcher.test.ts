@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
@@ -30,7 +29,7 @@ afterEach(() => {
 });
 
 describe("Container Lab bundled launcher", () => {
-  test("forwards attached argv, stdin, exit status, and termination signals", async () => {
+  it("forwards attached argv, stdin, exit status, and termination signals", async () => {
     const normal = fixtureTarget(
       "const stdin = await Bun.stdin.text(); console.log(JSON.stringify({ args: process.argv.slice(2), stdin })); process.exit(Number(process.env.FAKE_EXIT ?? 0));",
     );
@@ -70,7 +69,7 @@ describe("Container Lab bundled launcher", () => {
     expect(stderr).toBe("");
   });
 
-  test("rejects readiness when the inner fixture exits before signaling", async () => {
+  it("rejects readiness when the inner fixture exits before signaling", async () => {
     const failing = fixtureTarget("process.exit(17);");
     const readinessPath = join(dirname(failing), "fixture-ready");
     const child = Bun.spawn(["bun", failing], {
@@ -86,7 +85,7 @@ describe("Container Lab bundled launcher", () => {
     expect(await child.exited).toBe(17);
   });
 
-  test("resolves the canonical and copied-plugin runtime without node_modules", async () => {
+  it("resolves the canonical and copied-plugin runtime without node_modules", async () => {
     const source = await invoke(canonicalLauncher, ["--help"]);
     expect(source.exitCode).toBe(0);
     expect(typeof (JSON.parse(source.stdout) as { help?: unknown }).help).toBe(
@@ -109,7 +108,7 @@ describe("Container Lab bundled launcher", () => {
     );
   });
 
-  test("uses a distinct PATH binary from a skill-only install without recursing", async () => {
+  it("uses a distinct PATH binary from a skill-only install without recursing", async () => {
     const root = temporaryRoot();
     const launcher = skillOnlyLauncher(root);
     const bin = join(root, "bin");
@@ -139,7 +138,7 @@ describe("Container Lab bundled launcher", () => {
     expect(result.stderr).toBe("");
   });
 
-  test("explains the missing runtime for a skill-only install", async () => {
+  it("explains the missing runtime for a skill-only install", async () => {
     const root = temporaryRoot();
     const launcher = skillOnlyLauncher(root);
     const result = await invoke(launcher, ["health"], undefined, {

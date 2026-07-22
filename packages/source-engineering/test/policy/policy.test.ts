@@ -1,9 +1,8 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-// biome-ignore lint/correctness/noUnresolvedImports: TypeScript 7's parser is an unstable package export.
+
 import { API } from "typescript/unstable/async";
 import {
   analyzeSourcePolicy,
@@ -35,7 +34,6 @@ describe("parsed changed-node source policies", () => {
         path: "test/policy.test.ts",
         ownership: "test",
         candidate: [
-          // biome-ignore lint/security/noSecrets: source text is a JSON assertion fixture, not a credential.
           'expect(JSON.stringify(payload)).toBe("{\\"ok\\":true}");',
           "expect({ ok: true }).toBe({ ok: true });",
           "try { run(); } catch (error) {}",
@@ -95,7 +93,7 @@ describe("parsed changed-node source policies", () => {
           'function pending() { throw new Error("not_implemented"); }',
           "function empty() {}",
           "const payload: any = JSON.parse(text) as Payload;",
-          // biome-ignore lint/security/noSecrets: source text exercises non-null assertion syntax.
+
           "consume(payload!.id);",
         ].join("\n"),
       },

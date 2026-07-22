@@ -156,26 +156,14 @@ export function desiredConfigEdits(
       };
     }
     const agents = configValueAt(currentConfig, "agents");
-    if (!agents.present || !isJsonObject(agents.value)) {
-      edits.push({
-        keyPath: "agents",
-        value: configuredRoles,
-        mergeStrategy: "replace",
-      });
-    } else {
+    if (agents.present && isJsonObject(agents.value)) {
       for (const role of agentRoles) {
         const roleConfig: JsonValue = {
           description: agentDescriptions[role],
           config_file: instructionAssets.agentConfigs[role],
         };
         const existing = configValueAt(agents.value, role);
-        if (!existing.present || !isJsonObject(existing.value)) {
-          edits.push({
-            keyPath: `agents.${role}`,
-            value: roleConfig,
-            mergeStrategy: "replace",
-          });
-        } else {
+        if (existing.present && isJsonObject(existing.value)) {
           edits.push(
             {
               keyPath: `agents.${role}.description`,
@@ -188,8 +176,20 @@ export function desiredConfigEdits(
               mergeStrategy: "replace",
             },
           );
+        } else {
+          edits.push({
+            keyPath: `agents.${role}`,
+            value: roleConfig,
+            mergeStrategy: "replace",
+          });
         }
       }
+    } else {
+      edits.push({
+        keyPath: "agents",
+        value: configuredRoles,
+        mergeStrategy: "replace",
+      });
     }
   }
   if (orchestration === "aggressive") {

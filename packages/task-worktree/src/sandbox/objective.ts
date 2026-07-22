@@ -7,7 +7,7 @@ import {
 import type { SandboxVerificationObjective } from "./contract.ts";
 
 const digestPattern = /^sha256:[0-9a-f]{64}$/u;
-// biome-ignore lint/security/noSecrets: This is a public digest field name, not a credential.
+
 const productionOverlayDigestKey = "productionOverlayDigest";
 
 export function parseSandboxVerificationObjective(
@@ -27,8 +27,9 @@ export function parseSandboxVerificationObjective(
         productionOverlayDigestKey,
         "structuralReceiptDigest",
       ])
-    )
+    ) {
       return;
+    }
     const baselineTestManifestDigest = digest(
       value["baselineTestManifestDigest"],
     );
@@ -40,8 +41,9 @@ export function parseSandboxVerificationObjective(
       productionOverlayDigest === undefined ||
       containerImageDigest === undefined ||
       containerEvidenceDigest === undefined
-    )
+    ) {
       return;
+    }
     return Object.freeze({
       kind,
       structuralReceiptDigest,
@@ -59,16 +61,18 @@ export function parseSandboxVerificationObjective(
         "mutantIds",
         "structuralReceiptDigest",
       ])
-    )
+    ) {
       return;
+    }
     const inventoryDigest = digest(value["inventoryDigest"]);
     const mutantIds = digestArray(value["mutantIds"], 100_000);
     if (
       inventoryDigest === undefined ||
       mutantIds === undefined ||
       mutantIds.length === 0
-    )
+    ) {
       return;
+    }
     return Object.freeze({
       kind,
       structuralReceiptDigest,
@@ -76,8 +80,9 @@ export function parseSandboxVerificationObjective(
       mutantIds,
     });
   }
-  if (kind === "coverage")
+  if (kind === "coverage") {
     return parseCoverageObjective(value, structuralReceiptDigest);
+  }
   if (kind !== "property") return;
   if (
     !hasExactKeys(value, [
@@ -92,12 +97,18 @@ export function parseSandboxVerificationObjective(
       "seedScheduleDigest",
       "structuralReceiptDigest",
     ])
-  )
+  ) {
     return;
+  }
   const nodeIds = digestArray(value["nodeIds"], 100_000);
   const branchIds = digestArray(value["branchIds"], 100_000);
-  if (nodeIds === undefined || nodeIds.length === 0 || branchIds === undefined)
+  if (
+    nodeIds === undefined ||
+    nodeIds.length === 0 ||
+    branchIds === undefined
+  ) {
     return;
+  }
   const seedScheduleDigest = digest(value["seedScheduleDigest"]);
   const extremeVectorInventoryDigest = digest(
     value["extremeVectorInventoryDigest"],
@@ -126,8 +137,9 @@ export function parseSandboxVerificationObjective(
       requiredRandomFuzzCaseCount + requiredExtremeVectorCount ||
     extremeVectorInventoryDigest !==
       digestTaskWorktreeValue(requiredExtremeVectorDigests)
-  )
+  ) {
     return;
+  }
   return Object.freeze({
     kind,
     structuralReceiptDigest,
@@ -153,8 +165,9 @@ function parseCoverageObjective(
       "structuralReceiptDigest",
       "thresholds",
     ])
-  )
+  ) {
     return;
+  }
   const modifiedNodes = parseCoverageNodes(value["modifiedNodes"]);
   const thresholds = parseCoverageThresholds(value["thresholds"]);
   if (modifiedNodes === undefined || thresholds === undefined) return;
@@ -176,8 +189,9 @@ function parseCoverageNodes(
     !Object.isFrozen(value) ||
     value.length === 0 ||
     value.length > 100_000
-  )
+  ) {
     return;
+  }
   const nodes: Extract<
     SandboxVerificationObjective,
     { kind: "coverage" }
@@ -190,8 +204,9 @@ function parseCoverageNodes(
       !isPlainDataRecord(raw) ||
       !Object.isFrozen(raw) ||
       !hasExactKeys(raw, ["branchIds", "lineIds", "nodeId"])
-    )
+    ) {
       return;
+    }
     const nodeId = digest(raw["nodeId"]);
     const nodeLineIds = digestArray(raw["lineIds"], 100_000);
     const nodeBranchIds = digestArray(raw["branchIds"], 100_000);
@@ -203,8 +218,9 @@ function parseCoverageNodes(
       nodeBranchIds === undefined ||
       nodeLineIds.some((lineId) => lineIds.has(lineId)) ||
       nodeBranchIds.some((branchId) => branchIds.has(branchId))
-    )
+    ) {
       return;
+    }
     nodeIds.add(nodeId);
     for (const lineId of nodeLineIds) lineIds.add(lineId);
     for (const branchId of nodeBranchIds) branchIds.add(branchId);
@@ -232,8 +248,9 @@ function parseCoverageThresholds(
       "minimumLineHits",
       "minimumNodeHits",
     ])
-  )
+  ) {
     return;
+  }
   const minimumNodeHits = positiveInteger(value["minimumNodeHits"]);
   const minimumLineHits = positiveInteger(value["minimumLineHits"]);
   const minimumBranchHits = positiveInteger(value["minimumBranchHits"]);
@@ -241,8 +258,9 @@ function parseCoverageThresholds(
     minimumNodeHits === undefined ||
     minimumLineHits === undefined ||
     minimumBranchHits === undefined
-  )
+  ) {
     return;
+  }
   return Object.freeze({
     minimumNodeHits,
     minimumLineHits,
@@ -278,8 +296,9 @@ function digestArray(
   if (
     !(isDensePlainArray(value) && Object.isFrozen(value)) ||
     value.length > maximum
-  )
+  ) {
     return;
+  }
   const results: `sha256:${string}`[] = [];
   const seen = new Set<string>();
   for (const raw of value) {

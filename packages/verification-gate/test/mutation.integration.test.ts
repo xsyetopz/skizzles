@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { describe, expect, it } from "bun:test";
 import process from "node:process";
 import { digestValue, type VerificationDigest } from "../src/digest.ts";

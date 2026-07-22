@@ -41,7 +41,6 @@ export function inspectCatches(context: PolicyRuleContext): void {
   });
 }
 
-// biome-ignore lint/nursery/noMisleadingReturnType: the recursive visitor mutates the captured usage state.
 function catchBindingIsMeaningfullyUsed(clause: CatchClause): boolean {
   const names = new Set<string>();
   visitNodes(clause.variableDeclaration?.name ?? clause, (node) => {

@@ -1,6 +1,5 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { Database } from "bun:sqlite";
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
+
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -11,7 +10,7 @@ import { ownerKey } from "../../src/state/layout.ts";
 import { ensureOwner } from "../../src/state/owner-store.ts";
 
 const temporary: string[] = [];
-const OWNER_KEY_OUTPUT = /\b[a-f0-9]{64}\b/i;
+const OWNER_KEY_OUTPUT = /\b[a-f0-9]{64}\b/iu;
 afterEach(async () => {
   await Promise.all(
     temporary
@@ -21,7 +20,7 @@ afterEach(async () => {
 });
 
 describe("reaper CLI process output", () => {
-  test("reports the package version without touching reaper state", async () => {
+  it("reports the package version without touching reaper state", async () => {
     const child = Bun.spawn(
       [
         process.execPath,
@@ -41,7 +40,7 @@ describe("reaper CLI process output", () => {
     expect(JSON.parse(stdout)).toEqual({ version: "0.1.0" });
   });
 
-  test("clean no-op emits no stdout, even when many active owners are retained", async () => {
+  it("clean no-op emits no stdout, even when many active owners are retained", async () => {
     const fixture = await createFixture();
     const database = createThreadsDatabase(fixture.dbPath);
     for (let index = 0; index < 80; index++) {
@@ -61,7 +60,7 @@ describe("reaper CLI process output", () => {
     expect(result.stdout).toBe("");
   });
 
-  test("cleanup emits only compact counts with a measured serialized ceiling", async () => {
+  it("cleanup emits only compact counts with a measured serialized ceiling", async () => {
     const fixture = await createFixture();
     const owner = "archived-owner";
     await ensureOwner(fixture.stateRoot, owner);
@@ -85,7 +84,7 @@ describe("reaper CLI process output", () => {
     expect(result.stdout).not.toContain(owner);
   });
 
-  test("exceptional output remains bounded and redacts fixture paths and owner keys", async () => {
+  it("exceptional output remains bounded and redacts fixture paths and owner keys", async () => {
     const fixture = await createFixture();
     await mkdir(join(fixture.stateRoot, "owners"), { recursive: true });
     for (let index = 0; index < 300; index++) {

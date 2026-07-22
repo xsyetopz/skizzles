@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import { createHarness, repositoryContext } from "../support.ts";
 
@@ -104,7 +103,10 @@ describe("bounded repository discovery", () => {
       ],
       [
         {
-          path: `packages/orchestrator/${Array.from({ length: 9 }, () => "d").join("/")}/x.ts`,
+          path: `packages/orchestrator/${Array.from(
+            { length: 9 },
+            () => "d",
+          ).join("/")}/x.ts`,
           kind: "file",
           bytes: 1,
         },

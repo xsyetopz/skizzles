@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun provides its test module at runtime.
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   link,
@@ -180,8 +179,9 @@ describe("candidate exact-path security gateway", () => {
     const second = declaration("second.txt", "write", null, bytes("two\n"));
     const firstChange = first.changes[0];
     const secondChange = second.changes[0];
-    if (firstChange === undefined || secondChange === undefined)
+    if (firstChange === undefined || secondChange === undefined) {
       throw new Error("split fixture missing changes");
+    }
     const result = await prepare(
       root,
       Object.freeze({
@@ -266,8 +266,9 @@ async function prepare(
       ownedPackagePaths: Object.freeze([]),
     }),
   );
-  if (diff.status !== "created" || commit.status !== "created")
+  if (diff.status !== "created" || commit.status !== "created") {
     throw new Error("authority setup failed");
+  }
   return await prepareWithAuthorities(
     root,
     input,
@@ -337,13 +338,15 @@ function sandboxBroker(observed: string[][]): PortableSandboxBroker {
       execute: async () => Object.freeze({}),
     }),
   );
-  if (authority.status !== "created")
+  if (authority.status !== "created") {
     throw new Error("sandbox authority setup failed");
+  }
   const broker = createPortableSandboxBroker(
     Object.freeze({ authority: authority.authority }),
   );
-  if (broker.status !== "created")
+  if (broker.status !== "created") {
     throw new Error("sandbox broker setup failed");
+  }
   return broker.broker;
 }
 
@@ -353,12 +356,14 @@ function dependencyService(
   const authority = createDependencyResolverAuthority(
     Object.freeze({ id: "candidate-test-registry", resolve }),
   );
-  if (authority.status !== "created")
+  if (authority.status !== "created") {
     throw new Error("dependency authority setup failed");
+  }
   const service = createDependencyResolutionService(
     Object.freeze({ authority: authority.authority }),
   );
-  if (service.status !== "created")
+  if (service.status !== "created") {
     throw new Error("dependency service setup failed");
+  }
   return service.service;
 }

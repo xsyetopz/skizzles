@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import { recoverDiagnosticBytes } from "../src/index.ts";
 import { createHarness } from "./support.ts";

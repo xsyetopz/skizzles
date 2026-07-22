@@ -1,6 +1,5 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
 import { Database } from "bun:sqlite";
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver cannot resolve Bun's built-in module scheme; @types/bun supplies the contract.
+
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import {
@@ -43,7 +42,7 @@ afterEach(async () => {
 class EmptyDocker implements DockerRunner {
   calls: string[][] = [];
   runCalls: Array<{ args: string[]; options?: RunOptions }> = [];
-  // biome-ignore lint/suspicious/useAwait: The async signature implements a promise-returning test double contract.
+
   async run(args: string[], options?: RunOptions): Promise<CommandResult> {
     this.calls.push(args);
     this.runCalls.push({ args, ...(options === undefined ? {} : { options }) });
@@ -55,7 +54,7 @@ class EmptyDocker implements DockerRunner {
 }
 
 describe("archive reaper", () => {
-  test("cleans archived exact owners and retains active and missing rows", async () => {
+  it("cleans archived exact owners and retains active and missing rows", async () => {
     const fixture = await roots();
     const archived = await createLabFixture(fixture, "thread-archived");
     await createLabFixture(fixture, "thread-active");
@@ -72,7 +71,7 @@ describe("archive reaper", () => {
     expect(docker.calls.every((args) => !args.includes("down"))).toBe(true);
   });
 
-  test("schema mismatch and unavailable database fail closed without Docker", async () => {
+  it("schema mismatch and unavailable database fail closed without Docker", async () => {
     const fixture = await roots();
     await createLabFixture(fixture, "thread-safe");
     const malformed = join(fixture.root, "malformed.sqlite");
@@ -96,7 +95,7 @@ describe("archive reaper", () => {
     expect(docker.calls).toEqual([]);
   });
 
-  test("rechecks immediately and retains an owner whose archive state changes", async () => {
+  it("rechecks immediately and retains an owner whose archive state changes", async () => {
     const fixture = await roots();
     const lab = await createLabFixture(fixture, "thread-flip");
     const dbPath = join(fixture.root, "state.sqlite");
@@ -115,7 +114,7 @@ describe("archive reaper", () => {
     expect(docker.calls).toEqual([]);
   });
 
-  test("reads WAL state in place and validates the exact read-only schema", async () => {
+  it("reads WAL state in place and validates the exact read-only schema", async () => {
     const fixture = await roots();
     const dbPath = join(fixture.root, "wal.sqlite");
     const writer = createDatabase(dbPath);
@@ -128,7 +127,7 @@ describe("archive reaper", () => {
     writer.close();
   });
 
-  test("a symlinked runtime owner is retained without outside deletion or Docker", async () => {
+  it("a symlinked runtime owner is retained without outside deletion or Docker", async () => {
     const fixture = await roots();
     const lab = await createLabFixture(fixture, "thread-symlink");
     const ownerRuntime = join(fixture.runtimeRoot, lab.ownerKey);
@@ -148,7 +147,7 @@ describe("archive reaper", () => {
     expect(docker.calls).toEqual([]);
   });
 
-  test("an already-missing runtime remains safely cleanable", async () => {
+  it("an already-missing runtime remains safely cleanable", async () => {
     const fixture = await roots();
     const lab = await createLabFixture(fixture, "thread-missing-runtime");
     await rm(join(fixture.runtimeRoot, lab.ownerKey), { recursive: true });
@@ -167,7 +166,7 @@ describe("archive reaper", () => {
     expect(result.ok).toBe(true);
   });
 
-  test("a replaced owner state directory is retained without outside deletion or Docker", async () => {
+  it("a replaced owner state directory is retained without outside deletion or Docker", async () => {
     const fixture = await roots();
     const lab = await createLabFixture(fixture, "thread-replaced-state");
     const ownerState = ownerDirectory(fixture.stateRoot, lab.owner);
@@ -196,7 +195,7 @@ describe("archive reaper", () => {
     expect(docker.calls).toEqual([]);
   });
 
-  test("an escaped persisted runtime is retained before Docker", async () => {
+  it("an escaped persisted runtime is retained before Docker", async () => {
     const fixture = await roots();
     const lab = await createLabFixture(fixture, "thread-escaped-runtime");
     const manifest = labManifestPath(fixture.stateRoot, lab.owner, lab.id);
@@ -217,7 +216,7 @@ describe("archive reaper", () => {
     expect(docker.calls).toEqual([]);
   });
 
-  test("an initial query failure aborts the scan before cleanup", async () => {
+  it("an initial query failure aborts the scan before cleanup", async () => {
     const fixture = await roots();
     await createLabFixture(fixture, "thread-query-error");
     const dbPath = join(fixture.root, "state.sqlite");
@@ -237,7 +236,7 @@ describe("archive reaper", () => {
     expect(docker.calls).toEqual([]);
   });
 
-  test("cleanup removes exact containers before waiting for activity, then removes filesystem state", async () => {
+  it("cleanup removes exact containers before waiting for activity, then removes filesystem state", async () => {
     const fixture = await roots();
     const lab = await createLabFixture(fixture, "thread-active-cleanup");
     const dbPath = join(fixture.root, "state.sqlite");
@@ -276,7 +275,7 @@ describe("archive reaper", () => {
     expect((await reaping).archivedOwnersCleaned).toEqual([lab.ownerKey]);
   });
 
-  test("cleanup scrubs persisted secret names from every reaper Docker subprocess", async () => {
+  it("cleanup scrubs persisted secret names from every reaper Docker subprocess", async () => {
     const fixture = await roots();
     const secretName = "CODEX_CONTAINER_LAB_REAPER_TEST_SECRET";
     const previous = process.env[secretName];
@@ -346,7 +345,7 @@ async function createLabFixture(
     name: "lab",
     owner,
     ownerKey: key,
-    // biome-ignore lint/security/noSecrets: This fixed test/schema token is not a credential.
+
     repoHash: "123456789abc",
     composeProject: "ccl-reaper",
     state: "failed",

@@ -80,7 +80,6 @@ export interface TransactionEntryFixture {
 }
 
 export function currentCommit(): string {
-  // biome-ignore lint/security/noSecrets: This is a public upstream commit digest fixture.
   return "bc5c9161b46feddc13282652fd2cfdf1e5bab4a9";
 }
 

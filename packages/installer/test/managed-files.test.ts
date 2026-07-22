@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
@@ -23,7 +22,9 @@ import {
 const roots: string[] = [];
 
 function temporaryRoot(): string {
-  const root = `${process.env["TMPDIR"] ?? "/tmp"}/skizzles-managed-files-${crypto.randomUUID()}`;
+  const root = `${
+    process.env["TMPDIR"] ?? "/tmp"
+  }/skizzles-managed-files-${crypto.randomUUID()}`;
   roots.push(root);
   mkdirSync(root, { recursive: true });
   return root;

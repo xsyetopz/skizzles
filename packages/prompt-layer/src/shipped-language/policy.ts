@@ -4,7 +4,6 @@ import { PromptLayerError } from "../lifecycle/contract.ts";
 const POLICY_SCHEMA = "skizzles.shipped-language-policy.v2";
 const POLICY_VERSION = 2;
 const POLICY_SHA256 =
-  // biome-ignore lint/security/noSecrets: This is an integrity digest for the public evaluation corpus.
   "444d0182b07c1bb92f5703459b133b47c10bb81484625a289281d748bde53f53";
 const MAX_POLICY_BYTES = 64 * 1024;
 const MAX_DIAGNOSTIC_PATH_UNITS = 512;

@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -65,7 +64,7 @@ afterEach(async () => {
 });
 
 describe("Container Lab doctor", () => {
-  test("reports missing binaries without exposing paths", () => {
+  it("reports missing binaries without exposing paths", () => {
     const report = doctorContainerLab("");
     expect(report).toMatchObject({
       installed: false,
@@ -74,7 +73,7 @@ describe("Container Lab doctor", () => {
     });
     expect(JSON.stringify(report)).not.toContain(process.cwd());
   });
-  test("classifies ready and installed-not-ready", async () => {
+  it("classifies ready and installed-not-ready", async () => {
     expect(
       doctorContainerLab(stubs("ready"), undefined, 5000, await workspace()),
     ).toMatchObject({
@@ -97,7 +96,7 @@ describe("Container Lab doctor", () => {
       dockerAvailable: false,
     });
   });
-  test("rejects malformed and oversized public output", async () => {
+  it("rejects malformed and oversized public output", async () => {
     expect(
       doctorContainerLab(
         stubs("malformed"),
@@ -121,7 +120,7 @@ describe("Container Lab doctor", () => {
       reason: "external command exceeded its public output limit",
     });
   });
-  test("uses the descriptor version and output cap", async () => {
+  it("uses the descriptor version and output cap", async () => {
     const path = stubs("ready");
     const descriptorPath = join(path, "contract.json");
     const descriptor = structuredClone(containerLabIntegrationDescriptor);
@@ -136,7 +135,7 @@ describe("Container Lab doctor", () => {
       reason: "external command exceeded its public output limit",
     });
   });
-  test("rejects invalid descriptor overrides before command execution", () => {
+  it("rejects invalid descriptor overrides before command execution", () => {
     const path = stubs("ready");
     const descriptorPath = join(path, "invalid-contract.json");
     writeFileSync(descriptorPath, "{}\n");
@@ -144,7 +143,7 @@ describe("Container Lab doctor", () => {
       "Skizzles Container Lab descriptor is invalid",
     );
   });
-  test("bounds hanging commands and stderr", async () => {
+  it("bounds hanging commands and stderr", async () => {
     expect(
       doctorContainerLab(stubs("hang"), undefined, 50, await workspace()),
     ).toMatchObject({
@@ -158,7 +157,7 @@ describe("Container Lab doctor", () => {
       ready: false,
     });
   });
-  test("derives and validates Skizzles bundled ownership paths", async () => {
+  it("derives and validates Skizzles bundled ownership paths", async () => {
     const sourceRoot = resolve(import.meta.dir, "../../..");
     const paths = bundledContainerLabPaths(sourceRoot);
     expect(paths).toMatchObject({
@@ -181,7 +180,7 @@ describe("Container Lab doctor", () => {
       version: "configured-0.1.0-unverified",
     });
   });
-  test("reports Skizzles install health independently of optional Container Lab", () => {
+  it("reports Skizzles install health independently of optional Container Lab", () => {
     const root = `${
       process.env["TMPDIR"] ?? "/tmp"
     }/skizzles-install-doctor-${crypto.randomUUID()}`;

@@ -36,7 +36,7 @@ export async function readReapedOwner(
     );
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return undefined;
+      return;
     }
     throw error;
   }

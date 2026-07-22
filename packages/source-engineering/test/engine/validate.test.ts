@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Bun's test module is provided by the runtime.
 import { afterEach, describe, expect, it } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -60,8 +59,9 @@ describe("engine validation", () => {
       fixture.batch,
     );
     expect(result.status).toBe("prepared");
-    if (result.status !== "prepared")
+    if (result.status !== "prepared") {
       throw new Error(`unexpected ${result.code}`);
+    }
 
     expect(result.artifacts.map(({ path }) => path)).toEqual([
       "test/example.test.ts",
@@ -120,8 +120,9 @@ describe("engine validation", () => {
       fixture.state,
       fixture.batch,
     );
-    if (result.status !== "prepared")
+    if (result.status !== "prepared") {
       throw new Error(`unexpected ${result.code}`);
+    }
     expect(
       verifyPrepared(
         fixture.state,
@@ -232,8 +233,9 @@ async function createFixture(options: FixtureOptions = {}): Promise<Fixture> {
       Object.freeze({ id: "replace", language: "typescript" }),
     ]),
   });
-  if (sourceCreation.status !== "created")
+  if (sourceCreation.status !== "created") {
     throw new Error("source evidence setup failed");
+  }
   const capture = await sourceCreation.evidence.capture({
     requestDigest,
     repositoryId: repository.id,
@@ -272,8 +274,9 @@ async function createFixture(options: FixtureOptions = {}): Promise<Fixture> {
       }),
     }),
   );
-  if (adapterCreation.status !== "created")
+  if (adapterCreation.status !== "created") {
     throw new Error(adapterCreation.code);
+  }
   const adapter = resolveSourceLanguageAdapter(adapterCreation.adapter);
   if (adapter === undefined) throw new Error("adapter bindings missing");
   const config: EngineConfig = Object.freeze({
@@ -442,8 +445,9 @@ async function parsed(path: string, text: string) {
     targetPath: path,
     sourceText: text,
   });
-  if (result.status !== "parsed")
+  if (result.status !== "parsed") {
     throw new Error(`parse failed: ${result.code}`);
+  }
   return result.parsed;
 }
 
@@ -473,8 +477,9 @@ async function buildIndex(
       configDigest,
     },
   );
-  if (result.status !== "indexed")
+  if (result.status !== "indexed") {
     throw new Error(`index failed: ${result.code}`);
+  }
   return result.index;
 }
 
@@ -508,8 +513,9 @@ function astDeletion(
   baseline: Awaited<ReturnType<typeof parsed>>,
 ) {
   const declaration = listTypeScriptDeclarations(baseline)[0];
-  if (declaration === undefined)
+  if (declaration === undefined) {
     throw new Error("baseline declaration missing");
+  }
   const span = Object.freeze({
     start: declaration.start,
     end: declaration.end,

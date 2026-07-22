@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
@@ -111,7 +110,9 @@ describe("installer CLI target gates", () => {
   });
 
   test("prompt-policy rejects unknown arguments without touching ambient homes", () => {
-    const root = `${process.env["TMPDIR"] ?? "/tmp"}/skizzles-cli-unknown-${crypto.randomUUID()}`;
+    const root = `${
+      process.env["TMPDIR"] ?? "/tmp"
+    }/skizzles-cli-unknown-${crypto.randomUUID()}`;
     roots.push(root);
     const result = Bun.spawnSync({
       cmd: [
@@ -267,7 +268,9 @@ describe("installer CLI target gates", () => {
   });
 
   test("configure CLI isolates app-server writes during dry-run", () => {
-    const root = `${process.env["TMPDIR"] ?? "/tmp"}/skizzles-cli-config-${crypto.randomUUID()}`;
+    const root = `${
+      process.env["TMPDIR"] ?? "/tmp"
+    }/skizzles-cli-config-${crypto.randomUUID()}`;
     roots.push(root);
     const codexHome = join(root, "codex");
     const fakeCodex = join(root, "fake-codex");
@@ -307,7 +310,9 @@ describe("installer CLI target gates", () => {
   });
 
   test("unconfigure discards pending pre-write validation evidence", () => {
-    const root = `${process.env["TMPDIR"] ?? "/tmp"}/skizzles-cli-config-recovery-${crypto.randomUUID()}`;
+    const root = `${
+      process.env["TMPDIR"] ?? "/tmp"
+    }/skizzles-cli-config-recovery-${crypto.randomUUID()}`;
     roots.push(root);
     const codexHome = join(root, "codex");
     const fakeCodex = join(root, "fake-codex");
@@ -367,7 +372,9 @@ describe("installer CLI target gates", () => {
   });
 
   test("prompt-policy CLI emits a redacted dry-run summary", () => {
-    const root = `${process.env["TMPDIR"] ?? "/tmp"}/skizzles-cli-policy-${crypto.randomUUID()}`;
+    const root = `${
+      process.env["TMPDIR"] ?? "/tmp"
+    }/skizzles-cli-policy-${crypto.randomUUID()}`;
     roots.push(root);
     const codexHome = join(root, "codex");
     const fakeCodex = join(root, "fake-codex");
@@ -416,7 +423,9 @@ describe("installer CLI target gates", () => {
   });
 
   test("prompt-policy CLI redacts app-server error data and stderr", () => {
-    const root = `${process.env["TMPDIR"] ?? "/tmp"}/skizzles-cli-policy-error-${crypto.randomUUID()}`;
+    const root = `${
+      process.env["TMPDIR"] ?? "/tmp"
+    }/skizzles-cli-policy-error-${crypto.randomUUID()}`;
     roots.push(root);
     const codexHome = join(root, "codex");
     const fakeCodex = join(root, "fake-codex-error");
@@ -454,7 +463,6 @@ describe("installer CLI target gates", () => {
     expect(snapshotTree(codexHome)).toEqual(before);
   });
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: The exact wire-code matrix keeps one spawned-process assertion path for all current enum values and the legacy-shape negative case.
   test("prompt-policy CLI classifies only the current nested config write code", () => {
     for (const wireCode of [
       "configLayerReadonly",
@@ -465,7 +473,9 @@ describe("installer CLI target gates", () => {
       "userLayerNotFound",
       "UNSUPPORTED-AMBIGUOUS-CODE",
     ]) {
-      const root = `${process.env["TMPDIR"] ?? "/tmp"}/skizzles-cli-policy-write-${crypto.randomUUID()}`;
+      const root = `${
+        process.env["TMPDIR"] ?? "/tmp"
+      }/skizzles-cli-policy-write-${crypto.randomUUID()}`;
       roots.push(root);
       const codexHome = join(root, "codex");
       const fakeCodex = join(root, "fake-codex");
@@ -476,7 +486,9 @@ describe("installer CLI target gates", () => {
         : "";
       writeFileSync(
         fakeCodex,
-        `#!${process.execPath}\nimport { createInterface } from "node:readline";\nimport { join } from "node:path";\nprocess.stderr.write("DO-NOT-LEAK-WRITE-STDERR\\n");\nconst lines = createInterface({ input: process.stdin });\nlines.on("line", (line) => {\n  const message = JSON.parse(line);\n  if (message.id === undefined) return;\n  if (message.method === "initialize") {\n    process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + "\\n");\n  } else if (message.method === "config/read") {\n    process.stdout.write(JSON.stringify({ id: message.id, result: { layers: [{ name: { type: "user", file: join(process.env.CODEX_HOME, "config.toml"), profile: null }, version: "sha256:1", config: {} }] } }) + "\\n");\n  } else {\n    process.stdout.write(JSON.stringify({ id: message.id, error: { code: -32602, message: "DO-NOT-LEAK-WRITE-MESSAGE", data: { config_write_error_code: ${JSON.stringify(wireCode)}, developer_instructions: "DO-NOT-LEAK-WRITE-DATA"${legacyFields} } } }) + "\\n");\n  }\n});\nlines.on("close", () => process.exit(0));\n`,
+        `#!${process.execPath}\nimport { createInterface } from "node:readline";\nimport { join } from "node:path";\nprocess.stderr.write("DO-NOT-LEAK-WRITE-STDERR\\n");\nconst lines = createInterface({ input: process.stdin });\nlines.on("line", (line) => {\n  const message = JSON.parse(line);\n  if (message.id === undefined) return;\n  if (message.method === "initialize") {\n    process.stdout.write(JSON.stringify({ id: message.id, result: {} }) + "\\n");\n  } else if (message.method === "config/read") {\n    process.stdout.write(JSON.stringify({ id: message.id, result: { layers: [{ name: { type: "user", file: join(process.env.CODEX_HOME, "config.toml"), profile: null }, version: "sha256:1", config: {} }] } }) + "\\n");\n  } else {\n    process.stdout.write(JSON.stringify({ id: message.id, error: { code: -32602, message: "DO-NOT-LEAK-WRITE-MESSAGE", data: { config_write_error_code: ${JSON.stringify(
+          wireCode,
+        )}, developer_instructions: "DO-NOT-LEAK-WRITE-DATA"${legacyFields} } } }) + "\\n");\n  }\n});\nlines.on("close", () => process.exit(0));\n`,
       );
       chmodSync(fakeCodex, 0o755);
       const result = Bun.spawnSync({

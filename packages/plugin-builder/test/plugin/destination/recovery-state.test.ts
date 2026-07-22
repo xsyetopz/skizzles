@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome cannot resolve Bun's built-in test module.
 import { afterEach, describe, expect, it } from "bun:test";
 import { link, readFile, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -9,7 +8,6 @@ import {
   claimArtifacts,
   collectMessages,
   crashAt,
-  temporaryRoot as createTemporaryRoot,
   currentClaim,
   durableAllocatorArtifacts,
   expectProcessGone,
@@ -21,6 +19,7 @@ import {
   seededDestination,
   spawnRecoveryContender,
   startWorker,
+  temporaryRoot as createTemporaryRoot,
   waitForFile,
   writeRecoveryWorkerModule,
 } from "./claim-fixture.ts";
@@ -46,9 +45,9 @@ describe("plugin destination recovery state", () => {
           Promise.reject(new Error("entered after lease recovery")),
         ),
       ).rejects.toThrow("entered after lease recovery");
-      // biome-ignore lint/performance/noAwaitInLoops: every crash fixture proves cleanup.
+
       expect(await nonAllocatorArtifacts(parent)).toEqual([]);
-      // biome-ignore lint/performance/noAwaitInLoops: acquisition aliases must never survive recovery.
+
       expect(
         (await claimArtifacts(parent)).some((name) => name.endsWith(".tmp")),
       ).toBe(false);
@@ -88,7 +87,9 @@ describe("plugin destination recovery state", () => {
           name.includes(".recovery-highwater-") &&
           name.endsWith(`.${record.token}.tmp`),
       );
-      if (temporary === undefined) throw new Error("acquisition alias missing");
+      if (temporary === undefined) {
+        throw new Error("acquisition alias missing");
+      }
       const temporaryPath = join(parent, temporary);
       if (variant === "mismatch") {
         await unlink(temporaryPath);
@@ -162,8 +163,9 @@ describe("plugin destination recovery state", () => {
         );
       }
       if (variant === "malformed") await writeFile(temporary, "{\n");
-      if (variant === "oversize")
+      if (variant === "oversize") {
         await writeFile(temporary, "x".repeat(20_000));
+      }
       if (variant === "duplicate") {
         await writeFile(
           temporary,

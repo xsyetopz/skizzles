@@ -1,4 +1,3 @@
-// biome-ignore lint/correctness/noUnresolvedImports: Biome's resolver does not recognize Bun's built-in bun:test module.
 import { describe, expect, it } from "bun:test";
 import { renderLaunchAgent } from "../src/index.ts";
 

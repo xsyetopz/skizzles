@@ -16,7 +16,7 @@ export type {
   ReflexionPersistenceReceipt,
 } from "./contract.ts";
 export { createReflexionLocalDatabase } from "./local-database.ts";
-// biome-ignore lint/performance/noBarrelFile: this is the package's deliberate public entrypoint.
+
 export {
   createReflexionMemoryRecorder,
   createReflexionPersistenceReceipt,

@@ -160,7 +160,7 @@ async function validateInterface(
         key,
         ICON_PATH_MAX_LENGTH,
       );
-      // biome-ignore lint/performance/noAwaitInLoops: documented icon fields retain deterministic field-order diagnostics.
+
       const asset = await validateContainedAsset(
         root,
         directoryName,
