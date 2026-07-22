@@ -39,9 +39,43 @@ failed or uncertain application attempt requires a fresh review before retry.
 Checkpoint creation and supersession reserve their identifiers across authority
 awaits and revalidate ledger state before committing a transition.
 
-## Execution state
+## Engineering workflow
 
-Phase 2 state control is exposed through the same fail-closed facade:
+`createEngineeringWorkflow()` is the public effectful entrypoint. It composes
+the authenticated `@skizzles/source-engineering` facade with the internal
+causal publication workflow:
+
+1. `describe()` takes the language from a host-owned validation profile and
+   captures exact baselines, declaration digests, language-bound template
+   schemas, and a single-use source context receipt through the matching
+   registered source adapter;
+2. `prepare()` accepts only bounded declaration-level AST operations and
+   host-owned validation-profile identifiers. Whole candidate bytes, regex
+   rewrites, commands, and working directories are not public input;
+3. source editing, formatting, complete-set policy/compiler validation, and
+   artifact production run as one batch. The orchestrator independently checks
+   every receipt binding and caps each candidate artifact at 1.5 MB;
+4. context reservations are authority-owned before every source, physical, and
+   publication transition. A typed pause returns an opaque same-process,
+   one-shot continuation bound to the request, repository, target baseline,
+   source cursor, evidence, and budget epoch. `cancelContinuation()` atomically
+   releases an abandoned target reservation;
+5. optional physical-integration declarations are attested only by the injected
+   authority. Pure source changes never invoke it; accepted receipts must prove
+   matching loopback endpoints, a successful complete probe, and terminal lab
+   cleanup; and
+6. the review exposes digest-only engineering preview evidence. Candidate bytes
+   remain internal and canonical publication stays unchanged until external
+   approval. Source artifacts and the authentic task receipt are revalidated
+   immediately before promotion.
+
+Validation profiles bind the source language, formatter, ordinary command
+profiles, and distinct negative-test command profiles. A declared negative test
+is rejected unless a host-owned negative-test profile is present, and both the
+configured profile identities and observed command audits are bound into
+approval evidence.
+
+The internal causal state control enforces these publication properties:
 
 - declared relative targets are normalized and reserved before repository-state
   capture; unrelated dirty paths are allowed, while staged, unstaged, untracked,
@@ -65,18 +99,23 @@ Phase 2 state control is exposed through the same fail-closed facade:
   authority-owned and concurrent, replayed, cancelled, expired, or drifted
   attempts fail closed.
 
-`createCausalWorkflow()` composes those state machines with the intentional
+The internal causal workflow composes those state machines with the intentional
 public APIs of `@skizzles/command-supervisor`, `@skizzles/run-workspace`, and
-`@skizzles/workspace-transaction`. It is the Phase 2 effectful entrypoint:
+`@skizzles/workspace-transaction`:
 
 1. reserve a clean target baseline and require complete bounded discovery;
 2. start the host-owned execution budget, create an isolated run workspace, and
    check its byte, entry, and scan quotas before and after every operation;
-3. snapshot bounded caller candidate bytes, materialize coordinator-named files
-   in a fresh direct-child command directory with exclusive no-follow handles,
-   and execute only host-registered, absolute direct-argv command profiles in
-   that directory. Caller-selected working directories and candidate paths are
-   not accepted;
+3. materialize source-derived candidate artifacts at their declared relative
+   paths in a bounded repository-shaped command scope using exclusive no-follow
+   handles, and execute only host-registered absolute direct-argv command
+   profiles there. Caller-selected commands and working directories are not
+   accepted. A profile may register the package names it needs; the workflow
+   resolves their required, optional, and peer closure from the trusted
+   workspace topology, copies package bytes into the private scope, and creates
+   only measured internal resolution links. Package versions, content digests,
+   dependency topology, candidates, and the complete staged tree are bound into
+   the command audit and approval diff;
 4. require an allowed exit, complete stdout/stderr evidence, complete stream
    drain, confirmed process-tree cleanup, and unchanged regular single-link
    candidate identities and contents before binding the complete immutable diff

@@ -29,6 +29,7 @@ const SKIZZLES_PACKAGE_NAMES = [
   "@skizzles/plugin-builder",
   "@skizzles/prompt-layer",
   "@skizzles/run-workspace",
+  "@skizzles/source-engineering",
   "@skizzles/usage-analyzer",
   "@skizzles/workspace-transaction",
   "@skizzles/workspace-policy",

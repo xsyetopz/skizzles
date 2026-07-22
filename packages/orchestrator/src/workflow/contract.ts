@@ -12,6 +12,7 @@ import type {
   RecoveryResult,
   RepositoryLeaseAuthorityPort,
 } from "@skizzles/workspace-transaction";
+import type { Digest } from "../digest.ts";
 import type { Orchestrator } from "../runtime.ts";
 import type { ApprovalRequest } from "../state/approval.ts";
 import type { TargetBaseline } from "../state/target.ts";
@@ -25,6 +26,7 @@ export interface CommandAuditProfile {
   readonly id: string;
   readonly argv: readonly string[];
   readonly env: Readonly<Record<string, string>>;
+  readonly dependencyPackages: readonly string[];
   readonly timeoutMilliseconds: number;
   readonly maximumOutputBytes: number;
   readonly drainMilliseconds: number;
@@ -71,6 +73,30 @@ export interface WorkflowCommandAudit {
   readonly profileId: string;
   readonly receipt: CommandObservationReceipt;
   readonly stderrEvidence: readonly number[] | null;
+  readonly scope: CommandScopeReceipt;
+  readonly declaredTargetPaths: readonly string[];
+}
+
+export interface CommandScopeTargetReceipt {
+  readonly path: string;
+  readonly operation: "write" | "delete";
+  readonly candidateDigest: Digest | null;
+}
+
+export interface CommandScopeReceipt {
+  readonly stagedTreeDigest: Digest;
+  readonly candidateDigest: Digest;
+  readonly dependencyDigest: Digest;
+  readonly dependencies: readonly CommandDependencyReceipt[];
+  readonly targets: readonly CommandScopeTargetReceipt[];
+}
+
+export interface CommandDependencyReceipt {
+  readonly name: string;
+  readonly version: string;
+  readonly kind: "external" | "workspace";
+  readonly direct: boolean;
+  readonly packageDigest: Digest;
 }
 
 export interface WorkflowReview {
@@ -111,6 +137,7 @@ export type WorkflowFailureCode =
   | "COMMAND_OBSERVATION_REJECTED"
   | "PUBLICATION_BASELINE_REJECTED"
   | "DIFF_REJECTED"
+  | "ENGINEERING_EVIDENCE_REJECTED"
   | "COMPLETION_CONTRACT_REJECTED"
   | "APPROVAL_REJECTED"
   | "APPROVAL_DRIFTED"

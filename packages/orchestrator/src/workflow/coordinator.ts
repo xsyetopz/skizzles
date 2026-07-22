@@ -2,10 +2,10 @@ import {
   create as createRunWorkspace,
   type RunWorkspace,
 } from "@skizzles/run-workspace";
-import {
-  type PublicationResult,
-  type RecoveryResult,
-  type WorkspaceTransaction,
+import type {
+  PublicationResult,
+  RecoveryResult,
+  WorkspaceTransaction,
 } from "@skizzles/workspace-transaction";
 import { exactKeys, isRecord } from "../codec.ts";
 import { digestValue } from "../digest.ts";
@@ -29,15 +29,17 @@ import type {
   WorkflowRejectionResult,
   WorkflowReview,
 } from "./contract.ts";
+import type { WorkflowEngineeringEvidence } from "./evidence.ts";
 import { isWorkflowCleanupHandle, WorkflowLifecycle } from "./lifecycle.ts";
-import { parsePrepareInput } from "./prepare-input.ts";
+import { acceptPreparedBaseline, parsePrepareInput } from "./prepare-input.ts";
+import { revalidatePromotionState } from "./promotion.ts";
 import {
   capturePublicationBaseline,
   exactCommittedCleanupFailure,
   exactPublicationSuccess,
   type PreparedPublication,
   preparePublication,
-  TransactionApprovalBridge,
+  type TransactionApprovalBridge,
 } from "./publication.ts";
 import {
   createRecoveryHandle,
@@ -55,6 +57,7 @@ interface WorkflowRecord {
   readonly request: NormalizedRequest;
   readonly repository: RepositoryContext;
   readonly prepared: PreparedPublication;
+  readonly engineeringEvidence: WorkflowEngineeringEvidence | null;
   review: WorkflowReview;
   state:
     | "awaiting"
@@ -119,13 +122,21 @@ export class WorkflowCoordinator implements CausalWorkflow {
         cleanup: null,
       };
     }
-    const baselineResult = await this.config.orchestrator.captureTargetBaseline(
-      {
-        request: parsed.request,
-        repository: parsed.repository,
-        targets: parsed.targets.map((target) => target.path),
-      },
-    );
+    const baselineResult =
+      parsed.baseline === null
+        ? await this.config.orchestrator.captureTargetBaseline({
+            request: parsed.request,
+            repository: parsed.repository,
+            targets: parsed.targets.map((target) => target.path),
+          })
+        : await acceptPreparedBaseline(
+            this.config.orchestrator,
+            parsed.baseline,
+            parsed.request.intentDigest,
+            parsed.repository.repositoryId,
+            parsed.repository.treeDigest,
+            parsed.targets.map((target) => target.path),
+          );
     if (baselineResult.status !== "accepted") {
       return {
         status: "rejected",
@@ -169,6 +180,7 @@ export class WorkflowCoordinator implements CausalWorkflow {
       profiles: this.config.commandProfiles,
       workspace,
       limits: this.config.workspaceUsageLimits,
+      repositoryRoot: parsed.discoveryRoot,
       targets: parsed.targets,
       commands: parsed.commands,
       execution: started.execution,
@@ -196,6 +208,8 @@ export class WorkflowCoordinator implements CausalWorkflow {
       baselineResult.baseline,
       captured,
       parsed.targets,
+      operationResult.audits,
+      parsed.engineeringEvidence,
     );
     if (prepared === undefined)
       return this.failStartedPreparation(
@@ -269,6 +283,7 @@ export class WorkflowCoordinator implements CausalWorkflow {
       request: parsed.request,
       repository: parsed.repository,
       prepared,
+      engineeringEvidence: parsed.engineeringEvidence,
       review,
       state: "awaiting",
       publication: null,
@@ -299,18 +314,14 @@ export class WorkflowCoordinator implements CausalWorkflow {
     if (approved.status !== "accepted")
       return this.rejectPromotion(record, approvalCode(approved.code));
     record.lifecycle.updateApproval(approved.approval);
-    if (
-      !(await workspaceWithinQuota(
-        record.workspace,
-        this.config.workspaceUsageLimits,
-      ))
-    )
-      return this.rejectPromotion(record, "WORKSPACE_QUOTA_REJECTED");
-    const target = await this.config.orchestrator.revalidateTargetBaseline(
+    const revalidation = await revalidatePromotionState(
+      this.config,
+      record.workspace,
       record.baseline,
+      record.engineeringEvidence,
     );
-    if (target.status !== "unchanged")
-      return this.rejectPromotion(record, "APPROVAL_DRIFTED");
+    if (revalidation !== null)
+      return this.rejectPromotion(record, revalidation);
     const promotion = await this.config.orchestrator.promote({
       approval: approved.approval,
     });

@@ -8,7 +8,8 @@ import {
   createLocalRepositoryLeaseAuthority,
   type RepositoryLeaseAuthorityPort,
 } from "@skizzles/workspace-transaction";
-import { type CausalWorkflow, createCausalWorkflow } from "../../src/index.ts";
+import { createCausalWorkflow } from "../../src/workflow/causal-workflow.ts";
+import type { CausalWorkflow } from "../../src/workflow/contract.ts";
 import { createHarness, repositoryContext } from "../support.ts";
 import { IsolatedDestination } from "./isolated-destination.ts";
 
@@ -18,6 +19,14 @@ interface FixtureOptions {
   readonly crashStep?: string;
   readonly failLeaseReleaseAfterCommit?: boolean;
   readonly legacyCwd?: readonly string[];
+  readonly commandArgv?: readonly string[];
+  readonly dependencyPackages?: readonly string[];
+  readonly workspaceUsageLimits?: Readonly<{
+    byteLimit: number;
+    entryLimit: number;
+    scanLimit: number;
+  }>;
+  readonly stderr?: "evidence" | "must-be-empty";
 }
 
 function createFixture(options: FixtureOptions = {}): {
@@ -114,7 +123,7 @@ function createFixture(options: FixtureOptions = {}): {
             },
           }),
     },
-    workspaceUsageLimits: {
+    workspaceUsageLimits: options.workspaceUsageLimits ?? {
       byteLimit: 1_000_000,
       entryLimit: 100,
       scanLimit: 100,
@@ -123,19 +132,21 @@ function createFixture(options: FixtureOptions = {}): {
       {
         id: "write-candidate",
         ...(options.legacyCwd === undefined ? {} : { cwd: options.legacyCwd }),
-        argv: [
+        argv: options.commandArgv ?? [
           process.execPath,
           "-e",
           options.commandScript ??
-            "if (await Bun.file('candidate-000000.bin').text() !== 'new-content') process.exit(9)",
+            "if (await Bun.file('src/file.ts').text() !== 'new-content') process.exit(9)",
+          "src/file.ts",
         ],
         env: {},
+        dependencyPackages: options.dependencyPackages ?? [],
         timeoutMilliseconds: 5000,
         maximumOutputBytes: 10_000,
         drainMilliseconds: 1000,
         signalGraceMilliseconds: 1000,
         allowedExitCodes: [0],
-        stderr: "must-be-empty",
+        stderr: options.stderr ?? "must-be-empty",
       },
     ],
     approvalContext: {
@@ -171,12 +182,92 @@ async function prepare(fixture: ReturnType<typeof createFixture>) {
 }
 
 describe("causal Phase 2 workflow", () => {
+  it("compiles and tests a candidate against external and workspace dependencies inside the private scope", async () => {
+    const candidatePath = "test/dependency-candidate.test.ts";
+    const candidateSource = [
+      'import { expect, test } from "bun:test";',
+      'import { create } from "@skizzles/run-workspace";',
+      'import { z } from "zod";',
+      'test("staged dependency closure", () => {',
+      '  expect(z.literal("validated").parse("validated")).toBe("validated");',
+      '  expect(typeof create).toBe("function");',
+      "});",
+      "",
+    ].join("\n");
+    const fixture = createFixture({
+      commandArgv: [process.execPath, "test", candidatePath],
+      dependencyPackages: ["zod", "@skizzles/run-workspace"],
+      workspaceUsageLimits: {
+        byteLimit: 15_000_000,
+        entryLimit: 2_000,
+        scanLimit: 2_000,
+      },
+      stderr: "evidence",
+    });
+    const context = await repositoryContext(fixture.orchestrator);
+    const result = await fixture.workflow.prepare({
+      ...context,
+      targets: [
+        {
+          path: candidatePath,
+          operation: "write",
+          candidateBytes: Array.from(new TextEncoder().encode(candidateSource)),
+        },
+      ],
+      discoveryRoot: "packages/orchestrator",
+      commands: ["write-candidate"],
+    });
+    if (result.status !== "awaiting-approval") {
+      throw new Error(`dependency-backed workflow failed: ${result.code}`);
+    }
+    expect(result.review.commandAudits[0]?.declaredTargetPaths).toEqual([
+      candidatePath,
+    ]);
+    expect(result.review.commandAudits[0]?.scope.dependencies).toEqual([
+      expect.objectContaining({
+        name: "@skizzles/run-workspace",
+        kind: "workspace",
+        direct: true,
+        packageDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      }),
+      expect.objectContaining({
+        name: "zod",
+        kind: "external",
+        direct: true,
+        packageDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      }),
+    ]);
+    expect(result.review.commandAudits[0]?.scope.dependencyDigest).toMatch(
+      /^sha256:[0-9a-f]{64}$/u,
+    );
+    await expect(
+      fixture.workflow.reject({ review: result.review }),
+    ).resolves.toMatchObject({
+      status: "rejected",
+      cleanup: { complete: true, workspace: { state: "deleted" } },
+    });
+  }, 20_000);
+
   it("keeps the canonical target unchanged until single-use approval and publication", async () => {
     const fixture = createFixture();
     const review = await prepare(fixture);
     expect(fixture.destination.currentText("src/file.ts")).toBeUndefined();
     expect(review.commandAudits).toHaveLength(1);
     expect(review.commandAudits[0]?.receipt.lifecycle.drain).toBe("complete");
+    expect(review.commandAudits[0]?.declaredTargetPaths).toEqual([
+      "src/file.ts",
+    ]);
+    expect(review.commandAudits[0]?.scope).toMatchObject({
+      stagedTreeDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      candidateDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      targets: [
+        {
+          path: "src/file.ts",
+          operation: "write",
+          candidateDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+        },
+      ],
+    });
     const result = await fixture.workflow.approveAndPromote({
       review,
       token: "approve",
@@ -274,8 +365,8 @@ describe("causal Phase 2 workflow", () => {
     await writeFile(sentinel, "outside-safe", { mode: 0o600 });
     const script = [
       "const fs = await import('node:fs/promises')",
-      "await fs.unlink('candidate-000000.bin')",
-      `await fs.symlink(${JSON.stringify(sentinel)}, 'candidate-000000.bin')`,
+      "await fs.unlink('src/file.ts')",
+      `await fs.symlink(${JSON.stringify(sentinel)}, 'src/file.ts')`,
     ].join(";");
     const fixture = createFixture({ commandScript: script });
     const context = await repositoryContext(fixture.orchestrator);

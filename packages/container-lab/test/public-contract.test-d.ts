@@ -12,7 +12,9 @@ type Equal<Left, Right> =
 export type ContainerLabValueExports = Assert<
   Equal<
     keyof typeof import("@skizzles/container-lab"),
-    "ContainerLabService" | "recoverLabSync"
+    | "ContainerLabService"
+    | "createPhysicalIntegrationAuthority"
+    | "recoverLabSync"
   >
 >;
 

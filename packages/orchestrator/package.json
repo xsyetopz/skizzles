@@ -15,6 +15,7 @@
   "dependencies": {
     "@skizzles/command-supervisor": "workspace:*",
     "@skizzles/run-workspace": "workspace:*",
+    "@skizzles/source-engineering": "workspace:*",
     "@skizzles/workspace-transaction": "workspace:*"
   },
   "devDependencies": {

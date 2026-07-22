@@ -72,6 +72,7 @@
       "dependencies": {
         "@skizzles/command-supervisor": "workspace:*",
         "@skizzles/run-workspace": "workspace:*",
+        "@skizzles/source-engineering": "workspace:*",
         "@skizzles/workspace-transaction": "workspace:*",
       },
       "devDependencies": {
@@ -122,6 +123,18 @@
         "@types/bun": "^1.3.14",
         "@types/node": "^26.1.1",
         "typescript": "^7.0.2",
+      },
+    },
+    "packages/source-engineering": {
+      "name": "@skizzles/source-engineering",
+      "version": "0.1.0",
+      "dependencies": {
+        "@skizzles/run-workspace": "workspace:*",
+        "typescript": "7.0.2",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^26.1.1",
       },
     },
     "packages/usage-analyzer": {
@@ -203,6 +216,8 @@
     "@skizzles/prompt-layer": ["@skizzles/prompt-layer@workspace:packages/prompt-layer"],
 
     "@skizzles/run-workspace": ["@skizzles/run-workspace@workspace:packages/run-workspace"],
+
+    "@skizzles/source-engineering": ["@skizzles/source-engineering@workspace:packages/source-engineering"],
 
     "@skizzles/usage-analyzer": ["@skizzles/usage-analyzer@workspace:packages/usage-analyzer"],
 

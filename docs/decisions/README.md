@@ -19,6 +19,7 @@ rewriting its rationale.
 | [0009](0009-owned-run-workspaces.md) | Accepted | Own disposable run roots, child shutdown, preservation, signals, and stale cleanup in one capability package. |
 | [0010](0010-orchestration-runtime.md) | Accepted | Own deterministic orchestration policy in one modular runtime package with fail-closed trust boundaries. |
 | [0011](0011-orchestration-execution-boundaries.md) | Accepted | Separate durable publication, command observation, disposable-run quotas, and orchestration state while composing one gated execution path. |
+| [0012](0012-source-engineering-pipeline.md) | Accepted | Derive candidate bytes through a TypeScript-first source-engineering capability and bind validation provenance into the gated publication path. |
 
 ## Record contract
 

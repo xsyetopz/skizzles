@@ -130,6 +130,38 @@
     },
     {
       "rule": "semantic-token-limit",
+      "path": "docs/decisions/0009-owned-run-workspaces.md",
+      "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
+      "owner": "Repository architecture policy",
+      "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
+      "review": "Rename only through an explicit ADR history migration that updates every reference atomically."
+    },
+    {
+      "rule": "temporal-file",
+      "path": "docs/decisions/0009-owned-run-workspaces.md",
+      "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
+      "owner": "Repository architecture policy",
+      "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
+      "review": "Remove only if the repository adopts a different versioned ADR identity convention."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "docs/decisions/0010-orchestration-runtime.md",
+      "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
+      "owner": "Repository architecture policy",
+      "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
+      "review": "Rename only through an explicit ADR history migration that updates every reference atomically."
+    },
+    {
+      "rule": "temporal-file",
+      "path": "docs/decisions/0010-orchestration-runtime.md",
+      "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
+      "owner": "Repository architecture policy",
+      "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
+      "review": "Remove only if the repository adopts a different versioned ADR identity convention."
+    },
+    {
+      "rule": "semantic-token-limit",
       "path": "docs/decisions/0011-orchestration-execution-boundaries.md",
       "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
       "owner": "Repository architecture policy",
@@ -139,6 +171,22 @@
     {
       "rule": "temporal-file",
       "path": "docs/decisions/0011-orchestration-execution-boundaries.md",
+      "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
+      "owner": "Repository architecture policy",
+      "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
+      "review": "Remove only if the repository adopts a different versioned ADR identity convention."
+    },
+    {
+      "rule": "semantic-token-limit",
+      "path": "docs/decisions/0012-source-engineering-pipeline.md",
+      "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
+      "owner": "Repository architecture policy",
+      "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
+      "review": "Rename only through an explicit ADR history migration that updates every reference atomically."
+    },
+    {
+      "rule": "temporal-file",
+      "path": "docs/decisions/0012-source-engineering-pipeline.md",
       "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
       "owner": "Repository architecture policy",
       "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",

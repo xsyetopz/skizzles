@@ -22,6 +22,7 @@ The current workspace dependency edges are:
 @skizzles/model-catalog -> @skizzles/run-workspace
 @skizzles/orchestrator -> @skizzles/command-supervisor
 @skizzles/orchestrator -> @skizzles/run-workspace
+@skizzles/orchestrator -> @skizzles/source-engineering
 @skizzles/orchestrator -> @skizzles/workspace-transaction
 @skizzles/plugin-builder -> @skizzles/command-hook
 @skizzles/plugin-builder -> @skizzles/command-supervisor
@@ -32,6 +33,7 @@ The current workspace dependency edges are:
 @skizzles/plugin-builder -> @skizzles/run-workspace
 @skizzles/plugin-builder -> @skizzles/usage-analyzer
 @skizzles/prompt-layer -> @skizzles/run-workspace
+@skizzles/source-engineering -> @skizzles/run-workspace
 @skizzles/workspace-policy -> @skizzles/run-workspace
 ```
 <!-- workspace-policy:dependency-edges:end -->
@@ -55,6 +57,13 @@ deterministic recovery. It provides serialized per-file atomic publication and
 recoverable file-set semantics; it does not claim portable multi-file atomicity.
 The orchestrator owns policy and approval, while command-supervisor owns process
 observation and run-workspace owns disposable-root lifecycle and quota evidence.
+
+`@skizzles/source-engineering` owns language-specific source transformation and
+validation. It derives immutable candidates through compiler AST nodes, keeps
+symbol indexes advisory to compiler results, and binds template, formatter,
+policy, and semantic-diff provenance. The orchestrator composes that evidence
+with approval and publication; source-engineering never writes the canonical
+workspace.
 
 ## Run lifecycle ownership
 

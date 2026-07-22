@@ -1,7 +1,7 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
-import { createCausalWorkflow, createOrchestrator } from "../src/index.ts";
+import { createEngineeringWorkflow, createOrchestrator } from "../src/index.ts";
 import {
   createHarness,
   type EffectClassificationInput,
@@ -16,7 +16,7 @@ describe("package facade and fail-closed controller", () => {
     expect(Object.keys(facade).sort()).toEqual(
       [
         "ANCHOR_PRECEDENCE",
-        "createCausalWorkflow",
+        "createEngineeringWorkflow",
         "createOrchestrator",
         "recoverDiagnosticBytes",
         "recoverRequestBytes",
@@ -38,7 +38,7 @@ describe("package facade and fail-closed controller", () => {
       status: "rejected",
       code: "INVALID_ORCHESTRATOR_CONFIG",
     });
-    expect(createCausalWorkflow(null)).toEqual({
+    expect(createEngineeringWorkflow(null)).toEqual({
       status: "rejected",
       code: "INVALID_WORKFLOW_CONFIG",
     });

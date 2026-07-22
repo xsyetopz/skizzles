@@ -36,8 +36,25 @@ import {
   recoverLabSync as recoverManagedLabSync,
 } from "./destruction.ts";
 import { createProvisionedLab } from "./provisioning.ts";
+import { markPhysicalService } from "./service-provenance.ts";
 
 export type { RunOutput } from "./attached-run.ts";
+export {
+  createPhysicalIntegrationAuthority,
+  type PhysicalCleanupProof,
+  type PhysicalConnection,
+  type PhysicalIntegrationAuthority,
+  type PhysicalIntegrationBindings,
+  type PhysicalIntegrationController,
+  type PhysicalIntegrationDeclaration,
+  type PhysicalIntegrationDeclarationResult,
+  type PhysicalIntegrationReceipt,
+  type PhysicalIntegrationReceiptResult,
+  type PhysicalIntegrationRejectionCode,
+  type PhysicalProbe,
+  type PhysicalProbeEvidence,
+  type PhysicalProbeProfile,
+} from "./physical-integration.ts";
 
 export async function recoverLabSync(
   roots: StateRoots,
@@ -62,6 +79,21 @@ export class ContainerLabService {
     this.roots = roots;
     this.docker = docker;
     this.environment = environment;
+    if (
+      new.target === ContainerLabService &&
+      docker === defaultDockerRunner &&
+      environment === process.env
+    ) {
+      const capturedRoots = Object.freeze({ ...roots });
+      this.roots = capturedRoots;
+      markPhysicalService(this, {
+        owner,
+        roots: capturedRoots,
+        run: AUTHENTIC_RUN.bind(this),
+        destroyLab: AUTHENTIC_DESTROY_LAB.bind(this),
+        listLabs: AUTHENTIC_LIST_LABS.bind(this),
+      });
+    }
   }
 
   async health(): Promise<{
@@ -290,6 +322,10 @@ export class ContainerLabService {
     return activityLockPath(this.roots.stateRoot, this.owner, id);
   }
 }
+
+const AUTHENTIC_RUN = ContainerLabService.prototype.run;
+const AUTHENTIC_DESTROY_LAB = ContainerLabService.prototype.destroyLab;
+const AUTHENTIC_LIST_LABS = ContainerLabService.prototype.listLabs;
 
 function compactLabStatus(lab: LabMetadata, stack: unknown): unknown {
   const endpoints = lab.endpoints.slice(0, 8).map((endpoint) => ({

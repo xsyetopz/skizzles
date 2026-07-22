@@ -8,6 +8,28 @@ Project topology belongs to the consuming repository. A committed `.codex-contai
 
 Manifests separate `environment` (command-service forwarding), `compose_environment` (non-secret source interpolation and implicit pass-through), and `secret_environment` (top-level secret sources). Creation validates a raw source model, renders the original source directly to its normalized effective model, and accepts that render only when a second raw read is byte-identical to the first. The normalized model is then materialized under the private lab runtime; later up, status, logs, and exec operations never reinterpret mutable project Compose files. Docker and Git subprocesses receive constructed environments rather than ambient host state. Secret names are retained for lifecycle bookkeeping; values reach only Compose up and remain outside every generated, diagnostic, public, and durable boundary. See the [manifest contract](docs/manifest.md); bundled examples leave all capabilities empty.
 
+## Physical integration authority
+
+The public package facade also exposes a narrow `PhysicalIntegrationAuthority`
+for workflows that must prove a real containerized integration before accepting
+a candidate. Its controller issues opaque declarations only for a ready lab
+created with the package's production Docker runner. A declaration binds the
+exact owner, lab, source-repository, Compose-project, manifest digest,
+connection set, and one immutable host-registered probe profile. Workflow input
+selects a bounded profile ID; it cannot provide probe argv, cwd, environment, or
+timeouts.
+
+Attestation revalidates the declaration and current manifest, requires an exact
+declared-to-resolved endpoint set, runs the registered direct-argv probe through
+`ContainerLabService`, requires complete bounded output evidence and exit zero,
+then destroys the lab and proves its state is absent. Only that terminal path
+issues a receipt whose digest binds the declaration and caller-supplied
+repository/candidate provenance identities. Stale or forged declarations,
+changed manifests, missing or extra endpoints, nonzero or incomplete probes,
+test-double Docker evidence, and failed cleanup are rejected. Pure source
+changes carry zero physical declarations and therefore do not invoke this
+authority.
+
 ## Quick start
 
 1. From the Skizzles root, run `bun skills/codex-container-lab/scripts/codex-container-lab --help` to use the bundled launcher without PATH wiring. Read [docs/installation.md](docs/installation.md) before optional host wiring.

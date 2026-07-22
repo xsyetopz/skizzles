@@ -15,7 +15,9 @@ import type {
   CapturedPublicationBaseline,
   PublicationBaselineAuthorityPort,
   PublicationIdentity,
+  WorkflowCommandAudit,
 } from "./contract.ts";
+import type { WorkflowEngineeringEvidence } from "./evidence.ts";
 
 const rawDigest = /^[0-9a-f]{64}$/u;
 const maximumCandidateBytes = 1_500_000;
@@ -213,6 +215,8 @@ export async function preparePublication(
   baseline: TargetBaseline,
   captured: CapturedPublicationBaseline,
   targets: readonly WorkflowTarget[],
+  commandAudits: readonly WorkflowCommandAudit[],
+  engineeringEvidence: WorkflowEngineeringEvidence | null = null,
 ): Promise<PreparedPublication | undefined> {
   if (repository.repositoryId !== identity.repositoryId) return;
   const transactionTargets: unknown[] = [];
@@ -252,11 +256,24 @@ export async function preparePublication(
       }),
     );
   }
+  const auditMaterial = Object.freeze(
+    commandAudits.map((audit) =>
+      Object.freeze({
+        profileId: audit.profileId,
+        receipt: audit.receipt,
+        scope: audit.scope,
+        declaredTargetPaths: audit.declaredTargetPaths,
+        stderrEvidenceDigest: digestValue(audit.stderrEvidence),
+      }),
+    ),
+  );
   const reference = digestValue({
     repositoryId: identity.repositoryId,
     rootIdentity: identity.rootIdentity,
     ownerId: identity.ownerId,
     baselineDigest: baseline.baselineDigest,
+    engineeringEvidenceDigest: engineeringEvidence?.evidenceDigest ?? null,
+    commandAudits: auditMaterial,
     targets: diffTargets,
   });
   const request = Object.freeze({
@@ -268,7 +285,22 @@ export async function preparePublication(
     targets: Object.freeze(transactionTargets),
   });
   const diff = new TextEncoder().encode(
-    JSON.stringify(Object.freeze({ version: 1, targets: diffTargets })),
+    JSON.stringify(
+      Object.freeze({
+        version: 1,
+        commandAudits: auditMaterial,
+        engineeringEvidence:
+          engineeringEvidence === null
+            ? null
+            : Object.freeze({
+                evidenceDigest: engineeringEvidence.evidenceDigest,
+                evidenceBase64: Buffer.from(
+                  engineeringEvidence.evidenceBytes,
+                ).toString("base64"),
+              }),
+        targets: diffTargets,
+      }),
+    ),
   );
   if (diff.byteLength === 0 || diff.byteLength > maximumDiffBytes) return;
   return Object.freeze({

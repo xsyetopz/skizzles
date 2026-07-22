@@ -12623,6 +12623,220 @@ function assertSecretEnvironmentAvailable(names, environment) {
   }
 }
 
+// packages/container-lab/src/lab/physical/workspace.ts
+import { randomUUID as randomUUID4 } from "crypto";
+import { constants as constants2 } from "fs";
+import { lstat as lstat12, mkdir as mkdir10, open as open4, realpath as realpath4, rename as rename5, rm as rm9 } from "fs/promises";
+import { dirname as dirname2, join as join11, relative as relative4, resolve as resolve7, sep as sep3 } from "path";
+
+// packages/container-lab/src/lab/physical/input.ts
+import { createHash as createHash5 } from "crypto";
+var maximumCandidateBytes = 64 * 1024 * 1024;
+function digestValue(value) {
+  return `sha256:${createHash5("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+function digestBytes(value) {
+  return `sha256:${createHash5("sha256").update(Uint8Array.from(value)).digest("hex")}`;
+}
+function candidateDigestOf(targets) {
+  return digestValue(targets.map(({ path: path9, digest: digest2 }) => [path9, digest2]));
+}
+function targetSetDigestOf(targets) {
+  return digestValue(targets.map(({ path: path9, digest: digest2, byteLength }) => [path9, digest2, byteLength]));
+}
+function compareText(left, right) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+// packages/container-lab/src/lab/physical/workspace.ts
+async function synchronizeCandidateWorkspace(input) {
+  const lab = await readLab(input.roots, input.owner, input.labId);
+  if (lab.state !== "ready" || lab.runtime === undefined || lab.ownerKey !== input.ownerKey || lab.composeProject !== input.composeProject || lab.sourceRepositoryIdentity !== input.sourceRepositoryIdentity || lab.updatedAt !== input.labUpdatedAt) {
+    throw new Error("candidate workspace identity changed");
+  }
+  const expectedWorkspace = resolve7(lab.workspace);
+  const workspace = await realpath4(expectedWorkspace);
+  const workspaceState = await lstat12(expectedWorkspace);
+  if (!workspaceState.isDirectory() || workspaceState.isSymbolicLink()) {
+    throw new Error("candidate workspace is not an authentic directory");
+  }
+  const measurements = [];
+  for (const target of input.targets) {
+    const destination = containedDestination(workspace, target.path);
+    await ensureContainedParents(workspace, dirname2(destination));
+    await publishCandidate(destination, target.bytes);
+    if (await realpath4(destination) !== destination) {
+      throw new Error("candidate destination rebound after publication");
+    }
+    const observed = await readNoFollow(destination);
+    const observedDigest = digestBytes(observed);
+    if (observed.length !== target.byteLength || observedDigest !== target.digest || !sameBytes(observed, target.bytes)) {
+      throw new Error("candidate bytes drifted after workspace publication");
+    }
+    measurements.push(Object.freeze({
+      path: target.path,
+      digest: observedDigest,
+      byteLength: observed.length
+    }));
+  }
+  measurements.sort((left, right) => compareText(left.path, right.path));
+  const targets = Object.freeze(measurements);
+  const candidateDigest = candidateDigestOf(targets);
+  const targetSetDigest = targetSetDigestOf(targets);
+  const workspaceIdentityDigest = digestValue({
+    owner: lab.owner,
+    ownerKey: lab.ownerKey,
+    labId: lab.id,
+    composeProject: lab.composeProject,
+    sourceRepositoryIdentity: lab.sourceRepositoryIdentity,
+    labUpdatedAt: lab.updatedAt,
+    workspacePathDigest: digestValue(workspace)
+  });
+  const provenanceMeasurementDigest = digestValue({
+    declarationDigest: input.declarationDigest,
+    manifestDigest: input.manifestDigest,
+    profileDigest: input.profileDigest,
+    declaredProvenanceDigest: input.provenanceDigest,
+    workspaceIdentityDigest,
+    targetSetDigest,
+    candidateDigest
+  });
+  return Object.freeze({
+    targetSetDigest,
+    candidateDigest,
+    workspaceIdentityDigest,
+    provenanceMeasurementDigest,
+    targets
+  });
+}
+async function publishCandidate(destination, bytes) {
+  const existing = await lstat12(destination).catch((error) => {
+    if (errorCode(error) === "ENOENT")
+      return;
+    throw error;
+  });
+  if (existing !== undefined && (!existing.isFile() || existing.isSymbolicLink())) {
+    throw new Error("candidate destination is not a regular file");
+  }
+  const temporary = join11(dirname2(destination), `.codex-candidate-${randomUUID4()}.tmp`);
+  let handle;
+  try {
+    handle = await open4(temporary, constants2.O_WRONLY | constants2.O_CREAT | constants2.O_EXCL | constants2.O_NOFOLLOW, 384);
+    await handle.writeFile(Uint8Array.from(bytes));
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    await rename5(temporary, destination);
+  } finally {
+    await handle?.close().catch(() => {
+      return;
+    });
+    await rm9(temporary, { force: true }).catch(() => {
+      return;
+    });
+  }
+}
+async function readNoFollow(path9) {
+  const handle = await open4(path9, constants2.O_RDONLY | constants2.O_NOFOLLOW);
+  try {
+    const state = await handle.stat();
+    if (!state.isFile() || state.nlink !== 1) {
+      throw new Error("candidate destination changed identity");
+    }
+    return new Uint8Array(await handle.readFile());
+  } finally {
+    await handle.close();
+  }
+}
+async function ensureContainedParents(workspace, destinationParent) {
+  const relativeParent = relative4(workspace, destinationParent);
+  if (relativeParent === ".." || relativeParent.startsWith(`..${sep3}`) || resolve7(workspace, relativeParent) !== destinationParent) {
+    throw new Error("candidate parent escapes workspace");
+  }
+  let current = workspace;
+  for (const segment of relativeParent.split(sep3).filter(Boolean)) {
+    current = join11(current, segment);
+    await mkdir10(current).catch((error) => {
+      if (errorCode(error) !== "EEXIST")
+        throw error;
+    });
+    const state = await lstat12(current);
+    if (!state.isDirectory() || state.isSymbolicLink()) {
+      throw new Error("candidate parent is not a real directory");
+    }
+  }
+  const observed = await realpath4(destinationParent);
+  if (observed !== destinationParent) {
+    throw new Error("candidate parent rebound through a link");
+  }
+}
+function containedDestination(workspace, path9) {
+  const destination = resolve7(workspace, ...path9.split("/"));
+  const relativePath = relative4(workspace, destination);
+  if (relativePath === "" || relativePath === ".." || relativePath.startsWith(`..${sep3}`) || resolve7(workspace, relativePath) !== destination) {
+    throw new Error("candidate path escapes workspace");
+  }
+  return destination;
+}
+function sameBytes(left, right) {
+  if (left.length !== right.length)
+    return false;
+  for (let index = 0;index < left.length; index += 1) {
+    if (left[index] !== right[index])
+      return false;
+  }
+  return true;
+}
+function errorCode(error) {
+  if (typeof error !== "object" || error === null)
+    return;
+  const descriptor = Object.getOwnPropertyDescriptor(error, "code");
+  return descriptor !== undefined && "value" in descriptor ? String(descriptor.value) : undefined;
+}
+
+// packages/container-lab/src/lab/service-provenance.ts
+var physicalServices = new WeakMap;
+function markPhysicalService(service, registration) {
+  const capability = Object.freeze({
+    ...registration,
+    synchronizeCandidates: async (input) => await synchronizeCandidateWorkspace({
+      roots: registration.roots,
+      owner: registration.owner,
+      ...input
+    })
+  });
+  physicalServices.set(service, {
+    capability,
+    exposedRun: service.run,
+    exposedDestroyLab: service.destroyLab,
+    exposedListLabs: service.listLabs,
+    claimed: false
+  });
+}
+
+// packages/container-lab/src/lab/physical/probe.ts
+import { createHash as createHash6 } from "crypto";
+
+// packages/container-lab/src/lab/physical/contract.ts
+var MAXIMUM_PROBE_OUTPUT_BYTES = 1048576;
+
+// packages/container-lab/src/lab/physical/probe.ts
+class BoundedObservation {
+  #hash = createHash6("sha256");
+  bytes = 0;
+  complete = true;
+  observe(chunk) {
+    this.bytes += chunk.byteLength;
+    if (this.bytes > MAXIMUM_PROBE_OUTPUT_BYTES) {
+      this.complete = false;
+      return;
+    }
+    this.#hash.update(chunk);
+  }
+  digest() {
+    return `sha256:${this.#hash.digest("hex")}`;
+  }
+}
 // packages/container-lab/src/lab/orchestrator.ts
 class ContainerLabService {
   owner;
@@ -12634,6 +12848,17 @@ class ContainerLabService {
     this.roots = roots;
     this.docker = docker;
     this.environment = environment;
+    if (new.target === ContainerLabService && docker === defaultDockerRunner && environment === process10.env) {
+      const capturedRoots = Object.freeze({ ...roots });
+      this.roots = capturedRoots;
+      markPhysicalService(this, {
+        owner,
+        roots: capturedRoots,
+        run: AUTHENTIC_RUN.bind(this),
+        destroyLab: AUTHENTIC_DESTROY_LAB.bind(this),
+        listLabs: AUTHENTIC_LIST_LABS.bind(this)
+      });
+    }
   }
   async health() {
     await this.reconcileOwner();
@@ -12771,6 +12996,9 @@ class ContainerLabService {
     return activityLockPath(this.roots.stateRoot, this.owner, id);
   }
 }
+var AUTHENTIC_RUN = ContainerLabService.prototype.run;
+var AUTHENTIC_DESTROY_LAB = ContainerLabService.prototype.destroyLab;
+var AUTHENTIC_LIST_LABS = ContainerLabService.prototype.listLabs;
 function compactLabStatus(lab, stack) {
   const endpoints = lab.endpoints.slice(0, 8).map((endpoint) => ({
     name: endpoint.name.slice(0, 128),

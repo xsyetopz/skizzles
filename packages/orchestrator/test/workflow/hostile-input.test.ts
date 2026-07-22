@@ -2,7 +2,8 @@
 import { expect, it } from "bun:test";
 import process from "node:process";
 import { createLocalRepositoryLeaseAuthority } from "@skizzles/workspace-transaction";
-import { type CausalWorkflow, createCausalWorkflow } from "../../src/index.ts";
+import { createCausalWorkflow } from "../../src/workflow/causal-workflow.ts";
+import type { CausalWorkflow } from "../../src/workflow/contract.ts";
 import { createHarness } from "../support.ts";
 import { IsolatedDestination } from "./isolated-destination.ts";
 

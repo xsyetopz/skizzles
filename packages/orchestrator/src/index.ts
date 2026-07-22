@@ -23,6 +23,47 @@ export {
   type DiagnosticSeverity,
   recoverDiagnosticBytes,
 } from "./diagnostic.ts";
+export type {
+  ContextBindings,
+  ContextBudgetAuthorityPort,
+  ContextOperation,
+  ContextPause,
+  ContextReservation,
+  ContextReserveRequest,
+  ContextReserveResult,
+} from "./engineering/context.ts";
+export type { EngineeringContinuation } from "./engineering/continuation.ts";
+export type {
+  EngineeringContext,
+  EngineeringContinuationCancelResult,
+  EngineeringDeclarationKind,
+  EngineeringDescribeInput,
+  EngineeringDescribeResult,
+  EngineeringEditOperation,
+  EngineeringFailureCode,
+  EngineeringFaultDeclaration,
+  EngineeringNegativeEvidence,
+  EngineeringNodeSelector,
+  EngineeringObjective,
+  EngineeringPrepareInput,
+  EngineeringPrepareResult,
+  EngineeringPreview,
+  EngineeringPreviewTarget,
+  EngineeringReview,
+  EngineeringTarget,
+  EngineeringValidationProfile,
+  EngineeringWorkflow,
+  EngineeringWorkflowConfig,
+  EngineeringWorkflowResult,
+  SourceEngineeringPort,
+} from "./engineering/contract.ts";
+export type {
+  PhysicalCandidateEvidence,
+  PhysicalIntegrationAuthorityPort,
+  PhysicalIntegrationBindings,
+  PhysicalIntegrationReceipt,
+} from "./engineering/physical.ts";
+export { createEngineeringWorkflow } from "./engineering/workflow.ts";
 export {
   type CanonicalIntent,
   type IntentResult,
@@ -116,24 +157,3 @@ export type {
   TargetState,
   TargetStatus,
 } from "./state/target.ts";
-export { createCausalWorkflow } from "./workflow/causal-workflow.ts";
-export type {
-  CausalWorkflow,
-  CausalWorkflowConfig,
-  CausalWorkflowResult,
-  CommandAuditProfile,
-  PublicationBaselineAuthorityPort,
-  PublicationIdentity,
-  StderrPolicy,
-  WorkflowCleanupHandle,
-  WorkflowCleanupReceipt,
-  WorkflowCleanupResult,
-  WorkflowCommandAudit,
-  WorkflowFailureCode,
-  WorkflowPrepareResult,
-  WorkflowPromotionResult,
-  WorkflowRecoveryHandle,
-  WorkflowRecoveryResult,
-  WorkflowRejectionResult,
-  WorkflowReview,
-} from "./workflow/contract.ts";

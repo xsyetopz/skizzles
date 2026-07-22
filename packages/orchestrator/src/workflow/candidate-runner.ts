@@ -4,8 +4,8 @@ import type {
 } from "@skizzles/run-workspace";
 import type { Orchestrator } from "../runtime.ts";
 import type { ExecutionSession } from "../state/execution.ts";
-import { observeProfile } from "./command-audit.ts";
-import { createCommandScope, verifyCommandScope } from "./command-scope.ts";
+import { observeProfile } from "./command/audit.ts";
+import { createCommandScope, verifyCommandScope } from "./command/scope.ts";
 import type { CommandAuditProfile, WorkflowReview } from "./contract.ts";
 import type { WorkflowTarget } from "./publication.ts";
 
@@ -19,13 +19,34 @@ export async function runWorkflowCommands(input: {
   readonly profiles: readonly CommandAuditProfile[];
   readonly workspace: RunWorkspace;
   readonly limits: WorkspaceUsageLimits;
+  readonly repositoryRoot: string;
   readonly targets: readonly WorkflowTarget[];
   readonly commands: readonly string[];
   readonly execution: ExecutionSession;
 }): Promise<CandidateRun> {
   let execution = input.execution;
   const audits: WorkflowReview["commandAudits"][number][] = [];
-  for (const [index, id] of input.commands.entries()) {
+  const dependencyPackages = Object.freeze(
+    [
+      ...new Set(
+        input.commands.flatMap(
+          (id) =>
+            input.profiles.find((profile) => profile.id === id)
+              ?.dependencyPackages ?? [],
+        ),
+      ),
+    ].sort((left, right) => left.localeCompare(right)),
+  );
+  const scope = await createCommandScope({
+    workspace: input.workspace,
+    sequence: 0,
+    repositoryRoot: input.repositoryRoot,
+    limits: input.limits,
+    targets: input.targets,
+    dependencyPackages,
+  });
+  if (scope === undefined) return { execution, audits: null };
+  for (const id of input.commands) {
     if (!(await workspaceWithinQuota(input.workspace, input.limits))) {
       return { execution, audits: null };
     }
@@ -37,17 +58,19 @@ export async function runWorkflowCommands(input: {
     });
     if (action.status !== "accepted") return { execution, audits: null };
     execution = action.execution;
-    const scope = await createCommandScope(
+    if (!(await verifyCommandScope(scope))) {
+      return { execution, audits: null };
+    }
+    const audit = await observeProfile(
+      profile,
       input.workspace,
-      index,
-      input.targets,
+      scope.cwd,
+      scope.receipt,
     );
-    if (scope === undefined) return { execution, audits: null };
-    const audit = await observeProfile(profile, input.workspace, scope.cwd);
     if (
       audit === undefined ||
-      !(await verifyCommandScope(scope)) ||
-      !(await workspaceWithinQuota(input.workspace, input.limits))
+      !(await workspaceWithinQuota(input.workspace, input.limits)) ||
+      !(await verifyCommandScope(scope))
     ) {
       return { execution, audits: null };
     }

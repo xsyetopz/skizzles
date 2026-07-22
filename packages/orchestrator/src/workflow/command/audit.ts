@@ -4,12 +4,17 @@ import {
   recoverCommandOutput,
 } from "@skizzles/command-supervisor";
 import type { RunWorkspace } from "@skizzles/run-workspace";
-import type { CommandAuditProfile, WorkflowCommandAudit } from "./contract.ts";
+import type {
+  CommandAuditProfile,
+  CommandScopeReceipt,
+  WorkflowCommandAudit,
+} from "../contract.ts";
 
 export async function observeProfile(
   profile: CommandAuditProfile,
   workspace: RunWorkspace,
   ownedCwd: string,
+  scope: CommandScopeReceipt,
 ): Promise<WorkflowCommandAudit | undefined> {
   let receipt: CommandObservationReceipt;
   try {
@@ -54,6 +59,12 @@ export async function observeProfile(
     receipt,
     stderrEvidence:
       profile.stderr === "evidence" ? Object.freeze(Array.from(stderr)) : null,
+    scope,
+    declaredTargetPaths: Object.freeze(
+      scope.targets
+        .map((target) => target.path)
+        .filter((path) => profile.argv.includes(path)),
+    ),
   });
   return audit;
 }

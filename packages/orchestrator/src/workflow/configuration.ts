@@ -101,17 +101,21 @@ function parseProfile(value: unknown): CommandAuditProfile | undefined {
   if (
     !(
       isRecord(value) &&
-      exactKeys(value, [
-        "id",
-        "argv",
-        "env",
-        "timeoutMilliseconds",
-        "maximumOutputBytes",
-        "drainMilliseconds",
-        "signalGraceMilliseconds",
-        "allowedExitCodes",
-        "stderr",
-      ]) &&
+      exactKeys(
+        value,
+        [
+          "id",
+          "argv",
+          "env",
+          "timeoutMilliseconds",
+          "maximumOutputBytes",
+          "drainMilliseconds",
+          "signalGraceMilliseconds",
+          "allowedExitCodes",
+          "stderr",
+        ],
+        ["dependencyPackages"],
+      ) &&
       validId(value["id"], 128) &&
       value["stderr"] !== undefined &&
       (value["stderr"] === "evidence" || value["stderr"] === "must-be-empty")
@@ -122,10 +126,15 @@ function parseProfile(value: unknown): CommandAuditProfile | undefined {
   const argv = stringList(value["argv"], 1, 256);
   const env = environment(value["env"]);
   const allowedExitCodes = integerList(value["allowedExitCodes"], 0, 255);
+  const dependencyPackages =
+    value["dependencyPackages"] === undefined
+      ? Object.freeze([])
+      : packageList(value["dependencyPackages"]);
   if (
     argv === undefined ||
     env === undefined ||
     allowedExitCodes === undefined ||
+    dependencyPackages === undefined ||
     !boundedInteger(value["timeoutMilliseconds"], 1, 3_600_000) ||
     !boundedInteger(value["maximumOutputBytes"], 1, 64 * 1024 * 1024) ||
     !boundedInteger(value["drainMilliseconds"], 0, 60_000) ||
@@ -137,6 +146,7 @@ function parseProfile(value: unknown): CommandAuditProfile | undefined {
     id: value["id"],
     argv,
     env,
+    dependencyPackages,
     timeoutMilliseconds: value["timeoutMilliseconds"],
     maximumOutputBytes: value["maximumOutputBytes"],
     drainMilliseconds: value["drainMilliseconds"],
@@ -144,6 +154,26 @@ function parseProfile(value: unknown): CommandAuditProfile | undefined {
     allowedExitCodes,
     stderr: value["stderr"],
   });
+}
+
+function packageList(value: unknown): readonly string[] | undefined {
+  const values = stringList(value, 0, 256);
+  if (values === undefined) return;
+  const names = new Set<string>();
+  for (const name of values) {
+    if (
+      !/^(?:@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)$/u.test(
+        name,
+      ) ||
+      names.has(name)
+    ) {
+      return;
+    }
+    names.add(name);
+  }
+  return Object.freeze(
+    [...names].sort((left, right) => left.localeCompare(right)),
+  );
 }
 
 function parseIdentity(value: unknown): PublicationIdentity | undefined {
