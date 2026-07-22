@@ -28,9 +28,9 @@ Encode the role and objective in the task name; carry capability explicitly:
   "task_name": "worker__backend_contract",
   "fork_turns": "1",
   "agent_type": "worker",
-  "model": "gpt-5.6-terra",
-  "reasoning_effort": "medium",
-  "message": "You are dispatched as a Standard Worker. Implement the bounded backend contract described below..."
+  "model": "gpt-5.6-luna",
+  "reasoning_effort": "high",
+  "message": "You are dispatched as a Scoped Worker. Own the bounded backend contract through implementation, focused validation, in-scope fixes, and compact evidence..."
 }
 ```
 
@@ -40,7 +40,7 @@ Complexity and horizon select model, effort, and fork depth; the role selects be
 
 A depth-1 Terra/Sol Worker may dispatch at most one active bounded Worker when all of these hold:
 
-- The child is named `worker__...` and uses Luna medium/high when available or Terra low as the bounded fallback.
+- The child is named `worker__...` and uses Luna high when available or Terra medium as the bounded fallback.
 - The slice is small, disjoint from the parent's continuing edits, and comfortably short-context.
 - The child owns inspection, implementation, focused validation, in-scope fixes, and completion evidence together.
 - The parent has genuinely independent implementation to continue while the child works.
@@ -85,6 +85,6 @@ Require the task to report:
 
 The root verifies this claim before integration or completion.
 
-Completion releases active ownership but does not destroy the child. Use `followup_task` for a narrow correction or coherent next action by the same owner. Use a fresh task with a compact handoff when independent judgment, context reset, changed ownership, or a higher route is more valuable.
+Completion releases active ownership but does not destroy the child. Use `followup_task` for reviewer-directed corrections or coherent next work by the same owner at its current capability. Classify review findings before treating them as routing evidence: an explicit-contract miss is attributable rework, an adjacent existing defect is healing rather than failure, and a newly discovered invariant requires clarification rather than blame. Use a fresh task with a compact handoff when independent judgment, context reset, changed ownership, or a recorded higher route is required.
 
 When a durable `/tmp` task packet exists, pass its path rather than repeating stable cross-task context. The spawn message must still contain the child's selected route, role, concrete objective, ownership, constraints, and expected proof so the packet supplements rather than hides the assignment. Do not put secrets, raw transcripts, or unbounded build logs in the packet.

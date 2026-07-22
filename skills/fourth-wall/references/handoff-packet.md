@@ -26,8 +26,8 @@ Unfinished items, valid blockers, dependencies, and remaining gates.
 The first concrete action the successor should take.
 
 ## Routing State
-The task family, current proven floor, evidence trigger, clean-success count,
-probation state, and last independently accepted route.
+The active owner and route, any bounded capability adjustment reason, and the
+path to `routing-decisions.jsonl` beside this packet.
 ```
 
 Do not include motivational framing, a chronological transcript, stable base instructions, or facts the successor can cheaply inspect.
@@ -48,7 +48,7 @@ Prefer no-history forks. Quote the relevant completed decisions in the handoff p
 
 ## Reactivation Or Replacement
 
-Use `followup_task` when a completed child remains the right owner and its accumulated context reduces rediscovery; current native MultiAgentV2 preserves its original model and reasoning settings. Spawn a fresh sibling when the next action benefits from independent judgment, a clean context, changed ownership, or a higher route. Preserve reusable state in the packet either way.
+Use `followup_task` when a completed child remains the right owner and its accumulated context reduces rediscovery; current native MultiAgentV2 preserves its original model and reasoning settings but cannot change them. Spawn a fresh sibling when the next action benefits from independent judgment, a clean context, changed ownership, or a recorded capability increase. Use the smallest useful positive fork plus the packet so the successor retains relevant knowledge without inheriting an unbounded transcript.
 
 ## Root Handoff Limitation
 
