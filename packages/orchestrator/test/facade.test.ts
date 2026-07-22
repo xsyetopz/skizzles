@@ -11,16 +11,48 @@ import {
 } from "./support.ts";
 
 describe("package facade and fail-closed controller", () => {
-  it("exports one intentional value facade without public digest constructors", async () => {
+  it("exports only intentional value facades without public digest constructors", async () => {
     const facade = await import("../src/index.ts");
     expect(Object.keys(facade).sort()).toEqual(
       [
         "ANCHOR_PRECEDENCE",
         // biome-ignore lint/security/noSecrets: public exported symbol name
         "TaskWorktreeApprovalBridge",
+        "createAgentRuntime",
+        "createAgentlessExecutor",
+        "createCodeActExecutor",
+        // biome-ignore lint/security/noSecrets: public exported symbol name
+        "createCodeActSandboxCapability",
+        "createContextFragment",
+        "createDependencyScheduler",
         "createEngineeringWorkflow",
+        "createExecutionCommandCatalog",
+        // biome-ignore lint/security/noSecrets: public exported symbol name
+        "createModelDispatchAuthority",
         "createOrchestrator",
+        "createOutboundContextMiddleware",
+        "createReActController",
+        "createSchedulerWorkerAuthority",
+        "createSpecificationContextAuthority",
         "createWorkflowVerificationAuthority",
+        "isAgentRuntime",
+        "isAgentlessExecutor",
+        "isAgentlessSession",
+        "isCodeActExecutor",
+        // biome-ignore lint/security/noSecrets: public exported symbol name
+        "isCodeActSandboxCapability",
+        "isContextFragment",
+        "isDependencyScheduler",
+        "isExecutionCommandCatalog",
+        "isEngineeringWorkflow",
+        // biome-ignore lint/security/noSecrets: public exported symbol name
+        "isModelDispatchAuthority",
+        // biome-ignore lint/security/noSecrets: public exported symbol name
+        "isOutboundContextMiddleware",
+        "isReActController",
+        // biome-ignore lint/security/noSecrets: public exported symbol name
+        "isReActSession",
+        "isSpecificationContextAuthority",
         // biome-ignore lint/security/noSecrets: public exported symbol name
         "isTaskWorktreeApprovalBridge",
         // biome-ignore lint/security/noSecrets: public exported symbol name

@@ -24,6 +24,7 @@ The current workspace dependency edges are:
 @skizzles/model-catalog -> @skizzles/run-workspace
 @skizzles/orchestrator -> @skizzles/candidate-manifest
 @skizzles/orchestrator -> @skizzles/change-assurance
+@skizzles/orchestrator -> @skizzles/reflexion-memory
 @skizzles/orchestrator -> @skizzles/source-engineering
 @skizzles/orchestrator -> @skizzles/task-worktree
 @skizzles/orchestrator -> @skizzles/verification-gate
@@ -59,6 +60,13 @@ plugin runtime. Later lifecycle and validation phases must depend on existing
 capability owners through public package exports or injected ports; the plugin
 builder remains the only distribution composition owner.
 
+Its academic-paradigm router defaults to a linear Locate, Patch, Verify
+controller and admits ReAct only behind a host-owned step ledger. The router
+composes a closed command catalog, structured process results, dependency and
+path-aware scheduling, protected context placement, optional auditable
+compression, and cross-task failure memory before any injected model dispatch.
+It exposes no generic shell and owns no live model endpoint.
+
 `@skizzles/workspace-transaction` owns repository-scoped publication leases,
 destination-owned same-filesystem siblings, durable multi-file journals, and
 deterministic recovery. It provides serialized per-file atomic publication and
@@ -82,6 +90,14 @@ delete operations, and content digests; it contains no source bytes or host
 paths and does not claim caller authority. Each consuming capability derives
 and authenticates the same manifest independently while retaining its own
 native candidate digest domain.
+
+`@skizzles/reflexion-memory` owns immutable cross-task failure records backed by
+either an injected persistence authority or its explicit strict local SQLite
+adapter. Read-only snapshots and append-only recording are separate
+capabilities; snapshots exclude the consuming task's records, and
+skill-directory references remain inert structured data. The package does not
+construct prompts, execute skills, select an ambient database path, or let an
+active task read the critique it records.
 
 `@skizzles/change-assurance` owns pre-publication non-functional, security,
 migration, secret, performance, dependency, vulnerability, and license

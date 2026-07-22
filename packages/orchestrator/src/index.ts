@@ -76,7 +76,10 @@ export type {
   TaskRuntimeInterruptAuthorityPort,
   TaskRuntimeInterruptRequest,
 } from "./engineering/reset/contract.ts";
-export { createEngineeringWorkflow } from "./engineering/workflow.ts";
+export {
+  createEngineeringWorkflow,
+  isEngineeringWorkflow,
+} from "./engineering/workflow.ts";
 export {
   type CanonicalIntent,
   type IntentResult,
@@ -84,6 +87,123 @@ export {
   recoverRequestBytes,
   type SecuritySeverity,
 } from "./intent.ts";
+export type {
+  CompressionDecision,
+  CompressionReceipt,
+  ContextBuildResult,
+  ContextFragment,
+  ContextKind,
+  ContextPlacement,
+  OutboundContextMiddleware,
+  OutboundContextPayload,
+  PrioritizationReceipt,
+  ProtectedContextKind,
+  SpecificationContextAuthority,
+  SpecificationContextAuthorityCreationResult,
+} from "./paradigms/context/contract.ts";
+export {
+  createContextFragment,
+  type FragmentCreationResult,
+  isContextFragment,
+} from "./paradigms/context/fragment.ts";
+export {
+  createOutboundContextMiddleware,
+  isOutboundContextMiddleware,
+} from "./paradigms/context/payload.ts";
+export {
+  createSpecificationContextAuthority,
+  isSpecificationContextAuthority,
+} from "./paradigms/context/specification.ts";
+export {
+  createAgentlessExecutor,
+  isAgentlessExecutor,
+  isAgentlessSession,
+} from "./paradigms/execution/agentless.ts";
+export {
+  createExecutionCommandCatalog,
+  isExecutionCommandCatalog,
+} from "./paradigms/execution/catalog.ts";
+export {
+  createCodeActExecutor,
+  createCodeActSandboxCapability,
+  isCodeActExecutor,
+  isCodeActSandboxCapability,
+} from "./paradigms/execution/codeact.ts";
+export type {
+  AgentlessAdvanceResult,
+  AgentlessExecutor,
+  AgentlessExecutorCreationResult,
+  AgentlessSession,
+  AgentlessStage,
+  AgentlessStartResult,
+  AgentlessTask,
+  ApplyPatchCommand,
+  CodeActExecutionResult,
+  CodeActExecutor,
+  CodeActExecutorCreationResult,
+  CodeActSandboxAuthorityPort,
+  CodeActSandboxCapability,
+  CodeActSandboxRequest,
+  CommandCatalogCreationResult,
+  CommandExecutionResult,
+  ExecutionCommandAuthorityPort,
+  ExecutionCommandCatalog,
+  ExecutionObservation,
+  LocateSymbolCommand,
+  LocateTextCommand,
+  ReActActionTurn,
+  ReActAdvanceResult,
+  ReActController,
+  ReActControllerCreationResult,
+  ReActFinalTurn,
+  ReActSession,
+  ReActStartResult,
+  ReActTurn,
+  SandboxCapabilityCreationResult,
+  StableCommandName,
+  StableCommandRequest,
+  VerifyTestsCommand,
+} from "./paradigms/execution/contract.ts";
+export {
+  createReActController,
+  isReActController,
+  isReActSession,
+} from "./paradigms/execution/react.ts";
+export {
+  createModelDispatchAuthority,
+  isModelDispatchAuthority,
+} from "./paradigms/model-dispatch.ts";
+export { createAgentRuntime, isAgentRuntime } from "./paradigms/runtime.ts";
+export type {
+  AgentRuntime,
+  AgentRuntimeConfig,
+  AgentRuntimeCreationResult,
+  AgentRuntimeMode,
+  AgentRuntimeReceipt,
+  AgentRuntimeRunRequest,
+  AgentRuntimeRunResult,
+  ModelDispatchAuthority,
+  ModelDispatchAuthorityCreationResult,
+  ModelDispatchRequest,
+} from "./paradigms/runtime-contract.ts";
+export { createSchedulerWorkerAuthority } from "./paradigms/scheduler/authority.ts";
+export type {
+  DependencyScheduler,
+  DependencySchedulerCreationResult,
+  SchedulerDispatchRequest,
+  SchedulerLedgerEntry,
+  SchedulerReceipt,
+  SchedulerRunRequest,
+  SchedulerRunResult,
+  SchedulerTask,
+  SchedulerWorkerAuthority,
+  SchedulerWorkerAuthorityCreationResult,
+  SchedulerWorkerResult,
+} from "./paradigms/scheduler/contract.ts";
+export {
+  createDependencyScheduler,
+  isDependencyScheduler,
+} from "./paradigms/scheduler/runtime.ts";
 export type {
   InvariantEvidence,
   InvariantState,

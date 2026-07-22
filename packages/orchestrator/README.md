@@ -147,6 +147,42 @@ rejected. Only the framework-owned redundant-style descriptor lexicon is
 removed from the canonical semantic descriptor set; the exact source and raw
 bytes remain recoverable.
 
+## Academic paradigm routing
+
+`createAgentRuntime()` composes the Phase 7 capabilities and an authentic
+Engineering workflow behind one branded facade. A run reads an immutable
+`@skizzles/reflexion-memory` snapshot, obtains source-owned AST and contract
+context from Engineering, reads specifications from a branded immutable
+configuration authority, duplicates every protected fragment at both payload
+boundaries, optionally applies deterministic auditable compression, and only
+then invokes the injected model-dispatch authority. Dispatch requests are
+runtime-authentic, digest-bound values; copied request shapes cannot invoke the
+registered model adapter. Successful execution must traverse Engineering's
+source, assurance, security, physical, task-worktree, mutation, property,
+coverage, original-test, verification-gate, and approval preparation before the
+runtime returns `awaiting-approval`.
+
+The default route is the non-ReAct Locate, Patch, Verify state machine. The
+model may select only one of four versioned command schemas from a branded host
+catalog; it cannot provide a shell string, executable, environment, or loop
+counter. Every catalog adapter result is a validated CodeAct sandbox request,
+and only the branded CodeAct executor may produce the bounded immutable stdout,
+stderr, byte counts, exit code, and observation digest. ReAct is absent unless
+configured explicitly, and its step ledger is a private host-owned capability.
+
+The dependency scheduler validates an immutable DAG, dispatches deterministic
+ready waves up to the host parallelism limit, and serializes overlapping
+repository or ancestor/descendant path claims. Failed and cancelled work blocks
+its descendants while independent branches may finish. Scheduler receipts are
+single-runtime authentic and execution IDs cannot be replayed.
+
+Terminal failures are recorded only after execution through the separate
+write-only Reflexion recorder. The active task cannot observe a record with its
+own task or run identity; a later task may receive it as supporting context with
+read-only external skill-directory references. Recording failure never changes
+the already-established execution outcome. Model transport, credentials, and
+endpoint selection remain injected host concerns.
+
 ## Development
 
 ```sh

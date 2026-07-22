@@ -32,9 +32,10 @@ on undeclared root packages.
 | `container-lab` | Container Lab CLI, reaper, durable state, synchronization, and docs |
 | `installer` | Skills/harness install, Codex configuration, doctor, and prompt-policy lifecycle |
 | `model-catalog` | Isolated catalog refresh and LaunchAgent rendering |
-| `orchestrator` | Deterministic request policy, evidence checkpoints, and structural review contracts |
+| `orchestrator` | Deterministic request policy, evidence checkpoints, structural review, and bounded paradigm routing |
 | `plugin-builder` | Deterministic plugin staging, bundling, validation, and drift checks |
 | `prompt-layer` | Pinned upstream prompt, patch derivation, provenance, and recovery |
+| `reflexion-memory` | Immutable cross-task failure memory with separate read and recording authorities |
 | `source-engineering` | TypeScript AST edits, source-policy validation, compiler evidence, and semantic previews |
 | `task-worktree` | Task-scoped Git isolation, sandboxed validation, diff ceilings, and approved commit synthesis |
 | `usage-analyzer` | Read-only rollout discovery, aggregation, and reporting |

@@ -30,6 +30,7 @@ const SKIZZLES_PACKAGE_NAMES = [
   "@skizzles/orchestrator",
   "@skizzles/plugin-builder",
   "@skizzles/prompt-layer",
+  "@skizzles/reflexion-memory",
   "@skizzles/run-workspace",
   "@skizzles/source-engineering",
   "@skizzles/task-worktree",

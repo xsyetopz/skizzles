@@ -1,5 +1,5 @@
 {
-  "name": "@skizzles/orchestrator",
+  "name": "@skizzles/reflexion-memory",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -11,15 +11,6 @@
     "check": "bunx @biomejs/biome@2.5.4 check --config-path ../../biome.jsonc --vcs-root ../.. .",
     "test": "bun test test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
-  },
-  "dependencies": {
-    "@skizzles/candidate-manifest": "workspace:*",
-    "@skizzles/change-assurance": "workspace:*",
-    "@skizzles/reflexion-memory": "workspace:*",
-    "@skizzles/source-engineering": "workspace:*",
-    "@skizzles/task-worktree": "workspace:*",
-    "@skizzles/verification-gate": "workspace:*",
-    "@skizzles/workspace-transaction": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

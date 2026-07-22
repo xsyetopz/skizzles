@@ -23,6 +23,7 @@ rewriting its rationale.
 | [0013](0013-change-assurance-boundary.md) | Accepted | Assess exact source candidates through independently owned security, migration, performance, and supply-chain authorities before integration or approval. |
 | [0014](0014-task-worktree-boundary.md) | Accepted | Isolate each task in an authenticated Git worktree with exact write scope, sandboxed commands, bounded diffs, and one approved commit. |
 | [0015](0015-verification-gate.md) | Accepted | Gate publication on exact mutation, property, modified-coverage, original-test, security-review, specification-lock, and task-context-reset evidence. |
+| [0016](0016-academic-paradigm-routing.md) | Accepted | Compose bounded academic agent paradigms through one host-owned execution and context-routing boundary. |
 
 ## Record contract
 

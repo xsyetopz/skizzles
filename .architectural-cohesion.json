@@ -242,6 +242,22 @@
     },
     {
       "rule": "semantic-token-limit",
+      "path": "docs/decisions/0016-academic-paradigm-routing.md",
+      "reason": "The published ordered ADR convention keeps the sequence and decision title together as the repository's stable decision-history path.",
+      "owner": "Repository architecture policy",
+      "control": "The decisions index and cross-references bind the exact ordered path and ADR content records status, rationale, consequences, checks, and review triggers.",
+      "review": "Rename only through an explicit ADR history migration that updates every reference atomically."
+    },
+    {
+      "rule": "temporal-file",
+      "path": "docs/decisions/0016-academic-paradigm-routing.md",
+      "reason": "The numeric prefix is the durable published ADR sequence, not a temporary or date-based implementation marker.",
+      "owner": "Repository architecture policy",
+      "control": "A repository link check can verify ordering while ADR review records supersession rather than rewriting historical identifiers.",
+      "review": "Remove only if the repository adopts a different versioned ADR identity convention."
+    },
+    {
+      "rule": "semantic-token-limit",
       "path": "packages/command-hook/src/manage-command-output.ts",
       "reason": "The published plugin generator contract stages this exact canonical source path into the hook runtime.",
       "owner": "Command Hook and plugin builder",

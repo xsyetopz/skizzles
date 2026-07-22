@@ -14,6 +14,7 @@ const invalidPrepare = Object.freeze({
   code: "INVALID_WORKFLOW_INPUT" as const,
   cleanup: null,
 });
+const workflows = new WeakSet<object>();
 
 export function createEngineeringWorkflow(
   input: unknown,
@@ -24,13 +25,21 @@ export function createEngineeringWorkflow(
     const causal = createCausalWorkflow(config.causal);
     if (causal.status !== "accepted") return invalidConfig();
     const coordinator = new EngineeringCoordinator(config, causal.workflow);
+    const workflow = publicWorkflow(coordinator);
+    workflows.add(workflow);
     return {
       status: "accepted",
-      workflow: publicWorkflow(coordinator),
+      workflow,
     };
   } catch {
     return invalidConfig();
   }
+}
+
+export function isEngineeringWorkflow(
+  value: unknown,
+): value is EngineeringWorkflow {
+  return typeof value === "object" && value !== null && workflows.has(value);
 }
 
 function publicWorkflow(
