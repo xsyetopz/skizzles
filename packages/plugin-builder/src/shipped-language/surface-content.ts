@@ -121,6 +121,8 @@ function classifySurface(
       return "plist";
     case ".md":
       return "markdown";
+    case ".toml":
+      return "text";
     default:
       if (mode === "canonical") {
         return "text";

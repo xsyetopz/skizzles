@@ -1771,6 +1771,7 @@ var FLAG_NAMES = {
   "--codex-home": "codexHome",
   "--codex-binary": "codexBinary",
   "--orchestration": "orchestration",
+  "--instructions": "instructions",
   "--home": "home",
   "--source-root": "sourceRoot",
   "--transfer": "transfer",
@@ -1779,7 +1780,7 @@ var FLAG_NAMES = {
   "--dry-run": "dryRun"
 };
 function usage() {
-  console.error("usage: skizzles-installer install --surface <skills|harness> [--codex-home PATH|--home PATH] [--source-root PATH] [--transfer link|copy] [--dry-run] | uninstall --surface <skills|harness> [--codex-home PATH|--home PATH] [--dry-run] | configure --codex-home PATH --codex-binary PATH --orchestration <aggressive|passive> [--dry-run] | unconfigure --codex-home PATH --codex-binary PATH [--dry-run] | prompt-policy apply --codex-home PATH --codex-binary ABSOLUTE_PATH --source-root PATH [--dry-run] | prompt-policy restore --codex-home PATH --codex-binary ABSOLUTE_PATH [--dry-run] | doctor --home PATH --codex-home PATH");
+  console.error("usage: skizzles-installer install --surface <skills|harness> [--codex-home PATH|--home PATH] [--source-root PATH] [--transfer link|copy] [--dry-run] | uninstall --surface <skills|harness> [--codex-home PATH|--home PATH] [--dry-run] | configure --codex-home PATH --codex-binary PATH --orchestration <aggressive|passive> [--instructions <native|skizzles>] [--source-root PATH] [--dry-run] | unconfigure --codex-home PATH --codex-binary PATH [--dry-run] | prompt-policy apply --codex-home PATH --codex-binary ABSOLUTE_PATH --source-root PATH [--dry-run] | prompt-policy restore --codex-home PATH --codex-binary ABSOLUTE_PATH [--dry-run] | doctor --home PATH --codex-home PATH");
   process4.exit(2);
 }
 function parseInstallerCommand(argv) {
@@ -1865,12 +1866,21 @@ function parseDoctor(argv) {
   };
 }
 function parseConfigure(argv) {
-  const flags = parseFlags(argv, allowed("codexHome", "codexBinary", "orchestration", "dryRun"));
+  const flags = parseFlags(argv, allowed("codexHome", "codexBinary", "orchestration", "instructions", "sourceRoot", "dryRun"));
+  const instructions = flags.instructions === undefined ? undefined : parseInstructionMode(flags.instructions);
+  if (instructions === "skizzles" && flags.sourceRoot === undefined) {
+    usage();
+  }
+  if (instructions !== "skizzles" && flags.sourceRoot !== undefined) {
+    usage();
+  }
   return {
     command: "configure",
     codexHome: resolve2(required(flags.codexHome)),
     codexBinary: required(flags.codexBinary),
     orchestration: parseOrchestration(required(flags.orchestration)),
+    ...instructions === undefined ? {} : { instructions },
+    ...flags.sourceRoot === undefined ? {} : { sourceRoot: resolve2(flags.sourceRoot) },
     dryRun: flags.dryRun
   };
 }
@@ -1946,6 +1956,12 @@ function parseTransfer(value) {
 }
 function parseOrchestration(value) {
   if (value === "aggressive" || value === "passive") {
+    return value;
+  }
+  return usage();
+}
+function parseInstructionMode(value) {
+  if (value === "native" || value === "skizzles") {
     return value;
   }
   return usage();
@@ -2909,13 +2925,105 @@ async function closeOwnedWorkspace(workspace, operation) {
 var aggressiveModeHint = "Proactive complexity-aware delegation is active. Follow $fourth-wall whenever orchestration would materially improve speed or quality.";
 var rootHint = "Fourth Wall applies. Read and follow $fourth-wall before this task's first orchestration action.";
 var subagentHint = "Fourth Wall applies. Read and follow $fourth-wall and the behavioral role resource named in your assignment.";
+var agentDescriptions = {
+  default: "General Skizzles subagent with a compact developer-focused execution contract.",
+  triage: "Focused read-only codebase research, diagnosis, and current-shape mapping.",
+  worker: "Bounded implementation ownership through focused validation and evidence.",
+  designer: "Frontend and product UI implementation with visual and accessibility proof.",
+  qa: "Runtime piloting and evidence-rich product verification without silent fixes.",
+  review: "Independent adversarial review, verification, and acceptance assessment.",
+  deployment: "Authorized deployment and production-adjacent procedures with rollback discipline."
+};
+var agentRoles = [
+  "default",
+  "triage",
+  "worker",
+  "designer",
+  "qa",
+  "review",
+  "deployment"
+];
+function resolveInstructionAssets(sourceRootInput) {
+  const sourceRoot = canonicalExistingPath(sourceRootInput);
+  const rootInstructions = join9(sourceRoot, "assets", "skizzles_instructions.md");
+  const subagentInstructions = join9(sourceRoot, "assets", "skizzles_subagent_instructions.md");
+  const agentConfigs = {
+    default: join9(sourceRoot, "assets", "agents/default.toml"),
+    triage: join9(sourceRoot, "assets", "agents/triage.toml"),
+    worker: join9(sourceRoot, "assets", "agents/worker.toml"),
+    designer: join9(sourceRoot, "assets", "agents/designer.toml"),
+    qa: join9(sourceRoot, "assets", "agents/qa.toml"),
+    review: join9(sourceRoot, "assets", "agents/review.toml"),
+    deployment: join9(sourceRoot, "assets", "agents/deployment.toml")
+  };
+  const required2 = [
+    rootInstructions,
+    subagentInstructions,
+    ...Object.values(agentConfigs)
+  ];
+  if (required2.some((path) => !existsSync3(path))) {
+    throw new Error("Skizzles instruction assets are incomplete");
+  }
+  return Object.freeze({
+    sourceRoot,
+    rootInstructions,
+    agentConfigs: Object.freeze(agentConfigs)
+  });
+}
 function configReceiptPath(codexHome) {
   return join9(canonicalExistingPath(codexHome), ".skizzles", "config-receipt.json");
 }
-function desiredConfigEdits(orchestration) {
+function desiredConfigEdits(orchestration, instructionAssets, currentConfig = {}) {
   const edits = [
     { keyPath: "features.hooks", value: true, mergeStrategy: "replace" }
   ];
+  if (instructionAssets !== undefined) {
+    edits.push({
+      keyPath: "model_instructions_file",
+      value: instructionAssets.rootInstructions,
+      mergeStrategy: "replace"
+    });
+    const configuredRoles = {};
+    for (const role of agentRoles) {
+      configuredRoles[role] = {
+        description: agentDescriptions[role],
+        config_file: instructionAssets.agentConfigs[role]
+      };
+    }
+    const agents = configValueAt(currentConfig, "agents");
+    if (!agents.present || !isJsonObject(agents.value)) {
+      edits.push({
+        keyPath: "agents",
+        value: configuredRoles,
+        mergeStrategy: "replace"
+      });
+    } else {
+      for (const role of agentRoles) {
+        const roleConfig = {
+          description: agentDescriptions[role],
+          config_file: instructionAssets.agentConfigs[role]
+        };
+        const existing = configValueAt(agents.value, role);
+        if (!existing.present || !isJsonObject(existing.value)) {
+          edits.push({
+            keyPath: `agents.${role}`,
+            value: roleConfig,
+            mergeStrategy: "replace"
+          });
+        } else {
+          edits.push({
+            keyPath: `agents.${role}.description`,
+            value: agentDescriptions[role],
+            mergeStrategy: "replace"
+          }, {
+            keyPath: `agents.${role}.config_file`,
+            value: instructionAssets.agentConfigs[role],
+            mergeStrategy: "replace"
+          });
+        }
+      }
+    }
+  }
   if (orchestration === "aggressive") {
     edits.push({
       keyPath: "features.multi_agent_v2.enabled",
@@ -2941,6 +3049,9 @@ function desiredConfigEdits(orchestration) {
   }
   return edits;
 }
+function isJsonObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 function readReceipt(codexHome) {
   const path = configReceiptPath(codexHome);
   if (!existsSync3(path)) {
@@ -2963,10 +3074,20 @@ function readReceipt(codexHome) {
       after: owned["after"]
     };
   });
+  const instructions = receipt["instructions"];
+  if (instructions !== undefined && !isInstructionMode(instructions)) {
+    throw new Error(`invalid Skizzles config receipt: ${path}`);
+  }
+  const sourceRoot = receipt["sourceRoot"];
+  if (sourceRoot !== undefined && typeof sourceRoot !== "string") {
+    throw new Error(`invalid Skizzles config receipt: ${path}`);
+  }
   return {
     version: 1,
     state: receipt["state"],
     orchestration: receipt["orchestration"],
+    ...instructions === undefined ? {} : { instructions },
+    ...sourceRoot === undefined ? {} : { sourceRoot },
     codexBinary: receipt["codexBinary"],
     configPath: receipt["configPath"],
     values
@@ -2977,6 +3098,9 @@ function isReceiptState(value) {
 }
 function isOrchestrationMode(value) {
   return value === "aggressive" || value === "passive";
+}
+function isInstructionMode(value) {
+  return value === "native" || value === "skizzles";
 }
 function objectValue(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? Object.fromEntries(Object.entries(value)) : undefined;
@@ -3060,6 +3184,18 @@ async function recoverPendingConfigure(receipt, receiptPath, config, expectedVer
 async function configureCodex(options) {
   const codexHome = canonicalExistingPath(options.codexHome);
   const codexBinary = validateCodexBinary(options.codexBinary);
+  const instructions = options.instructions ?? "native";
+  if (instructions === "native" && options.sourceRoot !== undefined) {
+    throw new Error("--source-root requires --instructions skizzles");
+  }
+  let instructionAssets;
+  if (instructions === "skizzles") {
+    const sourceRoot = options.sourceRoot;
+    if (sourceRoot === undefined) {
+      throw new Error("--source-root is required with --instructions skizzles");
+    }
+    instructionAssets = resolveInstructionAssets(sourceRoot);
+  }
   assertManagedParentsAreReal(codexHome, [".skizzles"]);
   const receiptPath = configReceiptPath(codexHome);
   const existingReceipt = pendingConfigureReceipt(receiptPath, codexHome, codexBinary, options.orchestration);
@@ -3077,11 +3213,13 @@ async function configureCodex(options) {
     if (existingReceipt) {
       return recoverPendingConfigure(existingReceipt, receiptPath, layer.config, layer.version, rpc, options.dryRun);
     }
-    const edits = desiredConfigEdits(options.orchestration);
+    const edits = desiredConfigEdits(options.orchestration, instructionAssets, layer.config);
     const receipt = {
       version: 1,
       state: "pending",
       orchestration: options.orchestration,
+      instructions,
+      ...instructionAssets === undefined ? {} : { sourceRoot: instructionAssets.sourceRoot },
       codexBinary,
       configPath,
       values: snapshotConfigValues(layer.config, edits)
@@ -5321,14 +5459,19 @@ async function execute(parsed, workspace) {
   }
 }
 function printConfigSummary(receipt, dryRun) {
-  console.log(JSON.stringify({
+  const summary = {
     ok: true,
     dryRun,
     surface: "config",
     orchestration: receipt.orchestration,
+    instructions: receipt.instructions ?? "native",
     configPath: receipt.configPath,
     keys: receipt.values.map(({ keyPath }) => keyPath)
-  }));
+  };
+  if (receipt.sourceRoot !== undefined) {
+    summary["sourceRoot"] = receipt.sourceRoot;
+  }
+  console.log(JSON.stringify(summary));
 }
 function printHarnessSummary(receipt, dryRun) {
   console.log(JSON.stringify({

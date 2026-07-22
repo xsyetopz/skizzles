@@ -21,14 +21,12 @@ Append only evidence-backed candidates from completed orchestration work. This i
 ## 2026-07-22 - Causal routing evidence boundary
 - Status: promoted
 - Scope: routing | context | proof
-- Observation: rollout aggregates expose model/effort token totals but do not
-  identify verified task success, assignment propensity, context duplication,
-  retries, escalation, replacement, or a causal receipt join.
-- Evidence: `packages/usage-analyzer/src/rollout/parser.ts` records effective
-  model/effort and token deltas; `packages/orchestrator/src/paradigms/runtime-contract.ts`
-  binds dispatch and engineering evidence but had no experiment assignment.
-- Confidence: high
-- Proposed change: require host-owned candidate assignments and digest-bound
-  pre-approval observations, then learn expected workflow tokens per independently
-  verified success inside comparable strata. Treat AAII and price as priors,
-  not policy.
+- Observation: the framework had model/effort rollout totals but no strict
+  assignment, workflow-shape, verified-success, or causal receipt join.
+- Evidence: current runtime and usage-analyzer boundaries were inspected before
+  adding digest-bound host assignment, pre-approval observer evidence, strict
+  privacy-safe observations, and verification-gated empirical learning.
+- Proposed change: retain assignment and pre-approval observations, require
+  independent verification and disjoint token ledgers, then learn expected
+  workflow tokens per independently verified success inside comparable strata.
+  Treat AAII and price as priors, never as a fixed route table.

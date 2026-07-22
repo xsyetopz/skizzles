@@ -359,6 +359,36 @@ async function fixture(
       },
     }),
   );
+  await write(
+    root,
+    "assets/skizzles_instructions.md",
+    "# Fixture root instructions\n",
+  );
+  await write(
+    root,
+    "assets/skizzles_subagent.toml",
+    'model_instructions_file = "./skizzles_subagent_instructions.md"\n',
+  );
+  await write(
+    root,
+    "assets/skizzles_subagent_instructions.md",
+    "# Fixture subagent instructions\n",
+  );
+  for (const role of [
+    "default",
+    "deployment",
+    "designer",
+    "qa",
+    "review",
+    "triage",
+    "worker",
+  ]) {
+    await write(
+      root,
+      `assets/agents/${role}.toml`,
+      `model_instructions_file = "../skizzles_subagent_instructions.md"\n`,
+    );
+  }
   const canonicalRoot = resolve(import.meta.dir, "../../../..");
   for (const path of [
     "skills/fourth-wall/contracts/context-envelope.schema.json",

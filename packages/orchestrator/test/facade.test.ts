@@ -32,6 +32,9 @@ describe("package facade and fail-closed controller", () => {
         "createOrchestrator",
         "createOutboundContextMiddleware",
         "createReActController",
+        "createRoutingAssignment",
+        "createRoutingExperimentEvent",
+        "createRoutingExperimentObserver",
         "createSchedulerWorkerAuthority",
         "createSpecificationContextAuthority",
         "createWorkflowVerificationAuthority",
@@ -52,11 +55,15 @@ describe("package facade and fail-closed controller", () => {
         "isReActController",
         // biome-ignore lint/security/noSecrets: public exported symbol name
         "isReActSession",
+        "isRoutingAssignment",
+        "isRoutingExperimentEvent",
+        "isRoutingExperimentObserver",
         "isSpecificationContextAuthority",
         // biome-ignore lint/security/noSecrets: public exported symbol name
         "isTaskWorktreeApprovalBridge",
         // biome-ignore lint/security/noSecrets: public exported symbol name
         "isWorkflowVerificationAuthority",
+        "parseRoutingAssignment",
         "recoverDiagnosticBytes",
         "recoverRequestBytes",
       ].sort(),

@@ -195,6 +195,42 @@ describe("Codex configuration lifecycle", () => {
     expect(hints.every((hint) => hint.length < 180)).toBe(true);
   });
 
+  test("skizzles instruction mode installs the portable root and role assets", async () => {
+    const f = fixture({
+      agents: {
+        default: { developer_instructions: "prior default" },
+      },
+    });
+    const sourceRoot = realpathSync(join(import.meta.dir, "../../.."));
+    const receipt = await configureCodex({
+      ...f,
+      orchestration: "passive",
+      instructions: "skizzles",
+      sourceRoot,
+      rpcFactory: factory(f.rpc),
+    });
+    expect(receipt.instructions).toBe("skizzles");
+    expect(f.rpc.config["model_instructions_file"]).toBe(
+      join(sourceRoot, "assets/skizzles_instructions.md"),
+    );
+    expect(f.rpc.config["agents"]).toMatchObject({
+      default: {
+        config_file: join(sourceRoot, "assets/agents/default.toml"),
+      },
+      triage: {
+        config_file: join(sourceRoot, "assets/agents/triage.toml"),
+      },
+    });
+
+    await unconfigureCodex({ ...f, rpcFactory: factory(f.rpc) });
+    expect(f.rpc.config).toEqual({
+      agents: {
+        default: { developer_instructions: "prior default" },
+      },
+      features: {},
+    });
+  });
+
   test("configures and restores only receipt-owned keys", async () => {
     const f = fixture({
       model: "personal-model",

@@ -57,6 +57,7 @@ Ask the user to choose an orchestration mode:
 
 - `passive` writes only `features.hooks = true`. It does not write any MultiAgentV2 setting or hint, so Codex retains its model-specific native defaults.
 - `aggressive` also enables MultiAgentV2, sets `max_concurrent_threads_per_session = 7`, adds one concise proactive mode hint, and gives roots and subagents short pointers to `$fourth-wall`. Use this only when the user wants autonomous quality-and-speed delegation.
+- `native` instruction mode is the default and leaves model instructions and role configuration untouched. The optional `skizzles` instruction mode installs the portable root prompt plus the native default, Triage, Worker, Designer, QA, Review, and Deployment role assets from the selected source root.
 
 Preview against an explicit `CODEX_HOME` and absolute Codex binary:
 
@@ -65,6 +66,16 @@ bun run packages/installer/src/cli.ts configure \
   --codex-home /absolute/target/codex-home \
   --codex-binary /absolute/path/to/codex \
   --orchestration aggressive --dry-run
+```
+
+To preview the optional native instruction and role assets, add both flags:
+
+```sh
+bun run packages/installer/src/cli.ts configure \
+  --codex-home /absolute/target/codex-home \
+  --codex-binary /absolute/path/to/codex \
+  --orchestration aggressive --instructions skizzles \
+  --source-root /absolute/path/to/skizzles --dry-run
 ```
 
 Review the reported key list, then repeat without `--dry-run`. Restore the exact prior values with:

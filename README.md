@@ -16,6 +16,8 @@ packages; `plugins/skizzles/` is generated output.
 - disposable Docker Compose Container Lab tooling;
 - a validated model-catalog overlay with explicit host activation;
 - reversible Codex configuration and prompt-policy installers;
+- optional split native instruction/agent-role assets for default, triage,
+  worker, designer, QA, review, and deployment workflows;
 - checksum-locked derivation of the Codex base-instruction layer.
 
 ## Workspace
@@ -68,6 +70,88 @@ bunx skills add https://github.com/xsyetopz/skizzles --skill install-skizzles
 See [`install-skizzles`](skills/install-skizzles/SKILL.md) for explicit install,
 configuration, prompt-policy, and removal commands. Skill-only installation
 does not activate hooks, change Codex configuration, or wire host services.
+The optional `configure --instructions skizzles --source-root ...` mode installs
+the portable root prompt and native role configuration; `native` remains the
+default and leaves model instructions untouched.
+
+### Install, configure, and remove
+
+Use the installer when you want an explicit, receipt-owned setup. Always use
+absolute `HOME`/`CODEX_HOME` paths, preview with `--dry-run`, review the target
+and key list, then repeat the same command without `--dry-run`.
+
+Install only the public skills when you want guidance without hooks or runtime
+helpers:
+
+```sh
+bun run packages/installer/src/cli.ts install \
+  --source-root /absolute/path/to/skizzles \
+  --codex-home /absolute/target/codex-home \
+  --surface skills --transfer link --dry-run
+```
+
+Choose `--transfer link` for a trusted checkout that should update in place, or
+`--transfer copy` for an isolated snapshot. Install the complete development
+harness only when you also want the bundled hook, runtime tools, and marketplace
+entry:
+
+```sh
+bun run packages/installer/src/cli.ts install \
+  --source-root /absolute/path/to/skizzles \
+  --home /absolute/target/home \
+  --surface harness --transfer copy --dry-run
+```
+
+Configuration is a separate step because it changes the selected Codex config,
+not the installed files. Run it after the complete harness is installed and its
+hook is available. `passive` enables hooks while preserving Codex's native
+MultiAgentV2 defaults; `aggressive` additionally enables proactive Fourth Wall
+routing and its bounded concurrency setting:
+
+```sh
+bun run packages/installer/src/cli.ts configure \
+  --codex-home /absolute/target/codex-home \
+  --codex-binary /absolute/path/to/codex \
+  --orchestration passive --dry-run
+```
+
+The default `--instructions native` leaves model instructions and native role
+configuration alone. To opt into Skizzles' portable root prompt and default,
+Triage, Worker, Designer, QA, Review, and Deployment roles, add:
+
+```sh
+bun run packages/installer/src/cli.ts configure \
+  --codex-home /absolute/target/codex-home \
+  --codex-binary /absolute/path/to/codex \
+  --orchestration aggressive \
+  --instructions skizzles \
+  --source-root /absolute/path/to/skizzles --dry-run
+```
+
+Preview removal before changing anything. Uninstall only removes paths and
+marketplace state recorded by Skizzles receipts; it refuses foreign or drifted
+targets rather than overwriting user changes:
+
+```sh
+bun run packages/installer/src/cli.ts doctor \
+  --home /absolute/target/home \
+  --codex-home /absolute/target/codex-home
+bun run packages/installer/src/cli.ts unconfigure \
+  --codex-home /absolute/target/codex-home \
+  --codex-binary /absolute/path/to/codex --dry-run
+bun run packages/installer/src/cli.ts uninstall \
+  --surface skills --codex-home /absolute/target/codex-home --dry-run
+bun run packages/installer/src/cli.ts uninstall \
+  --surface harness --home /absolute/target/home --dry-run
+```
+
+Repeat each reviewed command without `--dry-run` to apply it. `unconfigure`
+restores the exact values captured in the private config receipt; it does not
+touch prompt policy, approvals, permissions, MCP registrations, or unrelated
+settings. Prompt-policy apply/restore is an independent opt-in lifecycle; see
+[`install-skizzles`](skills/install-skizzles/SKILL.md) before using it. Start a
+new Codex session after installation or configuration so the new skills and
+instructions are discovered.
 
 ### Source development
 

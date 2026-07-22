@@ -97,16 +97,19 @@ function printConfigSummary(
   receipt: Awaited<ReturnType<typeof configureCodex>>,
   dryRun: boolean,
 ): void {
-  console.log(
-    JSON.stringify({
-      ok: true,
-      dryRun,
-      surface: "config",
-      orchestration: receipt.orchestration,
-      configPath: receipt.configPath,
-      keys: receipt.values.map(({ keyPath }) => keyPath),
-    }),
-  );
+  const summary: Record<string, unknown> = {
+    ok: true,
+    dryRun,
+    surface: "config",
+    orchestration: receipt.orchestration,
+    instructions: receipt.instructions ?? "native",
+    configPath: receipt.configPath,
+    keys: receipt.values.map(({ keyPath }) => keyPath),
+  };
+  if (receipt.sourceRoot !== undefined) {
+    summary["sourceRoot"] = receipt.sourceRoot;
+  }
+  console.log(JSON.stringify(summary));
 }
 
 function printHarnessSummary(

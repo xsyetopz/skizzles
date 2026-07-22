@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from "node:path";
 import process from "node:process";
-import type { OrchestrationMode } from "./config.ts";
+import type { InstructionMode, OrchestrationMode } from "./config.ts";
 import type { Transfer } from "./skills.ts";
 
 interface DryRunCommand {
@@ -46,6 +46,8 @@ interface ConfigureCommand extends DryRunCommand {
   codexHome: string;
   codexBinary: string;
   orchestration: OrchestrationMode;
+  instructions?: InstructionMode;
+  sourceRoot?: string;
 }
 
 interface UnconfigureCommand extends DryRunCommand {
@@ -84,6 +86,7 @@ type ValueFlag =
   | "codexHome"
   | "codexBinary"
   | "orchestration"
+  | "instructions"
   | "home"
   | "sourceRoot"
   | "transfer"
@@ -95,6 +98,7 @@ const FLAG_NAMES: Record<string, Flag> = {
   "--codex-home": "codexHome",
   "--codex-binary": "codexBinary",
   "--orchestration": "orchestration",
+  "--instructions": "instructions",
   "--home": "home",
   "--source-root": "sourceRoot",
   "--transfer": "transfer",
@@ -105,7 +109,7 @@ const FLAG_NAMES: Record<string, Flag> = {
 
 function usage(): never {
   console.error(
-    "usage: skizzles-installer install --surface <skills|harness> [--codex-home PATH|--home PATH] [--source-root PATH] [--transfer link|copy] [--dry-run] | uninstall --surface <skills|harness> [--codex-home PATH|--home PATH] [--dry-run] | configure --codex-home PATH --codex-binary PATH --orchestration <aggressive|passive> [--dry-run] | unconfigure --codex-home PATH --codex-binary PATH [--dry-run] | prompt-policy apply --codex-home PATH --codex-binary ABSOLUTE_PATH --source-root PATH [--dry-run] | prompt-policy restore --codex-home PATH --codex-binary ABSOLUTE_PATH [--dry-run] | doctor --home PATH --codex-home PATH",
+    "usage: skizzles-installer install --surface <skills|harness> [--codex-home PATH|--home PATH] [--source-root PATH] [--transfer link|copy] [--dry-run] | uninstall --surface <skills|harness> [--codex-home PATH|--home PATH] [--dry-run] | configure --codex-home PATH --codex-binary PATH --orchestration <aggressive|passive> [--instructions <native|skizzles>] [--source-root PATH] [--dry-run] | unconfigure --codex-home PATH --codex-binary PATH [--dry-run] | prompt-policy apply --codex-home PATH --codex-binary ABSOLUTE_PATH --source-root PATH [--dry-run] | prompt-policy restore --codex-home PATH --codex-binary ABSOLUTE_PATH [--dry-run] | doctor --home PATH --codex-home PATH",
   );
   process.exit(2);
 }
@@ -209,13 +213,34 @@ function parseDoctor(argv: string[]): DoctorCommand {
 function parseConfigure(argv: string[]): ConfigureCommand {
   const flags = parseFlags(
     argv,
-    allowed("codexHome", "codexBinary", "orchestration", "dryRun"),
+    allowed(
+      "codexHome",
+      "codexBinary",
+      "orchestration",
+      "instructions",
+      "sourceRoot",
+      "dryRun",
+    ),
   );
+  const instructions =
+    flags.instructions === undefined
+      ? undefined
+      : parseInstructionMode(flags.instructions);
+  if (instructions === "skizzles" && flags.sourceRoot === undefined) {
+    usage();
+  }
+  if (instructions !== "skizzles" && flags.sourceRoot !== undefined) {
+    usage();
+  }
   return {
     command: "configure",
     codexHome: resolve(required(flags.codexHome)),
     codexBinary: required(flags.codexBinary),
     orchestration: parseOrchestration(required(flags.orchestration)),
+    ...(instructions === undefined ? {} : { instructions }),
+    ...(flags.sourceRoot === undefined
+      ? {}
+      : { sourceRoot: resolve(flags.sourceRoot) }),
     dryRun: flags.dryRun,
   };
 }
@@ -310,6 +335,13 @@ function parseTransfer(value: string): Transfer {
 
 function parseOrchestration(value: string): OrchestrationMode {
   if (value === "aggressive" || value === "passive") {
+    return value;
+  }
+  return usage();
+}
+
+function parseInstructionMode(value: string): InstructionMode {
+  if (value === "native" || value === "skizzles") {
     return value;
   }
   return usage();

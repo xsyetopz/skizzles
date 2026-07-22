@@ -14,6 +14,9 @@ distribution output.
   binaries under `packages/`.
 - `packages/plugin-builder/` is the sole plugin staging authority.
   `packages/prompt-layer/` owns prompt inputs and provenance.
+- Root `assets/` owns portable native instruction and role assets used by the
+  optional installer instruction profile; the package builder stages them into
+  generated output.
 - `skills/` is canonical public skill content. Repo-local `.codex/skills/` is
   maintainer guidance and is not public unless packaging explicitly includes it.
 - Never hand-edit `plugins/skizzles/`. Rebuild it from canonical packages and
@@ -47,6 +50,10 @@ complete package-to-artifact map.
   checkpoints after coherent, validated slices.
 
 ## Validation
+
+All build, test, packaging, release, and drift validation is local-first. Do not
+create, modify, enable, trigger, or require hosted CI for repository work unless
+the owner explicitly requests it; run the equivalent local commands instead.
 
 Run the narrowest package check first. For package inputs or workspace changes,
 run:

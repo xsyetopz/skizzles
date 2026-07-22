@@ -5,6 +5,7 @@ import {
   type ConfigEdit,
   type ConfigRpc,
   canonicalExistingPath,
+  configValueAt,
   isConfigVersionConflict,
   type JsonValue,
   type OwnedConfigValue,
@@ -26,11 +27,14 @@ import {
 
 export type { ConfigEdit, ConfigRpc } from "./codex-config.ts";
 export type OrchestrationMode = "aggressive" | "passive";
+export type InstructionMode = "native" | "skizzles";
 
 export interface ConfigReceipt {
   version: 1;
   state: "pending" | "active" | "restoring";
   orchestration: OrchestrationMode;
+  instructions?: InstructionMode;
+  sourceRoot?: string;
   codexBinary: string;
   configPath: string;
   values: OwnedConfigValue[];
@@ -40,6 +44,8 @@ export interface ConfigureOptions {
   codexHome: string;
   codexBinary: string;
   orchestration: OrchestrationMode;
+  instructions?: InstructionMode;
+  sourceRoot?: string;
   dryRun?: boolean;
   rpcFactory?: (codexHome: string, codexBinary: string) => Promise<ConfigRpc>;
   workspace?: RunWorkspace;
@@ -52,6 +58,74 @@ const rootHint =
 const subagentHint =
   "Fourth Wall applies. Read and follow $fourth-wall and the behavioral role resource named in your assignment.";
 
+const agentDescriptions = {
+  default:
+    "General Skizzles subagent with a compact developer-focused execution contract.",
+  triage:
+    "Focused read-only codebase research, diagnosis, and current-shape mapping.",
+  worker:
+    "Bounded implementation ownership through focused validation and evidence.",
+  designer:
+    "Frontend and product UI implementation with visual and accessibility proof.",
+  qa: "Runtime piloting and evidence-rich product verification without silent fixes.",
+  review:
+    "Independent adversarial review, verification, and acceptance assessment.",
+  deployment:
+    "Authorized deployment and production-adjacent procedures with rollback discipline.",
+} as const;
+const agentRoles = [
+  "default",
+  "triage",
+  "worker",
+  "designer",
+  "qa",
+  "review",
+  "deployment",
+] as const;
+type AgentRole = (typeof agentRoles)[number];
+
+interface InstructionAssets {
+  readonly sourceRoot: string;
+  readonly rootInstructions: string;
+  readonly agentConfigs: Readonly<Record<AgentRole, string>>;
+}
+
+function resolveInstructionAssets(sourceRootInput: string): InstructionAssets {
+  const sourceRoot = canonicalExistingPath(sourceRootInput);
+  const rootInstructions = join(
+    sourceRoot,
+    "assets",
+    "skizzles_instructions.md",
+  );
+  const subagentInstructions = join(
+    sourceRoot,
+    "assets",
+    "skizzles_subagent_instructions.md",
+  );
+  const agentConfigs: Record<AgentRole, string> = {
+    default: join(sourceRoot, "assets", "agents/default.toml"),
+    triage: join(sourceRoot, "assets", "agents/triage.toml"),
+    worker: join(sourceRoot, "assets", "agents/worker.toml"),
+    designer: join(sourceRoot, "assets", "agents/designer.toml"),
+    qa: join(sourceRoot, "assets", "agents/qa.toml"),
+    review: join(sourceRoot, "assets", "agents/review.toml"),
+    deployment: join(sourceRoot, "assets", "agents/deployment.toml"),
+  };
+  const required = [
+    rootInstructions,
+    subagentInstructions,
+    ...Object.values(agentConfigs),
+  ];
+  if (required.some((path) => !existsSync(path))) {
+    throw new Error("Skizzles instruction assets are incomplete");
+  }
+  return Object.freeze({
+    sourceRoot,
+    rootInstructions,
+    agentConfigs: Object.freeze(agentConfigs),
+  });
+}
+
 export function configReceiptPath(codexHome: string): string {
   return join(
     canonicalExistingPath(codexHome),
@@ -62,10 +136,62 @@ export function configReceiptPath(codexHome: string): string {
 
 export function desiredConfigEdits(
   orchestration: OrchestrationMode,
+  instructionAssets?: InstructionAssets,
+  currentConfig: JsonValue = {},
 ): ConfigEdit[] {
   const edits: ConfigEdit[] = [
     { keyPath: "features.hooks", value: true, mergeStrategy: "replace" },
   ];
+  if (instructionAssets !== undefined) {
+    edits.push({
+      keyPath: "model_instructions_file",
+      value: instructionAssets.rootInstructions,
+      mergeStrategy: "replace",
+    });
+    const configuredRoles: { [key: string]: JsonValue } = {};
+    for (const role of agentRoles) {
+      configuredRoles[role] = {
+        description: agentDescriptions[role],
+        config_file: instructionAssets.agentConfigs[role],
+      };
+    }
+    const agents = configValueAt(currentConfig, "agents");
+    if (!agents.present || !isJsonObject(agents.value)) {
+      edits.push({
+        keyPath: "agents",
+        value: configuredRoles,
+        mergeStrategy: "replace",
+      });
+    } else {
+      for (const role of agentRoles) {
+        const roleConfig: JsonValue = {
+          description: agentDescriptions[role],
+          config_file: instructionAssets.agentConfigs[role],
+        };
+        const existing = configValueAt(agents.value, role);
+        if (!existing.present || !isJsonObject(existing.value)) {
+          edits.push({
+            keyPath: `agents.${role}`,
+            value: roleConfig,
+            mergeStrategy: "replace",
+          });
+        } else {
+          edits.push(
+            {
+              keyPath: `agents.${role}.description`,
+              value: agentDescriptions[role],
+              mergeStrategy: "replace",
+            },
+            {
+              keyPath: `agents.${role}.config_file`,
+              value: instructionAssets.agentConfigs[role],
+              mergeStrategy: "replace",
+            },
+          );
+        }
+      }
+    }
+  }
   if (orchestration === "aggressive") {
     edits.push(
       {
@@ -96,6 +222,10 @@ export function desiredConfigEdits(
     );
   }
   return edits;
+}
+
+function isJsonObject(value: JsonValue): value is { [key: string]: JsonValue } {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function readReceipt(codexHome: string): ConfigReceipt {
@@ -132,10 +262,20 @@ function readReceipt(codexHome: string): ConfigReceipt {
       after: owned["after"],
     };
   });
+  const instructions = receipt["instructions"];
+  if (instructions !== undefined && !isInstructionMode(instructions)) {
+    throw new Error(`invalid Skizzles config receipt: ${path}`);
+  }
+  const sourceRoot = receipt["sourceRoot"];
+  if (sourceRoot !== undefined && typeof sourceRoot !== "string") {
+    throw new Error(`invalid Skizzles config receipt: ${path}`);
+  }
   return {
     version: 1,
     state: receipt["state"],
     orchestration: receipt["orchestration"],
+    ...(instructions === undefined ? {} : { instructions }),
+    ...(sourceRoot === undefined ? {} : { sourceRoot }),
     codexBinary: receipt["codexBinary"],
     configPath: receipt["configPath"],
     values,
@@ -148,6 +288,10 @@ function isReceiptState(value: unknown): value is ConfigReceipt["state"] {
 
 function isOrchestrationMode(value: unknown): value is OrchestrationMode {
   return value === "aggressive" || value === "passive";
+}
+
+function isInstructionMode(value: unknown): value is InstructionMode {
+  return value === "native" || value === "skizzles";
 }
 
 function objectValue(value: unknown): Record<string, unknown> | undefined {
@@ -282,6 +426,18 @@ export async function configureCodex(
 ): Promise<ConfigReceipt> {
   const codexHome = canonicalExistingPath(options.codexHome);
   const codexBinary = validateCodexBinary(options.codexBinary);
+  const instructions = options.instructions ?? "native";
+  if (instructions === "native" && options.sourceRoot !== undefined) {
+    throw new Error("--source-root requires --instructions skizzles");
+  }
+  let instructionAssets: InstructionAssets | undefined;
+  if (instructions === "skizzles") {
+    const sourceRoot = options.sourceRoot;
+    if (sourceRoot === undefined) {
+      throw new Error("--source-root is required with --instructions skizzles");
+    }
+    instructionAssets = resolveInstructionAssets(sourceRoot);
+  }
   assertManagedParentsAreReal(codexHome, [".skizzles"]);
   const receiptPath = configReceiptPath(codexHome);
   const existingReceipt = pendingConfigureReceipt(
@@ -313,11 +469,19 @@ export async function configureCodex(
       );
     }
 
-    const edits = desiredConfigEdits(options.orchestration);
+    const edits = desiredConfigEdits(
+      options.orchestration,
+      instructionAssets,
+      layer.config,
+    );
     const receipt: ConfigReceipt = {
       version: 1,
       state: "pending",
       orchestration: options.orchestration,
+      instructions,
+      ...(instructionAssets === undefined
+        ? {}
+        : { sourceRoot: instructionAssets.sourceRoot }),
       codexBinary,
       configPath,
       values: snapshotConfigValues(layer.config, edits),

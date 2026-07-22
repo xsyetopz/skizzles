@@ -19,16 +19,7 @@ Use native MultiAgentV2 with two independent dispatch choices: complexity and ho
 
 Name every child `<role>__<objective>`. Double underscores separate the behavioral role from the objective; use single underscores inside the objective. Examples: `worker__implement_filters`, `triage__map_sync_flow`, and `review__audit_auth_change`. Capability belongs in native spawn fields and the handoff, not in the task name.
 
-Choose the cheapest route likely to succeed subject to the active task-family
-floor. The matrix below is a capability baseline for initial assignments and
-fallbacks, not a normative winner ranking. Do not derive a routing policy from
-AAII scores, prices, or this table alone. For comparable work, assign from an
-explicit candidate set, record propensity/seed and workflow shape, and let
-verified workflow measurements update the route. See
-[references/routing-learning.md](references/routing-learning.md).
-
-Complexity selects the initial model class; horizon selects initial reasoning
-effort and how much recent context to fork:
+Choose the cheapest route likely to succeed. Complexity selects the model class; horizon selects reasoning effort and how much recent context to fork:
 
 | Route | Complexity / horizon | Preferred model | Effort | Availability fallback |
 |---|---|---|---|---|
@@ -39,6 +30,12 @@ effort and how much recent context to fork:
 | Complex | Ambiguous but bounded cross-boundary reasoning | `gpt-5.6-sol` | low | — |
 | Specialized | Architecture, security, migrations, or long horizon | `gpt-5.6-sol` | medium | — |
 | Critical | Adversarial acceptance, irreversible work, or repeated failure | `gpt-5.6-sol` | high | — |
+
+This table is a capability baseline and fallback, not a normative winner ranking.
+Do not derive a routing policy from AAII scores, prices, or this table alone.
+Comparable assignments must use an explicit candidate set, propensity or seed,
+workflow shape, and verified workflow measurements. See
+[references/routing-learning.md](references/routing-learning.md).
 
 Use Luna only when the active `spawn_agent` schema offers it and the assignment is short-lived, self-contained, cheaply verifiable, and comfortably below long-context territory. If Luna is unavailable, use the listed Terra fallback. Prefer Terra as context insurance when broad repository history must remain coherent even if reasoning is conventional. Use Sol when ambiguity, specialization, runtime-only behavior, cross-boundary architecture, platform lifecycle, or defect-escape cost dominates. A small difficult task may need Sol, while a large straightforward mapping task may fit Terra.
 
@@ -58,12 +55,12 @@ Choose the independent behavioral role that best matches the duty:
 
 | Role | Use | Resource |
 |---|---|---|
-| Triage | Focused codebase research and current-shape mapping | [resources/roles/triage.md](resources/roles/triage.md) |
-| Worker | Well-defined implementation with explicit ownership | [resources/roles/worker.md](resources/roles/worker.md) |
-| Designer | Frontend and product UI implementation | [resources/roles/designer.md](resources/roles/designer.md) |
-| QA | Runtime piloting and evidence-rich product verification | [resources/roles/qa.md](resources/roles/qa.md) |
-| Review | Independent adversarial review and final validation | [resources/roles/review.md](resources/roles/review.md) |
-| Deployment | Careful procedural deployment and production operations | [resources/roles/deployment.md](resources/roles/deployment.md) |
+| Triage | Focused codebase research and current-shape mapping | [assets/agents/triage.toml](../../assets/agents/triage.toml) |
+| Worker | Well-defined implementation with explicit ownership | [assets/agents/worker.toml](../../assets/agents/worker.toml) |
+| Designer | Frontend and product UI implementation | [assets/agents/designer.toml](../../assets/agents/designer.toml) |
+| QA | Runtime piloting and evidence-rich product verification | [assets/agents/qa.toml](../../assets/agents/qa.toml) |
+| Review | Independent adversarial review and final validation | [assets/agents/review.toml](../../assets/agents/review.toml) |
+| Deployment | Careful procedural deployment and production operations | [assets/agents/deployment.toml](../../assets/agents/deployment.toml) |
 
 In every spawn message:
 
@@ -110,22 +107,9 @@ Raise the affected task family's floor immediately when a lower-route result fai
 
 Within an active systemic incident, keep diagnostic and acceptance work at the proven elevated floor. Once uncertainty is removed, bounded implementation descendants may use a lower route when the invariant, ownership, and proof are explicit; the elevated reviewer still owns acceptance. Never infer that a lower route would have succeeded merely because a higher-route task completed in one shot.
 
-Consider a one-route cooldown only after three consecutive independently accepted assignments in the same task family. Count a success only when the first implementation passes focused checks and runtime proof, independent review finds no material issue, and neither root repair nor replacement is required. The documented routes are capability fallbacks, not a fixed model/effort policy: a learned candidate may use any host-advertised model and effort after the assignment and evidence gates pass. Keep a reduced route on probation for three more clean assignments before adopting it as the new baseline. Any material rejection, root rescue, architecture correction, or attributable regression resets the clean-success count and immediately restores the last proven floor.
+Consider a one-route cooldown only after three consecutive independently accepted assignments in the same task family. Count a success only when the first implementation passes focused checks and runtime proof, independent review finds no material issue, and neither root repair nor replacement is required. Use only the documented routes: `critical` -> `specialized` -> `complex` -> `standard`. This preserves the model while reducing reasoning wherever the table supports it, then crosses model class once. `broad` is selected by long context rather than elevated difficulty, so move it to `scoped` only when a new assignment is genuinely short-context; likewise move `standard` to `scoped` only after the work becomes independently Luna-eligible. `mechanical` and `scoped` are already baseline routes. Keep the reduced route on probation for three more clean assignments before adopting it as the new baseline. Any material rejection, root rescue, architecture correction, or attributable regression resets the clean-success count and immediately restores the last proven floor. Do not invent model/effort hybrids outside the routing table.
 
 Do not automatically cool down crash investigation, security or authentication, data corruption, migrations, irreversible operations, native window or engine lifecycle, accessibility-engine faults, or final adversarial acceptance. Their sparse samples and high defect cost do not justify downward experiments. Record the task family, current floor, evidence trigger, clean-success count, probation state, and last accepted route in the durable task packet.
-
-## Measurement and Learning
-
-Every experiment records the complete workflow, not just the selected model:
-task stratum, model and effort per stage, topology, decomposition, role plan,
-context inheritance and duplication, tokens, retries, failed loops, escalation,
-replacement, latency, and independently verified success. Join the observation
-to the runtime assignment and receipt by digest. Compare candidates only inside
-a comparable stratum after minimum-sample and reliability gates; minimize
-expected total workflow tokens per verified success, with money and latency
-secondary. A missing join, model completion claim, or guardian allow is not
-success evidence. The host owns assignment and persistence; Fourth Wall records
-evidence and curates policy revisions after independent review.
 
 ## Native Primitives
 
@@ -164,6 +148,19 @@ Read [references/delegation-contract.md](references/delegation-contract.md) befo
 - **Drift recovery:** inspect the tree, resolve stale or overlapping ownership, and interrupt only obsolete or unsafe work.
 
 Read [references/handoff-packet.md](references/handoff-packet.md) for context renewal and its limits.
+
+## Measurement and Learning
+
+Every experiment records the complete workflow, not just the selected model:
+task stratum, model and effort per stage, topology, decomposition, role plan,
+context inheritance and duplication, tokens, retries, failed loops, escalation,
+replacement, latency, and independently verified success. Join the observation
+to the runtime assignment and receipt by digest. Compare candidates only inside
+a comparable stratum after minimum-sample and reliability gates; minimize
+expected total workflow tokens per verified success, with money and latency
+secondary. A missing join, model completion claim, or guardian allow is not
+success evidence. The host owns assignment and persistence; Fourth Wall records
+evidence and curates policy revisions after independent review.
 
 When observed behavior reveals a reusable routing or lifecycle caveat, follow [references/learning-loop.md](references/learning-loop.md). Record evidence-backed candidates without silently changing global policy during active work.
 

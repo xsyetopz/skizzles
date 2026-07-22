@@ -9,6 +9,19 @@ export const MARKETPLACE_PATH = ".agents/plugins/marketplace.json";
 export const CANONICAL_TREE_INPUTS = [["skills", "skills"]] as const;
 
 export const CANONICAL_FILE_INPUTS = [
+  ["assets/skizzles_instructions.md", "assets/skizzles_instructions.md"],
+  ["assets/skizzles_subagent.toml", "assets/skizzles_subagent.toml"],
+  [
+    "assets/skizzles_subagent_instructions.md",
+    "assets/skizzles_subagent_instructions.md",
+  ],
+  ["assets/agents/default.toml", "assets/agents/default.toml"],
+  ["assets/agents/deployment.toml", "assets/agents/deployment.toml"],
+  ["assets/agents/designer.toml", "assets/agents/designer.toml"],
+  ["assets/agents/qa.toml", "assets/agents/qa.toml"],
+  ["assets/agents/review.toml", "assets/agents/review.toml"],
+  ["assets/agents/triage.toml", "assets/agents/triage.toml"],
+  ["assets/agents/worker.toml", "assets/agents/worker.toml"],
   [
     "packages/container-lab/assets/integrations/container-lab.json",
     "integrations/container-lab.json",
