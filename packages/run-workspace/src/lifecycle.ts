@@ -15,6 +15,7 @@ import type {
   CreateOptions,
   OwnedChild,
   RunWorkspace,
+  WorkspaceUsage,
 } from "./contract.ts";
 import { RunWorkspaceError } from "./errors.ts";
 import {
@@ -37,6 +38,12 @@ import {
   inspectPrivateDirectory,
 } from "./safety.ts";
 import { coordinateSignals } from "./signals.ts";
+import {
+  inspectWorkspaceUsage,
+  invalidUsage,
+  parseUsageLimits,
+  unknownUsage,
+} from "./usage/scan.ts";
 
 const defaultGracefulStopMs = 5000;
 const defaultForceStopMs = 5000;
@@ -158,6 +165,23 @@ class OwnedRunWorkspace implements RunWorkspace {
       );
     }
     return selected;
+  }
+
+  inspectUsage(limits: unknown): Promise<WorkspaceUsage> {
+    const validated = parseUsageLimits(limits);
+    if (validated === undefined) {
+      return Promise.resolve(invalidUsage());
+    }
+    if (this.#state !== "open") {
+      return Promise.resolve(unknownUsage(validated));
+    }
+    return inspectWorkspaceUsage(
+      this.#runtime,
+      this.#root,
+      this.#runId,
+      this.#marker.root,
+      validated,
+    );
   }
 
   registerChild(child: OwnedChild): void {

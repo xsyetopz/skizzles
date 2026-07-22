@@ -2,10 +2,10 @@
 // @bun
 
 // packages/model-catalog/src/index.ts
-import process7 from "process";
+import process8 from "process";
 
 // packages/model-catalog/src/catalog/refresh.ts
-import { join as join7, resolve as resolve3 } from "path";
+import { join as join8, resolve as resolve3 } from "path";
 
 // packages/run-workspace/src/errors.ts
 class RunWorkspaceError extends Error {
@@ -27,21 +27,21 @@ class RunWorkspaceAbortedError extends RunWorkspaceError {
   }
 }
 // packages/run-workspace/src/janitor.ts
-import { basename, dirname, join as join3 } from "path";
+import { basename, dirname, join as join4 } from "path";
 
 // packages/run-workspace/src/marker.ts
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 
 // packages/run-workspace/src/platform.ts
 import { execFile } from "child_process";
-import { constants, realpathSync } from "fs";
+import { constants as constants3, realpathSync } from "fs";
 import {
   chmod,
-  lstat,
+  lstat as lstat2,
   mkdir,
   mkdtemp,
-  open,
-  opendir,
+  open as open2,
+  opendir as opendir2,
   readdir,
   readFile,
   realpath,
@@ -49,9 +49,408 @@ import {
   rm
 } from "fs/promises";
 import { tmpdir } from "os";
-import { join, win32 } from "path";
-import process from "process";
+import { join as join2, win32 } from "path";
+import process2 from "process";
 import { promisify } from "util";
+
+// packages/run-workspace/src/usage/directory.ts
+import { constants as constants2 } from "fs";
+import { lstat, open, opendir } from "fs/promises";
+import { join } from "path";
+
+// packages/run-workspace/src/usage/darwin.ts
+import { dlopen, FFIType, ptr } from "bun:ffi";
+import { constants } from "fs";
+import process from "process";
+var blockBytes = 512n;
+var directoryBufferBytes = 64 * 1024;
+var statBytes = 144;
+var direntHeaderBytes = 21;
+var nanosecondsPerSecond = 1000000000n;
+var atSymlinkNoFollow = 32;
+var closeOnExec = 16777216;
+var seekStart = 0;
+var fileTypeMask = 61440;
+var directoryMode = 16384;
+var regularMode = 32768;
+var symlinkMode = 40960;
+var unsafeEntryName = /[\\/\0]/u;
+var decoder = new TextDecoder("utf-8", { fatal: true });
+var definitions = {
+  close: { args: [FFIType.i32], returns: FFIType.i32 },
+  fstat: {
+    args: [FFIType.i32, FFIType.ptr],
+    returns: FFIType.i32
+  },
+  fstatat: {
+    args: [FFIType.i32, FFIType.ptr, FFIType.ptr, FFIType.i32],
+    returns: FFIType.i32
+  },
+  __getdirentries64: {
+    args: [FFIType.i32, FFIType.ptr, FFIType.u64, FFIType.ptr],
+    returns: FFIType.i64
+  },
+  lseek: {
+    args: [FFIType.i32, FFIType.i64, FFIType.i32],
+    returns: FFIType.i64
+  },
+  openat: {
+    args: [FFIType.i32, FFIType.ptr, FFIType.i32],
+    returns: FFIType.i32
+  }
+};
+var library = (() => {
+  if (process.platform !== "darwin") {
+    return;
+  }
+  try {
+    return dlopen("/usr/lib/libSystem.B.dylib", definitions);
+  } catch {
+    return;
+  }
+})();
+function safeName(name) {
+  return name.length > 0 && name !== "." && name !== ".." && !unsafeEntryName.test(name);
+}
+function nativeNumber(value) {
+  const selected = typeof value === "bigint" ? Number(value) : value;
+  if (!Number.isSafeInteger(selected)) {
+    return;
+  }
+  return selected;
+}
+function timeNanoseconds(view, offset) {
+  const seconds = view.getBigInt64(offset, true);
+  const nanoseconds = view.getBigInt64(offset + 8, true);
+  return (seconds * nanosecondsPerSecond + nanoseconds).toString(10);
+}
+function entryKind(mode) {
+  const fileType = mode & fileTypeMask;
+  if (fileType === directoryMode) {
+    return "directory";
+  }
+  if (fileType === regularMode) {
+    return "file";
+  }
+  if (fileType === symlinkMode) {
+    return "symlink";
+  }
+  return "other";
+}
+function parseStat(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const logicalBytes = view.getBigInt64(96, true);
+  const blocks = view.getBigInt64(104, true);
+  if (logicalBytes < 0n || blocks < 0n) {
+    return;
+  }
+  return {
+    kind: entryKind(view.getUint16(4, true)),
+    device: view.getInt32(0, true).toString(10),
+    inode: view.getBigUint64(8, true).toString(10),
+    birthtimeNs: timeNanoseconds(view, 80),
+    changeTimeNs: timeNanoseconds(view, 64),
+    modifiedTimeNs: timeNanoseconds(view, 48),
+    logicalBytes,
+    allocatedBytes: blocks * blockBytes
+  };
+}
+function descriptorStat(descriptor) {
+  const symbols = library?.symbols;
+  if (symbols === undefined) {
+    return;
+  }
+  const bytes = new Uint8Array(statBytes);
+  if (symbols.fstat(descriptor, ptr(bytes)) !== 0) {
+    return;
+  }
+  return parseStat(bytes);
+}
+function childStat(descriptor, name) {
+  const symbols = library?.symbols;
+  if (symbols === undefined || !safeName(name)) {
+    return;
+  }
+  const bytes = new Uint8Array(statBytes);
+  const encoded = Buffer.from(`${name}\x00`, "utf8");
+  if (symbols.fstatat(descriptor, ptr(encoded), ptr(bytes), atSymlinkNoFollow) !== 0) {
+    return;
+  }
+  return parseStat(bytes);
+}
+function directoryNames(descriptor, limit) {
+  const symbols = library?.symbols;
+  if (symbols === undefined || nativeNumber(symbols.lseek(descriptor, 0n, seekStart)) !== 0) {
+    return;
+  }
+  const names = [];
+  const bytes = new Uint8Array(directoryBufferBytes);
+  const base = new BigInt64Array(1);
+  while (names.length <= limit) {
+    const count = nativeNumber(symbols.__getdirentries64(descriptor, ptr(bytes), BigInt(bytes.byteLength), ptr(base)));
+    if (count === undefined || count < 0) {
+      return;
+    }
+    if (count === 0) {
+      return { names, truncated: false };
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, count);
+    let offset = 0;
+    while (offset < count) {
+      if (offset + direntHeaderBytes > count) {
+        return;
+      }
+      const recordBytes = view.getUint16(offset + 16, true);
+      const nameBytes = view.getUint16(offset + 18, true);
+      if (recordBytes < direntHeaderBytes || offset + recordBytes > count || nameBytes > recordBytes - direntHeaderBytes) {
+        return;
+      }
+      const name = decoder.decode(bytes.subarray(offset + direntHeaderBytes, offset + direntHeaderBytes + nameBytes));
+      if (name !== "." && name !== "..") {
+        if (!safeName(name)) {
+          return;
+        }
+        names.push(name);
+        if (names.length > limit) {
+          return { names: names.slice(0, limit), truncated: true };
+        }
+      }
+      offset += recordBytes;
+    }
+  }
+  return { names: names.slice(0, limit), truncated: true };
+}
+
+class DarwinUsageDirectory {
+  entry;
+  #descriptor;
+  #closeDescriptor;
+  #closed = false;
+  constructor(descriptor, entry, closeDescriptor) {
+    this.#descriptor = descriptor;
+    this.entry = entry;
+    this.#closeDescriptor = closeDescriptor;
+  }
+  scan(limit) {
+    if (this.#closed) {
+      return Promise.reject(new Error("Usage directory is closed"));
+    }
+    const scanned = directoryNames(this.#descriptor, limit);
+    if (scanned === undefined) {
+      return Promise.reject(new Error("Descriptor enumeration failed"));
+    }
+    return Promise.resolve(scanned);
+  }
+  inspect(name) {
+    if (this.#closed) {
+      return Promise.resolve(undefined);
+    }
+    return Promise.resolve(childStat(this.#descriptor, name));
+  }
+  open(name) {
+    const symbols = library?.symbols;
+    if (this.#closed || symbols === undefined || !safeName(name)) {
+      return Promise.resolve(undefined);
+    }
+    const encoded = Buffer.from(`${name}\x00`, "utf8");
+    const descriptor = symbols.openat(this.#descriptor, ptr(encoded), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | closeOnExec);
+    if (descriptor < 0) {
+      return Promise.resolve(undefined);
+    }
+    const entry = descriptorStat(descriptor);
+    if (entry?.kind !== "directory") {
+      symbols.close(descriptor);
+      return Promise.resolve(undefined);
+    }
+    return Promise.resolve(new DarwinUsageDirectory(descriptor, entry, async () => {
+      if (symbols.close(descriptor) !== 0) {
+        throw new Error("Descriptor close failed");
+      }
+    }));
+  }
+  stat() {
+    if (this.#closed) {
+      return Promise.resolve(undefined);
+    }
+    return Promise.resolve(descriptorStat(this.#descriptor));
+  }
+  async close() {
+    if (this.#closed) {
+      return;
+    }
+    this.#closed = true;
+    await this.#closeDescriptor();
+  }
+}
+function openDarwinUsageDirectory(handle) {
+  if (library === undefined) {
+    return;
+  }
+  const entry = descriptorStat(handle.fd);
+  if (entry?.kind !== "directory") {
+    return;
+  }
+  return new DarwinUsageDirectory(handle.fd, entry, () => handle.close());
+}
+
+// packages/run-workspace/src/usage/directory.ts
+var blockBytes2 = 512n;
+var unsafeEntryName2 = /[\\/\0]/u;
+function safeName2(name) {
+  return name.length > 0 && name !== "." && name !== ".." && !unsafeEntryName2.test(name);
+}
+function fromStats(stats) {
+  let kind = "other";
+  if (stats.isDirectory()) {
+    kind = "directory";
+  } else if (stats.isFile()) {
+    kind = "file";
+  } else if (stats.isSymbolicLink()) {
+    kind = "symlink";
+  }
+  const logicalBytes = stats.size;
+  const allocatedBytes = stats.blocks * blockBytes2;
+  if (logicalBytes < 0n || allocatedBytes < 0n) {
+    return;
+  }
+  return {
+    kind,
+    device: stats.dev.toString(10),
+    inode: stats.ino.toString(10),
+    birthtimeNs: stats.birthtimeNs.toString(10),
+    changeTimeNs: stats.ctimeNs.toString(10),
+    modifiedTimeNs: stats.mtimeNs.toString(10),
+    logicalBytes,
+    allocatedBytes
+  };
+}
+function sameEntry(left, right) {
+  return left.kind === right.kind && left.device === right.device && left.inode === right.inode && left.birthtimeNs === right.birthtimeNs && left.changeTimeNs === right.changeTimeNs && left.modifiedTimeNs === right.modifiedTimeNs && left.logicalBytes === right.logicalBytes && left.allocatedBytes === right.allocatedBytes;
+}
+function descriptorRoot(platform, descriptor) {
+  if (platform === "linux") {
+    return `/proc/self/fd/${descriptor}`;
+  }
+  return;
+}
+async function scanDescriptor(root, limit) {
+  const directory = await opendir(root);
+  const names = [];
+  try {
+    while (names.length <= limit) {
+      const entry = await directory.read();
+      if (entry === null) {
+        return { names, truncated: false };
+      }
+      names.push(entry.name);
+    }
+    return { names: names.slice(0, limit), truncated: true };
+  } finally {
+    await directory.close().catch(() => {
+      return;
+    });
+  }
+}
+
+class SystemUsageDirectory {
+  entry;
+  #handle;
+  #root;
+  #platform;
+  #closed = false;
+  constructor(handle, root, platform, entry) {
+    this.#handle = handle;
+    this.#root = root;
+    this.#platform = platform;
+    this.entry = entry;
+  }
+  scan(limit) {
+    return scanDescriptor(this.#root, limit);
+  }
+  inspect(name) {
+    if (!safeName2(name) || this.#closed) {
+      return Promise.resolve(undefined);
+    }
+    return lstatSystemUsage(join(this.#root, name));
+  }
+  open(name) {
+    if (!safeName2(name) || this.#closed) {
+      return Promise.resolve(undefined);
+    }
+    return openSystemUsageDirectory(join(this.#root, name), this.#platform);
+  }
+  async stat() {
+    if (this.#closed) {
+      return;
+    }
+    try {
+      return fromStats(await this.#handle.stat({ bigint: true }));
+    } catch {
+      return;
+    }
+  }
+  async close() {
+    if (this.#closed) {
+      return;
+    }
+    this.#closed = true;
+    await this.#handle.close();
+  }
+}
+async function lstatSystemUsage(path) {
+  try {
+    return fromStats(await lstat(path, { bigint: true }));
+  } catch {
+    return;
+  }
+}
+async function openSystemUsageDirectory(path, platform) {
+  if (platform !== "linux" && platform !== "darwin") {
+    return;
+  }
+  let handle;
+  try {
+    handle = await open(path, constants2.O_RDONLY | constants2.O_DIRECTORY | constants2.O_NOFOLLOW);
+    const entry = fromStats(await handle.stat({ bigint: true }));
+    if (entry?.kind !== "directory") {
+      await handle.close();
+      return;
+    }
+    if (platform === "darwin") {
+      const directory = openDarwinUsageDirectory(handle);
+      if (directory === undefined || !sameEntry(entry, directory.entry)) {
+        await directory?.close().catch(() => {
+          return;
+        });
+        if (directory === undefined) {
+          await handle.close();
+        }
+        return;
+      }
+      return directory;
+    }
+    const root = descriptorRoot(platform, handle.fd);
+    if (root === undefined) {
+      await handle.close();
+      return;
+    }
+    const probe = await opendir(root);
+    await probe.close();
+    const confirmed = fromStats(await handle.stat({ bigint: true }));
+    if (confirmed === undefined || !sameEntry(entry, confirmed)) {
+      await handle.close();
+      return;
+    }
+    return new SystemUsageDirectory(handle, root, platform, entry);
+  } catch {
+    await handle?.close().catch(() => {
+      return;
+    });
+    return;
+  }
+}
+
+// packages/run-workspace/src/platform.ts
 var execFileAsync = promisify(execFile);
 var decimalPattern = /^\d+$/u;
 var whitespacePattern = /\s+/gu;
@@ -135,7 +534,7 @@ function parseLinuxStartTicks(stat) {
   return startTicks;
 }
 async function windowsIdentity(pid) {
-  const systemRoot = process.env["SystemRoot"];
+  const systemRoot = process2.env["SystemRoot"];
   if (systemRoot === undefined || systemRoot.length === 0) {
     return;
   }
@@ -174,7 +573,7 @@ async function observeProcess(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0)
     return;
   try {
-    process.kill(pid, 0);
+    process2.kill(pid, 0);
     return true;
   } catch (error) {
     const code = errorCode(error);
@@ -187,7 +586,7 @@ async function observeProcess(pid) {
 }
 async function fileIdentity(path) {
   try {
-    const stats = await lstat(path, { bigint: true });
+    const stats = await lstat2(path, { bigint: true });
     if (!stats.isDirectory() || stats.isSymbolicLink()) {
       return;
     }
@@ -202,7 +601,7 @@ async function fileIdentity(path) {
 }
 async function isRegularFile(path) {
   try {
-    const stats = await lstat(path);
+    const stats = await lstat2(path);
     return stats.isFile() && !stats.isSymbolicLink();
   } catch {
     return false;
@@ -210,7 +609,7 @@ async function isRegularFile(path) {
 }
 async function pathExists(path) {
   try {
-    await lstat(path);
+    await lstat2(path);
     return true;
   } catch (error) {
     if (errorCode(error) === "ENOENT")
@@ -220,12 +619,12 @@ async function pathExists(path) {
 }
 async function isPrivateDirectory(path) {
   try {
-    const stats = await lstat(path);
+    const stats = await lstat2(path);
     if (!stats.isDirectory() || stats.isSymbolicLink())
       return false;
-    if (process.platform === "win32")
+    if (process2.platform === "win32")
       return true;
-    const currentUserId = process.getuid?.();
+    const currentUserId = process2.getuid?.();
     return (stats.mode & 63) === 0 && (currentUserId === undefined || stats.uid === currentUserId);
   } catch {
     return false;
@@ -245,9 +644,9 @@ async function writeReplacement(path, contents) {
   }
 }
 async function syncParent(path) {
-  if (process.platform === "win32")
+  if (process2.platform === "win32")
     return;
-  const directory = await open(join(path, ".."), constants.O_RDONLY);
+  const directory = await open2(join2(path, ".."), constants3.O_RDONLY);
   try {
     await directory.sync();
   } finally {
@@ -255,8 +654,8 @@ async function syncParent(path) {
   }
 }
 async function writeSynced(path, contents, exclusive) {
-  const flags = exclusive ? constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY : constants.O_WRONLY;
-  const handle = await open(path, flags, 384);
+  const flags = exclusive ? constants3.O_CREAT | constants3.O_EXCL | constants3.O_WRONLY : constants3.O_WRONLY;
+  const handle = await open2(path, flags, 384);
   try {
     await handle.writeFile(contents, { encoding: "utf8" });
     await handle.sync();
@@ -266,21 +665,21 @@ async function writeSynced(path, contents, exclusive) {
   await syncParent(path);
 }
 async function readSecureFile(path, maximumBytes) {
-  const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
+  const noFollow = process2.platform === "win32" ? 0 : constants3.O_NOFOLLOW;
   let handle;
   try {
-    const pathBefore = await lstat(path, { bigint: true });
-    if (!pathBefore.isFile() || pathBefore.isSymbolicLink() || pathBefore.size > BigInt(maximumBytes) || process.platform !== "win32" && (Number(pathBefore.mode) & 63) !== 0) {
+    const pathBefore = await lstat2(path, { bigint: true });
+    if (!pathBefore.isFile() || pathBefore.isSymbolicLink() || pathBefore.size > BigInt(maximumBytes) || process2.platform !== "win32" && (Number(pathBefore.mode) & 63) !== 0) {
       return;
     }
-    handle = await open(path, constants.O_RDONLY | noFollow);
+    handle = await open2(path, constants3.O_RDONLY | noFollow);
     const before = await handle.stat({ bigint: true });
-    if (!before.isFile() || pathBefore.dev !== before.dev || pathBefore.ino !== before.ino || pathBefore.birthtimeNs !== before.birthtimeNs || before.size > BigInt(maximumBytes) || process.platform !== "win32" && (Number(before.mode) & 63) !== 0) {
+    if (!before.isFile() || pathBefore.dev !== before.dev || pathBefore.ino !== before.ino || pathBefore.birthtimeNs !== before.birthtimeNs || before.size > BigInt(maximumBytes) || process2.platform !== "win32" && (Number(before.mode) & 63) !== 0) {
       return;
     }
     const contents = await handle.readFile({ encoding: "utf8" });
     const after = await handle.stat({ bigint: true });
-    const pathAfter = await lstat(path, { bigint: true });
+    const pathAfter = await lstat2(path, { bigint: true });
     if (before.dev !== after.dev || before.ino !== after.ino || before.birthtimeNs !== after.birthtimeNs || before.size !== after.size || pathAfter.isSymbolicLink() || after.dev !== pathAfter.dev || after.ino !== pathAfter.ino || after.birthtimeNs !== pathAfter.birthtimeNs) {
       return;
     }
@@ -294,7 +693,7 @@ async function readSecureFile(path, maximumBytes) {
   }
 }
 async function scanDirectory(path, limit) {
-  const directory = await opendir(path);
+  const directory = await opendir2(path);
   const names = [];
   try {
     while (names.length <= limit) {
@@ -312,17 +711,19 @@ async function scanDirectory(path, limit) {
 }
 function systemRuntime() {
   return {
-    pid: process.pid,
-    platform: process.platform,
+    pid: process2.pid,
+    platform: process2.platform,
     now: Date.now,
     deadline,
     temporaryDirectory: () => realpathSync(tmpdir()),
-    processIdentity: (pid) => getProcessIdentity(process.platform, pid),
+    processIdentity: (pid) => getProcessIdentity(process2.platform, pid),
     processExists: observeProcess,
     mkdir: (path, options) => mkdir(path, options),
     chmod,
     mkdtemp,
     lstatIdentity: fileIdentity,
+    lstatUsage: lstatSystemUsage,
+    openUsageDirectory: (path) => openSystemUsageDirectory(path, process2.platform),
     isDirectory: async (path) => await fileIdentity(path) !== undefined,
     isPrivateDirectory,
     isFile: isRegularFile,
@@ -347,7 +748,7 @@ function systemRuntime() {
 var managedDirectoryName = "skizzles-run-workspaces";
 var markerName = ".skizzles-run-workspace.json";
 function managedParent(runtime) {
-  return join(runtime.temporaryDirectory(), managedDirectoryName);
+  return join2(runtime.temporaryDirectory(), managedDirectoryName);
 }
 
 // packages/run-workspace/src/safety.ts
@@ -466,7 +867,7 @@ function sameProcessIdentity(left, right) {
   return left.platform === right.platform && left.token === right.token;
 }
 function markerPath(root) {
-  return join2(root, markerName);
+  return join3(root, markerName);
 }
 function serializeMarker(marker) {
   return `${JSON.stringify(marker, undefined, 2)}
@@ -572,7 +973,7 @@ async function reap(runtime, root) {
       return "claimed";
     throw error;
   }
-  const claimed = join3(managedParent(runtime), `reaping-${marker.runId}-${crypto.randomUUID()}`);
+  const claimed = join4(managedParent(runtime), `reaping-${marker.runId}-${crypto.randomUUID()}`);
   try {
     await runtime.rename(root, claimed);
   } catch (error) {
@@ -638,7 +1039,7 @@ async function cleanupStaleWithRuntime(options, runtime) {
   const skipped = [];
   const failed = [];
   for (const name of selected) {
-    const root = join3(parent, name);
+    const root = join4(parent, name);
     if (!await runtime.isDirectory(root)) {
       skipped.push({ rootName: name, reason: "unmarked" });
       continue;
@@ -670,7 +1071,7 @@ function cleanupStale(options = {}) {
 import {
   basename as basename2,
   isAbsolute,
-  join as join4,
+  join as join5,
   relative,
   resolve,
   win32 as win322
@@ -754,11 +1155,11 @@ async function stopChildren(options) {
 }
 
 // packages/run-workspace/src/signals.ts
-import process2 from "process";
+import process3 from "process";
 var targets = new Set;
 var listeners = new Map;
 function supportedSignals() {
-  if (process2.platform === "win32")
+  if (process3.platform === "win32")
     return ["SIGINT", "SIGTERM"];
   return ["SIGHUP", "SIGINT", "SIGTERM"];
 }
@@ -772,14 +1173,14 @@ function install() {
         target.abort(error);
     };
     listeners.set(signal, listener);
-    process2.on(signal, listener);
+    process3.on(signal, listener);
   }
 }
 function uninstall() {
   if (targets.size > 0)
     return;
   for (const [signal, listener] of listeners)
-    process2.off(signal, listener);
+    process3.off(signal, listener);
   listeners.clear();
 }
 function coordinateSignals(target) {
@@ -793,6 +1194,225 @@ function coordinateSignals(target) {
     targets.delete(target);
     uninstall();
   };
+}
+
+// packages/run-workspace/src/usage/scan.ts
+import { types } from "util";
+var maximumScanLimit = 1e6;
+var maximumSafeBytes = BigInt(Number.MAX_SAFE_INTEGER);
+var limitNames = ["byteLimit", "entryLimit", "scanLimit"];
+var limitNameSet = new Set(limitNames);
+var unsafeEntryName3 = /[\\/\0]/u;
+function integerLimit(value, maximum) {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    return;
+  }
+  const selected = Number(value);
+  if (selected > maximum) {
+    return;
+  }
+  return selected;
+}
+function parseUsageLimits(value) {
+  try {
+    if (typeof value !== "object" || value === null || types.isProxy(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+      return;
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Reflect.ownKeys(descriptors);
+    if (keys.length !== limitNames.length || keys.some((key) => typeof key !== "string" || !limitNameSet.has(key))) {
+      return;
+    }
+    const values = new Map;
+    for (const name of limitNames) {
+      const descriptor = descriptors[name];
+      if (descriptor === undefined || !("value" in descriptor)) {
+        return;
+      }
+      values.set(name, descriptor.value);
+    }
+    const byteLimit = integerLimit(values.get("byteLimit"), Number.MAX_SAFE_INTEGER);
+    const entryLimit = integerLimit(values.get("entryLimit"), Number.MAX_SAFE_INTEGER);
+    const scanLimit = integerLimit(values.get("scanLimit"), maximumScanLimit);
+    if (byteLimit === undefined || entryLimit === undefined || scanLimit === undefined) {
+      return;
+    }
+    return { byteLimit, entryLimit, scanLimit };
+  } catch {
+    return;
+  }
+}
+function invalidUsage() {
+  return {
+    state: "unknown",
+    code: "INVALID_USAGE_LIMIT",
+    logicalBytes: 0,
+    allocatedBytes: 0,
+    entryCount: 0
+  };
+}
+function boundedNumber(value) {
+  if (value > maximumSafeBytes) {
+    return;
+  }
+  return Number(value);
+}
+function report(state, limits, totals) {
+  return {
+    state,
+    logicalBytes: boundedNumber(totals.logicalBytes) ?? Number.MAX_SAFE_INTEGER,
+    allocatedBytes: boundedNumber(totals.allocatedBytes) ?? Number.MAX_SAFE_INTEGER,
+    entryCount: totals.entryCount,
+    ...limits
+  };
+}
+function unknownUsage(limits, totals = {
+  logicalBytes: 0n,
+  allocatedBytes: 0n,
+  entryCount: 0
+}) {
+  return report("unknown", limits, totals);
+}
+function sameEntry2(left, right) {
+  return left.kind === right.kind && left.device === right.device && left.inode === right.inode && left.birthtimeNs === right.birthtimeNs && left.changeTimeNs === right.changeTimeNs && left.modifiedTimeNs === right.modifiedTimeNs && left.logicalBytes === right.logicalBytes && left.allocatedBytes === right.allocatedBytes;
+}
+function identity(entry) {
+  return `${entry.device}:${entry.inode}`;
+}
+function validEntry(entry) {
+  return entry.device.length > 0 && entry.inode.length > 0 && entry.birthtimeNs.length > 0 && entry.changeTimeNs.length > 0 && entry.modifiedTimeNs.length > 0 && entry.logicalBytes >= 0n && entry.allocatedBytes >= 0n;
+}
+function rootMatchesMarker(entry, marker) {
+  return entry.kind === "directory" && sameFileIdentity({
+    device: entry.device,
+    inode: entry.inode,
+    birthtimeNs: entry.birthtimeNs
+  }, marker.rootIdentity);
+}
+function addEntry(entry, context) {
+  const key = identity(entry);
+  const measured = context.measuredIdentities.get(key);
+  if (measured !== undefined) {
+    return sameEntry2(measured, entry);
+  }
+  context.measuredIdentities.set(key, entry);
+  context.totals.logicalBytes += entry.logicalBytes;
+  context.totals.allocatedBytes += entry.allocatedBytes;
+  return context.totals.logicalBytes <= maximumSafeBytes && context.totals.allocatedBytes <= maximumSafeBytes;
+}
+function safeName3(name) {
+  return name.length > 0 && name !== "." && name !== ".." && !unsafeEntryName3.test(name);
+}
+async function closeDirectory(directory) {
+  try {
+    await directory.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function inspectDirectory(directory, expected, context) {
+  if (!validEntry(directory.entry) || !sameEntry2(directory.entry, expected)) {
+    return false;
+  }
+  const remaining = context.limits.scanLimit - context.totals.entryCount;
+  const scanned = await directory.scan(remaining);
+  if (scanned.truncated || scanned.names.length > remaining) {
+    return false;
+  }
+  const entries = new Map;
+  for (const name of scanned.names) {
+    if (!safeName3(name) || entries.has(name)) {
+      return false;
+    }
+    const entry = await directory.inspect(name);
+    if (entry === undefined || !validEntry(entry)) {
+      return false;
+    }
+    entries.set(name, entry);
+    context.totals.entryCount += 1;
+    if (!addEntry(entry, context)) {
+      return false;
+    }
+    if (entry.kind === "directory") {
+      const key = identity(entry);
+      if (context.directoryIdentities.has(key)) {
+        return false;
+      }
+      context.directoryIdentities.add(key);
+      const child = await directory.open(name);
+      if (child === undefined) {
+        return false;
+      }
+      let childValid = false;
+      try {
+        childValid = await inspectDirectory(child, entry, context);
+      } finally {
+        if (!await closeDirectory(child)) {
+          childValid = false;
+        }
+      }
+      if (!childValid) {
+        return false;
+      }
+    }
+  }
+  for (const [name, entry] of entries) {
+    const current2 = await directory.inspect(name);
+    if (current2 === undefined || !sameEntry2(entry, current2)) {
+      return false;
+    }
+  }
+  const current = await directory.stat();
+  return current !== undefined && sameEntry2(directory.entry, current);
+}
+async function inspectWorkspaceUsage(runtime, root, runId, expectedRoot, limits) {
+  const totals = {
+    logicalBytes: 0n,
+    allocatedBytes: 0n,
+    entryCount: 0
+  };
+  try {
+    const marker = await verifyMarkedRoot(runtime, root, runId, expectedRoot);
+    const rootEntry = await runtime.lstatUsage(root);
+    if (rootEntry === undefined || !validEntry(rootEntry) || !rootMatchesMarker(rootEntry, marker)) {
+      return unknownUsage(limits, totals);
+    }
+    const directory = await runtime.openUsageDirectory(root);
+    if (directory === undefined) {
+      return unknownUsage(limits, totals);
+    }
+    const context = {
+      limits,
+      totals,
+      measuredIdentities: new Map,
+      directoryIdentities: new Set([identity(rootEntry)])
+    };
+    let valid = false;
+    try {
+      valid = await inspectDirectory(directory, rootEntry, context);
+    } finally {
+      if (!await closeDirectory(directory)) {
+        valid = false;
+      }
+    }
+    if (!valid) {
+      return unknownUsage(limits, totals);
+    }
+    await verifyMarkedRoot(runtime, root, runId, expectedRoot);
+    const logicalBytes = boundedNumber(totals.logicalBytes);
+    const allocatedBytes = boundedNumber(totals.allocatedBytes);
+    if (logicalBytes === undefined || allocatedBytes === undefined) {
+      return unknownUsage(limits, totals);
+    }
+    const exceeded = logicalBytes > limits.byteLimit || allocatedBytes > limits.byteLimit || totals.entryCount > limits.entryLimit;
+    if (exceeded) {
+      return report("exceeded", limits, totals);
+    }
+    return report("within", limits, totals);
+  } catch {
+    return unknownUsage(limits, totals);
+  }
 }
 
 // packages/run-workspace/src/lifecycle.ts
@@ -876,6 +1496,16 @@ class OwnedRunWorkspace {
     }
     return selected;
   }
+  inspectUsage(limits) {
+    const validated = parseUsageLimits(limits);
+    if (validated === undefined) {
+      return Promise.resolve(invalidUsage());
+    }
+    if (this.#state !== "open") {
+      return Promise.resolve(unknownUsage(validated));
+    }
+    return inspectWorkspaceUsage(this.#runtime, this.#root, this.#runId, this.#marker.root, validated);
+  }
   registerChild(child) {
     if (this.#state !== "open") {
       throw new RunWorkspaceError("WORKSPACE_CLOSED", "Cannot register a child after close begins");
@@ -931,13 +1561,13 @@ class OwnedRunWorkspace {
     this.#state = "closing";
     const active = this.#close();
     this.#closePromise = active;
-    active.then((report) => {
-      if (report.state === "cleanup-failed") {
+    active.then((report2) => {
+      if (report2.state === "cleanup-failed") {
         this.#state = "cleanup-failed";
         this.#closePromise = undefined;
       } else {
         this.#state = "closed";
-        this.#finalReport = report;
+        this.#finalReport = report2;
         this.#removeSignalCoordination?.();
       }
     }).catch(() => {
@@ -978,7 +1608,7 @@ class OwnedRunWorkspace {
   async#deleteRoot() {
     const marker = await verifyMarkedRoot(this.#runtime, this.#root, this.#runId, this.#marker.root);
     const source = this.#root;
-    const claimed = join4(managedParent(this.#runtime), `reaping-${this.#runId}-${crypto.randomUUID()}`);
+    const claimed = join5(managedParent(this.#runtime), `reaping-${this.#runId}-${crypto.randomUUID()}`);
     await this.#runtime.rename(source, claimed);
     this.#root = claimed;
     const reapingMarker = {
@@ -1073,7 +1703,7 @@ async function createWithRuntime(options, runtime) {
     throw new RunWorkspaceError("UNKNOWN_PROCESS_IDENTITY", "Current process start identity is unavailable");
   }
   const parent = await prepareParent(runtime);
-  const root = await runtime.mkdtemp(join4(parent, "run-"));
+  const root = await runtime.mkdtemp(join5(parent, "run-"));
   const runId = crypto.randomUUID();
   let marker;
   let markerPublished = false;
@@ -1103,8 +1733,8 @@ async function createWithRuntime(options, runtime) {
       throw new RunWorkspaceAbortedError;
     workspace = new OwnedRunWorkspace(root, marker, runtime, options);
     if (workspace.signal.aborted) {
-      const report = await workspace.close();
-      if (report.state === "cleanup-failed") {
+      const report2 = await workspace.close();
+      if (report2.state === "cleanup-failed") {
         throw new RunWorkspaceError("INITIALIZATION_FAILED", "Aborted run workspace cleanup must be retried");
       }
       throw new RunWorkspaceAbortedError;
@@ -1138,9 +1768,9 @@ function create(options = {}) {
   return createWithRuntime(options, systemRuntime());
 }
 // packages/model-catalog/src/codex-child.ts
-import { lstat as lstat2, mkdir as mkdir2, realpath as realpath2, writeFile } from "fs/promises";
-import { isAbsolute as isAbsolute2, join as join5 } from "path";
-import process5 from "process";
+import { lstat as lstat3, mkdir as mkdir2, realpath as realpath2, writeFile } from "fs/promises";
+import { isAbsolute as isAbsolute2, join as join6 } from "path";
+import process6 from "process";
 
 // packages/model-catalog/src/catalog/schema.ts
 var LUNA_MODEL = "gpt-5.6-luna";
@@ -1227,9 +1857,9 @@ function applyLunaV2Overlay(value) {
 }
 
 // packages/model-catalog/src/codex-group.ts
-import process3 from "process";
+import process4 from "process";
 var FORCED_EXIT_TIMEOUT_MS = 2000;
-function signalOwnedCodexSupervisor(supervisorExited, pid, signal, kill = process3.kill) {
+function signalOwnedCodexSupervisor(supervisorExited, pid, signal, kill = process4.kill) {
   if (supervisorExited)
     return false;
   try {
@@ -1254,7 +1884,7 @@ async function settlesWithin(settled, milliseconds) {
     clearTimeout(timer);
   }
 }
-function codexSupervisorGroup(child, label, kill = process3.kill) {
+function codexSupervisorGroup(child, label, kill = process4.kill) {
   let exitObserved = false;
   const signal = (value) => {
     if (exitObserved)
@@ -1317,7 +1947,7 @@ function codexSupervisorGroup(child, label, kill = process3.kill) {
 }
 
 // packages/model-catalog/src/codex-supervisor.ts
-import process4 from "process";
+import process5 from "process";
 var CODEX_SUPERVISOR_PROTOCOL_VERSION = 1;
 var CODEX_SUPERVISOR_SOURCE = String.raw`
 const protocolVersion = ${CODEX_SUPERVISOR_PROTOCOL_VERSION};
@@ -1413,7 +2043,7 @@ function codexSupervisorProtocol() {
 }
 function codexSupervisorCommand(binary, args) {
   return [
-    process4.execPath,
+    process5.execPath,
     "--eval",
     CODEX_SUPERVISOR_SOURCE,
     encodeURIComponent(JSON.stringify({ binary, args }))
@@ -1449,7 +2079,7 @@ class CodexChildError extends Error {
   }
 }
 var systemCodexRuntime = {
-  platform: process5.platform,
+  platform: process6.platform,
   spawn: (command, options) => Bun.spawn(command, options)
 };
 function requireOwnedProcessScope(platform) {
@@ -1464,18 +2094,18 @@ function commandEnvironment(home) {
     LANG: "C",
     LC_ALL: "C",
     NO_COLOR: "1",
-    PATH: process5.env["PATH"] ?? "/usr/bin:/bin",
-    TMPDIR: join5(home, "tmp"),
-    XDG_CACHE_HOME: join5(home, "xdg-cache"),
-    XDG_CONFIG_HOME: join5(home, "xdg-config"),
-    XDG_DATA_HOME: join5(home, "xdg-data")
+    PATH: process6.env["PATH"] ?? "/usr/bin:/bin",
+    TMPDIR: join6(home, "tmp"),
+    XDG_CACHE_HOME: join6(home, "xdg-cache"),
+    XDG_CONFIG_HOME: join6(home, "xdg-config"),
+    XDG_DATA_HOME: join6(home, "xdg-data")
   };
 }
 async function isolatedHome(workspace) {
   const home = workspace.path(`codex-home-${crypto.randomUUID()}`);
   await mkdir2(home, { mode: 448 });
   for (const directory of ["tmp", "xdg-cache", "xdg-config", "xdg-data"]) {
-    await mkdir2(join5(home, directory), { mode: 448 });
+    await mkdir2(join6(home, directory), { mode: 448 });
   }
   return home;
 }
@@ -1484,7 +2114,7 @@ async function validateCodexBinary(path) {
     if (!isAbsolute2(path) || await realpath2(path) !== path) {
       throw new CodexChildError("unsafe-binary");
     }
-    const metadata = await lstat2(path);
+    const metadata = await lstat3(path);
     if (!metadata.isFile() || metadata.isSymbolicLink()) {
       throw new CodexChildError("unsafe-binary");
     }
@@ -1671,7 +2301,7 @@ async function bundledCatalog(workspace, codexBinary, limits, runtime = systemCo
 }
 async function preflightCatalog(workspace, codexBinary, contents, limits, runtime = systemCodexRuntime) {
   const result = await runIsolatedCodex(workspace, codexBinary, async (home) => {
-    const candidate = join5(home, "candidate.json");
+    const candidate = join6(home, "candidate.json");
     await writeFile(candidate, contents, { mode: 384, flag: "wx" });
     return [
       "debug",
@@ -1694,9 +2324,9 @@ async function preflightCatalog(workspace, codexBinary, contents, limits, runtim
 import { createHash } from "crypto";
 import {
   chmod as chmod2,
-  lstat as lstat3,
+  lstat as lstat4,
   mkdir as mkdir3,
-  open as open2,
+  open as open3,
   readFile as readFile2,
   realpath as realpath3,
   rename as rename2,
@@ -1706,13 +2336,13 @@ import {
   basename as basename3,
   dirname as dirname2,
   isAbsolute as isAbsolute3,
-  join as join6,
+  join as join7,
   parse,
   relative as relative2,
   resolve as resolve2,
   sep
 } from "path";
-import process6 from "process";
+import process7 from "process";
 var MODEL_CACHE_TTL_MS = 300000;
 function physicalPathKey(path) {
   return path.normalize("NFC").toLocaleLowerCase("en-US");
@@ -1720,7 +2350,7 @@ function physicalPathKey(path) {
 function isMissingFile(error) {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
 }
-function identity(metadata) {
+function identity2(metadata) {
   return { dev: metadata.dev, ino: metadata.ino };
 }
 function sameIdentity(first, second) {
@@ -1736,14 +2366,14 @@ function pathComponents(path) {
   const paths = [root];
   let current = root;
   for (const segment of segments) {
-    current = join6(current, segment);
+    current = join7(current, segment);
     paths.push(current);
   }
   return paths;
 }
 async function existingPathMetadata(path) {
   try {
-    return await lstat3(path);
+    return await lstat4(path);
   } catch (error) {
     if (isMissingFile(error)) {
       return;
@@ -1780,7 +2410,7 @@ async function ensureDirectoryPath(path) {
     const metadata = await existingPathMetadata(component);
     if (metadata === undefined) {
       await mkdir3(component, { mode: 448 });
-      const created = await lstat3(component);
+      const created = await lstat4(component);
       if (!created.isDirectory() || created.isSymbolicLink()) {
         throw new Error(`${component} must be a directory`);
       }
@@ -1799,12 +2429,12 @@ async function validatePrivateDirectoryChain(privacyRoot, directory) {
     throw new Error(`${directory} escapes its private storage root`);
   }
   await rejectSymlinkAncestors(directory);
-  const expectedUid = process6.getuid?.();
+  const expectedUid = process7.getuid?.();
   for (const component of pathComponents(directory)) {
     if (!within(privacyRoot, component)) {
       continue;
     }
-    const metadata = await lstat3(component);
+    const metadata = await lstat4(component);
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
       throw new Error(`${component} must be a directory`);
     }
@@ -1838,7 +2468,7 @@ async function prepareStandaloneParent(target) {
   await validatePrivateDirectoryChain(privacyRoot, directory);
 }
 async function regularFileMetadata(path) {
-  const metadata = await lstat3(path);
+  const metadata = await lstat4(path);
   if (metadata.isSymbolicLink()) {
     throw new Error(`${path} must not be a symlink`);
   }
@@ -1862,7 +2492,7 @@ async function validatePhysicalRegularFile(path) {
 }
 async function validatePhysicalDirectory(path) {
   await rejectSymlinkAncestors(path);
-  const metadata = await lstat3(path);
+  const metadata = await lstat4(path);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error(`${path} must be a directory`);
   }
@@ -1878,12 +2508,12 @@ async function inspectTarget(path) {
   }
   const metadata = await existingPathMetadata(path);
   if (metadata === undefined) {
-    return { physicalPath: join6(physicalParent, basename3(path)) };
+    return { physicalPath: join7(physicalParent, basename3(path)) };
   }
   const regular = await managedFileMetadata(path);
   return {
-    physicalPath: join6(physicalParent, basename3(path)),
-    identity: identity(regular),
+    physicalPath: join7(physicalParent, basename3(path)),
+    identity: identity2(regular),
     metadata: regular
   };
 }
@@ -1893,22 +2523,22 @@ async function ensurePrivateFileMode(path) {
     return;
   }
   const regular = await managedFileMetadata(path);
-  const expectedUid = process6.getuid?.();
+  const expectedUid = process7.getuid?.();
   if (expectedUid !== undefined && regular.uid !== expectedUid) {
     throw new Error(`${path} must be owned by the current user`);
   }
   if ((regular.mode & 511) === 384) {
     return;
   }
-  const expected = identity(regular);
+  const expected = identity2(regular);
   await chmod2(path, 384);
   const repaired = await managedFileMetadata(path);
-  if (!sameIdentity(expected, identity(repaired))) {
+  if (!sameIdentity(expected, identity2(repaired))) {
     throw new Error(`${path} changed during permission repair`);
   }
 }
 async function targetSnapshot(path) {
-  const parent = await lstat3(dirname2(path));
+  const parent = await lstat4(dirname2(path));
   if (!parent.isDirectory() || parent.isSymbolicLink()) {
     throw new Error(`${dirname2(path)} must be a directory`);
   }
@@ -1920,9 +2550,9 @@ async function targetSnapshot(path) {
     requireSingleLink(path, target);
   }
   return {
-    parent: identity(parent),
+    parent: identity2(parent),
     ...target === undefined ? {} : {
-      target: identity(target),
+      target: identity2(target),
       targetCtimeMs: target.ctimeMs,
       targetMode: target.mode & 511,
       targetMtimeMs: target.mtimeMs,
@@ -1939,7 +2569,7 @@ async function assertSnapshotUnchanged(path, expected) {
   }
 }
 async function syncDirectory(path) {
-  const handle = await open2(path, "r");
+  const handle = await open3(path, "r");
   try {
     await handle.sync();
   } finally {
@@ -1964,7 +2594,7 @@ async function validateCatalogTarget(paths, path) {
   if (inspection.metadata === undefined) {
     return inspection;
   }
-  const expectedUid = process6.getuid?.();
+  const expectedUid = process7.getuid?.();
   if (expectedUid !== undefined && inspection.metadata.uid !== expectedUid || (inspection.metadata.mode & 511) !== 384) {
     throw new Error(`${path} must be an owner-only mode 0600 file`);
   }
@@ -1995,10 +2625,10 @@ async function readBoundedJsonFile(path, maxBytes) {
   if (metadata.size > maxBytes) {
     throw new Error("catalog input exceeds size limit");
   }
-  const handle = await open2(path, "r");
+  const handle = await open3(path, "r");
   try {
     const opened = requireSingleLink(path, await handle.stat());
-    if (!(opened.isFile() && sameIdentity(identity(metadata), identity(opened)))) {
+    if (!(opened.isFile() && sameIdentity(identity2(metadata), identity2(opened)))) {
       throw new Error(`${path} changed while opening catalog input`);
     }
     const contents = Buffer.alloc(maxBytes + 1);
@@ -2014,7 +2644,7 @@ async function readBoundedJsonFile(path, maxBytes) {
       throw new Error("catalog input exceeds size limit");
     }
     const completed = requireSingleLink(path, await handle.stat());
-    if (!sameIdentity(identity(opened), identity(completed))) {
+    if (!sameIdentity(identity2(opened), identity2(completed))) {
       throw new Error(`${path} changed while reading catalog input`);
     }
     return parseJson(contents.subarray(0, length).toString("utf8"));
@@ -2045,14 +2675,14 @@ async function validatedAtomicParent(path) {
   await prepareStandaloneParent(path);
   await rejectSymlinkAncestors(path);
   const parent = dirname2(path);
-  const metadata = await lstat3(parent);
+  const metadata = await lstat4(parent);
   if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
     throw new Error(`${parent} must be a directory`);
   }
   if (!privateMode(metadata)) {
     throw new Error(`${parent} must have mode 0700`);
   }
-  const expectedUid = process6.getuid?.();
+  const expectedUid = process7.getuid?.();
   if (expectedUid !== undefined && metadata.uid !== expectedUid) {
     throw new Error(`${parent} must be owned by the current user`);
   }
@@ -2077,7 +2707,7 @@ async function preparedTarget(path, contents) {
 }
 async function writeSyncedTemporary(temporary, contents) {
   try {
-    const handle = await open2(temporary, "wx", 384);
+    const handle = await open3(temporary, "wx", 384);
     try {
       const opened = requireSingleLink(temporary, await handle.stat());
       if ((opened.mode & 511) !== 384) {
@@ -2086,7 +2716,7 @@ async function writeSyncedTemporary(temporary, contents) {
       await handle.writeFile(contents, "utf8");
       await handle.sync();
       const completed = requireSingleLink(temporary, await handle.stat());
-      if (!sameIdentity(identity(opened), identity(completed)) || (completed.mode & 511) !== 384) {
+      if (!sameIdentity(identity2(opened), identity2(completed)) || (completed.mode & 511) !== 384) {
         throw new Error(`${temporary} changed while staging atomic output`);
       }
     } finally {
@@ -2107,7 +2737,7 @@ async function promoteTemporary(path, parent, temporary, temporaryExpected, expe
   await rename2(temporary, path);
   await syncDirectory(parent);
   const promoted = await managedFileMetadata(path);
-  if ((promoted.mode & 511) !== 384 || !sameIdentity(identity(promoted), temporaryExpected.target)) {
+  if ((promoted.mode & 511) !== 384 || !sameIdentity(identity2(promoted), temporaryExpected.target)) {
     throw new Error(`${path} must have mode 0600`);
   }
 }
@@ -2117,7 +2747,7 @@ async function writePrivateAtomic(path, contents, options = {}) {
   if (target.unchanged) {
     return false;
   }
-  const temporary = join6(parent, `.${globalThis.crypto.randomUUID()}.tmp`);
+  const temporary = join7(parent, `.${globalThis.crypto.randomUUID()}.tmp`);
   let created = false;
   try {
     const temporaryExpected = await writeSyncedTemporary(temporary, contents);
@@ -2149,9 +2779,9 @@ function resolveCatalogPaths(options) {
   const paths = {
     codexHome,
     codexBinary: resolve3(options.codexBinary),
-    output: resolve3(options.output ?? join7(codexHome, "skizzles", "model-catalog.json")),
-    status: resolve3(options.status ?? join7(codexHome, "skizzles", "model-catalog-status.json")),
-    cache: resolve3(options.cache ?? join7(codexHome, "models_cache.json"))
+    output: resolve3(options.output ?? join8(codexHome, "skizzles", "model-catalog.json")),
+    status: resolve3(options.status ?? join8(codexHome, "skizzles", "model-catalog-status.json")),
+    cache: resolve3(options.cache ?? join8(codexHome, "models_cache.json"))
   };
   const distinct = new Set([paths.output, paths.status, paths.cache]);
   if (distinct.size !== 3) {
@@ -2268,7 +2898,7 @@ import { readFile as readFile3 } from "fs/promises";
 import { isAbsolute as isAbsolute5, resolve as resolve5 } from "path";
 
 // packages/model-catalog/src/launch-agent.ts
-import { isAbsolute as isAbsolute4, join as join8, resolve as resolve4 } from "path";
+import { isAbsolute as isAbsolute4, join as join9, resolve as resolve4 } from "path";
 var UNRESOLVED_PLACEHOLDER = /__[A-Z0-9_]+__/;
 function xml(value) {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
@@ -2279,7 +2909,7 @@ function renderLaunchAgent(template, values) {
     __SCRIPT_ABSOLUTE_PATH__: values.script,
     __CODEX_HOME_ABSOLUTE_PATH__: values.codexHome,
     __CODEX_BINARY_ABSOLUTE_PATH__: values.codexBinary,
-    __MODELS_CACHE_ABSOLUTE_PATH__: join8(values.codexHome, "models_cache.json")
+    __MODELS_CACHE_ABSOLUTE_PATH__: join9(values.codexHome, "models_cache.json")
   };
   let rendered = template;
   for (const [placeholder, value] of Object.entries(replacements)) {
@@ -2447,7 +3077,7 @@ function renderLaunchAgent2(template, values) {
 }
 if (import.meta.main) {
   try {
-    await runModelCatalogCli(process7.argv.slice(2));
+    await runModelCatalogCli(process8.argv.slice(2));
   } catch (error) {
     if (error instanceof Error) {
       const { message } = error;
@@ -2455,7 +3085,7 @@ if (import.meta.main) {
     } else {
       console.error("model catalog operation failed");
     }
-    process7.exit(1);
+    process8.exit(1);
   }
 }
 export {

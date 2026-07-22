@@ -1,6 +1,5 @@
 import {
   ArtifactRegistry,
-  type ArtifactValidator,
   type FilePayloadResult,
   type OutputBoundary,
   type OutputResult,
@@ -9,67 +8,47 @@ import {
   CheckpointLedger,
   type CheckpointResult,
   type CheckpointValidation,
-  type VerificationAuthorityPort,
 } from "./checkpoint.ts";
-import { exactKeys, isRecord, nonempty, stringArray } from "./codec.ts";
-import {
-  type DiagnosticInterceptor,
-  type DiagnosticResult,
-  interceptDiagnostic,
-} from "./diagnostic.ts";
-import {
-  type IntentResult,
-  type NormalizedRequest,
-  normalizeRequest,
-} from "./intent.ts";
-import {
-  type PreflightApproval,
-  PreflightEngine,
-  type PreflightResult,
-  type RepositoryGraphPort,
-} from "./preflight.ts";
-import type {
-  EffectClassification,
-  EffectClassificationAuthorityPort,
-  RepositoryAuthorityPort,
-  RepositoryContext,
-} from "./repository.ts";
+import { exactKeys, isRecord } from "./codec.ts";
+import { type DiagnosticResult, interceptDiagnostic } from "./diagnostic.ts";
+import { type IntentResult, normalizeRequest } from "./intent.ts";
+import { PreflightEngine, type PreflightResult } from "./preflight.ts";
+import type { EffectClassificationAuthorityPort } from "./repository.ts";
 import { classifyEffect } from "./repository.ts";
 import {
-  type MeasurementAuthorityPort,
   type ProposalResult,
   type ReviewResult,
-  type StructuralPort,
   type StructuralResult,
   StructuralReview,
 } from "./review.ts";
-
-export interface NonEffectSpawnPort {
-  spawn(input: {
-    readonly effect: "none";
-    readonly request: NormalizedRequest;
-    readonly repository: RepositoryContext;
-    readonly preflight: PreflightApproval;
-    readonly classification: EffectClassification;
-  }): unknown | Promise<unknown>;
-}
-
-export interface OrchestratorConfig {
-  readonly repositoryAuthority: RepositoryAuthorityPort;
-  readonly effectClassificationAuthority: EffectClassificationAuthorityPort;
-  readonly graph: RepositoryGraphPort;
-  readonly measurementAuthority: MeasurementAuthorityPort;
-  readonly verificationAuthority: VerificationAuthorityPort;
-  readonly nonEffectSpawn: NonEffectSpawnPort;
-  readonly structural: StructuralPort;
-  readonly artifactValidators: readonly ArtifactValidator[];
-  readonly requiredInvariants: readonly string[];
-  readonly outputCaps: {
-    readonly tokens: number;
-    readonly bytes: number;
-  };
-  readonly diagnosticInterceptor?: DiagnosticInterceptor;
-}
+import {
+  type ApprovalCancelResult,
+  ApprovalController,
+  type ApprovalTransitionResult,
+  type PromotionResult,
+} from "./state/approval.ts";
+import {
+  type NonEffectSpawnPort,
+  type OrchestratorConfig,
+  parseOrchestratorConfig,
+} from "./state/configuration.ts";
+import {
+  DiscoveryController,
+  type DiscoveryResult,
+} from "./state/discovery.ts";
+import {
+  ExecutionBudgetController,
+  type ExecutionCompletionResult,
+  type ExecutionRecordResult,
+  type ExecutionStartResult,
+  type ExecutionTerminationResult,
+} from "./state/execution.ts";
+import {
+  TargetBaselineManager,
+  type TargetBaselineResult,
+  type TargetReleaseResult,
+  type TargetRevalidation,
+} from "./state/target.ts";
 
 export type RunResult =
   | { readonly status: "completed"; readonly output: OutputBoundary }
@@ -97,6 +76,21 @@ export interface Orchestrator {
   proposeChange(input: unknown): ProposalResult;
   reviewChange(input: unknown): Promise<ReviewResult>;
   applyChange(input: unknown): Promise<StructuralResult>;
+  captureTargetBaseline(input: unknown): Promise<TargetBaselineResult>;
+  revalidateTargetBaseline(input: unknown): Promise<TargetRevalidation>;
+  releaseTargetBaseline(input: unknown): TargetReleaseResult;
+  startExecution(input: unknown): ExecutionStartResult;
+  recordExecution(input: unknown): ExecutionRecordResult;
+  terminateExecution(input: unknown): ExecutionTerminationResult;
+  completeExecution(input: unknown): Promise<ExecutionCompletionResult>;
+  discover(input: unknown): Promise<DiscoveryResult>;
+  expandDiscovery(input: unknown): Promise<DiscoveryResult>;
+  planApproval(input: unknown): ApprovalTransitionResult;
+  reviewApproval(input: unknown): ApprovalTransitionResult;
+  awaitApproval(input: unknown): ApprovalTransitionResult;
+  approve(input: unknown): Promise<ApprovalTransitionResult>;
+  promote(input: unknown): Promise<PromotionResult>;
+  cancelApproval(input: unknown): ApprovalCancelResult;
 }
 
 export type OrchestratorResult =
@@ -109,7 +103,7 @@ export type OrchestratorResult =
 export function createOrchestrator(input: unknown): OrchestratorResult {
   let config: OrchestratorConfig | undefined;
   try {
-    config = parseConfig(input);
+    config = parseOrchestratorConfig(input);
   } catch {
     return { status: "rejected", code: "INVALID_ORCHESTRATOR_CONFIG" };
   }
@@ -131,6 +125,25 @@ export function createOrchestrator(input: unknown): OrchestratorResult {
   const structural = new StructuralReview(
     config.measurementAuthority,
     config.structural,
+  );
+  const targets = new TargetBaselineManager(config.targetAuthority);
+  const executions = new ExecutionBudgetController(
+    config.clock,
+    config.completionAuthority,
+    config.executionBudgets,
+    config.completionContract.id,
+    config.completionContract.checks,
+  );
+  const discovery = new DiscoveryController(
+    config.discoveryAuthority,
+    config.clock,
+    config.discoveryPolicy,
+  );
+  const approvals = new ApprovalController(
+    config.approvalAuthority,
+    config.clock,
+    targets,
+    config.approvalTtlMs,
   );
   const orchestrator: Orchestrator = Object.freeze({
     normalize: (value: unknown) => safeIntent(value),
@@ -195,8 +208,141 @@ export function createOrchestrator(input: unknown): OrchestratorResult {
         status: "rejected",
         code: "ADVERSARIAL_REVIEW_REQUIRED",
       }),
+    captureTargetBaseline: (value: unknown) =>
+      safeAsync(() => targets.capture(value), {
+        status: "rejected",
+        code: "INVALID_TARGET_INPUT",
+      }),
+    revalidateTargetBaseline: (value: unknown) =>
+      safeAsync(() => targets.revalidate(value), {
+        status: "rejected",
+        code: "INVALID_TARGET_BASELINE",
+      }),
+    releaseTargetBaseline: (value: unknown) =>
+      safeTargetRelease(value, targets),
+    startExecution: (value: unknown) => safeExecutionStart(value, executions),
+    recordExecution: (value: unknown) => safeExecutionRecord(value, executions),
+    terminateExecution: (value: unknown) =>
+      safeExecutionTermination(value, executions),
+    completeExecution: (value: unknown) =>
+      safeAsync(() => executions.complete(value), {
+        status: "rejected",
+        code: "INVALID_EXECUTION_COMPLETION",
+      }),
+    discover: (value: unknown) =>
+      safeAsync(() => discovery.discover(value), {
+        status: "rejected",
+        code: "INVALID_DISCOVERY_INPUT",
+      }),
+    expandDiscovery: (value: unknown) =>
+      safeAsync(() => discovery.expand(value), {
+        status: "rejected",
+        code: "INVALID_DISCOVERY_INPUT",
+      }),
+    planApproval: (value: unknown) => safeApprovalPlan(value, approvals),
+    reviewApproval: (value: unknown) => safeApprovalReview(value, approvals),
+    awaitApproval: (value: unknown) => safeApprovalAwait(value, approvals),
+    approve: (value: unknown) =>
+      safeAsync(() => approvals.approve(value), {
+        status: "rejected",
+        code: "INVALID_APPROVAL_INPUT",
+      }),
+    promote: (value: unknown) =>
+      safeAsync(() => approvals.promote(value), {
+        status: "rejected",
+        code: "INVALID_APPROVAL_INPUT",
+      }),
+    cancelApproval: (value: unknown) => safeApprovalCancel(value, approvals),
   });
   return { status: "accepted", orchestrator };
+}
+
+function safeTargetRelease(
+  value: unknown,
+  targets: TargetBaselineManager,
+): TargetReleaseResult {
+  try {
+    return targets.release(value);
+  } catch {
+    return { status: "rejected", code: "INVALID_TARGET_BASELINE" };
+  }
+}
+
+function safeExecutionStart(
+  value: unknown,
+  executions: ExecutionBudgetController,
+): ExecutionStartResult {
+  try {
+    return executions.start(value);
+  } catch {
+    return { status: "rejected", code: "INVALID_EXECUTION_INPUT" };
+  }
+}
+
+function safeExecutionRecord(
+  value: unknown,
+  executions: ExecutionBudgetController,
+): ExecutionRecordResult {
+  try {
+    return executions.record(value);
+  } catch {
+    return { status: "rejected", code: "INVALID_EXECUTION_EVENT" };
+  }
+}
+
+function safeExecutionTermination(
+  value: unknown,
+  executions: ExecutionBudgetController,
+): ExecutionTerminationResult {
+  try {
+    return executions.terminate(value);
+  } catch {
+    return { status: "rejected", code: "INVALID_EXECUTION_TERMINATION" };
+  }
+}
+
+function safeApprovalPlan(
+  value: unknown,
+  approvals: ApprovalController,
+): ApprovalTransitionResult {
+  try {
+    return approvals.plan(value);
+  } catch {
+    return { status: "rejected", code: "INVALID_APPROVAL_INPUT" };
+  }
+}
+
+function safeApprovalReview(
+  value: unknown,
+  approvals: ApprovalController,
+): ApprovalTransitionResult {
+  try {
+    return approvals.review(value);
+  } catch {
+    return { status: "rejected", code: "INVALID_APPROVAL_INPUT" };
+  }
+}
+
+function safeApprovalAwait(
+  value: unknown,
+  approvals: ApprovalController,
+): ApprovalTransitionResult {
+  try {
+    return approvals.awaitApproval(value);
+  } catch {
+    return { status: "rejected", code: "INVALID_APPROVAL_INPUT" };
+  }
+}
+
+function safeApprovalCancel(
+  value: unknown,
+  approvals: ApprovalController,
+): ApprovalCancelResult {
+  try {
+    return approvals.cancel(value);
+  } catch {
+    return { status: "rejected", code: "INVALID_APPROVAL_INPUT" };
+  }
 }
 
 function safeIntent(value: unknown): IntentResult {
@@ -291,101 +437,4 @@ async function run(
   const output = await artifacts.compose(rawOutput);
   if (output.status === "rejected") return output;
   return { status: "completed", output: output.output };
-}
-
-function parseConfig(input: unknown): OrchestratorConfig | undefined {
-  if (
-    !isRecord(input) ||
-    !exactKeys(
-      input,
-      [
-        "repositoryAuthority",
-        "effectClassificationAuthority",
-        "graph",
-        "measurementAuthority",
-        "verificationAuthority",
-        "nonEffectSpawn",
-        "structural",
-        "artifactValidators",
-        "requiredInvariants",
-        "outputCaps",
-      ],
-      ["diagnosticInterceptor"],
-    ) ||
-    !isRecord(input.outputCaps) ||
-    !exactKeys(input.outputCaps, ["tokens", "bytes"]) ||
-    typeof input.outputCaps.tokens !== "number" ||
-    typeof input.outputCaps.bytes !== "number"
-  ) {
-    return;
-  }
-  const repositoryCapture = method(input.repositoryAuthority, "capture");
-  const effectClassify = method(
-    input.effectClassificationAuthority,
-    "classify",
-  );
-  const graphInspect = method(input.graph, "inspect");
-  const measure = method(input.measurementAuthority, "measure");
-  const verificationCapture = method(input.verificationAuthority, "capture");
-  const spawn = method(input.nonEffectSpawn, "spawn");
-  const apply = method(input.structural, "apply");
-  const validators = ArtifactRegistry.parseValidators(
-    input.artifactValidators,
-    input.outputCaps.tokens,
-    input.outputCaps.bytes,
-  );
-  const requiredInvariants = stringArray(input.requiredInvariants);
-  const interceptor = Object.hasOwn(input, "diagnosticInterceptor")
-    ? method(input.diagnosticInterceptor, "intercept")
-    : undefined;
-  if (
-    repositoryCapture === undefined ||
-    effectClassify === undefined ||
-    graphInspect === undefined ||
-    measure === undefined ||
-    verificationCapture === undefined ||
-    spawn === undefined ||
-    apply === undefined ||
-    validators === undefined ||
-    requiredInvariants === undefined ||
-    requiredInvariants.length === 0 ||
-    requiredInvariants.some((id) => !nonempty(id, 128)) ||
-    new Set(requiredInvariants).size !== requiredInvariants.length ||
-    (Object.hasOwn(input, "diagnosticInterceptor") && interceptor === undefined)
-  ) {
-    return;
-  }
-  return Object.freeze({
-    repositoryAuthority: { capture: repositoryCapture },
-    effectClassificationAuthority: { classify: effectClassify },
-    graph: { inspect: graphInspect },
-    measurementAuthority: { measure },
-    verificationAuthority: { capture: verificationCapture },
-    nonEffectSpawn: { spawn },
-    structural: { apply },
-    artifactValidators: validators,
-    requiredInvariants,
-    outputCaps: Object.freeze({
-      tokens: input.outputCaps.tokens,
-      bytes: input.outputCaps.bytes,
-    }),
-    ...(interceptor === undefined
-      ? {}
-      : { diagnosticInterceptor: { intercept: interceptor } }),
-  });
-}
-
-function method(
-  value: unknown,
-  name: string,
-): ((input: unknown) => unknown | Promise<unknown>) | undefined {
-  if (
-    !isRecord(value) ||
-    !exactKeys(value, [name]) ||
-    typeof value[name] !== "function"
-  ) {
-    return;
-  }
-  const implementation = value[name];
-  return (input: unknown) => Reflect.apply(implementation, value, [input]);
 }

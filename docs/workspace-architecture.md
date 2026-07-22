@@ -20,6 +20,9 @@ The current workspace dependency edges are:
 @skizzles/installer -> @skizzles/prompt-layer
 @skizzles/installer -> @skizzles/run-workspace
 @skizzles/model-catalog -> @skizzles/run-workspace
+@skizzles/orchestrator -> @skizzles/command-supervisor
+@skizzles/orchestrator -> @skizzles/run-workspace
+@skizzles/orchestrator -> @skizzles/workspace-transaction
 @skizzles/plugin-builder -> @skizzles/command-hook
 @skizzles/plugin-builder -> @skizzles/command-supervisor
 @skizzles/plugin-builder -> @skizzles/container-lab
@@ -45,6 +48,13 @@ contracts. Its Phase 1 surface is dependency-free and is not yet a distributed
 plugin runtime. Later lifecycle and validation phases must depend on existing
 capability owners through public package exports or injected ports; the plugin
 builder remains the only distribution composition owner.
+
+`@skizzles/workspace-transaction` owns repository-scoped publication leases,
+destination-owned same-filesystem siblings, durable multi-file journals, and
+deterministic recovery. It provides serialized per-file atomic publication and
+recoverable file-set semantics; it does not claim portable multi-file atomicity.
+The orchestrator owns policy and approval, while command-supervisor owns process
+observation and run-workspace owns disposable-root lifecycle and quota evidence.
 
 ## Run lifecycle ownership
 

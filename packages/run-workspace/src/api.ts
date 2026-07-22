@@ -12,9 +12,14 @@ export type {
   CloseFailureCode,
   CloseReport,
   CreateOptions,
+  InvalidWorkspaceUsage,
+  MeasuredWorkspaceUsage,
   OwnedChild,
   RunWorkspace,
   SkipReason,
+  WorkspaceUsage,
+  WorkspaceUsageLimits,
+  WorkspaceUsageState,
 } from "./contract.ts";
 export {
   RunWorkspaceError,

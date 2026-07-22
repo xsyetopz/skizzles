@@ -1,5 +1,11 @@
 import process from "node:process";
 import type { SupervisedSignal } from "./contract.ts";
+import {
+  processTreeExists,
+  signalProcessTree,
+  terminateProcessTree,
+  waitForProcessTreeExit,
+} from "./process-tree.ts";
 
 type ShellSubprocess = Bun.Subprocess<"inherit", "pipe", "pipe">;
 
@@ -16,8 +22,6 @@ export type SupervisedShell = {
   close: () => void;
 };
 
-type SignalTarget = SupervisedSignal | "SIGKILL";
-
 const supervisedSignals: readonly SupervisedSignal[] = [
   "SIGINT",
   "SIGTERM",
@@ -29,51 +33,6 @@ const signalExitCodes: Readonly<Record<SupervisedSignal, number>> = {
   SIGINT: 130,
   SIGTERM: 143,
 };
-
-function missingProcess(error: unknown): boolean {
-  return error instanceof Error && "code" in error && error.code === "ESRCH";
-}
-
-function signalProcessTree(child: ShellSubprocess, signal: SignalTarget): void {
-  if (process.platform !== "win32") {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch (error) {
-      if (missingProcess(error)) {
-        return;
-      }
-    }
-  }
-  try {
-    child.kill(signal);
-  } catch {
-    // The shell may have exited between observation and delivery.
-  }
-}
-
-function processTreeExists(child: ShellSubprocess): boolean {
-  try {
-    process.kill(process.platform === "win32" ? child.pid : -child.pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function waitForProcessTreeExit(
-  child: ShellSubprocess,
-  timeoutMilliseconds: number,
-): Promise<boolean> {
-  const deadline = performance.now() + timeoutMilliseconds;
-  while (performance.now() < deadline) {
-    if (!processTreeExists(child)) {
-      return true;
-    }
-    await Bun.sleep(10);
-  }
-  return !processTreeExists(child);
-}
 
 export function spawnSupervisedShell(
   shell: string,
@@ -161,23 +120,8 @@ export function spawnSupervisedShell(
     return escalated ? "killed" : "terminated";
   };
 
-  const settleNormalCompletion = async (): Promise<ShellCleanupOutcome> => {
-    if (!processTreeExists(child)) {
-      return "not-required";
-    }
-    signalProcessTree(child, "SIGTERM");
-    const exitedGracefully = await waitForProcessTreeExit(
-      child,
-      signalGraceMilliseconds,
-    );
-    if (!exitedGracefully) {
-      signalProcessTree(child, "SIGKILL");
-      await waitForProcessTreeExit(child, 500);
-      return "killed";
-    }
-    await waitForProcessTreeExit(child, 500);
-    return "terminated";
-  };
+  const settleNormalCompletion = async (): Promise<ShellCleanupOutcome> =>
+    terminateProcessTree(child, signalGraceMilliseconds);
 
   return {
     child,

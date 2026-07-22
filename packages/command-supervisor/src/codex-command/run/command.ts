@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import process from "node:process";
+import { finishCaptures, waitForCaptureDrain } from "../capture-lifecycle.ts";
 import type { StreamCaptureState } from "../contract.ts";
 import { commandShell, loadRunSettings } from "../settings.ts";
 import { spawnSupervisedShell } from "../shell-process.ts";
@@ -7,7 +8,6 @@ import {
   captureStream,
   emptyCaptureState,
   printCaptured,
-  type StreamCapture,
 } from "../stream-capture.ts";
 import {
   artifactContents,
@@ -39,38 +39,13 @@ function progressReporter(
     ) {
       return;
     }
-    const seconds = Math.floor((performance.now() - startedAt) / 1_000);
+    const seconds = Math.floor((performance.now() - startedAt) / 1000);
     console.log(
       `| ${seconds}s | ${stdout.observedBytes}B | ${stderr.observedBytes}B |`,
     );
     lastReportedStdoutBytes = stdout.observedBytes;
     lastReportedStderrBytes = stderr.observedBytes;
   };
-}
-
-function waitForCaptureDrain(
-  captures: readonly StreamCapture[],
-  drainMilliseconds: number,
-): Promise<boolean> {
-  const allDone = Promise.all(captures.map((capture) => capture.done));
-  return Promise.race([
-    allDone.then(() => true),
-    Bun.sleep(drainMilliseconds).then(() => false),
-  ]);
-}
-
-async function finishCaptures(captures: readonly StreamCapture[]) {
-  const allDone = Promise.all(captures.map((capture) => capture.done));
-  const finished = await Promise.race([
-    allDone.then(() => true),
-    Bun.sleep(25).then(() => false),
-  ]);
-  if (!finished) {
-    for (const capture of captures) {
-      capture.cancel();
-    }
-    await Promise.race([allDone, Bun.sleep(25)]);
-  }
 }
 
 function renderRetainedOutput(
@@ -105,7 +80,7 @@ function renderCompletion(status: RunStatus, processStartedAt: number): void {
   const incomplete =
     status.lifecycle.drain === "incomplete" ? " drain-incomplete" : "";
   const elapsedSeconds = Math.floor(
-    (performance.now() - processStartedAt) / 1_000,
+    (performance.now() - processStartedAt) / 1000,
   );
   console.log(`[codex-command] ${outcome} in ${elapsedSeconds}s${incomplete}`);
 }

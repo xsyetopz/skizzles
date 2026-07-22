@@ -30,10 +30,36 @@ export interface CloseReport {
 export interface RunWorkspace {
   readonly signal: AbortSignal;
   path: (...relativeParts: readonly string[]) => string;
+  inspectUsage: (limits: unknown) => Promise<WorkspaceUsage>;
   registerChild: (child: OwnedChild) => void;
   preserve: (reason: string) => Promise<void>;
   close: () => Promise<CloseReport>;
 }
+
+export interface WorkspaceUsageLimits {
+  readonly byteLimit: number;
+  readonly entryLimit: number;
+  readonly scanLimit: number;
+}
+
+export type WorkspaceUsageState = "within" | "exceeded" | "unknown";
+
+export interface MeasuredWorkspaceUsage extends WorkspaceUsageLimits {
+  readonly state: WorkspaceUsageState;
+  readonly logicalBytes: number;
+  readonly allocatedBytes: number;
+  readonly entryCount: number;
+}
+
+export interface InvalidWorkspaceUsage {
+  readonly state: "unknown";
+  readonly code: "INVALID_USAGE_LIMIT";
+  readonly logicalBytes: 0;
+  readonly allocatedBytes: 0;
+  readonly entryCount: 0;
+}
+
+export type WorkspaceUsage = InvalidWorkspaceUsage | MeasuredWorkspaceUsage;
 
 export interface CreateOptions {
   readonly signal?: AbortSignal;

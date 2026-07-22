@@ -8,6 +8,10 @@ export type StreamCapture = {
   cancel: () => void;
 };
 
+export type MemoryStreamCapture = StreamCapture & {
+  bytes: () => Uint8Array;
+};
+
 export function emptyCaptureState(): StreamCaptureState {
   return {
     observedBytes: 0,
@@ -71,6 +75,16 @@ export function captureStream(
   forward: boolean,
   state: StreamCaptureState,
 ): StreamCapture {
+  return consumeStream(stream, state, (chunk) => {
+    consumeChunk(streamName, chunk, artifact, maximumBytes, forward, state);
+  });
+}
+
+function consumeStream(
+  stream: ReadableStream<Uint8Array> | null,
+  state: StreamCaptureState,
+  consume: (chunk: Uint8Array) => void,
+): StreamCapture {
   if (!stream) {
     state.finished = true;
     return { done: Promise.resolve(), cancel: () => undefined };
@@ -87,14 +101,7 @@ export function captureStream(
         if (cancelled) {
           break;
         }
-        consumeChunk(
-          streamName,
-          next.value,
-          artifact,
-          maximumBytes,
-          forward,
-          state,
-        );
+        consume(next.value);
       }
     } catch {
       state.truncated = true;
@@ -108,6 +115,45 @@ export function captureStream(
     cancel: () => {
       cancelled = true;
       reader.cancel().catch(() => undefined);
+    },
+  };
+}
+
+export function captureStreamBytes(
+  stream: ReadableStream<Uint8Array> | null,
+  maximumBytes: number,
+  state: StreamCaptureState,
+  onLimitExceeded: () => void,
+): MemoryStreamCapture {
+  const chunks: Uint8Array[] = [];
+  let limitReported = false;
+  const capture = consumeStream(stream, state, (chunk) => {
+    state.observedBytes += chunk.length;
+    const remaining = maximumBytes - state.storedBytes;
+    if (remaining > 0) {
+      const retained = Uint8Array.from(chunk.subarray(0, remaining));
+      chunks.push(retained);
+      state.storedBytes += retained.length;
+      state.retainedSha256.update(retained);
+    }
+    if (state.observedBytes > maximumBytes) {
+      state.truncated = true;
+      if (!limitReported) {
+        limitReported = true;
+        onLimitExceeded();
+      }
+    }
+  });
+  return {
+    ...capture,
+    bytes: () => {
+      const content = new Uint8Array(state.storedBytes);
+      let offset = 0;
+      for (const chunk of chunks) {
+        content.set(chunk, offset);
+        offset += chunk.length;
+      }
+      return content;
     },
   };
 }

@@ -20,7 +20,10 @@ import {
   checkPluginWithWorkspace,
   stagePluginWithWorkspace,
 } from "../../src/plugin/staging.ts";
-import { withPluginWorkspaceUsing } from "../../src/plugin/workspace.ts";
+import {
+  adaptPluginWorkspace,
+  withPluginWorkspaceUsing,
+} from "../../src/plugin/workspace.ts";
 import { createTestWorkspace, write } from "./fixture.ts";
 
 const outside = createTestWorkspace();
@@ -140,6 +143,24 @@ describe("plugin run workspace composition", () => {
     expect(await directoryExists(runRoot)).toBe(false);
   });
 
+  it("delegates usage inspection to the owned run workspace", async () => {
+    const owned = await create();
+    const workspace = adaptPluginWorkspace(owned);
+    try {
+      expect(
+        (
+          await workspace.inspectUsage({
+            byteLimit: 1024 * 1024,
+            entryLimit: 100,
+            scanLimit: 101,
+          })
+        ).state,
+      ).toBe("within");
+    } finally {
+      await workspace.close();
+    }
+  });
+
   it("fails closed before Windows process-group supervision", () => {
     expect(() => assertSupervisorPlatform("win32")).toThrow(
       "requires POSIX process-group ownership",
@@ -222,6 +243,8 @@ describe("plugin run workspace composition", () => {
     const owned: RunWorkspace = {
       signal,
       path: () => "/unused-test-workspace",
+      inspectUsage: () =>
+        Promise.reject(new Error("unexpected usage inspection")),
       registerChild: () => undefined,
       preserve: async () => undefined,
       close: () => Promise.reject(closeError),

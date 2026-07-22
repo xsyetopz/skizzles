@@ -34,6 +34,7 @@ on undeclared root packages.
 | `plugin-builder` | Deterministic plugin staging, bundling, validation, and drift checks |
 | `prompt-layer` | Pinned upstream prompt, patch derivation, provenance, and recovery |
 | `usage-analyzer` | Read-only rollout discovery, aggregation, and reporting |
+| `workspace-transaction` | Recoverable, lease-serialized publication of approved workspace file sets |
 | `workspace-policy` | Package, dependency, export, lockfile, and source-ownership enforcement |
 
 See [workspace architecture](docs/workspace-architecture.md) for package and

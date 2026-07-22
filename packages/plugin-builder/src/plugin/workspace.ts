@@ -56,6 +56,10 @@ class OwnedPluginWorkspace implements PluginWorkspace {
     return this.#workspace.path(...relativeParts);
   }
 
+  inspectUsage(limits: unknown): ReturnType<RunWorkspace["inspectUsage"]> {
+    return this.#workspace.inspectUsage(limits);
+  }
+
   registerChild(child: Parameters<RunWorkspace["registerChild"]>[0]): void {
     this.#workspace.registerChild(child);
   }

@@ -2,7 +2,7 @@
 // @bun
 
 // packages/installer/src/cli.ts
-import process8 from "process";
+import process9 from "process";
 
 // packages/run-workspace/src/errors.ts
 class RunWorkspaceError extends Error {
@@ -24,21 +24,21 @@ class RunWorkspaceAbortedError extends RunWorkspaceError {
   }
 }
 // packages/run-workspace/src/janitor.ts
-import { basename, dirname, join as join3 } from "path";
+import { basename, dirname, join as join4 } from "path";
 
 // packages/run-workspace/src/marker.ts
-import { join as join2 } from "path";
+import { join as join3 } from "path";
 
 // packages/run-workspace/src/platform.ts
 import { execFile } from "child_process";
-import { constants, realpathSync } from "fs";
+import { constants as constants3, realpathSync } from "fs";
 import {
   chmod,
-  lstat,
+  lstat as lstat2,
   mkdir,
   mkdtemp,
-  open,
-  opendir,
+  open as open2,
+  opendir as opendir2,
   readdir,
   readFile,
   realpath,
@@ -46,9 +46,408 @@ import {
   rm
 } from "fs/promises";
 import { tmpdir } from "os";
-import { join, win32 } from "path";
-import process from "process";
+import { join as join2, win32 } from "path";
+import process2 from "process";
 import { promisify } from "util";
+
+// packages/run-workspace/src/usage/directory.ts
+import { constants as constants2 } from "fs";
+import { lstat, open, opendir } from "fs/promises";
+import { join } from "path";
+
+// packages/run-workspace/src/usage/darwin.ts
+import { dlopen, FFIType, ptr } from "bun:ffi";
+import { constants } from "fs";
+import process from "process";
+var blockBytes = 512n;
+var directoryBufferBytes = 64 * 1024;
+var statBytes = 144;
+var direntHeaderBytes = 21;
+var nanosecondsPerSecond = 1000000000n;
+var atSymlinkNoFollow = 32;
+var closeOnExec = 16777216;
+var seekStart = 0;
+var fileTypeMask = 61440;
+var directoryMode = 16384;
+var regularMode = 32768;
+var symlinkMode = 40960;
+var unsafeEntryName = /[\\/\0]/u;
+var decoder = new TextDecoder("utf-8", { fatal: true });
+var definitions = {
+  close: { args: [FFIType.i32], returns: FFIType.i32 },
+  fstat: {
+    args: [FFIType.i32, FFIType.ptr],
+    returns: FFIType.i32
+  },
+  fstatat: {
+    args: [FFIType.i32, FFIType.ptr, FFIType.ptr, FFIType.i32],
+    returns: FFIType.i32
+  },
+  __getdirentries64: {
+    args: [FFIType.i32, FFIType.ptr, FFIType.u64, FFIType.ptr],
+    returns: FFIType.i64
+  },
+  lseek: {
+    args: [FFIType.i32, FFIType.i64, FFIType.i32],
+    returns: FFIType.i64
+  },
+  openat: {
+    args: [FFIType.i32, FFIType.ptr, FFIType.i32],
+    returns: FFIType.i32
+  }
+};
+var library = (() => {
+  if (process.platform !== "darwin") {
+    return;
+  }
+  try {
+    return dlopen("/usr/lib/libSystem.B.dylib", definitions);
+  } catch {
+    return;
+  }
+})();
+function safeName(name) {
+  return name.length > 0 && name !== "." && name !== ".." && !unsafeEntryName.test(name);
+}
+function nativeNumber(value) {
+  const selected = typeof value === "bigint" ? Number(value) : value;
+  if (!Number.isSafeInteger(selected)) {
+    return;
+  }
+  return selected;
+}
+function timeNanoseconds(view, offset) {
+  const seconds = view.getBigInt64(offset, true);
+  const nanoseconds = view.getBigInt64(offset + 8, true);
+  return (seconds * nanosecondsPerSecond + nanoseconds).toString(10);
+}
+function entryKind(mode) {
+  const fileType = mode & fileTypeMask;
+  if (fileType === directoryMode) {
+    return "directory";
+  }
+  if (fileType === regularMode) {
+    return "file";
+  }
+  if (fileType === symlinkMode) {
+    return "symlink";
+  }
+  return "other";
+}
+function parseStat(bytes) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const logicalBytes = view.getBigInt64(96, true);
+  const blocks = view.getBigInt64(104, true);
+  if (logicalBytes < 0n || blocks < 0n) {
+    return;
+  }
+  return {
+    kind: entryKind(view.getUint16(4, true)),
+    device: view.getInt32(0, true).toString(10),
+    inode: view.getBigUint64(8, true).toString(10),
+    birthtimeNs: timeNanoseconds(view, 80),
+    changeTimeNs: timeNanoseconds(view, 64),
+    modifiedTimeNs: timeNanoseconds(view, 48),
+    logicalBytes,
+    allocatedBytes: blocks * blockBytes
+  };
+}
+function descriptorStat(descriptor) {
+  const symbols = library?.symbols;
+  if (symbols === undefined) {
+    return;
+  }
+  const bytes = new Uint8Array(statBytes);
+  if (symbols.fstat(descriptor, ptr(bytes)) !== 0) {
+    return;
+  }
+  return parseStat(bytes);
+}
+function childStat(descriptor, name) {
+  const symbols = library?.symbols;
+  if (symbols === undefined || !safeName(name)) {
+    return;
+  }
+  const bytes = new Uint8Array(statBytes);
+  const encoded = Buffer.from(`${name}\x00`, "utf8");
+  if (symbols.fstatat(descriptor, ptr(encoded), ptr(bytes), atSymlinkNoFollow) !== 0) {
+    return;
+  }
+  return parseStat(bytes);
+}
+function directoryNames(descriptor, limit) {
+  const symbols = library?.symbols;
+  if (symbols === undefined || nativeNumber(symbols.lseek(descriptor, 0n, seekStart)) !== 0) {
+    return;
+  }
+  const names = [];
+  const bytes = new Uint8Array(directoryBufferBytes);
+  const base = new BigInt64Array(1);
+  while (names.length <= limit) {
+    const count = nativeNumber(symbols.__getdirentries64(descriptor, ptr(bytes), BigInt(bytes.byteLength), ptr(base)));
+    if (count === undefined || count < 0) {
+      return;
+    }
+    if (count === 0) {
+      return { names, truncated: false };
+    }
+    const view = new DataView(bytes.buffer, bytes.byteOffset, count);
+    let offset = 0;
+    while (offset < count) {
+      if (offset + direntHeaderBytes > count) {
+        return;
+      }
+      const recordBytes = view.getUint16(offset + 16, true);
+      const nameBytes = view.getUint16(offset + 18, true);
+      if (recordBytes < direntHeaderBytes || offset + recordBytes > count || nameBytes > recordBytes - direntHeaderBytes) {
+        return;
+      }
+      const name = decoder.decode(bytes.subarray(offset + direntHeaderBytes, offset + direntHeaderBytes + nameBytes));
+      if (name !== "." && name !== "..") {
+        if (!safeName(name)) {
+          return;
+        }
+        names.push(name);
+        if (names.length > limit) {
+          return { names: names.slice(0, limit), truncated: true };
+        }
+      }
+      offset += recordBytes;
+    }
+  }
+  return { names: names.slice(0, limit), truncated: true };
+}
+
+class DarwinUsageDirectory {
+  entry;
+  #descriptor;
+  #closeDescriptor;
+  #closed = false;
+  constructor(descriptor, entry, closeDescriptor) {
+    this.#descriptor = descriptor;
+    this.entry = entry;
+    this.#closeDescriptor = closeDescriptor;
+  }
+  scan(limit) {
+    if (this.#closed) {
+      return Promise.reject(new Error("Usage directory is closed"));
+    }
+    const scanned = directoryNames(this.#descriptor, limit);
+    if (scanned === undefined) {
+      return Promise.reject(new Error("Descriptor enumeration failed"));
+    }
+    return Promise.resolve(scanned);
+  }
+  inspect(name) {
+    if (this.#closed) {
+      return Promise.resolve(undefined);
+    }
+    return Promise.resolve(childStat(this.#descriptor, name));
+  }
+  open(name) {
+    const symbols = library?.symbols;
+    if (this.#closed || symbols === undefined || !safeName(name)) {
+      return Promise.resolve(undefined);
+    }
+    const encoded = Buffer.from(`${name}\x00`, "utf8");
+    const descriptor = symbols.openat(this.#descriptor, ptr(encoded), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | closeOnExec);
+    if (descriptor < 0) {
+      return Promise.resolve(undefined);
+    }
+    const entry = descriptorStat(descriptor);
+    if (entry?.kind !== "directory") {
+      symbols.close(descriptor);
+      return Promise.resolve(undefined);
+    }
+    return Promise.resolve(new DarwinUsageDirectory(descriptor, entry, async () => {
+      if (symbols.close(descriptor) !== 0) {
+        throw new Error("Descriptor close failed");
+      }
+    }));
+  }
+  stat() {
+    if (this.#closed) {
+      return Promise.resolve(undefined);
+    }
+    return Promise.resolve(descriptorStat(this.#descriptor));
+  }
+  async close() {
+    if (this.#closed) {
+      return;
+    }
+    this.#closed = true;
+    await this.#closeDescriptor();
+  }
+}
+function openDarwinUsageDirectory(handle) {
+  if (library === undefined) {
+    return;
+  }
+  const entry = descriptorStat(handle.fd);
+  if (entry?.kind !== "directory") {
+    return;
+  }
+  return new DarwinUsageDirectory(handle.fd, entry, () => handle.close());
+}
+
+// packages/run-workspace/src/usage/directory.ts
+var blockBytes2 = 512n;
+var unsafeEntryName2 = /[\\/\0]/u;
+function safeName2(name) {
+  return name.length > 0 && name !== "." && name !== ".." && !unsafeEntryName2.test(name);
+}
+function fromStats(stats) {
+  let kind = "other";
+  if (stats.isDirectory()) {
+    kind = "directory";
+  } else if (stats.isFile()) {
+    kind = "file";
+  } else if (stats.isSymbolicLink()) {
+    kind = "symlink";
+  }
+  const logicalBytes = stats.size;
+  const allocatedBytes = stats.blocks * blockBytes2;
+  if (logicalBytes < 0n || allocatedBytes < 0n) {
+    return;
+  }
+  return {
+    kind,
+    device: stats.dev.toString(10),
+    inode: stats.ino.toString(10),
+    birthtimeNs: stats.birthtimeNs.toString(10),
+    changeTimeNs: stats.ctimeNs.toString(10),
+    modifiedTimeNs: stats.mtimeNs.toString(10),
+    logicalBytes,
+    allocatedBytes
+  };
+}
+function sameEntry(left, right) {
+  return left.kind === right.kind && left.device === right.device && left.inode === right.inode && left.birthtimeNs === right.birthtimeNs && left.changeTimeNs === right.changeTimeNs && left.modifiedTimeNs === right.modifiedTimeNs && left.logicalBytes === right.logicalBytes && left.allocatedBytes === right.allocatedBytes;
+}
+function descriptorRoot(platform, descriptor) {
+  if (platform === "linux") {
+    return `/proc/self/fd/${descriptor}`;
+  }
+  return;
+}
+async function scanDescriptor(root, limit) {
+  const directory = await opendir(root);
+  const names = [];
+  try {
+    while (names.length <= limit) {
+      const entry = await directory.read();
+      if (entry === null) {
+        return { names, truncated: false };
+      }
+      names.push(entry.name);
+    }
+    return { names: names.slice(0, limit), truncated: true };
+  } finally {
+    await directory.close().catch(() => {
+      return;
+    });
+  }
+}
+
+class SystemUsageDirectory {
+  entry;
+  #handle;
+  #root;
+  #platform;
+  #closed = false;
+  constructor(handle, root, platform, entry) {
+    this.#handle = handle;
+    this.#root = root;
+    this.#platform = platform;
+    this.entry = entry;
+  }
+  scan(limit) {
+    return scanDescriptor(this.#root, limit);
+  }
+  inspect(name) {
+    if (!safeName2(name) || this.#closed) {
+      return Promise.resolve(undefined);
+    }
+    return lstatSystemUsage(join(this.#root, name));
+  }
+  open(name) {
+    if (!safeName2(name) || this.#closed) {
+      return Promise.resolve(undefined);
+    }
+    return openSystemUsageDirectory(join(this.#root, name), this.#platform);
+  }
+  async stat() {
+    if (this.#closed) {
+      return;
+    }
+    try {
+      return fromStats(await this.#handle.stat({ bigint: true }));
+    } catch {
+      return;
+    }
+  }
+  async close() {
+    if (this.#closed) {
+      return;
+    }
+    this.#closed = true;
+    await this.#handle.close();
+  }
+}
+async function lstatSystemUsage(path) {
+  try {
+    return fromStats(await lstat(path, { bigint: true }));
+  } catch {
+    return;
+  }
+}
+async function openSystemUsageDirectory(path, platform) {
+  if (platform !== "linux" && platform !== "darwin") {
+    return;
+  }
+  let handle;
+  try {
+    handle = await open(path, constants2.O_RDONLY | constants2.O_DIRECTORY | constants2.O_NOFOLLOW);
+    const entry = fromStats(await handle.stat({ bigint: true }));
+    if (entry?.kind !== "directory") {
+      await handle.close();
+      return;
+    }
+    if (platform === "darwin") {
+      const directory = openDarwinUsageDirectory(handle);
+      if (directory === undefined || !sameEntry(entry, directory.entry)) {
+        await directory?.close().catch(() => {
+          return;
+        });
+        if (directory === undefined) {
+          await handle.close();
+        }
+        return;
+      }
+      return directory;
+    }
+    const root = descriptorRoot(platform, handle.fd);
+    if (root === undefined) {
+      await handle.close();
+      return;
+    }
+    const probe = await opendir(root);
+    await probe.close();
+    const confirmed = fromStats(await handle.stat({ bigint: true }));
+    if (confirmed === undefined || !sameEntry(entry, confirmed)) {
+      await handle.close();
+      return;
+    }
+    return new SystemUsageDirectory(handle, root, platform, entry);
+  } catch {
+    await handle?.close().catch(() => {
+      return;
+    });
+    return;
+  }
+}
+
+// packages/run-workspace/src/platform.ts
 var execFileAsync = promisify(execFile);
 var decimalPattern = /^\d+$/u;
 var whitespacePattern = /\s+/gu;
@@ -132,7 +531,7 @@ function parseLinuxStartTicks(stat) {
   return startTicks;
 }
 async function windowsIdentity(pid) {
-  const systemRoot = process.env["SystemRoot"];
+  const systemRoot = process2.env["SystemRoot"];
   if (systemRoot === undefined || systemRoot.length === 0) {
     return;
   }
@@ -171,7 +570,7 @@ async function observeProcess(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0)
     return;
   try {
-    process.kill(pid, 0);
+    process2.kill(pid, 0);
     return true;
   } catch (error) {
     const code = errorCode(error);
@@ -184,7 +583,7 @@ async function observeProcess(pid) {
 }
 async function fileIdentity(path) {
   try {
-    const stats = await lstat(path, { bigint: true });
+    const stats = await lstat2(path, { bigint: true });
     if (!stats.isDirectory() || stats.isSymbolicLink()) {
       return;
     }
@@ -199,7 +598,7 @@ async function fileIdentity(path) {
 }
 async function isRegularFile(path) {
   try {
-    const stats = await lstat(path);
+    const stats = await lstat2(path);
     return stats.isFile() && !stats.isSymbolicLink();
   } catch {
     return false;
@@ -207,7 +606,7 @@ async function isRegularFile(path) {
 }
 async function pathExists(path) {
   try {
-    await lstat(path);
+    await lstat2(path);
     return true;
   } catch (error) {
     if (errorCode(error) === "ENOENT")
@@ -217,12 +616,12 @@ async function pathExists(path) {
 }
 async function isPrivateDirectory(path) {
   try {
-    const stats = await lstat(path);
+    const stats = await lstat2(path);
     if (!stats.isDirectory() || stats.isSymbolicLink())
       return false;
-    if (process.platform === "win32")
+    if (process2.platform === "win32")
       return true;
-    const currentUserId = process.getuid?.();
+    const currentUserId = process2.getuid?.();
     return (stats.mode & 63) === 0 && (currentUserId === undefined || stats.uid === currentUserId);
   } catch {
     return false;
@@ -242,9 +641,9 @@ async function writeReplacement(path, contents) {
   }
 }
 async function syncParent(path) {
-  if (process.platform === "win32")
+  if (process2.platform === "win32")
     return;
-  const directory = await open(join(path, ".."), constants.O_RDONLY);
+  const directory = await open2(join2(path, ".."), constants3.O_RDONLY);
   try {
     await directory.sync();
   } finally {
@@ -252,8 +651,8 @@ async function syncParent(path) {
   }
 }
 async function writeSynced(path, contents, exclusive) {
-  const flags = exclusive ? constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY : constants.O_WRONLY;
-  const handle = await open(path, flags, 384);
+  const flags = exclusive ? constants3.O_CREAT | constants3.O_EXCL | constants3.O_WRONLY : constants3.O_WRONLY;
+  const handle = await open2(path, flags, 384);
   try {
     await handle.writeFile(contents, { encoding: "utf8" });
     await handle.sync();
@@ -263,21 +662,21 @@ async function writeSynced(path, contents, exclusive) {
   await syncParent(path);
 }
 async function readSecureFile(path, maximumBytes) {
-  const noFollow = process.platform === "win32" ? 0 : constants.O_NOFOLLOW;
+  const noFollow = process2.platform === "win32" ? 0 : constants3.O_NOFOLLOW;
   let handle;
   try {
-    const pathBefore = await lstat(path, { bigint: true });
-    if (!pathBefore.isFile() || pathBefore.isSymbolicLink() || pathBefore.size > BigInt(maximumBytes) || process.platform !== "win32" && (Number(pathBefore.mode) & 63) !== 0) {
+    const pathBefore = await lstat2(path, { bigint: true });
+    if (!pathBefore.isFile() || pathBefore.isSymbolicLink() || pathBefore.size > BigInt(maximumBytes) || process2.platform !== "win32" && (Number(pathBefore.mode) & 63) !== 0) {
       return;
     }
-    handle = await open(path, constants.O_RDONLY | noFollow);
+    handle = await open2(path, constants3.O_RDONLY | noFollow);
     const before = await handle.stat({ bigint: true });
-    if (!before.isFile() || pathBefore.dev !== before.dev || pathBefore.ino !== before.ino || pathBefore.birthtimeNs !== before.birthtimeNs || before.size > BigInt(maximumBytes) || process.platform !== "win32" && (Number(before.mode) & 63) !== 0) {
+    if (!before.isFile() || pathBefore.dev !== before.dev || pathBefore.ino !== before.ino || pathBefore.birthtimeNs !== before.birthtimeNs || before.size > BigInt(maximumBytes) || process2.platform !== "win32" && (Number(before.mode) & 63) !== 0) {
       return;
     }
     const contents = await handle.readFile({ encoding: "utf8" });
     const after = await handle.stat({ bigint: true });
-    const pathAfter = await lstat(path, { bigint: true });
+    const pathAfter = await lstat2(path, { bigint: true });
     if (before.dev !== after.dev || before.ino !== after.ino || before.birthtimeNs !== after.birthtimeNs || before.size !== after.size || pathAfter.isSymbolicLink() || after.dev !== pathAfter.dev || after.ino !== pathAfter.ino || after.birthtimeNs !== pathAfter.birthtimeNs) {
       return;
     }
@@ -291,7 +690,7 @@ async function readSecureFile(path, maximumBytes) {
   }
 }
 async function scanDirectory(path, limit) {
-  const directory = await opendir(path);
+  const directory = await opendir2(path);
   const names = [];
   try {
     while (names.length <= limit) {
@@ -309,17 +708,19 @@ async function scanDirectory(path, limit) {
 }
 function systemRuntime() {
   return {
-    pid: process.pid,
-    platform: process.platform,
+    pid: process2.pid,
+    platform: process2.platform,
     now: Date.now,
     deadline,
     temporaryDirectory: () => realpathSync(tmpdir()),
-    processIdentity: (pid) => getProcessIdentity(process.platform, pid),
+    processIdentity: (pid) => getProcessIdentity(process2.platform, pid),
     processExists: observeProcess,
     mkdir: (path, options) => mkdir(path, options),
     chmod,
     mkdtemp,
     lstatIdentity: fileIdentity,
+    lstatUsage: lstatSystemUsage,
+    openUsageDirectory: (path) => openSystemUsageDirectory(path, process2.platform),
     isDirectory: async (path) => await fileIdentity(path) !== undefined,
     isPrivateDirectory,
     isFile: isRegularFile,
@@ -344,7 +745,7 @@ function systemRuntime() {
 var managedDirectoryName = "skizzles-run-workspaces";
 var markerName = ".skizzles-run-workspace.json";
 function managedParent(runtime) {
-  return join(runtime.temporaryDirectory(), managedDirectoryName);
+  return join2(runtime.temporaryDirectory(), managedDirectoryName);
 }
 
 // packages/run-workspace/src/safety.ts
@@ -463,7 +864,7 @@ function sameProcessIdentity(left, right) {
   return left.platform === right.platform && left.token === right.token;
 }
 function markerPath(root) {
-  return join2(root, markerName);
+  return join3(root, markerName);
 }
 function serializeMarker(marker) {
   return `${JSON.stringify(marker, undefined, 2)}
@@ -569,7 +970,7 @@ async function reap(runtime, root) {
       return "claimed";
     throw error;
   }
-  const claimed = join3(managedParent(runtime), `reaping-${marker.runId}-${crypto.randomUUID()}`);
+  const claimed = join4(managedParent(runtime), `reaping-${marker.runId}-${crypto.randomUUID()}`);
   try {
     await runtime.rename(root, claimed);
   } catch (error) {
@@ -635,7 +1036,7 @@ async function cleanupStaleWithRuntime(options, runtime) {
   const skipped = [];
   const failed = [];
   for (const name of selected) {
-    const root = join3(parent, name);
+    const root = join4(parent, name);
     if (!await runtime.isDirectory(root)) {
       skipped.push({ rootName: name, reason: "unmarked" });
       continue;
@@ -667,7 +1068,7 @@ function cleanupStale(options = {}) {
 import {
   basename as basename2,
   isAbsolute,
-  join as join4,
+  join as join5,
   relative,
   resolve,
   win32 as win322
@@ -751,11 +1152,11 @@ async function stopChildren(options) {
 }
 
 // packages/run-workspace/src/signals.ts
-import process2 from "process";
+import process3 from "process";
 var targets = new Set;
 var listeners = new Map;
 function supportedSignals() {
-  if (process2.platform === "win32")
+  if (process3.platform === "win32")
     return ["SIGINT", "SIGTERM"];
   return ["SIGHUP", "SIGINT", "SIGTERM"];
 }
@@ -769,14 +1170,14 @@ function install() {
         target.abort(error);
     };
     listeners.set(signal, listener);
-    process2.on(signal, listener);
+    process3.on(signal, listener);
   }
 }
 function uninstall() {
   if (targets.size > 0)
     return;
   for (const [signal, listener] of listeners)
-    process2.off(signal, listener);
+    process3.off(signal, listener);
   listeners.clear();
 }
 function coordinateSignals(target) {
@@ -790,6 +1191,225 @@ function coordinateSignals(target) {
     targets.delete(target);
     uninstall();
   };
+}
+
+// packages/run-workspace/src/usage/scan.ts
+import { types } from "util";
+var maximumScanLimit = 1e6;
+var maximumSafeBytes = BigInt(Number.MAX_SAFE_INTEGER);
+var limitNames = ["byteLimit", "entryLimit", "scanLimit"];
+var limitNameSet = new Set(limitNames);
+var unsafeEntryName3 = /[\\/\0]/u;
+function integerLimit(value, maximum) {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    return;
+  }
+  const selected = Number(value);
+  if (selected > maximum) {
+    return;
+  }
+  return selected;
+}
+function parseUsageLimits(value) {
+  try {
+    if (typeof value !== "object" || value === null || types.isProxy(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+      return;
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Reflect.ownKeys(descriptors);
+    if (keys.length !== limitNames.length || keys.some((key) => typeof key !== "string" || !limitNameSet.has(key))) {
+      return;
+    }
+    const values = new Map;
+    for (const name of limitNames) {
+      const descriptor = descriptors[name];
+      if (descriptor === undefined || !("value" in descriptor)) {
+        return;
+      }
+      values.set(name, descriptor.value);
+    }
+    const byteLimit = integerLimit(values.get("byteLimit"), Number.MAX_SAFE_INTEGER);
+    const entryLimit = integerLimit(values.get("entryLimit"), Number.MAX_SAFE_INTEGER);
+    const scanLimit = integerLimit(values.get("scanLimit"), maximumScanLimit);
+    if (byteLimit === undefined || entryLimit === undefined || scanLimit === undefined) {
+      return;
+    }
+    return { byteLimit, entryLimit, scanLimit };
+  } catch {
+    return;
+  }
+}
+function invalidUsage() {
+  return {
+    state: "unknown",
+    code: "INVALID_USAGE_LIMIT",
+    logicalBytes: 0,
+    allocatedBytes: 0,
+    entryCount: 0
+  };
+}
+function boundedNumber(value) {
+  if (value > maximumSafeBytes) {
+    return;
+  }
+  return Number(value);
+}
+function report(state, limits, totals) {
+  return {
+    state,
+    logicalBytes: boundedNumber(totals.logicalBytes) ?? Number.MAX_SAFE_INTEGER,
+    allocatedBytes: boundedNumber(totals.allocatedBytes) ?? Number.MAX_SAFE_INTEGER,
+    entryCount: totals.entryCount,
+    ...limits
+  };
+}
+function unknownUsage(limits, totals = {
+  logicalBytes: 0n,
+  allocatedBytes: 0n,
+  entryCount: 0
+}) {
+  return report("unknown", limits, totals);
+}
+function sameEntry2(left, right) {
+  return left.kind === right.kind && left.device === right.device && left.inode === right.inode && left.birthtimeNs === right.birthtimeNs && left.changeTimeNs === right.changeTimeNs && left.modifiedTimeNs === right.modifiedTimeNs && left.logicalBytes === right.logicalBytes && left.allocatedBytes === right.allocatedBytes;
+}
+function identity(entry) {
+  return `${entry.device}:${entry.inode}`;
+}
+function validEntry(entry) {
+  return entry.device.length > 0 && entry.inode.length > 0 && entry.birthtimeNs.length > 0 && entry.changeTimeNs.length > 0 && entry.modifiedTimeNs.length > 0 && entry.logicalBytes >= 0n && entry.allocatedBytes >= 0n;
+}
+function rootMatchesMarker(entry, marker) {
+  return entry.kind === "directory" && sameFileIdentity({
+    device: entry.device,
+    inode: entry.inode,
+    birthtimeNs: entry.birthtimeNs
+  }, marker.rootIdentity);
+}
+function addEntry(entry, context) {
+  const key = identity(entry);
+  const measured = context.measuredIdentities.get(key);
+  if (measured !== undefined) {
+    return sameEntry2(measured, entry);
+  }
+  context.measuredIdentities.set(key, entry);
+  context.totals.logicalBytes += entry.logicalBytes;
+  context.totals.allocatedBytes += entry.allocatedBytes;
+  return context.totals.logicalBytes <= maximumSafeBytes && context.totals.allocatedBytes <= maximumSafeBytes;
+}
+function safeName3(name) {
+  return name.length > 0 && name !== "." && name !== ".." && !unsafeEntryName3.test(name);
+}
+async function closeDirectory(directory) {
+  try {
+    await directory.close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+async function inspectDirectory(directory, expected, context) {
+  if (!validEntry(directory.entry) || !sameEntry2(directory.entry, expected)) {
+    return false;
+  }
+  const remaining = context.limits.scanLimit - context.totals.entryCount;
+  const scanned = await directory.scan(remaining);
+  if (scanned.truncated || scanned.names.length > remaining) {
+    return false;
+  }
+  const entries = new Map;
+  for (const name of scanned.names) {
+    if (!safeName3(name) || entries.has(name)) {
+      return false;
+    }
+    const entry = await directory.inspect(name);
+    if (entry === undefined || !validEntry(entry)) {
+      return false;
+    }
+    entries.set(name, entry);
+    context.totals.entryCount += 1;
+    if (!addEntry(entry, context)) {
+      return false;
+    }
+    if (entry.kind === "directory") {
+      const key = identity(entry);
+      if (context.directoryIdentities.has(key)) {
+        return false;
+      }
+      context.directoryIdentities.add(key);
+      const child = await directory.open(name);
+      if (child === undefined) {
+        return false;
+      }
+      let childValid = false;
+      try {
+        childValid = await inspectDirectory(child, entry, context);
+      } finally {
+        if (!await closeDirectory(child)) {
+          childValid = false;
+        }
+      }
+      if (!childValid) {
+        return false;
+      }
+    }
+  }
+  for (const [name, entry] of entries) {
+    const current2 = await directory.inspect(name);
+    if (current2 === undefined || !sameEntry2(entry, current2)) {
+      return false;
+    }
+  }
+  const current = await directory.stat();
+  return current !== undefined && sameEntry2(directory.entry, current);
+}
+async function inspectWorkspaceUsage(runtime, root, runId, expectedRoot, limits) {
+  const totals = {
+    logicalBytes: 0n,
+    allocatedBytes: 0n,
+    entryCount: 0
+  };
+  try {
+    const marker = await verifyMarkedRoot(runtime, root, runId, expectedRoot);
+    const rootEntry = await runtime.lstatUsage(root);
+    if (rootEntry === undefined || !validEntry(rootEntry) || !rootMatchesMarker(rootEntry, marker)) {
+      return unknownUsage(limits, totals);
+    }
+    const directory = await runtime.openUsageDirectory(root);
+    if (directory === undefined) {
+      return unknownUsage(limits, totals);
+    }
+    const context = {
+      limits,
+      totals,
+      measuredIdentities: new Map,
+      directoryIdentities: new Set([identity(rootEntry)])
+    };
+    let valid = false;
+    try {
+      valid = await inspectDirectory(directory, rootEntry, context);
+    } finally {
+      if (!await closeDirectory(directory)) {
+        valid = false;
+      }
+    }
+    if (!valid) {
+      return unknownUsage(limits, totals);
+    }
+    await verifyMarkedRoot(runtime, root, runId, expectedRoot);
+    const logicalBytes = boundedNumber(totals.logicalBytes);
+    const allocatedBytes = boundedNumber(totals.allocatedBytes);
+    if (logicalBytes === undefined || allocatedBytes === undefined) {
+      return unknownUsage(limits, totals);
+    }
+    const exceeded = logicalBytes > limits.byteLimit || allocatedBytes > limits.byteLimit || totals.entryCount > limits.entryLimit;
+    if (exceeded) {
+      return report("exceeded", limits, totals);
+    }
+    return report("within", limits, totals);
+  } catch {
+    return unknownUsage(limits, totals);
+  }
 }
 
 // packages/run-workspace/src/lifecycle.ts
@@ -873,6 +1493,16 @@ class OwnedRunWorkspace {
     }
     return selected;
   }
+  inspectUsage(limits) {
+    const validated = parseUsageLimits(limits);
+    if (validated === undefined) {
+      return Promise.resolve(invalidUsage());
+    }
+    if (this.#state !== "open") {
+      return Promise.resolve(unknownUsage(validated));
+    }
+    return inspectWorkspaceUsage(this.#runtime, this.#root, this.#runId, this.#marker.root, validated);
+  }
   registerChild(child) {
     if (this.#state !== "open") {
       throw new RunWorkspaceError("WORKSPACE_CLOSED", "Cannot register a child after close begins");
@@ -928,13 +1558,13 @@ class OwnedRunWorkspace {
     this.#state = "closing";
     const active = this.#close();
     this.#closePromise = active;
-    active.then((report) => {
-      if (report.state === "cleanup-failed") {
+    active.then((report2) => {
+      if (report2.state === "cleanup-failed") {
         this.#state = "cleanup-failed";
         this.#closePromise = undefined;
       } else {
         this.#state = "closed";
-        this.#finalReport = report;
+        this.#finalReport = report2;
         this.#removeSignalCoordination?.();
       }
     }).catch(() => {
@@ -975,7 +1605,7 @@ class OwnedRunWorkspace {
   async#deleteRoot() {
     const marker = await verifyMarkedRoot(this.#runtime, this.#root, this.#runId, this.#marker.root);
     const source = this.#root;
-    const claimed = join4(managedParent(this.#runtime), `reaping-${this.#runId}-${crypto.randomUUID()}`);
+    const claimed = join5(managedParent(this.#runtime), `reaping-${this.#runId}-${crypto.randomUUID()}`);
     await this.#runtime.rename(source, claimed);
     this.#root = claimed;
     const reapingMarker = {
@@ -1070,7 +1700,7 @@ async function createWithRuntime(options, runtime) {
     throw new RunWorkspaceError("UNKNOWN_PROCESS_IDENTITY", "Current process start identity is unavailable");
   }
   const parent = await prepareParent(runtime);
-  const root = await runtime.mkdtemp(join4(parent, "run-"));
+  const root = await runtime.mkdtemp(join5(parent, "run-"));
   const runId = crypto.randomUUID();
   let marker;
   let markerPublished = false;
@@ -1100,8 +1730,8 @@ async function createWithRuntime(options, runtime) {
       throw new RunWorkspaceAbortedError;
     workspace = new OwnedRunWorkspace(root, marker, runtime, options);
     if (workspace.signal.aborted) {
-      const report = await workspace.close();
-      if (report.state === "cleanup-failed") {
+      const report2 = await workspace.close();
+      if (report2.state === "cleanup-failed") {
         throw new RunWorkspaceError("INITIALIZATION_FAILED", "Aborted run workspace cleanup must be retried");
       }
       throw new RunWorkspaceAbortedError;
@@ -1136,7 +1766,7 @@ function create(options = {}) {
 }
 // packages/installer/src/cli-arguments.ts
 import { isAbsolute as isAbsolute2, resolve as resolve2 } from "path";
-import process3 from "process";
+import process4 from "process";
 var FLAG_NAMES = {
   "--codex-home": "codexHome",
   "--codex-binary": "codexBinary",
@@ -1150,7 +1780,7 @@ var FLAG_NAMES = {
 };
 function usage() {
   console.error("usage: skizzles-installer install --surface <skills|harness> [--codex-home PATH|--home PATH] [--source-root PATH] [--transfer link|copy] [--dry-run] | uninstall --surface <skills|harness> [--codex-home PATH|--home PATH] [--dry-run] | configure --codex-home PATH --codex-binary PATH --orchestration <aggressive|passive> [--dry-run] | unconfigure --codex-home PATH --codex-binary PATH [--dry-run] | prompt-policy apply --codex-home PATH --codex-binary ABSOLUTE_PATH --source-root PATH [--dry-run] | prompt-policy restore --codex-home PATH --codex-binary ABSOLUTE_PATH [--dry-run] | doctor --home PATH --codex-home PATH");
-  process3.exit(2);
+  process4.exit(2);
 }
 function parseInstallerCommand(argv) {
   const remaining = [...argv];
@@ -1332,17 +1962,17 @@ function defaultSourceRoot() {
 
 // packages/installer/src/config.ts
 import { existsSync as existsSync3, rmSync as rmSync3 } from "fs";
-import { join as join8, resolve as resolve6 } from "path";
+import { join as join9, resolve as resolve6 } from "path";
 
 // packages/installer/src/codex-config.ts
 import { chmodSync as chmodSync4, mkdirSync as mkdirSync4, realpathSync as realpathSync3 } from "fs";
-import { join as join7 } from "path";
+import { join as join8 } from "path";
 
 // packages/installer/src/codex-config/preview.ts
 import {
   chmodSync as chmodSync2,
   closeSync,
-  constants as constants2,
+  constants as constants4,
   fstatSync,
   lstatSync as lstatSync3,
   mkdirSync as mkdirSync2,
@@ -1350,7 +1980,7 @@ import {
   readFileSync as readFileSync2,
   writeFileSync
 } from "fs";
-import { dirname as dirname2, isAbsolute as isAbsolute4, join as join6, relative as relative2, resolve as resolve5, sep } from "path";
+import { dirname as dirname2, isAbsolute as isAbsolute4, join as join7, relative as relative2, resolve as resolve5, sep } from "path";
 
 // packages/installer/src/managed-files.ts
 import {
@@ -1364,7 +1994,7 @@ import {
   renameSync,
   rmSync
 } from "fs";
-import { join as join5, resolve as resolve3 } from "path";
+import { join as join6, resolve as resolve3 } from "path";
 function pathEntryExists(path) {
   try {
     lstatSync(path);
@@ -1384,7 +2014,7 @@ function copyDirectoryExclusive(source, target, copyEntry = (from, to) => cpSync
       if (name === ".DS_Store") {
         continue;
       }
-      copyEntry(join5(source, name), join5(target, name));
+      copyEntry(join6(source, name), join6(target, name));
     }
   } catch (error) {
     rmSync(target, { recursive: true, force: true });
@@ -1395,7 +2025,7 @@ function assertManagedParentsAreReal(rootInput, managedParents) {
   const root = resolve3(rootInput);
   for (const path of [
     root,
-    ...managedParents.map((parent) => join5(root, parent))
+    ...managedParents.map((parent) => join6(root, parent))
   ]) {
     if (pathEntryExists(path) && lstatSync(path).isSymbolicLink()) {
       throw new Error(`refusing to manage through a symlinked parent: ${path}`);
@@ -1423,7 +2053,7 @@ function sameTree(left, right) {
     if (leftNames.join("\x00") !== rightNames.join("\x00")) {
       return false;
     }
-    return leftNames.every((name) => sameTree(join5(left, name), join5(right, name)));
+    return leftNames.every((name) => sameTree(join6(left, name), join6(right, name)));
   }
   return readFileSync(left).equals(readFileSync(right));
 }
@@ -1440,7 +2070,7 @@ import { mkdir as mkdir2 } from "fs/promises";
 import processRuntime from "process";
 
 // packages/installer/src/codex-config/supervisor.ts
-import process4 from "process";
+import process5 from "process";
 var EXIT_TIMEOUT_MS = 2000;
 var POLL_MS = 10;
 var SOURCE = String.raw`
@@ -1463,7 +2093,7 @@ function spawnRpcSupervisor(command, environment) {
   let state = "pending";
   let protocolFailure;
   let child;
-  child = Bun.spawn([process4.execPath, "--eval", SOURCE, JSON.stringify(command)], {
+  child = Bun.spawn([process5.execPath, "--eval", SOURCE, JSON.stringify(command)], {
     env: environment,
     stdin: "pipe",
     stdout: "pipe",
@@ -1538,7 +2168,7 @@ function supervisorScope(child) {
       const deadline2 = Date.now() + EXIT_TIMEOUT_MS;
       while (Date.now() < deadline2) {
         try {
-          process4.kill(-child.pid, 0);
+          process5.kill(-child.pid, 0);
         } catch (error) {
           if (error instanceof Error && "code" in error && error.code === "ESRCH")
             return;
@@ -1551,7 +2181,7 @@ function supervisorScope(child) {
     }
   };
 }
-function signalOwnedSupervisor(supervisorExited, pid, signal, kill = process4.kill) {
+function signalOwnedSupervisor(supervisorExited, pid, signal, kill = process5.kill) {
   if (supervisorExited)
     return false;
   try {
@@ -1683,14 +2313,14 @@ class AppServerRpc {
   }
   async consumeStdout() {
     const reader = this.process.stdout.getReader();
-    const decoder = new TextDecoder;
+    const decoder2 = new TextDecoder;
     let buffered = "";
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
         break;
       }
-      buffered += decoder.decode(value, { stream: true });
+      buffered += decoder2.decode(value, { stream: true });
       const lines = buffered.split(`
 `);
       buffered = lines.pop() ?? "";
@@ -1734,13 +2364,13 @@ class AppServerRpc {
   }
   async consumeStderr() {
     const reader = this.process.stderr.getReader();
-    const decoder = new TextDecoder;
+    const decoder2 = new TextDecoder;
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
         break;
       }
-      decoder.decode(value, { stream: true });
+      decoder2.decode(value, { stream: true });
     }
   }
 }
@@ -1942,11 +2572,11 @@ function statNanoseconds(nanoseconds, milliseconds) {
   return typeof milliseconds === "bigint" ? milliseconds * 1000000n : BigInt(Math.round(milliseconds * 1e6));
 }
 function createConfigPreviewSnapshot(selectedHome, previewHome) {
-  const configPath = join6(selectedHome, "config.toml");
+  const configPath = join7(selectedHome, "config.toml");
   if (!pathEntryExists(configPath)) {
     return;
   }
-  const configBytes = copyPrivateSnapshotFile(selectedHome, configPath, join6(previewHome, "config.toml"), "selected Codex config", MAX_PREVIEW_TOTAL_BYTES);
+  const configBytes = copyPrivateSnapshotFile(selectedHome, configPath, join7(previewHome, "config.toml"), "selected Codex config", MAX_PREVIEW_TOTAL_BYTES);
   const budget = {
     bytes: configBytes,
     copied: new Set([canonicalExistingPath(configPath)]),
@@ -1955,7 +2585,7 @@ function createConfigPreviewSnapshot(selectedHome, previewHome) {
   copyRelativeConfigInputs(configPath, selectedHome, previewHome, budget, 0);
 }
 function copyRelativeConfigInputs(documentPath, selectedHome, previewHome, budget, depth) {
-  const contents = readFileSync2(join6(previewHome, safeSnapshotRelativePath(selectedHome, documentPath)), "utf8");
+  const contents = readFileSync2(join7(previewHome, safeSnapshotRelativePath(selectedHome, documentPath)), "utf8");
   let parsed;
   try {
     parsed = Bun.TOML.parse(contents);
@@ -1979,7 +2609,7 @@ function copyRelativeConfigInputs(documentPath, selectedHome, previewHome, budge
       throw new Error("dry-run snapshot nested-config depth limit exceeded");
     }
     budget.referencedFiles += 1;
-    const destination = join6(previewHome, relativePath);
+    const destination = join7(previewHome, relativePath);
     const copiedBytes = copyPrivateSnapshotFile(selectedHome, source, destination, reference.key, Math.min(MAX_PREVIEW_FILE_BYTES, MAX_PREVIEW_TOTAL_BYTES - budget.bytes));
     budget.bytes += copiedBytes;
     budget.copied.add(sourceKey);
@@ -2026,7 +2656,7 @@ function snapshotSourceIdentities(selectedHome, source, label) {
   let current = selectedHome;
   for (const segment of ["", ...relativePath.split(sep)]) {
     if (segment) {
-      current = join6(current, segment);
+      current = join7(current, segment);
     }
     let metadata;
     try {
@@ -2037,8 +2667,8 @@ function snapshotSourceIdentities(selectedHome, source, label) {
     if (metadata.isSymbolicLink()) {
       throw new Error(`${label} may not traverse a symlink`);
     }
-    const identity = snapshotStat(metadata);
-    identities.push({ ...identity, path: current });
+    const identity2 = snapshotStat(metadata);
+    identities.push({ ...identity2, path: current });
   }
   if (!lstatSync3(source, { bigint: true }).isFile()) {
     throw new Error(`${label} must be a regular file`);
@@ -2058,7 +2688,7 @@ function copyPrivateSnapshotFile(selectedHome, source, destination, label, maxBy
   if (!expectedFile) {
     throw new Error("config snapshot identity is empty");
   }
-  const descriptor = openSync(source, constants2.O_RDONLY | constants2.O_NOFOLLOW);
+  const descriptor = openSync(source, constants4.O_RDONLY | constants4.O_NOFOLLOW);
   let bytes;
   try {
     const opened = fstatSync(descriptor, { bigint: true });
@@ -2068,7 +2698,7 @@ function copyPrivateSnapshotFile(selectedHome, source, destination, label, maxBy
     }
     assertSnapshotIdentities(identities, label);
     bytes = readFileSync2(descriptor);
-    const rereadDescriptor = openSync(source, constants2.O_RDONLY | constants2.O_NOFOLLOW);
+    const rereadDescriptor = openSync(source, constants4.O_RDONLY | constants4.O_NOFOLLOW);
     try {
       const rereadStat = fstatSync(rereadDescriptor, { bigint: true });
       assertSnapshotStat(rereadStat, expectedFile, label);
@@ -2145,7 +2775,7 @@ function remapPreviewValue(value, previewHome, selectedHome) {
       return selectedHome;
     }
     if (value.startsWith(`${previewHome}${sep}`)) {
-      return join6(selectedHome, relative2(previewHome, value));
+      return join7(selectedHome, relative2(previewHome, value));
     }
     return value;
   }
@@ -2210,7 +2840,7 @@ function readJsonFile(path, label) {
 // packages/installer/src/codex-config.ts
 async function openConfigRpcSession(options) {
   const selectedHome = canonicalExistingPath(options.codexHome);
-  const configPath = join7(selectedHome, "config.toml");
+  const configPath = join8(selectedHome, "config.toml");
   const owned = options.workspace === undefined && options.rpcFactory === undefined ? await createOwnedWorkspace() : undefined;
   const workspace = options.workspace ?? owned;
   if (!options.dryRun || options.rpcFactory) {
@@ -2259,16 +2889,16 @@ async function createOwnedWorkspace() {
 async function closeOwnedWorkspace(workspace, operation) {
   if (workspace === undefined)
     return;
-  let report;
+  let report2;
   try {
-    report = await workspace.close();
+    report2 = await workspace.close();
   } catch (cleanup) {
     throw new Error("installer temporary cleanup failed", {
       cause: operation === undefined ? cleanup : new AggregateError([cleanup, operation.error], "workspace cleanup and config RPC acquisition both failed")
     });
   }
-  if (report.state === "cleanup-failed") {
-    const cleanup = new Error(`installer temporary cleanup failed: ${report.error ?? "CLEANUP_FAILED"}`);
+  if (report2.state === "cleanup-failed") {
+    const cleanup = new Error(`installer temporary cleanup failed: ${report2.error ?? "CLEANUP_FAILED"}`);
     throw new Error(cleanup.message, {
       cause: operation === undefined ? cleanup : new AggregateError([cleanup, operation.error], "workspace cleanup and config RPC acquisition both failed")
     });
@@ -2280,7 +2910,7 @@ var aggressiveModeHint = "Proactive complexity-aware delegation is active. Follo
 var rootHint = "Fourth Wall applies. Read and follow $fourth-wall before this task's first orchestration action.";
 var subagentHint = "Fourth Wall applies. Read and follow $fourth-wall and the behavioral role resource named in your assignment.";
 function configReceiptPath(codexHome) {
-  return join8(canonicalExistingPath(codexHome), ".skizzles", "config-receipt.json");
+  return join9(canonicalExistingPath(codexHome), ".skizzles", "config-receipt.json");
 }
 function desiredConfigEdits(orchestration) {
   const edits = [
@@ -2368,7 +2998,7 @@ function validateReceiptTarget(receipt, codexHome, codexBinary) {
   if (resolve6(receipt.codexBinary) !== codexBinary) {
     throw new Error(`use the Codex binary recorded by the config receipt: ${receipt.codexBinary}`);
   }
-  if (resolve6(receipt.configPath) !== join8(codexHome, "config.toml")) {
+  if (resolve6(receipt.configPath) !== join9(codexHome, "config.toml")) {
     throw new Error("config receipt points outside the selected CODEX_HOME");
   }
 }
@@ -2433,7 +3063,7 @@ async function configureCodex(options) {
   assertManagedParentsAreReal(codexHome, [".skizzles"]);
   const receiptPath = configReceiptPath(codexHome);
   const existingReceipt = pendingConfigureReceipt(receiptPath, codexHome, codexBinary, options.orchestration);
-  const configPath = join8(codexHome, "config.toml");
+  const configPath = join9(codexHome, "config.toml");
   const rpcSession = await openConfigRpcSession({
     codexHome,
     codexBinary,
@@ -2529,14 +3159,14 @@ async function unconfigureCodex(options) {
 // packages/installer/src/doctor.ts
 import {
   accessSync,
-  constants as constants3,
+  constants as constants5,
   existsSync as existsSync6,
   lstatSync as lstatSync7,
   mkdirSync as mkdirSync7,
   readFileSync as readFileSync6
 } from "fs";
-import { delimiter, join as join11, resolve as resolve9 } from "path";
-import process6 from "process";
+import { delimiter, join as join12, resolve as resolve9 } from "path";
+import process7 from "process";
 // packages/container-lab/assets/integrations/container-lab.json
 var container_lab_default = {
   id: "codex-container-lab",
@@ -2603,9 +3233,9 @@ import {
   symlinkSync,
   writeFileSync as writeFileSync3
 } from "fs";
-import { dirname as dirname4, join as join9, resolve as resolve7 } from "path";
+import { dirname as dirname4, join as join10, resolve as resolve7 } from "path";
 function harnessReceiptPath(home) {
-  return join9(resolve7(home), ".skizzles", "harness-receipt.json");
+  return join10(resolve7(home), ".skizzles", "harness-receipt.json");
 }
 function pluginEntry() {
   return {
@@ -2650,9 +3280,9 @@ function objectValue2(value) {
 function installHarness(options) {
   const home = resolve7(options.home);
   const sourceRoot = resolve7(options.sourceRoot);
-  const pluginSource = join9(sourceRoot, "plugins", "skizzles");
-  const pluginTarget = join9(home, "plugins", "skizzles");
-  const marketplacePath = join9(home, ".agents", "plugins", "marketplace.json");
+  const pluginSource = join10(sourceRoot, "plugins", "skizzles");
+  const pluginTarget = join10(home, "plugins", "skizzles");
+  const marketplacePath = join10(home, ".agents", "plugins", "marketplace.json");
   const receiptPath = harnessReceiptPath(home);
   assertManagedParentsAreReal(home, [
     "plugins",
@@ -2660,7 +3290,7 @@ function installHarness(options) {
     ".agents/plugins",
     ".skizzles"
   ]);
-  if (!existsSync4(join9(pluginSource, ".codex-plugin", "plugin.json"))) {
+  if (!existsSync4(join10(pluginSource, ".codex-plugin", "plugin.json"))) {
     throw new Error(`generated plugin is missing: ${pluginSource}`);
   }
   if (pathEntryExists(pluginTarget)) {
@@ -2714,15 +3344,15 @@ function uninstallHarness(homeInput, dryRun = false, move = renameSync3) {
     ".skizzles"
   ]);
   const receipt = readReceipt2(home);
-  const expectedTarget = join9(home, "plugins", "skizzles");
-  const expectedMarketplace = join9(home, ".agents", "plugins", "marketplace.json");
+  const expectedTarget = join10(home, "plugins", "skizzles");
+  const expectedMarketplace = join10(home, ".agents", "plugins", "marketplace.json");
   if (resolve7(receipt.pluginTarget) !== expectedTarget || resolve7(receipt.marketplacePath) !== expectedMarketplace) {
     throw new Error("harness receipt targets are outside the selected HOME");
   }
   if (!pathEntryExists(receipt.pluginTarget)) {
     throw new Error("owned plugin target is missing");
   }
-  const pluginSource = join9(receipt.sourceRoot, "plugins", "skizzles");
+  const pluginSource = join10(receipt.sourceRoot, "plugins", "skizzles");
   if (receipt.transfer === "link") {
     if (!lstatSync5(receipt.pluginTarget).isSymbolicLink()) {
       throw new Error("owned plugin link changed type");
@@ -2740,7 +3370,7 @@ function uninstallHarness(homeInput, dryRun = false, move = renameSync3) {
   if (dryRun) {
     return receipt;
   }
-  const quarantine = join9(home, ".skizzles", `harness-uninstall-${crypto.randomUUID()}`);
+  const quarantine = join10(home, ".skizzles", `harness-uninstall-${crypto.randomUUID()}`);
   mkdirSync5(quarantine);
   const moved = [];
   try {
@@ -2749,7 +3379,7 @@ function uninstallHarness(homeInput, dryRun = false, move = renameSync3) {
       [receipt.pluginTarget, "plugin"],
       [harnessReceiptPath(home), "receipt.json"]
     ]) {
-      const to = join9(quarantine, name);
+      const to = join10(quarantine, name);
       move(from, to);
       moved.push({ from, to });
     }
@@ -2777,18 +3407,18 @@ import {
   symlinkSync as symlinkSync2,
   writeFileSync as writeFileSync4
 } from "fs";
-import { dirname as dirname5, join as join10, relative as relative3, resolve as resolve8 } from "path";
-import process5 from "process";
+import { dirname as dirname5, join as join11, relative as relative3, resolve as resolve8 } from "path";
+import process6 from "process";
 var receiptName = "skills-receipt.json";
 function skillsReceiptPath(codexHome) {
-  return join10(resolve8(codexHome), ".skizzles", receiptName);
+  return join11(resolve8(codexHome), ".skizzles", receiptName);
 }
 function publicSkills(sourceRoot) {
-  const root = join10(resolve8(sourceRoot), "skills");
+  const root = join11(resolve8(sourceRoot), "skills");
   if (!existsSync5(root)) {
     throw new Error(`canonical skills directory is missing: ${root}`);
   }
-  return readdirSync2(root, { withFileTypes: true }).filter((entry) => entry.isDirectory() && existsSync5(join10(root, entry.name, "SKILL.md"))).map((entry) => ({ name: entry.name, source: join10(root, entry.name) })).sort((left, right) => left.name.localeCompare(right.name));
+  return readdirSync2(root, { withFileTypes: true }).filter((entry) => entry.isDirectory() && existsSync5(join11(root, entry.name, "SKILL.md"))).map((entry) => ({ name: entry.name, source: join11(root, entry.name) })).sort((left, right) => left.name.localeCompare(right.name));
 }
 function readReceipt3(codexHome) {
   const path = skillsReceiptPath(codexHome);
@@ -2829,7 +3459,7 @@ function installSkills(options) {
   const skills = publicSkills(sourceRoot).map(({ name, source }) => ({
     name,
     source,
-    target: join10(codexHome, "skills", name)
+    target: join11(codexHome, "skills", name)
   }));
   if (skills.length === 0) {
     throw new Error("no public skills were found");
@@ -2847,7 +3477,7 @@ function installSkills(options) {
   if (options.dryRun) {
     return receipt;
   }
-  mkdirSync6(join10(codexHome, "skills"), { recursive: true });
+  mkdirSync6(join11(codexHome, "skills"), { recursive: true });
   const created = [];
   try {
     for (const skill of skills) {
@@ -2877,11 +3507,11 @@ function uninstallSkills(codexHomeInput, dryRun = false, move = renameSync4) {
   const receipt = readReceipt3(codexHome);
   for (const skill of receipt.skills) {
     const target = resolve8(skill.target);
-    const expectedParent = join10(codexHome, "skills");
+    const expectedParent = join11(codexHome, "skills");
     if (dirname5(target) !== expectedParent || !pathEntryExists(target)) {
       throw new Error(`owned skill target is missing or outside CODEX_HOME: ${target}`);
     }
-    const source = join10(receipt.sourceRoot, "skills", skill.name);
+    const source = join11(receipt.sourceRoot, "skills", skill.name);
     if (receipt.transfer === "link") {
       if (!lstatSync6(target).isSymbolicLink()) {
         throw new Error(`owned link changed type: ${target}`);
@@ -2897,17 +3527,17 @@ function uninstallSkills(codexHomeInput, dryRun = false, move = renameSync4) {
   if (dryRun) {
     return receipt;
   }
-  const quarantine = join10(codexHome, ".skizzles", `uninstall-${crypto.randomUUID()}`);
+  const quarantine = join11(codexHome, ".skizzles", `uninstall-${crypto.randomUUID()}`);
   mkdirSync6(quarantine);
   const moved = [];
   try {
     for (const skill of receipt.skills) {
-      const destination = join10(quarantine, skill.name);
+      const destination = join11(quarantine, skill.name);
       move(skill.target, destination);
       moved.push({ from: skill.target, to: destination });
     }
     const receiptPath = skillsReceiptPath(codexHome);
-    const receiptDestination = join10(quarantine, receiptName);
+    const receiptDestination = join11(quarantine, receiptName);
     move(receiptPath, receiptDestination);
     moved.push({ from: receiptPath, to: receiptDestination });
   } catch (error) {
@@ -2927,7 +3557,7 @@ function receiptSummary(receipt) {
     sourceRoot: receipt.sourceRoot,
     skills: receipt.skills.map(({ name, target }) => ({
       name,
-      target: relative3(process5.cwd(), target) || target
+      target: relative3(process6.cwd(), target) || target
     }))
   };
 }
@@ -2994,7 +3624,7 @@ function executable(name, pathValue) {
     }
     const candidate = resolve9(directory, name);
     try {
-      accessSync(candidate, constants3.X_OK);
+      accessSync(candidate, constants5.X_OK);
       return candidate;
     } catch {}
   }
@@ -3039,11 +3669,11 @@ function inspectContainerLab(operational, reaper, descriptor, pathValue, timeout
   const root = workspace.path("container-lab-doctor");
   mkdirSync7(root, { recursive: true, mode: 448 });
   try {
-    const processTemp = join11(root, "tmp");
+    const processTemp = join12(root, "tmp");
     mkdirSync7(processTemp, { recursive: true, mode: 448 });
     const environment = {
       PATH: pathValue,
-      HOME: join11(root, "home"),
+      HOME: join12(root, "home"),
       TEMP: processTemp,
       TMP: processTemp,
       TMPDIR: processTemp
@@ -3063,9 +3693,9 @@ function inspectContainerLab(operational, reaper, descriptor, pathValue, timeout
       "--owner",
       `skizzles-doctor-${crypto.randomUUID()}`,
       "--state-root",
-      join11(root, "state"),
+      join12(root, "state"),
       "--runtime-root",
-      join11(root, "runtime"),
+      join12(root, "runtime"),
       "health"
     ], environment, descriptor.execution.adminMaxBytes, timeoutMs);
     if (health["ok"] !== true || typeof health["dockerAvailable"] !== "boolean" || typeof health["labs"] !== "number") {
@@ -3096,7 +3726,7 @@ function inspectContainerLab(operational, reaper, descriptor, pathValue, timeout
     };
   }
 }
-function doctorContainerLab(pathValue = process6.env["PATH"] ?? "", descriptorPath, timeoutMs = 5000, workspace) {
+function doctorContainerLab(pathValue = process7.env["PATH"] ?? "", descriptorPath, timeoutMs = 5000, workspace) {
   const descriptor = contract(descriptorPath);
   const operational = executable(descriptor.binaries.operational, pathValue);
   const reaper = executable(descriptor.binaries.reaper, pathValue);
@@ -3114,7 +3744,7 @@ function doctorContainerLab(pathValue = process6.env["PATH"] ?? "", descriptorPa
   }
   return inspectContainerLab([operational], [reaper], descriptor, pathValue, timeoutMs, requiredWorkspace2(workspace));
 }
-function doctor(home, codexHome, pathValue = process6.env["PATH"] ?? "", workspace) {
+function doctor(home, codexHome, pathValue = process7.env["PATH"] ?? "", workspace) {
   const containerLab = doctorContainerLab(pathValue, undefined, 5000, workspace);
   let skills = "absent";
   let harness = "absent";
@@ -3173,16 +3803,16 @@ async function runInstallerOperationWithLifecycle(operation, lifecycle) {
   } catch (error) {
     outcome = { ok: false, error };
   }
-  let report;
+  let report2;
   try {
-    report = await workspace.close();
+    report2 = await workspace.close();
   } catch (error) {
     throw new Error("installer temporary cleanup failed", {
       cause: outcome.ok ? error : new AggregateError([error, outcome.error], "workspace cleanup and installer operation both failed")
     });
   }
-  if (report.state === "cleanup-failed") {
-    const cleanupError = new Error(`installer temporary cleanup failed: ${report.error ?? "CLEANUP_FAILED"}`);
+  if (report2.state === "cleanup-failed") {
+    const cleanupError = new Error(`installer temporary cleanup failed: ${report2.error ?? "CLEANUP_FAILED"}`);
     throw new Error(cleanupError.message, {
       cause: outcome.ok ? cleanupError : new AggregateError([cleanupError, outcome.error], "workspace cleanup and installer operation both failed")
     });
@@ -3197,7 +3827,7 @@ async function runInstallerOperationWithLifecycle(operation, lifecycle) {
 
 // packages/installer/src/prompt-policy.ts
 import { existsSync as existsSync10, lstatSync as lstatSync11 } from "fs";
-import { isAbsolute as isAbsolute7, join as join14, resolve as resolve13 } from "path";
+import { isAbsolute as isAbsolute7, join as join15, resolve as resolve13 } from "path";
 
 // packages/prompt-layer/src/lifecycle/contract.ts
 var PROMPT_LAYER_SOURCE_PATHS = {
@@ -3318,8 +3948,8 @@ import {
   writeFileSync as writeFileSync5
 } from "fs";
 import { tmpdir as tmpdir2 } from "os";
-import { basename as basename3, dirname as dirname6, join as join12, resolve as resolve10 } from "path";
-import process7 from "process";
+import { basename as basename3, dirname as dirname6, join as join13, resolve as resolve10 } from "path";
+import process8 from "process";
 var LOCK_SCHEMA = "skizzles.prompt-policy-lock";
 var LOCK_VERSION2 = 1;
 var OWNER_NAME = "owner.json";
@@ -3349,7 +3979,7 @@ function promptPolicyLockPath(codexHome, lockParent = defaultLockParent()) {
   const absolute = resolve10(codexHome);
   const canonical = existsSync7(absolute) ? realpathSync4(absolute) : absolute;
   const key = createHash("sha256").update(canonical).digest("hex");
-  return join12(resolve10(lockParent), key);
+  return join13(resolve10(lockParent), key);
 }
 async function withPromptPolicyLock(codexHome, operation, options, work) {
   const lock = await acquireLock(codexHome, operation, options);
@@ -3365,7 +3995,7 @@ async function withPromptPolicyLock(codexHome, operation, options, work) {
 function acquireLock(codexHome, operation, options) {
   const parent = resolve10(options?.lockParent ?? defaultLockParent());
   ensureSafeParent(parent);
-  const processStartIdentity = (options?.processStartIdentity ?? defaultProcessStartIdentity)(process7.pid);
+  const processStartIdentity = (options?.processStartIdentity ?? defaultProcessStartIdentity)(process8.pid);
   if (!validProcessStartIdentity2(processStartIdentity)) {
     throw new Error("cannot establish process-start identity for prompt-policy lifecycle lock");
   }
@@ -3373,7 +4003,7 @@ function acquireLock(codexHome, operation, options) {
     schema: LOCK_SCHEMA,
     version: LOCK_VERSION2,
     operation,
-    pid: process7.pid,
+    pid: process8.pid,
     processStartIdentity,
     token: randomUUID(),
     createdAtUnixMs: Date.now()
@@ -3397,7 +4027,7 @@ function cleanupLockOrphans(parent, lockPath, options) {
     if (!ORPHAN_NAME_PATTERN.test(suffix)) {
       throw new Error("prompt-policy lock parent contains malformed orphan state");
     }
-    const path = join12(parent, name);
+    const path = join13(parent, name);
     const metadata = lstatSync8(path);
     if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
       throw new Error("prompt-policy lock orphan is not a safe directory");
@@ -3405,7 +4035,7 @@ function cleanupLockOrphans(parent, lockPath, options) {
     if ((metadata.mode & 511) !== 448) {
       throw new Error("prompt-policy lock orphan must have mode 0700");
     }
-    const identity = fileIdentity3(path);
+    const identity2 = fileIdentity3(path);
     const entries = readdirSync3(path).sort();
     if (entries.length > 1 || entries.length === 1 && entries[0] !== OWNER_NAME) {
       throw new Error("prompt-policy lock orphan contains unexpected entries");
@@ -3416,11 +4046,11 @@ function cleanupLockOrphans(parent, lockPath, options) {
     } else if (Date.now() - metadata.mtimeMs < grace) {
       throw new Error("prompt-policy lock orphan is inside its grace period");
     }
-    assertIdentity(path, identity, "prompt-policy lock orphan was replaced");
+    assertIdentity(path, identity2, "prompt-policy lock orphan was replaced");
     if (owner && !sameOwner(readOwner(path), owner)) {
       throw new Error("prompt-policy lock orphan ownership changed");
     }
-    removeQuarantine(path, identity, owner !== undefined);
+    removeQuarantine(path, identity2, owner !== undefined);
   }
 }
 function createLock(parent, path, owner) {
@@ -3433,19 +4063,19 @@ function createLock(parent, path, owner) {
     throw error;
   }
   chmodSync5(path, 448);
-  const identity = fileIdentity3(path);
+  const identity2 = fileIdentity3(path);
   try {
-    writeFileSync5(join12(path, OWNER_NAME), `${JSON.stringify(owner, null, 2)}
+    writeFileSync5(join13(path, OWNER_NAME), `${JSON.stringify(owner, null, 2)}
 `, {
       flag: "wx",
       mode: 384
     });
-    chmodSync5(join12(path, OWNER_NAME), 384);
-    const handle = { parent, path, identity, owner };
+    chmodSync5(join13(path, OWNER_NAME), 384);
+    const handle = { parent, path, identity: identity2, owner };
     verifyOwnedLock(handle, "initialization");
     return handle;
   } catch (error) {
-    removeOwnedLockDirectory2({ parent, path, identity, owner });
+    removeOwnedLockDirectory2({ parent, path, identity: identity2, owner });
     throw error;
   }
 }
@@ -3461,7 +4091,7 @@ async function reclaimStaleLock(parent, path, replacement, options) {
   if ((metadata.mode & 511) !== 448) {
     throw new Error("prompt-policy lifecycle lock must have mode 0700");
   }
-  const identity = fileIdentity3(path);
+  const identity2 = fileIdentity3(path);
   const entries = readdirSync3(path).sort();
   if (entries.length > 1 || entries.length === 1 && entries[0] !== OWNER_NAME) {
     throw new Error("prompt-policy lifecycle lock contains unexpected entries");
@@ -3473,7 +4103,7 @@ async function reclaimStaleLock(parent, path, replacement, options) {
     throw new Error("prompt-policy lifecycle lock initialization is incomplete within its grace period");
   }
   await options?.beforeStaleQuarantine?.(path);
-  assertIdentity(path, identity, "prompt-policy lock changed during stale reclaim");
+  assertIdentity(path, identity2, "prompt-policy lock changed during stale reclaim");
   if (owner) {
     const current = readOwner(path);
     if (!sameOwner(current, owner)) {
@@ -3485,14 +4115,14 @@ async function reclaimStaleLock(parent, path, replacement, options) {
   }
   const quarantine = `${path}.stale-${replacement.token}`;
   renameSync5(path, quarantine);
-  assertIdentity(quarantine, identity, "prompt-policy stale-lock quarantine identity changed");
+  assertIdentity(quarantine, identity2, "prompt-policy stale-lock quarantine identity changed");
   const acquired = createLock(parent, path, replacement);
   if (!acquired) {
-    removeQuarantine(quarantine, identity, owner !== undefined);
+    removeQuarantine(quarantine, identity2, owner !== undefined);
     throw new Error("another prompt-policy operation acquired the lifecycle lock");
   }
   try {
-    removeQuarantine(quarantine, identity, owner !== undefined);
+    removeQuarantine(quarantine, identity2, owner !== undefined);
   } catch (error) {
     releaseLock(acquired);
     throw error;
@@ -3518,15 +4148,15 @@ function removeOwnedLockDirectory2(lock) {
   removeQuarantine(quarantine, lock.identity, true);
   removeParentIfEmpty(lock.parent);
 }
-function removeQuarantine(path, identity, ownerExpected) {
-  assertIdentity(path, identity, "prompt-policy lock quarantine was replaced");
+function removeQuarantine(path, identity2, ownerExpected) {
+  assertIdentity(path, identity2, "prompt-policy lock quarantine was replaced");
   const entries = readdirSync3(path).sort();
   const expected = ownerExpected ? [OWNER_NAME] : [];
   if (entries.join("\x00") !== expected.join("\x00")) {
     throw new Error("prompt-policy lock quarantine contains unexpected entries");
   }
   if (ownerExpected) {
-    rmSync6(join12(path, OWNER_NAME));
+    rmSync6(join13(path, OWNER_NAME));
   }
   rmdirSync(path);
 }
@@ -3545,7 +4175,7 @@ function verifyOwnedLock(lock, phase) {
   }
 }
 function readOwner(lockPath) {
-  const path = join12(lockPath, OWNER_NAME);
+  const path = join13(lockPath, OWNER_NAME);
   const metadata = lstatSync8(path);
   if (metadata.isSymbolicLink() || !metadata.isFile()) {
     throw new Error("prompt-policy lock owner is not a regular file");
@@ -3606,7 +4236,7 @@ function assertStaleOwner(owner, provider = defaultProcessStartIdentity) {
   }
 }
 function defaultProcessStartIdentity(pid) {
-  if (process7.platform === "linux") {
+  if (process8.platform === "linux") {
     try {
       const stat = readFileSync7(`/proc/${pid}/stat`, "utf8");
       const commandEnd = stat.lastIndexOf(")");
@@ -3620,9 +4250,9 @@ function defaultProcessStartIdentity(pid) {
       return;
     }
   }
-  if (process7.platform === "darwin") {
+  if (process8.platform === "darwin") {
     const result = Bun.spawnSync(["/bin/ps", "-o", "lstart=", "-p", String(pid)], {
-      env: { ...process7.env, LANG: "C", LC_ALL: "C", TZ: "UTC" },
+      env: { ...process8.env, LANG: "C", LC_ALL: "C", TZ: "UTC" },
       stdout: "pipe",
       stderr: "ignore"
     });
@@ -3657,7 +4287,7 @@ function normalizeDarwinProcessStart(output) {
 }
 function processExists(pid) {
   try {
-    process7.kill(pid, 0);
+    process8.kill(pid, 0);
     return true;
   } catch (error) {
     if (isNodeError2(error) && error.code === "EPERM") {
@@ -3722,9 +4352,9 @@ function removeParentIfEmpty(parent) {
   }
 }
 function defaultLockParent(temporaryDirectory = tmpdir2()) {
-  const uid = typeof process7.getuid === "function" ? process7.getuid() : process7.pid;
+  const uid = typeof process8.getuid === "function" ? process8.getuid() : process8.pid;
   const systemTemp = realpathSync4(temporaryDirectory);
-  return join12(systemTemp, `skizzles-prompt-policy-locks-${uid}`);
+  return join13(systemTemp, `skizzles-prompt-policy-locks-${uid}`);
 }
 function isObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -3750,7 +4380,7 @@ import { dirname as dirname8, isAbsolute as isAbsolute6, resolve as resolve12 } 
 // packages/installer/src/prompt-policy/source.ts
 import { createHash as createHash2 } from "crypto";
 import { existsSync as existsSync8, lstatSync as lstatSync9, readFileSync as readFileSync8, realpathSync as realpathSync5 } from "fs";
-import { dirname as dirname7, isAbsolute as isAbsolute5, join as join13, relative as relative4, resolve as resolve11 } from "path";
+import { dirname as dirname7, isAbsolute as isAbsolute5, join as join14, relative as relative4, resolve as resolve11 } from "path";
 var MACHINE_PATH_PATTERNS = [
   /\/Users\/[A-Za-z0-9._-]+(?:\/|\b)/,
   /\/home\/[A-Za-z0-9._-]+(?:\/|\b)/,
@@ -3885,7 +4515,7 @@ function parseUpstreamFact(value) {
   };
 }
 function readFactFile(root, sourcePrefix, fact, label) {
-  const path = sourcePrefix ? join13(sourcePrefix, fact.path) : fact.path;
+  const path = sourcePrefix ? join14(sourcePrefix, fact.path) : fact.path;
   const bytes = readFileSync8(resolveContainedFile(root, path, label));
   assertDigest(bytes, fact, label);
   return bytes;
@@ -3947,7 +4577,7 @@ function resolveContainedFile(root, path, label) {
   }
   let current = root;
   for (const segment of portable.split("/")) {
-    current = join13(current, segment);
+    current = join14(current, segment);
     if (!pathEntryExists(current)) {
       throw new Error(`${label} is missing: ${portable}`);
     }
@@ -4597,10 +5227,10 @@ function validateContext(options) {
   return {
     codexHome,
     codexBinary,
-    configPath: join14(codexHome, "config.toml"),
-    receiptPath: join14(codexHome, ".skizzles", RECEIPT_NAME),
-    managedDirectory: join14(codexHome, ".skizzles", MANAGED_DIRECTORY),
-    managedTarget: join14(codexHome, ".skizzles", MANAGED_DIRECTORY, MANAGED_FILE)
+    configPath: join15(codexHome, "config.toml"),
+    receiptPath: join15(codexHome, ".skizzles", RECEIPT_NAME),
+    managedDirectory: join15(codexHome, ".skizzles", MANAGED_DIRECTORY),
+    managedTarget: join15(codexHome, ".skizzles", MANAGED_DIRECTORY, MANAGED_FILE)
   };
 }
 function policyEdits(target, source) {
@@ -4627,7 +5257,7 @@ function descriptorPathForSourceRoot(sourceRoot) {
 }
 
 // packages/installer/src/cli.ts
-async function main(argv = process8.argv.slice(2)) {
+async function main(argv = process9.argv.slice(2)) {
   const parsed = parseInstallerCommand(argv);
   await runInstallerOperation(async (workspace) => {
     await execute(parsed, workspace);
@@ -4636,10 +5266,10 @@ async function main(argv = process8.argv.slice(2)) {
 async function execute(parsed, workspace) {
   switch (parsed.command) {
     case "doctor": {
-      const report = doctor(parsed.home, parsed.codexHome, undefined, workspace);
-      console.log(JSON.stringify(report));
-      if (!report.ok) {
-        process8.exitCode = 1;
+      const report2 = doctor(parsed.home, parsed.codexHome, undefined, workspace);
+      console.log(JSON.stringify(report2));
+      if (!report2.ok) {
+        process9.exitCode = 1;
       }
       return;
     }
@@ -4726,7 +5356,7 @@ function exitCodeForError(error) {
 if (import.meta.main) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : "installer failed");
-    process8.exit(exitCodeForError(error));
+    process9.exit(exitCodeForError(error));
   });
 }
 export {

@@ -7,9 +7,21 @@ atomic within an owner-only run store.
 
 ## Entrypoint
 
-`@skizzles/command-supervisor` exports the import-safe `dispatchCommand`
-programmatic facade. Calling it may write command output; importing it does not
-dispatch the executable.
+`@skizzles/command-supervisor` exports the import-safe `dispatchCommand` CLI
+facade and a direct-argv `observeCommand` programmatic API. Importing either
+does not dispatch an executable.
+
+`observeCommand` accepts a strict versioned specification with an absolute
+executable path, argument vector, working directory, complete environment,
+timeout, per-stream byte cap, drain bound, signal grace bound, and optional
+abort signal. It never accepts a shell command string. Its immutable receipt
+binds the invocation and terminal outcome, preserving exit, signal, timeout,
+abort, invalid-spec, spawn-failure, output-limit, stream-drain, and process-tree
+cleanup states separately. Malformed or hostile specifications return a
+no-spawn `invalid-spec` receipt with the fixed redacted `INVALID_SPEC` code;
+they do not throw. Standard error is retained evidence and does not by itself
+change a successful exit into a failure. Bounded output bytes are recovered
+from an authentic receipt with `recoverCommandOutput`; callers receive a copy.
 
 The source workspace executes the CLI directly with
 `bun run packages/command-supervisor/src/codex-command.ts`; the generated

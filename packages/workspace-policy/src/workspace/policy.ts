@@ -30,6 +30,7 @@ const SKIZZLES_PACKAGE_NAMES = [
   "@skizzles/prompt-layer",
   "@skizzles/run-workspace",
   "@skizzles/usage-analyzer",
+  "@skizzles/workspace-transaction",
   "@skizzles/workspace-policy",
   "codex-fastmcp-template",
 ] as const;

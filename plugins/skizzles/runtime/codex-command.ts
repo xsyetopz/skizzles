@@ -2,14 +2,37 @@
 // @bun
 
 // packages/command-supervisor/src/codex-command.ts
-import process7 from "process";
+import process8 from "process";
 
 // packages/command-supervisor/src/codex-command/cli.ts
-import process6 from "process";
+import process7 from "process";
 
 // packages/command-supervisor/src/codex-command/run/command.ts
 import { join as join5 } from "path";
-import process5 from "process";
+import process6 from "process";
+
+// packages/command-supervisor/src/codex-command/capture-lifecycle.ts
+var captureCancellationMilliseconds = 25;
+function waitForCaptureDrain(captures, drainMilliseconds) {
+  const allDone = Promise.all(captures.map((capture) => capture.done));
+  return Promise.race([
+    allDone.then(() => true),
+    Bun.sleep(drainMilliseconds).then(() => false)
+  ]);
+}
+async function finishCaptures(captures) {
+  const allDone = Promise.all(captures.map((capture) => capture.done));
+  const finished = await Promise.race([
+    allDone.then(() => true),
+    Bun.sleep(captureCancellationMilliseconds).then(() => false)
+  ]);
+  if (!finished) {
+    for (const capture of captures) {
+      capture.cancel();
+    }
+    await Promise.race([allDone, Bun.sleep(captureCancellationMilliseconds)]);
+  }
+}
 
 // packages/command-supervisor/src/codex-command/settings.ts
 import { accessSync, constants } from "fs";
@@ -73,17 +96,11 @@ function loadRunSettings() {
 }
 
 // packages/command-supervisor/src/codex-command/shell-process.ts
+import process3 from "process";
+
+// packages/command-supervisor/src/codex-command/process-tree.ts
 import process2 from "process";
-var supervisedSignals = [
-  "SIGINT",
-  "SIGTERM",
-  "SIGHUP"
-];
-var signalExitCodes = {
-  SIGHUP: 129,
-  SIGINT: 130,
-  SIGTERM: 143
-};
+var forcedExitWaitMilliseconds = 500;
 function missingProcess(error) {
   return error instanceof Error && "code" in error && error.code === "ESRCH";
 }
@@ -104,7 +121,11 @@ function signalProcessTree(child, signal) {
 }
 function processTreeExists(child) {
   try {
-    process2.kill(process2.platform === "win32" ? child.pid : -child.pid, 0);
+    let target = -child.pid;
+    if (process2.platform === "win32") {
+      target = child.pid;
+    }
+    process2.kill(target, 0);
     return true;
   } catch {
     return false;
@@ -120,14 +141,39 @@ async function waitForProcessTreeExit(child, timeoutMilliseconds) {
   }
   return !processTreeExists(child);
 }
+async function terminateProcessTree(child, signalGraceMilliseconds) {
+  if (!processTreeExists(child)) {
+    return "not-required";
+  }
+  signalProcessTree(child, "SIGTERM");
+  const exitedGracefully = await waitForProcessTreeExit(child, signalGraceMilliseconds);
+  if (exitedGracefully) {
+    return "terminated";
+  }
+  signalProcessTree(child, "SIGKILL");
+  await waitForProcessTreeExit(child, forcedExitWaitMilliseconds);
+  return "killed";
+}
+
+// packages/command-supervisor/src/codex-command/shell-process.ts
+var supervisedSignals = [
+  "SIGINT",
+  "SIGTERM",
+  "SIGHUP"
+];
+var signalExitCodes = {
+  SIGHUP: 129,
+  SIGINT: 130,
+  SIGTERM: 143
+};
 function spawnSupervisedShell(shell, script, signalGraceMilliseconds) {
   const child = Bun.spawn([shell, "-c", script], {
-    cwd: process2.cwd(),
-    env: process2.env,
+    cwd: process3.cwd(),
+    env: process3.env,
     stdin: "inherit",
     stdout: "pipe",
     stderr: "pipe",
-    detached: process2.platform !== "win32"
+    detached: process3.platform !== "win32"
   });
   let receivedSignal;
   let shellExited = false;
@@ -173,11 +219,11 @@ function spawnSupervisedShell(shell, script, signalGraceMilliseconds) {
   for (const signal of supervisedSignals) {
     const handler = handleSignal.bind(undefined, signal);
     handlers.set(signal, handler);
-    process2.on(signal, handler);
+    process3.on(signal, handler);
   }
   const removeHandlers = () => {
     for (const [signal, handler] of handlers) {
-      process2.off(signal, handler);
+      process3.off(signal, handler);
     }
   };
   const settleReceivedSignal = async () => {
@@ -200,20 +246,7 @@ function spawnSupervisedShell(shell, script, signalGraceMilliseconds) {
     await waitForProcessTreeExit(child, 500);
     return escalated ? "killed" : "terminated";
   };
-  const settleNormalCompletion = async () => {
-    if (!processTreeExists(child)) {
-      return "not-required";
-    }
-    signalProcessTree(child, "SIGTERM");
-    const exitedGracefully = await waitForProcessTreeExit(child, signalGraceMilliseconds);
-    if (!exitedGracefully) {
-      signalProcessTree(child, "SIGKILL");
-      await waitForProcessTreeExit(child, 500);
-      return "killed";
-    }
-    await waitForProcessTreeExit(child, 500);
-    return "terminated";
-  };
+  const settleNormalCompletion = async () => terminateProcessTree(child, signalGraceMilliseconds);
   return {
     child,
     waitForShell: async () => {
@@ -238,7 +271,7 @@ function spawnSupervisedShell(shell, script, signalGraceMilliseconds) {
 // packages/command-supervisor/src/codex-command/stream-capture.ts
 import { createHash } from "crypto";
 import { writeSync } from "fs";
-import process3 from "process";
+import process4 from "process";
 function emptyCaptureState() {
   return {
     observedBytes: 0,
@@ -249,7 +282,7 @@ function emptyCaptureState() {
   };
 }
 function forwardChunk(streamName, chunk) {
-  (streamName === "stdout" ? process3.stdout : process3.stderr).write(chunk);
+  (streamName === "stdout" ? process4.stdout : process4.stderr).write(chunk);
 }
 function retainChunk(artifact, chunk, maximumBytes, state) {
   const remaining = maximumBytes - state.storedBytes;
@@ -279,6 +312,11 @@ function consumeChunk(streamName, chunk, artifact, maximumBytes, forward, state)
   }
 }
 function captureStream(stream, streamName, artifact, maximumBytes, forward, state) {
+  return consumeStream(stream, state, (chunk) => {
+    consumeChunk(streamName, chunk, artifact, maximumBytes, forward, state);
+  });
+}
+function consumeStream(stream, state, consume) {
   if (!stream) {
     state.finished = true;
     return { done: Promise.resolve(), cancel: () => {
@@ -297,7 +335,7 @@ function captureStream(stream, streamName, artifact, maximumBytes, forward, stat
         if (cancelled) {
           break;
         }
-        consumeChunk(streamName, next.value, artifact, maximumBytes, forward, state);
+        consume(next.value);
       }
     } catch {
       state.truncated = true;
@@ -320,11 +358,11 @@ function printCaptured(label, content) {
   if (!content) {
     return;
   }
-  process3.stdout.write(`[codex-command] ${label}:
+  process4.stdout.write(`[codex-command] ${label}:
 ${content}`);
   if (!content.endsWith(`
 `)) {
-    process3.stdout.write(`
+    process4.stdout.write(`
 `);
   }
 }
@@ -453,9 +491,9 @@ function verifyRunEvidence(status, stdout, stderr) {
 // packages/command-supervisor/src/codex-command/run/root.ts
 import { lstatSync, mkdirSync, realpathSync } from "fs";
 import { basename as basename2, dirname, join as join2, resolve as resolve2 } from "path";
-import process4 from "process";
+import process5 from "process";
 function currentUid() {
-  return process4.getuid?.();
+  return process5.getuid?.();
 }
 function identity(info) {
   return {
@@ -1057,26 +1095,6 @@ function progressReporter(startedAt, stdout, stderr) {
     lastReportedStderrBytes = stderr.observedBytes;
   };
 }
-function waitForCaptureDrain(captures, drainMilliseconds) {
-  const allDone = Promise.all(captures.map((capture) => capture.done));
-  return Promise.race([
-    allDone.then(() => true),
-    Bun.sleep(drainMilliseconds).then(() => false)
-  ]);
-}
-async function finishCaptures(captures) {
-  const allDone = Promise.all(captures.map((capture) => capture.done));
-  const finished = await Promise.race([
-    allDone.then(() => true),
-    Bun.sleep(25).then(() => false)
-  ]);
-  if (!finished) {
-    for (const capture of captures) {
-      capture.cancel();
-    }
-    await Promise.race([allDone, Bun.sleep(25)]);
-  }
-}
 function renderRetainedOutput(directory, status, inlineBytes) {
   const combinedBytes = status.evidence.stdout.observedBytes + status.evidence.stderr.observedBytes;
   const printFullOutput = combinedBytes <= inlineBytes && !status.evidence.stdout.truncated && !status.evidence.stderr.truncated;
@@ -1126,7 +1144,7 @@ async function runCommand(script) {
     console.error(`[codex-command] unable to start command: ${error instanceof Error ? error.message : "unknown error"}`);
     return 127;
   }
-  const shouldForward = !artifacts.available || Boolean(process5.stdout.isTTY || process5.stderr.isTTY);
+  const shouldForward = !artifacts.available || Boolean(process6.stdout.isTTY || process6.stderr.isTTY);
   const stdoutState = emptyCaptureState();
   const stderrState = emptyCaptureState();
   const captures = [
@@ -1301,10 +1319,10 @@ function selectedStream(value) {
   return stream;
 }
 function writeTail(content) {
-  process6.stdout.write(content);
+  process7.stdout.write(content);
   if (!content.endsWith(`
 `)) {
-    process6.stdout.write(`
+    process7.stdout.write(`
 `);
   }
 }
@@ -1324,7 +1342,7 @@ function executeRun(arguments_) {
 function executeQuery(subcommand, arguments_) {
   const queries = new RunStoreQueries(runRoot());
   if (subcommand === "status" && arguments_.length === 1) {
-    process6.stdout.write(queries.status(requiredArgument(arguments_, 0)));
+    process7.stdout.write(queries.status(requiredArgument(arguments_, 0)));
     return 0;
   }
   if (subcommand === "tail" && (arguments_.length === 1 || arguments_.length === 2)) {
@@ -1362,4 +1380,4 @@ async function dispatchCommand(arguments_) {
 }
 
 // packages/command-supervisor/src/codex-command.ts
-process7.exit(await dispatchCommand(process7.argv.slice(2)));
+process8.exit(await dispatchCommand(process8.argv.slice(2)));

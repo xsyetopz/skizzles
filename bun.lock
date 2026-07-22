@@ -66,6 +66,20 @@
         "typescript": "^7.0.2",
       },
     },
+    "packages/orchestrator": {
+      "name": "@skizzles/orchestrator",
+      "version": "0.1.0",
+      "dependencies": {
+        "@skizzles/command-supervisor": "workspace:*",
+        "@skizzles/run-workspace": "workspace:*",
+        "@skizzles/workspace-transaction": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/plugin-builder": {
       "name": "@skizzles/plugin-builder",
       "version": "0.1.0",
@@ -135,6 +149,15 @@
         "@types/node": "^26.1.1",
       },
     },
+    "packages/workspace-transaction": {
+      "name": "@skizzles/workspace-transaction",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/bun": "^1.3.14",
+        "@types/node": "^26.1.1",
+        "typescript": "^7.0.2",
+      },
+    },
     "skills/codex-project-tooling/assets/fastmcp-bun-template": {
       "name": "codex-fastmcp-template",
       "version": "0.1.0",
@@ -173,6 +196,8 @@
 
     "@skizzles/model-catalog": ["@skizzles/model-catalog@workspace:packages/model-catalog"],
 
+    "@skizzles/orchestrator": ["@skizzles/orchestrator@workspace:packages/orchestrator"],
+
     "@skizzles/plugin-builder": ["@skizzles/plugin-builder@workspace:packages/plugin-builder"],
 
     "@skizzles/prompt-layer": ["@skizzles/prompt-layer@workspace:packages/prompt-layer"],
@@ -182,6 +207,8 @@
     "@skizzles/usage-analyzer": ["@skizzles/usage-analyzer@workspace:packages/usage-analyzer"],
 
     "@skizzles/workspace-policy": ["@skizzles/workspace-policy@workspace:packages/workspace-policy"],
+
+    "@skizzles/workspace-transaction": ["@skizzles/workspace-transaction@workspace:packages/workspace-transaction"],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 

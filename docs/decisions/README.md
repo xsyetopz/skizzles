@@ -18,6 +18,7 @@ rewriting its rationale.
 | [0008](0008-typescript-source-parser.md) | Accepted | Parse static TypeScript dependency forms with one lifecycle-bounded compiler AST snapshot. |
 | [0009](0009-owned-run-workspaces.md) | Accepted | Own disposable run roots, child shutdown, preservation, signals, and stale cleanup in one capability package. |
 | [0010](0010-orchestration-runtime.md) | Accepted | Own deterministic orchestration policy in one modular runtime package with fail-closed trust boundaries. |
+| [0011](0011-orchestration-execution-boundaries.md) | Accepted | Separate durable publication, command observation, disposable-run quotas, and orchestration state while composing one gated execution path. |
 
 ## Record contract
 

@@ -14,6 +14,12 @@ const workspace = await create({ signal: operationSignal });
 try {
   const checkout = workspace.path("checkout");
   // Put every run-local checkout, build, download, agent home, and test artifact below checkout.
+  const usage = await workspace.inspectUsage({
+    byteLimit: 10 * 1024 * 1024 * 1024,
+    entryLimit: 100_000,
+    scanLimit: 100_001,
+  });
+  if (usage.state !== "within") throw new Error("run workspace quota unavailable or exceeded");
 } finally {
   const report = await workspace.close();
   if (report.state === "cleanup-failed") throw new Error(report.error);
@@ -31,6 +37,23 @@ shares one bounded force deadline before considering root deletion.
 Preservation still stops registered children. `close()` is single-flight while active, idempotent after
 success, and retryable after cleanup failure. Deletion always claims and revalidates the complete root;
 it never removes nested `.codex`, `.gradle`, `build`, `Downloads`, or any other child independently.
+
+`inspectUsage()` performs a fail-closed, bounded inspection of the exact owned root. It reports
+logical bytes, allocated bytes, and directory-entry count, and returns `exceeded` when either byte
+measurement or the entry count is above its configured limit. Exact limits pass. The scan never
+follows symlinks and counts hard-linked storage once by filesystem identity. Recursive traversal is
+bound to no-follow directory descriptors; it does not use check-then-path enumeration. Linux uses
+`/proc/self/fd` for descriptor-relative enumeration. Darwin uses libc `getdirentries64`, `fstatat`,
+and `openat` through Bun FFI so enumeration, metadata inspection, and child opens remain relative to
+held directory descriptors. Platforms without a working descriptor adapter, including Windows,
+return `unknown` before enumerating. The root marker and all other entries below the root count toward
+usage; the root directory itself does not.
+Unreadable, raced, replaced, numerically unrepresentable, or scan-truncated state returns `unknown`
+with bounded observations. A closed or closing workspace also returns `unknown`. Malformed limits,
+accessors, symbols, and proxy inputs return `unknown` with code `INVALID_USAGE_LIMIT` without
+scanning. Configure `scanLimit` above `entryLimit` when one-over entry detection must be
+distinguishable from scan truncation. The package accepts at most 1,000,000 scanned entries per
+inspection.
 
 `cleanupStale()` performs a bounded direct-child scan. It deletes only roots with exact markers and a
 definitely absent owner or a start-identity mismatch proving PID reuse. Live, preserved, too-young,

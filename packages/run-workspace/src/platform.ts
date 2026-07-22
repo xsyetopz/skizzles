@@ -18,6 +18,17 @@ import { tmpdir } from "node:os";
 import { join, win32 } from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
+import type { UsageDirectory, UsageEntry } from "./usage/contract.ts";
+import {
+  lstatSystemUsage,
+  openSystemUsageDirectory,
+} from "./usage/directory.ts";
+
+export type {
+  UsageDirectory,
+  UsageEntry,
+  UsageEntryKind,
+} from "./usage/contract.ts";
 
 export interface FileIdentity {
   readonly device: string;
@@ -50,6 +61,8 @@ export interface Runtime {
   chmod: (path: string, mode: number) => Promise<void>;
   mkdtemp: (prefix: string) => Promise<string>;
   lstatIdentity: (path: string) => Promise<FileIdentity | undefined>;
+  lstatUsage: (path: string) => Promise<UsageEntry | undefined>;
+  openUsageDirectory: (path: string) => Promise<UsageDirectory | undefined>;
   isDirectory: (path: string) => Promise<boolean>;
   isPrivateDirectory: (path: string) => Promise<boolean>;
   isFile: (path: string) => Promise<boolean>;
@@ -407,6 +420,9 @@ export function systemRuntime(): Runtime {
     chmod,
     mkdtemp,
     lstatIdentity: fileIdentity,
+    lstatUsage: lstatSystemUsage,
+    openUsageDirectory: (path) =>
+      openSystemUsageDirectory(path, process.platform),
     isDirectory: async (path) => (await fileIdentity(path)) !== undefined,
     isPrivateDirectory,
     isFile: isRegularFile,

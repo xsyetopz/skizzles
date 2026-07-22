@@ -160,7 +160,7 @@ export function parseJsonBytes(value: unknown): JsonValue | undefined {
     value.byteLength === 0 ||
     value.byteLength > JSON_LIMITS.bytes
   )
-    return undefined;
+    return;
   try {
     const text = new TextDecoder("utf-8", { fatal: true }).decode(value);
     return new JsonParser(text).parse();
@@ -252,6 +252,80 @@ export interface RuntimeRecord {
   readonly verificationAuthority?: unknown;
   readonly verifier?: unknown;
   readonly version?: unknown;
+  readonly approval?: unknown;
+  readonly approvalAuthority?: unknown;
+  readonly approvalTtlMs?: unknown;
+  readonly approved?: unknown;
+  readonly approvalId?: unknown;
+  readonly authenticate?: unknown;
+  readonly authorized?: unknown;
+  readonly baseline?: unknown;
+  readonly baselineDigest?: unknown;
+  readonly causalFailureId?: unknown;
+  readonly challengeDigest?: unknown;
+  readonly checks?: unknown;
+  readonly clock?: unknown;
+  readonly complete?: unknown;
+  readonly completionAuthority?: unknown;
+  readonly completionContract?: unknown;
+  readonly diffBytes?: unknown;
+  readonly discovery?: unknown;
+  readonly discoveryAuthority?: unknown;
+  readonly discoveryDigest?: unknown;
+  readonly discoveryPolicy?: unknown;
+  readonly entries?: unknown;
+  readonly execution?: unknown;
+  readonly executionBudgets?: unknown;
+  readonly executionId?: unknown;
+  readonly expansion?: unknown;
+  readonly headBytes?: unknown;
+  readonly headDigest?: unknown;
+  readonly indexBytes?: unknown;
+  readonly indexDigest?: unknown;
+  readonly maxBytes?: unknown;
+  readonly maxDepth?: unknown;
+  readonly maxExpansions?: unknown;
+  readonly maxFiles?: unknown;
+  readonly maxMs?: unknown;
+  readonly now?: unknown;
+  readonly operation?: unknown;
+  readonly passed?: unknown;
+  readonly principalId?: unknown;
+  readonly proposedRoot?: unknown;
+  readonly revalidate?: unknown;
+  readonly reviewExpansion?: unknown;
+  readonly reviewId?: unknown;
+  readonly root?: unknown;
+  readonly scan?: unknown;
+  readonly skippedSymlinks?: unknown;
+  readonly statuses?: unknown;
+  readonly statusBytes?: unknown;
+  readonly stoppedBy?: unknown;
+  readonly targetAuthority?: unknown;
+  readonly targets?: unknown;
+  readonly taskId?: unknown;
+  readonly token?: unknown;
+  readonly transactionDigest?: unknown;
+  readonly unchanged?: unknown;
+  readonly verifiedAtMs?: unknown;
+  readonly worktreeBytes?: unknown;
+  readonly worktreeDigest?: unknown;
+  readonly actions?: unknown;
+  readonly retries?: unknown;
+  readonly repeatedCausalFailures?: unknown;
+  readonly wallClockMs?: unknown;
+  readonly includedRoots?: unknown;
+  readonly exclusions?: unknown;
+  readonly bounds?: unknown;
+  readonly renamedFrom?: unknown;
+  readonly path?: unknown;
+  readonly low?: unknown;
+  readonly medium?: unknown;
+  readonly high?: unknown;
+  readonly contractId?: unknown;
+  readonly evidenceBytes?: unknown;
+  readonly reservationId?: unknown;
+  readonly statusDigest?: unknown;
 }
 
 export function isRecord(value: unknown): value is RuntimeRecord {
@@ -281,14 +355,14 @@ export function bytesOf(value: unknown): readonly number[] | undefined {
     values === undefined ||
     values.some((byte) => !Number.isInteger(byte) || byte < 0 || byte > 255)
   ) {
-    return undefined;
+    return;
   }
   return Object.freeze([...values]);
 }
 
 export function stringArray(value: unknown): readonly string[] | undefined {
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    return undefined;
+    return;
   }
   return Object.freeze([...value]);
 }

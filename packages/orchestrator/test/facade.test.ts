@@ -1,7 +1,7 @@
 // biome-ignore lint/correctness/noUnresolvedImports: Bun supplies this built-in module.
 import { describe, expect, it } from "bun:test";
 import { readFile } from "node:fs/promises";
-import { createOrchestrator } from "../src/index.ts";
+import { createCausalWorkflow, createOrchestrator } from "../src/index.ts";
 import {
   createHarness,
   type EffectClassificationInput,
@@ -16,6 +16,7 @@ describe("package facade and fail-closed controller", () => {
     expect(Object.keys(facade).sort()).toEqual(
       [
         "ANCHOR_PRECEDENCE",
+        "createCausalWorkflow",
         "createOrchestrator",
         "recoverDiagnosticBytes",
         "recoverRequestBytes",
@@ -37,6 +38,10 @@ describe("package facade and fail-closed controller", () => {
       status: "rejected",
       code: "INVALID_ORCHESTRATOR_CONFIG",
     });
+    expect(createCausalWorkflow(null)).toEqual({
+      status: "rejected",
+      code: "INVALID_WORKFLOW_CONFIG",
+    });
   });
 
   it("makes every controller boundary reject malformed runtime values", async () => {
@@ -57,6 +62,26 @@ describe("package facade and fail-closed controller", () => {
     expect(orchestrator.proposeChange(null).status).toBe("rejected");
     expect((await orchestrator.reviewChange(null)).status).toBe("rejected");
     expect((await orchestrator.applyChange(null)).status).toBe("rejected");
+    expect((await orchestrator.captureTargetBaseline(null)).status).toBe(
+      "rejected",
+    );
+    expect((await orchestrator.revalidateTargetBaseline(null)).status).toBe(
+      "rejected",
+    );
+    expect(orchestrator.releaseTargetBaseline(null).status).toBe("rejected");
+    expect(orchestrator.startExecution(null).status).toBe("rejected");
+    expect(orchestrator.recordExecution(null).status).toBe("rejected");
+    expect((await orchestrator.completeExecution(null)).status).toBe(
+      "rejected",
+    );
+    expect((await orchestrator.discover(null)).status).toBe("rejected");
+    expect((await orchestrator.expandDiscovery(null)).status).toBe("rejected");
+    expect(orchestrator.planApproval(null).status).toBe("rejected");
+    expect(orchestrator.reviewApproval(null).status).toBe("rejected");
+    expect(orchestrator.awaitApproval(null).status).toBe("rejected");
+    expect((await orchestrator.approve(null)).status).toBe("rejected");
+    expect((await orchestrator.promote(null)).status).toBe("rejected");
+    expect(orchestrator.cancelApproval(null).status).toBe("rejected");
   });
 
   it("contains hostile runtime property traps at the public facade", async () => {

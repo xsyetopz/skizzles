@@ -1,11 +1,14 @@
 import {
   createOrchestrator,
   type DiagnosticInterceptor,
+  type DiscoverySnapshot,
   type EffectKind,
   type NormalizedRequest,
   type Orchestrator,
   type OrchestratorConfig,
+  type RepositoryContext,
   type StructuralProposal,
+  type TargetBaseline,
 } from "../src/index.ts";
 
 const encoder = new TextEncoder();
@@ -97,6 +100,12 @@ interface HarnessOptions {
   readonly structuralApply?: OrchestratorConfig["structural"]["apply"];
   readonly tokenCap?: number;
   readonly byteCap?: number;
+  readonly targetCapture?: OrchestratorConfig["targetAuthority"]["capture"];
+  readonly targetRevalidate?: OrchestratorConfig["targetAuthority"]["revalidate"];
+  readonly completionVerify?: OrchestratorConfig["completionAuthority"]["verify"];
+  readonly discoveryScan?: OrchestratorConfig["discoveryAuthority"]["scan"];
+  readonly reviewExpansion?: OrchestratorConfig["discoveryAuthority"]["reviewExpansion"];
+  readonly authenticate?: OrchestratorConfig["approvalAuthority"]["authenticate"];
 }
 
 export function createHarness(options: HarnessOptions = {}): {
@@ -108,8 +117,19 @@ export function createHarness(options: HarnessOptions = {}): {
     graph: number;
     measure: number;
     repository: number;
+    targetCapture: number;
+    targetRevalidate: number;
+    completion: number;
+    discovery: number;
+    expansion: number;
+    authenticate: number;
   };
   readonly applied: Uint8Array[];
+  readonly clock: {
+    now(): number;
+    set(value: number): void;
+    advance(value: number): void;
+  };
 } {
   const counts = {
     classify: 0,
@@ -118,6 +138,22 @@ export function createHarness(options: HarnessOptions = {}): {
     graph: 0,
     measure: 0,
     repository: 0,
+    targetCapture: 0,
+    targetRevalidate: 0,
+    completion: 0,
+    discovery: 0,
+    expansion: 0,
+    authenticate: 0,
+  };
+  let now = 1000;
+  const clock = {
+    now: () => now,
+    set(value: number) {
+      now = value;
+    },
+    advance(value: number) {
+      now += value;
+    },
   };
   const applied: Uint8Array[] = [];
   const verification = [
@@ -223,6 +259,143 @@ export function createHarness(options: HarnessOptions = {}): {
         return { target: input.target, ref: input.payloadRef };
       },
     },
+    targetAuthority: {
+      capture(input) {
+        counts.targetCapture += 1;
+        if (options.targetCapture !== undefined)
+          return options.targetCapture(input);
+        return {
+          reservationId: input.reservationId,
+          repositoryId: input.repositoryId,
+          requestDigest: input.requestDigest,
+          treeDigest: input.treeDigest,
+          targets: input.targets,
+          headBytes: [1],
+          indexBytes: [2],
+          worktreeBytes: [3],
+          statusBytes: [4],
+          statuses: input.targets.map((path) => ({ path, state: "clean" })),
+        };
+      },
+      revalidate(input) {
+        counts.targetRevalidate += 1;
+        if (options.targetRevalidate !== undefined)
+          return options.targetRevalidate(input);
+        return {
+          reservationId: input.reservationId,
+          repositoryId: input.repositoryId,
+          requestDigest: input.requestDigest,
+          treeDigest: input.treeDigest,
+          targets: input.targets,
+          headDigest: input.headDigest,
+          indexDigest: input.indexDigest,
+          worktreeDigest: input.worktreeDigest,
+          statusDigest: input.statusDigest,
+          unchanged: true,
+        };
+      },
+    },
+    clock: { now: clock.now },
+    completionAuthority: {
+      verify(input) {
+        counts.completion += 1;
+        if (options.completionVerify !== undefined)
+          return options.completionVerify(input);
+        return {
+          executionId: input.executionId,
+          requestDigest: input.request.intentDigest,
+          repositoryId: input.repository.repositoryId,
+          treeDigest: input.repository.treeDigest,
+          contractId: input.contractId,
+          checks: input.requiredChecks.map((id, index) => ({
+            id,
+            passed: true,
+            evidenceBytes: [index + 1],
+          })),
+        };
+      },
+    },
+    executionBudgets: {
+      low: {
+        actions: 4,
+        retries: 2,
+        repeatedCausalFailures: 2,
+        wallClockMs: 1000,
+      },
+      medium: {
+        actions: 3,
+        retries: 2,
+        repeatedCausalFailures: 2,
+        wallClockMs: 800,
+      },
+      high: {
+        actions: 2,
+        retries: 1,
+        repeatedCausalFailures: 1,
+        wallClockMs: 500,
+      },
+    },
+    completionContract: {
+      id: "phase-two",
+      checks: ["lint", "compiler", "target-tests"],
+    },
+    discoveryAuthority: {
+      scan(input) {
+        counts.discovery += 1;
+        if (options.discoveryScan !== undefined)
+          return options.discoveryScan(input);
+        return {
+          repositoryId: input.repositoryId,
+          requestDigest: input.requestDigest,
+          treeDigest: input.treeDigest,
+          root: input.root,
+          entries: [
+            { path: `${input.root}/src`, kind: "directory", bytes: 0 },
+            { path: `${input.root}/src/index.ts`, kind: "file", bytes: 100 },
+          ],
+          skippedSymlinks: [`${input.root}/vendor-link`],
+          complete: true,
+          stoppedBy: null,
+        };
+      },
+      reviewExpansion(input) {
+        counts.expansion += 1;
+        if (options.reviewExpansion !== undefined)
+          return options.reviewExpansion(input);
+        return {
+          discoveryDigest: input.discoveryDigest,
+          proposedRoot: input.proposedRoot,
+          expansion: input.expansion,
+          approved: true,
+          reviewId: `expansion-${input.expansion}`,
+        };
+      },
+    },
+    discoveryPolicy: {
+      includedRoots: ["packages"],
+      exclusions: [
+        "packages/orchestrator/node_modules",
+        "packages/orchestrator/dist",
+      ],
+      bounds: { maxDepth: 8, maxFiles: 100, maxBytes: 100_000, maxMs: 100 },
+      maxExpansions: 2,
+    },
+    approvalAuthority: {
+      authenticate(input) {
+        counts.authenticate += 1;
+        if (options.authenticate !== undefined)
+          return options.authenticate(input);
+        return {
+          challengeDigest: input.challenge.challengeDigest,
+          taskId: input.challenge.taskId,
+          principalId: input.challenge.principalId,
+          operation: input.challenge.operation,
+          authorized: input.token === "approve",
+          verifiedAtMs: clock.now(),
+        };
+      },
+    },
+    approvalTtlMs: 200,
     artifactValidators: [
       {
         kind: "code",
@@ -245,13 +418,58 @@ export function createHarness(options: HarnessOptions = {}): {
   const created = createOrchestrator(config);
   if (created.status === "rejected")
     throw new Error("valid harness config rejected");
-  return { orchestrator: created.orchestrator, counts, applied };
+  return { orchestrator: created.orchestrator, counts, applied, clock };
 }
 
 export function normalize(orchestrator: Orchestrator): NormalizedRequest {
   const result = orchestrator.normalize(requestBytes());
   if (result.status === "rejected") throw new Error("valid request rejected");
   return result.request;
+}
+
+export async function repositoryContext(orchestrator: Orchestrator): Promise<{
+  readonly request: NormalizedRequest;
+  readonly repository: RepositoryContext;
+}> {
+  const request = normalize(orchestrator);
+  const result = await orchestrator.preflight({
+    request,
+    repository: { id: "repo-a" },
+  });
+  if (result.status !== "accepted")
+    throw new Error("valid repository rejected");
+  return { request, repository: result.approval.repository };
+}
+
+export async function targetBaseline(
+  orchestrator: Orchestrator,
+  targets: readonly string[] = ["packages/orchestrator/src/runtime.ts"],
+): Promise<{
+  readonly request: NormalizedRequest;
+  readonly repository: RepositoryContext;
+  readonly baseline: TargetBaseline;
+}> {
+  const context = await repositoryContext(orchestrator);
+  const result = await orchestrator.captureTargetBaseline({
+    ...context,
+    targets,
+  });
+  if (result.status !== "accepted") throw new Error("valid baseline rejected");
+  return { ...context, baseline: result.baseline };
+}
+
+export async function discoverySnapshot(orchestrator: Orchestrator): Promise<{
+  readonly request: NormalizedRequest;
+  readonly repository: RepositoryContext;
+  readonly discovery: DiscoverySnapshot;
+}> {
+  const context = await repositoryContext(orchestrator);
+  const result = await orchestrator.discover({
+    ...context,
+    root: "packages/orchestrator",
+  });
+  if (result.status !== "accepted") throw new Error("valid discovery rejected");
+  return { ...context, discovery: result.discovery };
 }
 
 export function proposal(orchestrator: Orchestrator): StructuralProposal {
