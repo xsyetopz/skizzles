@@ -1,4 +1,4 @@
-# 0011: Separate orchestration execution capabilities
+# ADR 0011: Separate orchestration execution capabilities
 
 Status: Superseded by [ADR 0014](../workspace/0014-task-worktree-boundary.md)
 

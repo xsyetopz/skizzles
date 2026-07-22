@@ -1,5 +1,10 @@
 # Safety model
 
+Use this guide when reviewing a manifest or changing cleanup, synchronization,
+process, Git, Docker, or output behavior. The [manifest guide](manifest.md)
+defines the configuration fields; the [architecture guide](architecture.md)
+maps the internal owners.
+
 Labs are disposable trusted-project environments, not a policy sandbox for hostile Compose files.
 
 The engine adds only its isolated workspace mount, init behavior, random loopback publications explicitly declared by the manifest, non-sensitive metadata, and exact management labels. It never introduces a Docker socket, credential mount, secret, privileged mode, host namespace, device, capability, language toolchain, database, cache, object store, or project credential. `secret_environment` is the explicit opt-in for Compose top-level secret sources; it accepts names only and injects their values ephemerally for `compose up`.
@@ -16,7 +21,7 @@ Each new durable lab manifest binds the source repository to a full SHA-256 toke
 
 Every managed resource requires `io.openai.codex-container-lab.managed=true`, the exact `io.openai.codex-container-lab.owner` thread id, and its exact lab label. Normal and archive cleanup both discover resources only through those exact labels. Volumes and networks must additionally pass label inspection for the same owner, exact recorded Compose project, and Docker Compose ownership labels. External resources are never labeled as lab-owned. Cleanup is bounded, idempotent, and never falls back to Compose project teardown, pruning, or name-prefix guesses.
 
-Dockerfile shorthand receives a deterministic owner/lab image tag, recorded in the durable lab manifest, and its generated build applies the same exact managed, owner, and lab labels to the image. Cleanup resolves that tag only to inspect ownership, requires those exact labels and a structurally valid immutable `sha256` image id, and removes only that verified id. A genuinely absent internal tag is idempotent; malformed, mismatched, or otherwise uncertain inspection fails closed without image removal. Image mode and project-declared Compose images are never removed. Exact-label container removal includes anonymous volumes.
+Dockerfile shorthand receives a deterministic owner/lab image tag, recorded in the durable lab manifest, and its generated build applies the same exact managed, owner, and lab labels to the image. Cleanup resolves that tag only to inspect ownership, requires those exact labels and a structurally valid immutable `sha256` image id, and removes only that verified id. A confirmed-absent internal tag is idempotent; malformed, mismatched, or otherwise uncertain inspection fails closed without image removal. Image mode and project-declared Compose images are never removed. Exact-label container removal includes anonymous volumes.
 
 Synchronization is limited to Git-tracked and non-ignored untracked regular files and symlinks. Paths are lexical-checked and existing parent symlinks are rejected. Apply tokens bind owner, lab, direction, canonical roots, manifests, and expiry. Preview and apply take the same crash-recoverable lab activity lock as attached execution; apply also rechecks both manifests, atomically claims the token, journals backups, and rolls back interrupted target changes. Immediately before each rename or removal, apply revalidates the target descriptor and its parent directory identity, closing deterministic pre-publication mutation windows. This is not an atomic filesystem compare-and-swap: Node and portable POSIX APIs provide no inode-conditional rename or removal, so an uncooperative same-user actor can still race the final check. Crash cleanup recovers only journals whose recorded roots match the exact durable lab identity.
 

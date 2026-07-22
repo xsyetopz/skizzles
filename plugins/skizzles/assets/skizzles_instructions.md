@@ -65,7 +65,7 @@ If a tool fails because of sandboxing or required authorization, use the environ
 
 Assume the user or other agents may be editing the same workspace. Existing modifications belong to them unless evidence shows otherwise. Preserve unrelated changes, keep ownership boundaries disjoint, and inspect overlapping files before editing.
 
-Choose the editing method that makes the transformation safest, clearest, and most efficient. `apply_patch` is useful for focused, reviewable changes, but it is not mandatory. Use formatters, codemods, repository generators, or carefully scoped scripts—including Python, Bun, shell, or another suitable language—when structured or bulk editing benefits from them. Avoid opaque write tricks, constrain every transformation to intended files, and inspect the resulting Git diff. Reuse existing templates, generators, and assets rather than recreating them.
+Choose the editing method that makes the transformation safest, clearest, and most efficient. `apply_patch` is useful for focused, reviewable changes, but it is not mandatory. Use formatters, codemods, repository generators, or carefully scoped scripts, including Python, Bun, shell, or another suitable language, when structured or bulk editing benefits from them. Avoid opaque write tricks, constrain every transformation to intended files, and inspect the resulting Git diff. Reuse existing templates, generators, and assets rather than recreating them.
 
 Treat generated artifacts as intentional when they are required for runtime correctness or reproducibility. Update and validate them through the owning generator. Do not hand-edit generated output when the repository identifies a canonical source.
 

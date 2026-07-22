@@ -2,19 +2,26 @@
 
 ![Skizzles logo](packages/plugin-packaging/template/assets/logo.png)
 
-Skizzles is a portable set of skills, hooks, and developer tools for Codex.
-This repository is the source workspace; `plugins/skizzles/` is the generated
-plugin that Codex installs.
+Skizzles is a portable toolkit for Codex. It bundles public skills, guarded
+hooks, and small runtime tools that help agents work through repository changes
+with explicit ownership and local evidence.
 
-## Install the plugin
+This repository is the source workspace. Codex installs the generated plugin at
+`plugins/skizzles/`; that directory is build output, not an editing surface.
 
-The normal path is one command from a checkout. You need:
+## Choose a starting point
+
+### Install the complete plugin
+
+Use this path when you want the skills, hooks, and bundled runtimes together.
+
+Requirements:
 
 - Codex CLI with the `codex plugin` commands;
-- [Just](https://github.com/casey/just) to run the repository commands; and
-- Bun available on `PATH` for Skizzles' bundled hooks and runtime tools.
+- [Just](https://github.com/casey/just); and
+- Bun on `PATH` for Skizzles hooks and runtime tools.
 
-Clone the repository, then install it into an existing Codex home:
+From a checkout:
 
 ```sh
 git clone https://github.com/xsyetopz/skizzles.git
@@ -22,99 +29,98 @@ cd skizzles
 just plugin-install "$HOME/.codex"
 ```
 
-The command adds this checkout as the `skizzles` marketplace and installs
-`skizzles@skizzles`. It changes only the Codex home you pass as the first
-argument. Use a disposable existing directory when trying Skizzles for the
-first time. To use another Codex binary, set `CODEX_BIN=/absolute/path/to/codex`.
-When using a local source, pass the repository root; Codex reads its marketplace
-metadata from `.agents/plugins/marketplace.json`.
+The command registers this checkout as the `skizzles` marketplace and installs
+`skizzles@skizzles` into the Codex home you provide. Use a disposable existing
+Codex home for a first trial. Set `CODEX_BIN` when the Codex executable is not
+on the default `PATH`.
 
-Start a new Codex task after installation so the cached plugin is discovered.
-The generated plugin is self-contained, but its executable hook and runtime
-entrypoints still require Bun.
+Start a new Codex task after installation so it can load the plugin. The
+generated plugin is self-contained, but its executable hooks and runtimes still
+need Bun.
 
-If you do not want a checkout, the equivalent official Codex CLI flow is to add
-the Git repository as a marketplace and then add `skizzles@skizzles`:
+The official marketplace flow does the same without a local checkout:
 
 ```sh
 codex plugin marketplace add xsyetopz/skizzles
 codex plugin add skizzles@skizzles
 ```
 
-See the
-Codex [plugin](https://learn.chatgpt.com/docs/developer-commands?surface=cli#cli-codex-plugin)
+Read the Codex [plugin](https://learn.chatgpt.com/docs/developer-commands?surface=cli#cli-codex-plugin)
 and [marketplace](https://learn.chatgpt.com/docs/developer-commands?surface=cli#cli-codex-plugin-marketplace)
-command reference for the current syntax.
+references for the current CLI syntax.
 
-Useful lifecycle commands from a checkout:
+Check or remove a checkout-based installation with:
 
 ```sh
 just plugin-status "$HOME/.codex"
 just plugin-remove "$HOME/.codex"
 ```
 
-Removal deletes the installed `skizzles@skizzles` cache entry first and then
-removes the configured `skizzles` marketplace. Review `plugin-status` before
-removing anything from a shared Codex home.
+Review `plugin-status` before removing a marketplace shared by other work.
 
-## Skills only
+### Install the skills only
 
-Choose this when you want Skizzles guidance without hooks or bundled runtime
-tools:
+Choose this path when you want Skizzles guidance without hooks or bundled
+runtimes:
 
 ```sh
 just skills-install
 ```
 
-This uses the Skills CLI to install the public `install-skizzles` skill. The
-full plugin remains the recommended option when you want the complete bundle.
+This installs the public `install-skizzles` skill through the Skills CLI. Use
+the complete plugin when you need the runtime bundle as well.
 
-## Source development
+### Work on the source workspace
 
-The workspace uses Bun and keeps one lockfile at the repository root:
+Use Bun and the one lockfile at the repository root:
 
 ```sh
 just setup
 just verify
 ```
 
-Maintainer shortcuts are available through the same `justfile`:
+The source tree is a Bun/TypeScript workspace. Each package owns its manifest,
+source, tests, direct dependencies, and public entrypoints. The package map and
+generated-artifact boundaries are documented in
+[workspace architecture](docs/workspace-architecture.md).
 
-```sh
-just plugin-build   # rebuild plugins/skizzles from canonical inputs
-just plugin-check   # prove generated output is in sync
-```
+## What Skizzles provides
 
-Never edit `plugins/skizzles/` by hand. Change canonical package or skill
-inputs, run `just plugin-build`, inspect the generated diff, and finish with
-`just plugin-check`.
+The bundle covers a few separate jobs:
 
-## What is included
-
-- reusable Codex skills, including Fourth Wall orchestration guidance;
-- a command-output hook and bounded command supervisor;
-- disposable Docker Compose Container Lab tooling;
+- public skills for agent workflows and repository policy;
+- a command-output hook and bounded command observation;
+- disposable Docker Compose workspaces through Container Lab;
 - privacy-preserving rollout usage analysis;
-- a validated model-catalog overlay with explicit host activation; and
-- reversible configuration and prompt-policy lifecycles for advanced setups.
+- a model catalog that requires explicit host activation; and
+- reversible prompt-policy and configuration lifecycles.
 
-The production implementation is split into capability packages under
-`packages/`. See [workspace architecture](docs/workspace-architecture.md) for
-package ownership and generated-artifact boundaries.
+Install only the feature you need. The optional host integrations below are
+separate from ordinary plugin installation.
 
-## Advanced setup
+## Optional integrations
 
-The public [`install-skizzles`](skills/install-skizzles/SKILL.md) skill covers
-source-linked development installs, Codex configuration, prompt policy, and
-diagnostics. Those lifecycles are separate from the official Codex
-plugin/marketplace flow and are not required for a normal plugin install.
-
-Container Lab host wiring and the optional model-catalog LaunchAgent are also
-explicit, reversible machine setup. Read their owning guides only when you
-need those features:
+Read these guides only when you are using the corresponding feature:
 
 - [Container Lab installation](packages/container-lab/docs/installation.md)
 - [Model catalog installation](packages/model-catalog/docs/installation.md)
+- [`install-skizzles` skill](skills/install-skizzles/SKILL.md) for source-linked
+  installs, Codex configuration, prompt policy, and diagnostics
 
-Ordinary plugin or skill installation does not modify `PATH`, launchd, Docker,
-or active Container Lab state.
+These integrations are explicit and reversible. A normal plugin or skills-only
+install does not change `PATH`, launchd, Docker state, or active Container Lab
+state.
+
+## Maintainer workflow
+
+Change canonical packages or skills, never `plugins/skizzles/` directly. Use:
+
+```sh
+just plugin-build
+just plugin-check
+just verify
+```
+
+`plugin-build` regenerates the distribution tree. `plugin-check` proves that
+the generated tree matches its canonical inputs. Inspect the generated diff
+before handing off a packaging change.

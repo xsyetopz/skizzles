@@ -1,9 +1,11 @@
-# Rust measurement gate — 2026-07-18
+# Rust measurement gate: 2026-07-18
 
-This is the dated evidence update for [ADR 0004](../../decisions/platform/0004-measurement-gated-rust.md),
-not an acceptance benchmark or a Rust implementation proposal. The decision is **defer
-Rust and reject a pilot now**: no measured owner is shown to be a CPU-bound native
-candidate.
+This dated evidence update supports
+[ADR 0004](../../decisions/platform/0004-measurement-gated-rust.md). Use the ADR
+for the governing policy and this report for the measurements taken on
+2026-07-18. This report is neither an acceptance benchmark nor a Rust
+implementation proposal. The result is **defer Rust and reject a pilot now**:
+no measured owner is shown to be a CPU-bound native candidate.
 
 ## Environment and method
 

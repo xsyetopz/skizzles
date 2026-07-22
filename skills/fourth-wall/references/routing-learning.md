@@ -1,9 +1,8 @@
 # Evidence-driven routing
 
-Fourth Wall's dispatch matrix is a capability baseline, not a ranking of
-models. AAII scores and prices supplied by a host may be stored as candidate
-metadata or an initial prior, but they must never become a fixed route table.
-Selection is an experiment assignment followed by empirical learning.
+Use this reference when a host records routing experiments or curates a dispatch policy from measured task results. It is not required for routine assignment selection.
+
+Fourth Wall's dispatch matrix is a capability baseline, not a model ranking. AAII scores and prices supplied by a host may be stored as candidate metadata or an initial prior, but they must never become a fixed route table. Selection starts with an experiment assignment and ends with empirical learning from independently verified outcomes.
 
 ## Assignment contract
 
@@ -73,8 +72,4 @@ Do not infer retries, escalation, or replacement from task names.
    Cool down only after the documented clean-success window, and reset the
    window after repair, rescue, or regression.
 
-The `@skizzles/usage-analysis` routing API provides strict in-memory parsing,
-workflow-token accounting, stratified empirical summaries, and a
-acceptance-gated recommendation. The orchestrator's optional routing
-observer supplies digest-bound join evidence; neither component owns a live
-model endpoint or silently changes host policy.
+The `@skizzles/usage-analysis` routing API provides strict in-memory parsing, workflow-token accounting, stratified empirical summaries, and an acceptance-gated recommendation. The orchestrator's optional routing observer supplies digest-bound join evidence. Neither component owns a live model endpoint or silently changes host policy.

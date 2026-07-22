@@ -7,11 +7,23 @@ latestModelInfo:
 
 # Using GPT-5.6
 
-## Introduction
+Start here when selecting or migrating to GPT-5.6. This guide covers model
+choice, migration, prompting, pro mode, and Programmatic Tool Calling. For a
+focused implementation guide, continue with [Reasoning models](reasoning-models.md),
+[Prompt caching](prompt-caching.md),
+[Programmatic tool calling](tool-calling.md), or [Multi-agent](multi-agent.md).
+Apply the baseline in [Safety](safety.md) to any production integration.
 
-GPT-5.6 sets a new quality and efficiency baseline for complex production workflows. GPT-5.6 is especially token-efficient and improves frontend aesthetics, including layout, visual hierarchy, and design judgment.
+## Choose a model and migration plan
 
-GPT-5.6 also introduces a new naming scheme. The `gpt-5.6` alias routes requests to `gpt-5.6-sol`, the model for flagship capability. Use `gpt-5.6-terra` for strong performance at a lower price and `gpt-5.6-luna` for efficient, high-volume workloads.
+This guide uses GPT-5.6 as the default family for complex production workflows.
+GPT-5.6 uses fewer output tokens for its reported performance and improves
+layout, visual hierarchy, and design judgment in frontend work.
+
+GPT-5.6 also introduces a new naming scheme. The `gpt-5.6` alias routes
+requests to `gpt-5.6-sol`, the highest-capability model in the family. Use
+`gpt-5.6-terra` for a lower-priced balance of capability and cost, and
+`gpt-5.6-luna` for lower-cost, high-volume workloads.
 
 When migrating from GPT-5.5 or GPT-5.4, start with your current GPT-5.5 or GPT-5.4 reasoning setting, then test the same setting and one level lower on representative tasks. GPT-5.6 can often maintain or improve quality with fewer tokens, but the best setting depends on your workload.
 
@@ -34,7 +46,9 @@ When using GPT-5.6 models, users may encounter safeguards that block or refuse s
 
 If your application serves individual end users, send a stable, privacy-preserving `safety_identifier` with each request. See [Implement safety identifiers](https://developers.openai.com/api/docs/guides/safety-best-practices#implement-safety-identifiers) for guidance.
 
-We are continuously evolving these safeguards so that they are robust and effective in holding up to adversarial pressure, while preserving access to legitimate work such as code review, vulnerability research, patch development, debugging, security education, and defensive testing.
+OpenAI updates these safeguards to withstand adversarial pressure while
+preserving access to code review, vulnerability research, patch development,
+debugging, security education, and defensive testing.
 
 <div id="migrate-to-gpt-56" aria-hidden="true"></div>
 
@@ -71,7 +85,7 @@ To use this skill in other coding agents, download it from the [OpenAI skills re
 - To use Programmatic Tool Calling, add the `programmatic_tool_calling` tool and opt eligible tools in with `allowed_callers`. Update your application to handle `program` items, program-issued function calls, and `program_output` items while preserving each call's `call_id` and `caller` linkage. See the [Programmatic Tool Calling guide](https://developers.openai.com/api/docs/guides/tools-programmatic-tool-calling) for request and continuation examples.
   - Benchmark the PTC-enabled workflow on representative tasks. Compare task success, final-answer completeness, required evidence, total tokens, latency, and cost. Fewer calls, turns, or intermediate outputs are improvements only when the final answer still meets the required quality bar.
 
-## Prompting best practices
+## Prompt design
 
 ### Favor leaner prompts
 

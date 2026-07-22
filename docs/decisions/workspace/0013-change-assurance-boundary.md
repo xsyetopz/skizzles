@@ -1,4 +1,4 @@
-# 0013: Add a pre-publication change-assurance boundary
+# ADR 0013: Add a pre-publication change-assurance boundary
 
 Status: Accepted
 

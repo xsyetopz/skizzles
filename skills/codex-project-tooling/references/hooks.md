@@ -1,8 +1,18 @@
-# Codex Hooks Reference
+# Codex hooks
 
-Codex hooks are repo/user/plugin-configured command handlers. Use them for lightweight policy checks, context injection, and lifecycle automation. Keep hooks fast, deterministic, non-interactive, and safe to run repeatedly.
+Codex hooks run configured commands at tool, prompt, session, compaction, and subagent lifecycle events. This reference is for maintainers adding lightweight policy checks, context injection, or lifecycle automation at repository, user, or plugin scope.
 
-## Where Hooks Live
+Before authoring a hook, identify the event and matcher, decide whether the hook may block the operation, and define a short timeout. The handler must accept JSON on stdin, reserve stdout for the documented response, remain non-interactive, and be safe to run more than once.
+
+## Workflow
+
+1. Choose the narrowest event and matcher that cover the policy.
+2. Define whether the hook injects context, blocks before an operation, responds to an approval request, or rejects a result.
+3. Implement a bounded command handler in a stable path such as `.codex/hooks/`.
+4. Parse the hook configuration and test the handler with representative stdin.
+5. Trigger a safe matching event in a fresh trusted thread.
+
+## Configuration locations
 
 Inline TOML in `.codex/config.toml`:
 
@@ -46,7 +56,7 @@ JSON in `.codex/hooks.json`:
 
 Prefer inline TOML for small project-local hook declarations. Use `hooks.json` when the project already keeps hook config separate or when generated/plugin-style hook config is easier to manage as JSON.
 
-## Event Names
+## Event names
 
 Supported hook events:
 
@@ -63,7 +73,7 @@ Supported hook events:
 
 Event tables contain matcher groups. A matcher group has optional `matcher` and a `hooks` array.
 
-## Command Handler Fields
+## Command handler fields
 
 Command hooks use:
 
@@ -101,7 +111,7 @@ Matchers select which occurrences of an event run a hook.
 - `SubagentStart` and `SubagentStop` match agent type.
 - Compact events match compact trigger.
 
-## Stdin And Stdout
+## Input and output
 
 Hooks receive JSON on stdin. Common input fields include:
 
@@ -118,7 +128,7 @@ Tool hooks also receive `tool_name`, `tool_input`, and, for post-use hooks, tool
 
 Plain non-empty stdout is usually rendered as hook output or additional model context depending on the event. JSON stdout can express structured decisions.
 
-## Useful Output Patterns
+## Output contracts
 
 Inject context for `SessionStart`, `SubagentStart`, or `UserPromptSubmit`:
 
@@ -186,23 +196,21 @@ Stop processing for prompt/session/compact/stop-style hooks:
 }
 ```
 
-## Safety Guidance
+## Boundaries
 
-- Use hooks to enforce narrow, observable policy. Do not turn hooks into a second agent.
+- Use hooks to enforce narrow, observable policy. A hook is not a second agent.
 - Avoid network calls unless the hook is explicitly about network-backed validation.
 - Avoid long builds in hooks. Use hooks to remind, route, or block; run heavyweight validation as an explicit task.
 - Include clear failure messages. A blocked operation should tell the agent what to do instead.
 - Keep scripts in a stable repo path such as `.codex/hooks/`.
-- Validate hook config by parsing the TOML/JSON and, when available, using app or CLI hook-listing commands.
+- Keep raw secrets out of hook output and recorded evidence.
 
-## Trust-boundary contract
+Hook and MCP composition may produce or consume the versioned Fourth Wall [context envelope](../../fourth-wall/contracts/context-envelope.schema.json) and [handoff/review](../../fourth-wall/contracts/handoff-review.schema.json), but the published schemas define only the portable document shape. Repository packaging pins those schema bytes and executes incident fixtures through a strict evaluator. That evaluator still depends on trusted caller-supplied clock, version, digest, and effect facts. Neither layer intercepts native Codex handoffs or enforces host lifecycle. Use references and SHA-256 digests in evidence instead of raw secrets.
 
-Hook and MCP composition may produce or consume the versioned Fourth Wall
-[context envelope](../../fourth-wall/contracts/context-envelope.schema.json)
-and [handoff/review](../../fourth-wall/contracts/handoff-review.schema.json),
-but the published schemas only define portable document shape. Repository
-packaging pins those schema bytes and executes incident fixtures through a
-strict evaluator; that evaluator still depends on trusted caller-supplied
-clock, version, digest, and effect facts. Neither layer intercepts native Codex
-handoffs or enforces host lifecycle. Keep raw secrets out of evidence; use
-references and SHA-256 digests.
+## Verification
+
+1. Parse the edited TOML or JSON.
+2. Confirm each command and referenced script resolves from its configured scope.
+3. Send representative JSON to the handler directly and check its exit status, stdout, and stderr.
+4. Use app or CLI hook-listing commands when available.
+5. Trigger one safe matching event and one non-matching event in a fresh trusted thread.

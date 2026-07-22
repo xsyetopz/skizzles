@@ -1,8 +1,12 @@
 # FastMCP Bun template
 
-Portable starting point for a repo-local MCP server using Bun, TypeScript,
-FastMCP, and Zod. Copy it into `.codex/mcp/<server-name>`, then replace the
-generic package and server identity before committing it.
+This template starts a repo-local stdio MCP server with Bun, TypeScript,
+FastMCP, and Zod. It is for maintainers who need project-specific Codex tools
+that can start from a fresh checkout or linked worktree.
+
+Copy the directory into `.codex/mcp/<server-name>`. Replace the generic package
+and server identity, register the server through `src/start.ts`, and keep stdout
+reserved for MCP JSON-RPC.
 
 ## Commands
 
@@ -29,3 +33,14 @@ The package exposes `createServer` and `startServer` from its root export, and
 the lifecycle API from `codex-fastmcp-template/lifecycle`. The
 `codex-fastmcp-template` executable starts the stdio server from source. `build`
 produces a separate deterministic Bun-targeted JavaScript artifact in `dist/`.
+
+Do not add secrets, host paths, or parent-repository dependencies to the copied
+package. Commit the copied package's generated `bun.lock`; the source template
+omits a nested lockfile because the Skizzles workspace owns one root lockfile.
+
+## Verification
+
+Run the commands above in order. `bun run validate:stdio` must complete
+unattended and verify `initialize`, `tools/list`, and the `health` tool. After
+registration, start a fresh trusted Codex thread, call `health`, and confirm
+that no dependency or diagnostic output contaminated stdout.

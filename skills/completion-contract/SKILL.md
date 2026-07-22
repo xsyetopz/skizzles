@@ -5,23 +5,25 @@ description: Convert user intent, approved plans, and subagent handoffs into exp
 
 # Completion Contract
 
-Use this skill to turn a task into a concrete completion contract. A completion contract is not a plan, estimate, suggestion list, or escape hatch. It is the smallest explicit statement of what must be true before the work can be called done.
+Use this skill when an agent must translate user intent into implementation, delegation, or acceptance obligations. It is for planners, roots, workers preparing handoffs, and reviewers deciding whether a completion claim covers the requested outcome.
 
-## Authority Order
+A completion contract states the smallest observable conditions that must be true before the work is done. It is not a plan, estimate, suggestion list, reduced first slice, or reason to stop early.
 
-Preserve this order:
+## Authority order
 
-1. Permanent user or repo instructions.
-2. Explicit user non-negotiables.
-3. User-approved plan.
-4. Task-specific outcome.
-5. Agent implementation preference.
+Resolve requirements in this order:
 
-Do not let a worker plan, convenience path, or smaller first slice weaken a higher-authority item.
+1. permanent user or repository instructions
+2. explicit user non-negotiables
+3. user-approved plan
+4. task-specific outcome
+5. agent implementation preference
 
-## Contract Draft
+A worker plan, convenient implementation, or smaller slice cannot weaken a higher-authority item. Escalate a genuine contradiction instead of choosing the easier requirement.
 
-Before delegating or claiming completion, normalize the task:
+## Draft the contract
+
+Normalize the task before delegation and again before claiming completion:
 
 ```text
 Outcome:
@@ -35,35 +37,11 @@ Known valid blockers:
 Unknowns requiring clarification:
 ```
 
-If an unknown would materially change the contract, ask the user or parent orchestrator instead of silently narrowing scope.
+Ask the user or parent orchestrator when an unknown would materially change one of these fields. Do not silently narrow the scope.
 
-## Fan-Out
+## Write observable obligations
 
-Split large work before execution, not by letting a worker shrink scope during execution.
-
-Good boundaries:
-
-- API/contracts
-- storage or persistence
-- backend implementation
-- frontend integration
-- design polish
-- QA validation
-- deployment/infrastructure
-
-Bad boundaries:
-
-- first slice
-- make a start
-- easiest part
-- best effort
-- docs-only substitute
-
-Each delegated package must cover the full responsibility for its boundary and map back to the top-level outcome.
-
-## Requirements
-
-Write one main obligation per requirement. Prefer obligations that are observable and hard to fake:
+Give each requirement one main obligation. Prefer verbs that describe an inspectable final state:
 
 - implement
 - remove
@@ -82,7 +60,7 @@ Write one main obligation per requirement. Prefer obligations that are observabl
 - reject
 - fail
 
-Avoid soft wording:
+Replace soft qualifiers with exact obligations. Treat these phrases as warning signs:
 
 ```text
 if possible
@@ -110,11 +88,25 @@ tombstone
 legacy wrapper
 ```
 
-Rewrite soft language into exact final-state obligations.
+The replacement must describe what users, callers, files, or runtimes will observe when the work is complete.
 
-## Valid Blockers
+## Delegate without shrinking scope
 
-Accept blockers only when they are concrete and external:
+Split a large outcome by responsibility before execution. Suitable ownership boundaries include API contracts, persistence, backend implementation, frontend integration, design polish, QA, and deployment or infrastructure.
+
+Do not create packages named or scoped as:
+
+- first slice
+- make a start
+- easiest part
+- best effort
+- docs-only substitute
+
+Each delegated package must own its complete boundary and map to at least one top-level obligation. Its evidence should prove that boundary instead of returning unfinished work for the root to interpret.
+
+## Valid blockers
+
+A blocker must be concrete and external to ordinary implementation work:
 
 - missing permissions
 - unavailable external services
@@ -122,77 +114,54 @@ Accept blockers only when they are concrete and external:
 - inaccessible required files
 - contradictory instructions
 - unsafe work
-- explicit missing user decision
+- an explicit user decision that has not been made
 
-Do not accept task size, difficulty, uncertainty, refactor effort, stale failing tests, or lack of a convenient path as blockers.
+Task size, difficult code, uncertainty, refactor effort, stale failing tests, or the absence of a convenient route are not blockers.
 
-## Clobber Audit
+## Acceptance audit
 
-Before execution or final acceptance, ask:
+Before execution and final acceptance, answer:
 
-- Did the contract preserve the user-approved outcome?
-- Did it shrink scope into a partial job?
-- Did it add fallback or compatibility paths the user did not ask for?
-- Did it preserve legacy names, wrappers, disabled entrypoints, or tombstones?
-- Did it require evidence that can actually be inspected?
-- Did it allow fake UI, fake data, disabled checks, skipped tests, or manual workarounds?
-- Did it ignore relevant skills, repo instructions, or role constraints?
+- Does the contract preserve the approved outcome?
+- Did any package reduce the task to partial work?
+- Did the implementation add fallback or compatibility paths that were not requested?
+- Are legacy names, wrappers, disabled entrypoints, or tombstones still present against the removal contract?
+- Can a reviewer inspect the required evidence?
+- Does the contract allow fake UI, fake data, disabled checks, skipped tests, or manual workarounds?
+- Were relevant skills, repository instructions, and role constraints preserved?
 
-Final responses should include the concrete evidence used: changed files, tests or commands, screenshots, source inspection, artifacts, or exact blockers.
+The final claim must cite concrete evidence such as changed files, commands, tests, screenshots, runtime artifacts, source inspection, or an exact blocker. A summary without inspectable evidence is not acceptance.
 
-## Forward-Progress Checkpoints
+## Forward-progress checkpoints
 
-Treat commits as validated repository checkpoints, independent of `/goal` lifecycle. A goal tracks the overall outcome; a commit records one coherent causal state. Do not require or create a goal merely to obtain commit boundaries.
+Treat commits as validated repository checkpoints, independent of `/goal` lifecycle. A goal tracks the full outcome. A commit records one coherent causal state. Do not create or require a goal only to establish commit boundaries.
 
-Commit when a coherent ownership slice is integrated, its focused proof passes, and no known breakage remains in that slice. Prefer a checkpoint before switching causal surfaces, beginning a risky refactor, transferring substantial ownership, or starting independent QA or Review. Keep unrelated slices separate and write commit messages in terms of the behavioral outcome.
+Commit after a coherent ownership slice is integrated, its focused proof passes, and that slice has no known breakage. Prefer a checkpoint before switching causal surfaces, starting a risky refactor, transferring substantial ownership, or beginning independent QA or Review. Keep unrelated slices separate, and describe the behavioral outcome in the commit message.
 
-Do not commit every child completion automatically. The root first inspects shared-worktree ownership, integrates the slice, excludes unrelated user or agent changes, and verifies the evidence. Do not checkpoint a known-broken intermediate state merely to reduce diff size. Preserve reviewer corrections as later commits when practical so accepted history remains inspectable. Before final acceptance, validate the aggregate commit series and working tree, not only the newest checkpoint.
+The root inspects shared-worktree ownership before committing. It excludes unrelated user or agent changes and does not commit every child completion automatically. Do not checkpoint known-broken intermediate states to reduce diff size. Keep reviewer corrections in later commits when practical so accepted history remains inspectable. Final acceptance covers the aggregate commit series and working tree, not only the latest checkpoint.
 
 ## Versioned acceptance contract
 
-The published [acceptance schema](contracts/acceptance.schema.json) defines the
-portable v3 record: requirement IDs, objective-gate results, an explicit
-objective-gates-before-judge order, artifacts, evidence/effect bindings,
-integrity findings, fixed retries/seeds, policy/model/validator identity, fixed
-judge version and prompt digest, and author/reviewer fields.
+The published [acceptance schema](contracts/acceptance.schema.json) defines the portable v3 record. It includes requirement IDs, objective-gate results, an explicit objective-gates-before-judge order, artifacts, evidence/effect bindings, integrity findings, fixed retries and seeds, policy/model/validator identity, fixed judge version and prompt digest, and author/reviewer fields.
 
-JSON Schema validates that shape; it does not prove that an effect occurred,
-compare identities, relate arbitrary references, or determine whether a
-verifier was hidden from an implementation. The repository's strict typed
-evaluator consumes trusted harness facts and explicit expected versions and
-digests. Acceptance records are bound to the expected objective and acceptance
-identity. Runtime effects are accepted only when their observation and evidence
-identity match independent harness-supplied facts. The acceptance digest is
-recomputed from the complete canonical record with only its self-referential
-digest zeroed; scope, obligation, check, proof-kind, evidence-reference,
-artifact, effect, actor, judge, finding, and run rewrites therefore require a
-new trusted digest. Runtime-specific gates
-require that effect evidence, while test results must bind a known test-suite
-artifact. The evaluator rejects duplicate or unknown requirements,
-non-contiguous gates, self-review, ineligible or unexpected reviewer identity,
-mutated verifier/test artifacts, untrusted/extra/missing test results, unbound or
-non-causal gate evidence, fake effects, retry overflow, and judge-before-gate
-execution. Finding labels supplied by an independent harness map to stable
-policy rejection codes for solution leakage, grader injection, hard-coded
-answers, and deceptive completion; the evaluator does not detect those
-conditions from arbitrary prose or source content. The
-canonical public
-[acceptance incident-regression corpus](fixtures/acceptance-incidents.json)
-contains a valid control plus executable mutations and stable rejection codes;
-it is implementation-visible regression input, not independent or private
-acceptance material.
+JSON Schema validates record shape. It does not prove an effect, compare identities, relate arbitrary references, or determine whether an implementation could inspect its verifier. The repository's strict typed evaluator consumes trusted harness facts plus explicit expected versions and digests.
 
-The schema and evaluator cannot intercept native Codex handoffs, attest that a
-host supplied truthful facts, independently discover adversarial findings, or
-enforce host lifecycle. Verifier-resistant detection requires acceptance and
-review contexts that are independent of the implementation under evaluation.
-A trusted integration must collect those facts and invoke the deterministic
-evaluator explicitly.
+The evaluator binds acceptance records to the expected objective and acceptance identity. Runtime effects pass only when their observation and evidence identity match independent harness facts. Test results must bind a known test-suite artifact. The acceptance digest is recomputed from the complete canonical record with only its self-referential digest zeroed. Any rewrite of scope, obligation, check, proof kind, evidence reference, artifact, effect, actor, judge, finding, or run therefore requires a new trusted digest.
 
-Reviewer eligibility here is an exact local allowlist supplied by that trusted
-integration, not a claim of global personhood or identity infrastructure. Run
-replay protection likewise compares the submitted run ID with trusted prior
-run IDs; persistence and synchronization of that set remain host obligations.
-Handoffs also bind the acceptance document's repository-local reference to the
-exact trusted reference. Matching version and digest bytes at an unrelated
-location do not satisfy that local composition contract.
+The evaluator rejects duplicate or unknown requirements, non-contiguous gates, self-review, ineligible or unexpected reviewer identity, mutated verifier or test artifacts, untrusted, extra, or missing test results, unbound or non-causal gate evidence, fake effects, retry overflow, and judge-before-gate execution. Independent harness finding labels map to stable policy rejection codes for solution leakage, grader injection, hard-coded answers, and deceptive completion. The evaluator does not discover those conditions from arbitrary prose or source files.
+
+The public [acceptance incident-regression corpus](fixtures/acceptance-incidents.json) contains a valid control, executable mutations, and stable rejection codes. It is implementation-visible regression input. It is not private or independent acceptance material.
+
+These contracts have explicit limits:
+
+- The schema and evaluator do not intercept native Codex handoffs.
+- They cannot attest that host-supplied facts are truthful.
+- They do not independently discover adversarial findings.
+- They do not enforce host lifecycle.
+- Verifier-resistant detection requires acceptance and review contexts that are independent of the implementation under evaluation.
+
+A trusted integration must collect the facts and invoke the deterministic evaluator.
+
+Reviewer eligibility is an exact local allowlist supplied by that integration, not a claim of global personhood or identity infrastructure. Run replay protection compares the submitted run ID with trusted prior run IDs; persistence and synchronization of that set remain host obligations.
+
+Handoffs bind the acceptance document's repository-local reference to the exact trusted reference. Matching version and digest bytes at another location do not satisfy this local composition contract.

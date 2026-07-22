@@ -1,5 +1,10 @@
 # Completion contract
 
+This maintainer contract defines the required Container Lab outcome and the
+evidence needed to accept an implementation change. It is not an operator
+tutorial. Operators should start with the [package README](../README.md),
+[installation guide](installation.md), and [manifest guide](manifest.md).
+
 Outcome: a complete, version-controlled Skizzles workspace package and stable-plugin runtime that gives each exact Codex thread multiple disposable Docker Compose labs with isolated Git clones, one attached command path, guarded bidirectional synchronization, deterministic exact-label cleanup, and archive-aware crash recovery.
 
 Approved implementation path: Bun, TypeScript, Git, host-side Docker Compose, atomic durable JSON lab manifests, synchronous attached CLI execution, and Bun's SQLite reader in strict read-only mode. A consuming repository commits `.codex-container-lab.yaml`. Compose mode uses project-owned topology; Dockerfile and image modes share the same generated Compose lifecycle. The manifest separates command-service `environment`, non-secret source `compose_environment`, and top-level `secret_environment` capabilities.

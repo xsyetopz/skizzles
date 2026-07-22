@@ -5,33 +5,39 @@ description: Preserve authentication, authorization, session, permission, access
 
 # Auth Semantics
 
-Use this skill when a change touches auth, sessions, permissions, or access control. The goal is to preserve precise security semantics while improving behavior.
+Apply this skill when implementation or review can change who may act, how identity is established, or what users and callers learn from an access failure. It is for engineers working across API enforcement, session handling, client gating, navigation, and user-facing state.
 
-## Distinguish States
+The job is to preserve the product's security contract. A passing UI flow is not sufficient if privileges broaden, server enforcement weakens, or distinct failures collapse into one misleading state.
 
-Keep these states separate:
+## State model
 
-- unauthenticated: no valid identity/session is present
-- invalid session: identity was expected but token/session is expired, revoked, corrupt, or otherwise unusable
-- unauthorized: identity is valid but lacks permission for the action/resource
-- unavailable: the system cannot determine or serve the state because a dependency is unavailable
+Classify each path before changing it:
+
+- unauthenticated: no valid identity or session is present
+- invalid session: identity was expected, but the token or session is expired, revoked, corrupt, or otherwise unusable
+- unauthorized: the identity is valid but lacks permission for the action or resource
+- unavailable: a dependency failure prevents the system from determining or serving the state
 - invalid request: the caller supplied malformed or unsupported input
 
-Do not collapse these into one generic failure path unless the product contract explicitly requires that.
+Keep these states distinct unless the product contract explicitly combines them. Follow each state from enforcement through error mapping, client behavior, and visible copy.
 
-## Security Rules
+## Security boundaries
 
-- Do not broaden privileges to make a flow pass.
-- Do not force logout on mere permission denial unless that is the intended contract.
-- Do not treat dependency outages as authorization denials.
-- Do not reveal sensitive resource existence through error wording unless the product contract allows it.
-- Do not replace server-side enforcement with UI-only hiding.
-- Preserve audit/logging behavior where relevant.
-- Ensure retries or refreshes cannot loop forever or mask denied permissions.
+- Never broaden privileges to make a flow pass.
+- Do not force logout for a permission denial unless the contract requires it.
+- Do not report dependency outages as authorization denials.
+- Do not reveal that a sensitive resource exists unless the product contract permits it.
+- UI hiding cannot replace server-side enforcement.
+- Preserve relevant audit and logging behavior.
+- Bound retries and refreshes so they cannot loop forever or hide a denied permission.
 
-## UI/API Behavior
+Error wording may intentionally conceal resource existence. Preserve that policy while keeping internal state classification and enforcement accurate.
 
-For UI, show the truthful state:
+## API and UI contract
+
+APIs must retain the status codes, error variants, response shapes, redirects, and retry behavior their callers depend on. Treat any change to those surfaces as a compatibility decision and inspect affected callers.
+
+The UI must present the state that actually occurred:
 
 - login needed
 - access denied
@@ -39,17 +45,26 @@ For UI, show the truthful state:
 - temporarily unavailable
 - invalid input
 
-For APIs, preserve status/error semantics used by callers. If the change alters status codes, error variants, response shapes, redirects, or retry behavior, treat that as a compatibility surface and verify affected callers.
+Do not replace one state with a more convenient screen. Navigation, refresh, and recovery behavior must also match the classified state.
 
-## Verification
+## Workflow
 
-Inspect both enforcement and presentation:
+1. Map the relevant identities, permissions, sessions, dependencies, and public error surfaces.
+2. Trace server, middleware, or guard enforcement before inspecting presentation.
+3. Follow token refresh, session invalidation, logout, redirects, and client gating for every affected state.
+4. Check error mapping and callers for contract changes.
+5. Exercise negative cases as well as the successful path.
+6. Inspect logs or audit events when the product records security decisions.
 
-- server/middleware/guard checks
+## Completion evidence
+
+Report which states were inspected or exercised, where enforcement occurs, and why the change did not broaden privileges. Evidence should cover the affected subset of:
+
+- server, middleware, or guard checks
 - client gating and navigation
-- token refresh/session invalidation paths
-- error mapping
-- tests or fixtures for denied, expired, unauthenticated, and unavailable cases
-- logs/audit paths when applicable
+- token refresh and session invalidation
+- error mapping and API compatibility
+- denied, expired, unauthenticated, invalid, and unavailable cases
+- logs or audit events
 
-Final claims should state which auth states were exercised or inspected and why privileges were not broadened.
+If a state could not be exercised, name the missing environment or dependency and state what source-level evidence was available. Do not describe generic successful tests as auth proof unless they distinguish the relevant states.

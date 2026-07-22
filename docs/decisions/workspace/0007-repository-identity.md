@@ -1,4 +1,4 @@
-# 0007: Bind source repositories and dissociate clone object stores
+# ADR 0007: Bind source repositories and dissociate clone object stores
 
 ## Status
 

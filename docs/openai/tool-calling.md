@@ -1,5 +1,13 @@
 # Programmatic tool calling
 
+Use this guide when a bounded workflow needs code to coordinate several tool
+calls or reduce large intermediate results. It does not replace direct tool
+calling for semantic judgment, approvals, or final validation. Start with
+[Using GPT-5.6](model-guidance.md) for model selection, read
+[Reasoning models](reasoning-models.md) for continuation state, and use
+[Multi-agent](multi-agent.md) when the work divides into independent agent tasks.
+Apply [Safety](safety.md) to tool permissions and side effects.
+
 Programmatic tool calling lets a model write and run JavaScript that coordinates tools in a Responses API request. A program can call tools in parallel, use loops and conditions, and keep intermediate results in the hosted runtime. It suits tasks that need related tool calls or must reduce large tool outputs before returning a result.
 
 Your application decides whether programmatic tool calling is available and whether the model can invoke each eligible tool directly, from a program, or both. Your application still executes client-owned tool calls.
@@ -486,6 +494,11 @@ Measure:
 
 ## Related guides
 
+- [Using GPT-5.6](model-guidance.md) covers migration and routing guidance.
+- [Reasoning models](reasoning-models.md) explains how to preserve reasoning across calls.
+- [Prompt caching](prompt-caching.md) explains cache keys and breakpoints for repeated prefixes.
+- [Multi-agent](multi-agent.md) covers parallel delegation by a root agent.
+- [Safety](safety.md) covers production safety controls.
 - Use [function calling](https://developers.openai.com/api/docs/guides/function-calling) to define client-owned functions.
 - Use [tool search](https://developers.openai.com/api/docs/guides/tools-tool-search) to defer large tool definitions until a model needs them.
 - Use [conversation state](https://developers.openai.com/api/docs/guides/conversation-state) to continue stored or stateless Responses API requests.

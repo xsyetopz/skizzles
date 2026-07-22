@@ -92,7 +92,7 @@ person grammar.
 ## Considered alternatives
 
 - **A parallel agent runtime:** rejected; it duplicates current owners and lifecycle.
-- **One comprehensive security/system prompt:** rejected; prompt text cannot enforce
+- **One all-purpose security/system prompt:** rejected; prompt text cannot enforce
   process, filesystem, network, secret, or verifier boundaries.
 - **Self-review as acceptance:** rejected; authorship and acceptance need independent
   incentives and context.

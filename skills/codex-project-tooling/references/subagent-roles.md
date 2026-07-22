@@ -1,8 +1,10 @@
-# Codex Subagent Roles Reference
+# Codex subagent roles
 
-Subagent roles describe the types of agents the orchestrator can spawn. Good roles are concise, scoped, and operational: they tell the parent when to use the role and tell the child how to behave.
+Subagent roles define the duties an orchestrator can assign. This reference is for maintainers configuring project roles, concurrency limits, loading precedence, and role-specific instructions.
 
-## Agents Settings
+Before adding a role, identify the work it owns, tell the parent when to use it, and tell the child what to do and avoid. Inspect existing `.codex/config.toml` declarations and `.codex/agents/**/*.toml` files so a new role does not duplicate or override one accidentally.
+
+## Agent settings
 
 Project `.codex/config.toml` can set agent limits and role declarations:
 
@@ -27,7 +29,7 @@ Fields:
 
 When `features.multi_agent_v2` is enabled, `agents.max_threads` cannot be set. Use the v2 concurrency config instead. For normal project roles, follow the project's existing multi-agent feature style.
 
-## Inline Role Declarations
+## Inline role declarations
 
 Declare roles under `[agents.<role>]`:
 
@@ -44,7 +46,7 @@ Fields:
 - `config_file`: Optional role-specific TOML config layer. Relative paths resolve relative to the config file that declares them.
 - `nickname_candidates`: Optional non-empty list. Values must be unique and contain only ASCII letters, digits, spaces, hyphens, and underscores.
 
-## Discovered Role Files
+## Discovered role files
 
 Codex also discovers role files under `.codex/agents/**/*.toml`. This is usually the cleanest project-local form:
 
@@ -72,7 +74,7 @@ Role files may include normal Codex config keys after the role metadata. Example
 
 Discovered role files must define `name`, `description`, and `developer_instructions`. Files referenced by `[agents.<role>].config_file` can inherit the role name and description from the declaration.
 
-## Precedence And Loading
+## Precedence and loading
 
 - User-defined roles override built-in roles with the same name.
 - Built-ins include `default`, `explorer`, and `worker`.
@@ -81,7 +83,7 @@ Discovered role files must define `name`, `description`, and `developer_instruct
 - Role descriptions are merged across config layers by filling missing fields from lower-precedence layers.
 - Duplicate role names in the same config layer are ignored with startup warnings.
 
-## Practical Role Templates
+## Role templates
 
 Worker:
 
@@ -156,10 +158,25 @@ Never expose secrets. Do not push, publish, migrate production, or destroy resou
 """
 ```
 
-## Authoring Guidance
+## Authoring workflow
 
 - Put operational rules in `developer_instructions`, not only in the description.
 - Keep descriptions short enough to scan in spawn tool guidance.
 - Use `max_depth = 1` when subagents should not spawn more subagents.
 - Give the parent guidance in role descriptions and the child guidance in role config.
 - Prefer role-specific permissions only when the role truly needs different safety boundaries.
+
+## Boundaries
+
+- A role defines duty; the spawn assignment still defines concrete ownership and acceptance evidence.
+- Do not grant broader permissions merely because a role performs specialized work.
+- Avoid overlapping discovered and inline declarations for the same role name.
+- Follow the project's existing `multi_agent` or `multi_agent_v2` configuration style.
+
+## Verification
+
+1. Parse changed TOML and confirm referenced `config_file` paths resolve from the declaring file.
+2. Confirm discovered role files provide `name`, `description`, and `developer_instructions`.
+3. Check nickname values for uniqueness and the allowed character set.
+4. Start a fresh trusted thread and inspect available role descriptions.
+5. Spawn the role with a harmless, bounded assignment and verify that its instructions and safety settings load.

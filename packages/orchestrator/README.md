@@ -1,9 +1,20 @@
 # `@skizzles/orchestrator`
 
-Private deterministic orchestration policy for Skizzles. The package is one
-modular Bun/TypeScript owner with a single facade at `src/index.ts`.
+This private package composes Skizzles' repository, source-engineering,
+assurance, worktree, publication, runtime, and approval capabilities. Hosts use
+it to run one request through those authorities without exposing internal
+state-machine constructors or candidate bytes.
 
-## Trust model
+The package has one public entrypoint, `@skizzles/orchestrator`, backed by
+`src/index.ts`. Choose the facade that matches the work:
+
+- `createOrchestrator()` handles request parsing, read-only dispatch, structural
+  review, checkpoints, and application.
+- `createEngineeringWorkflow()` prepares and promotes effectful source changes.
+- `createAgentRuntime()` composes the engineering workflow with execution,
+  scheduling, acceptance, and optional routing-experiment observation.
+
+## Request and trust model
 
 `createOrchestrator()` registers repository, effect-classification, graph,
 measurement, verification, non-effect spawn, structural-application,
@@ -147,7 +158,7 @@ rejected. Only the framework-owned redundant-style descriptor lexicon is
 removed from the canonical semantic descriptor set; the exact source and raw
 bytes remain recoverable.
 
-## Academic paradigm routing
+## Agent runtime and routing
 
 `createAgentRuntime()` composes the Phase 7 capabilities and an authentic
 Engineering workflow behind one branded facade. A run reads an immutable
@@ -194,7 +205,28 @@ Independent post-approval verification remains host-owned; observer failures
 are reported in the receipt and cannot change execution or approval. The
 runtime does not choose a candidate or own the experiment store.
 
-## Development
+## Package dependencies and limits
+
+The orchestrator depends on
+[`@skizzles/source-transformation`](../source-transformation/README.md),
+[`@skizzles/change-assurance`](../change-assurance/README.md),
+[`@skizzles/task-worktree`](../task-worktree/README.md),
+[`@skizzles/acceptance`](../acceptance/README.md),
+[`@skizzles/workspace-publication`](../workspace-publication/README.md),
+[`@skizzles/reflexion-memory`](../reflexion-memory/README.md), and the shared
+[`@skizzles/candidate-manifest`](../candidate-manifest/README.md) contract.
+Those packages retain authority over their receipts and side effects. The
+orchestrator verifies and sequences them rather than reimplementing them.
+
+Repository, graph, model transport, approval, authentication, sandbox,
+physical-integration, and other host effects are injected authorities. Public
+methods accept `unknown` and return typed accepted or rejected results. The
+package does not infer trust from copied object shapes, raw digests, action
+names, or caller-provided commands.
+
+## Verify the package
+
+Run these commands from this directory:
 
 ```sh
 bun run check

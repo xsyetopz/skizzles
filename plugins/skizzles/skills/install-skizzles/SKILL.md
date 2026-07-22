@@ -5,11 +5,20 @@ description: Choose, install, diagnose, update, or uninstall Skizzles from its c
 
 # Install Skizzles
 
-Keep installation deliberate and reversible. Never mutate a live Codex home,
-plugin marketplace, `PATH`, Docker, or launchd without the user's explicit
-approval.
+Choose and manage one of three installation surfaces: the full plugin,
+skills-only guidance, or the private source-linked installer. This skill is for
+users who want to install, update, diagnose, or remove Skizzles.
 
-## Choose the smallest surface
+## Before changing host state
+
+- Get explicit approval before mutating a live Codex home, plugin marketplace,
+  `PATH`, Docker, or launchd.
+- Resolve the target Codex home and Codex executable as absolute paths.
+- Decide whether the user needs hooks and runtime tools, skills only, or a
+  receipt-backed source lifecycle.
+- Use disposable roots for probes and demonstrations.
+
+## Choose the installation surface
 
 - Use the full plugin when the user wants Skizzles skills, hooks, and bundled
   runtime tools.
@@ -24,7 +33,7 @@ rules.
 
 ## Install the full plugin
 
-From a Skizzles checkout, the one obvious path is:
+From a Skizzles checkout, run:
 
 ```sh
 just plugin-install /absolute/path/to/codex-home
@@ -69,7 +78,7 @@ The equivalent direct command is `bunx skills add
 https://github.com/xsyetopz/skizzles --skill install-skizzles`. Skill-only mode
 does not activate hooks or change Codex configuration.
 
-## Advanced source lifecycle
+## Use the private source lifecycle
 
 Use the private installer only after the user has chosen explicit target roots,
 the link/copy behavior, and the lifecycle they want. Preview every stateful
@@ -102,9 +111,23 @@ editing `PATH`, loading launchd, or changing a model catalog:
 Keep health probes and demonstrations on disposable roots. An installed bundle
 with an unavailable Docker daemon is not proof that Container Lab is broken.
 
-## Finish cleanly
+## Boundaries
 
-Tell the user what was installed, whether it was linked or copied, and where
-the receipt lives for private-installer lifecycles. Do not claim activation from
-a dry run or repository packaging alone. A new task is the reliable discovery
-boundary after install or update.
+- A dry run or repository packaging check does not activate an installation.
+- Do not delete a private-installer receipt to bypass drift or ownership checks.
+- Do not apply prompt policy as a side effect of plugin or skills installation.
+- Do not treat plugin installation, source installation, and optional host-tool
+  setup as interchangeable lifecycles.
+- A running task does not hot-reload an installed or updated plugin cache.
+
+## Verification and report
+
+Use `just plugin-status /absolute/path/to/codex-home` for a checkout-managed full
+plugin. For a private-installer lifecycle, use its status or dry-run surface and
+confirm the receipt remains available. Verify skill-only installs from a new
+task, because skill discovery is session-bound.
+
+Tell the user what was installed, updated, or removed; which target changed;
+whether files were linked or copied; and where a private-installer receipt
+lives. Report optional host wiring separately. Start a new Codex task to verify
+discovery after installation or update.

@@ -1,8 +1,10 @@
-# MCP-Managed Environment Stacks
+# MCP-managed environment stacks
 
-Use this reference when an MCP server owns local infrastructure for an agent or project.
+Tie a disposable local environment stack to the lifetime of a stdio MCP process. This reference is for maintainers whose MCP server starts, inspects, restarts, or removes local Compose services or similar infrastructure.
 
-## Pattern
+Use this pattern only when the stack is disposable, local, and owned by one MCP process. Define deterministic resource names, cleanup labels, startup failure behavior, and short shutdown timeouts before implementation.
+
+## Lifecycle
 
 For disposable local stacks, the MCP process can own stack lifetime:
 
@@ -32,7 +34,7 @@ docker compose up -d
 
 Do not assume `CODEX_THREAD_ID` is present inside every MCP process unless the config explicitly passes it through with `env_vars`.
 
-## Cleanup Rules
+## Cleanup rules
 
 - Cleanup must be idempotent.
 - Cleanup should tolerate partially started stacks.
@@ -41,7 +43,7 @@ Do not assume `CODEX_THREAD_ID` is present inside every MCP process unless the c
 - Write cleanup logs to stderr.
 - Do not block forever during shutdown; use short timeouts.
 
-## Tool Surface
+## Tool surface
 
 Useful stack tools:
 
@@ -53,7 +55,7 @@ Useful stack tools:
 
 Keep build/test commands out of lifecycle startup unless the stack is unusable without them. Long-running validation belongs in explicit tools or normal shell commands.
 
-## When Not To Use This Pattern
+## Boundaries
 
 Avoid MCP-owned stacks when:
 
@@ -64,3 +66,11 @@ Avoid MCP-owned stacks when:
 
 In those cases, use ordinary project scripts plus conservative MCP inspection tools.
 
+## Verification
+
+1. Start the MCP and confirm it creates or attaches only to the expected named resources.
+2. Interrupt startup at a partial state and run cleanup twice; both cleanup attempts must be safe.
+3. Exercise `SIGINT`, `SIGTERM`, `beforeExit`, and the explicit shutdown path where the runtime supports them.
+4. Confirm cleanup selects resources by deterministic names or labels and never by a broad destructive command.
+5. Verify startup, tool, and cleanup diagnostics stay on stderr so stdout remains valid MCP JSON-RPC.
+6. Terminate the Codex MCP client and confirm the disposable stack is removed within the configured timeout.

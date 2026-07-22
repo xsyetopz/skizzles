@@ -1,8 +1,10 @@
-# Delegation Contract
+# Delegation contract
 
-Use this contract for consequential delegated work. Keep it concrete enough that the recipient can act without reconstructing the parent's reasoning.
+Use this reference when a root, or an eligible depth-1 Worker, prepares consequential delegated work. It converts an orchestration decision into a bounded assignment that the recipient can execute without reconstructing the parent's reasoning.
 
-## Before Spawning
+The handoff must preserve the top-level outcome while naming one complete ownership slice and its acceptance evidence.
+
+## Before spawning
 
 Define:
 
@@ -13,13 +15,13 @@ Define:
 5. **Evidence:** exact checks, artifacts, screenshots, or source inspection expected at completion.
 6. **Return shape:** changed areas, validation performed, unresolved risks, and the next recommended action.
 
-## Complete Slice Test
+## Complete-slice test
 
 Prefer a handoff that gives one child the complete causal loop: inspect the owned surface, implement the change, run focused validation, correct in-scope failures, and collect relevant runtime proof. A code-only handoff is too narrow when it predictably leaves the root with the longer test, integration, or proof campaign.
 
 Keep shared Git mutations and final acceptance at the root. When parallel edits prevent lock-heavy checks, defer those checks until the tree stabilizes, then dispatch one integration Worker, Review, or QA leaf with the complete serial command or piloting contract.
 
-## Spawn Shape
+## Spawn shape
 
 Encode the role and objective in the task name; carry capability explicitly:
 
@@ -36,7 +38,7 @@ Encode the role and objective in the task name; carry capability explicitly:
 
 Complexity and horizon select model, effort, and fork depth; the role selects behavior. Under the Skizzles profile, set the matching native `agent_type`; under native instructions, set it only when the active schema advertises that role. Name the route and role in the message and pass explicit model and reasoning overrides from the active tool schema. The installed role config already supplies the shared subagent base plus role-specific developer instructions, so repeat only assignment-specific constraints.
 
-## Worker Grandchildren
+## Worker grandchildren
 
 A depth-1 Terra/Sol Worker may dispatch at most one active bounded Worker when all of these hold:
 
@@ -50,7 +52,7 @@ Do not create a command runner by another name. If the parent must interpret eve
 
 Include directly relevant skill names and obligations in the message. Skills available to the parent are not a substitute for telling the recipient which domain contract governs its work.
 
-## Fan-Out Test
+## Fan-out test
 
 Spawn tasks in parallel only when all are true:
 
@@ -73,7 +75,7 @@ A valid blocker identifies one of:
 
 Task size, difficult code, uncertainty, failing tests, or the need for more investigation are not blockers by themselves.
 
-## Completion Claim
+## Completion claim
 
 Require the task to report:
 

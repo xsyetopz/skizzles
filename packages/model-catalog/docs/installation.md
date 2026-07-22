@@ -1,6 +1,12 @@
 # Optional Luna V2 model catalog
 
-This host-wiring surface is for owners who have independently verified Luna with MultiAgentV2. It preserves the complete official catalog and changes only `gpt-5.6-luna.multi_agent_version` from `v1` to `v2`. It is intentionally separate from ordinary skill/plugin installation.
+This host-wiring surface is for owners who have independently verified Luna
+with MultiAgentV2. Start with the [package README](../README.md) for the public
+facade, runtime limits, and package checks.
+
+The overlay preserves the complete official catalog and changes only
+`gpt-5.6-luna.multi_agent_version` from `v1` to `v2`. It is separate from
+ordinary skill or plugin installation and never loads itself automatically.
 
 ## Generate and inspect
 

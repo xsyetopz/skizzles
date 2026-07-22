@@ -1,10 +1,15 @@
-# Architecture decision log
+# Architecture decisions
 
-This directory records consequential Skizzles architecture decisions. Each record
-owns one decision, its evidence, rejected alternatives, consequences, fitness
-checks, and review triggers. A record is historical evidence: replace a decision
-by adding a new record and marking the old record superseded rather than silently
-rewriting its rationale.
+Use this log to understand why Skizzles has its current boundaries. The
+[workspace architecture](../workspace-architecture.md) describes the current
+package and distribution model; these records preserve the decisions behind it.
+The [architecture research ledger](../research/architecture-ledger.md) records
+the source evidence used by the initial cohesion campaign.
+
+Each architecture decision record (ADR) owns one decision, its evidence,
+rejected alternatives, consequences, fitness checks, and review triggers. ADRs
+are historical evidence. Replace a decision by adding a new record and marking
+the old record superseded instead of rewriting its rationale.
 
 | ADR | Status | Decision |
 | --- | --- | --- |
@@ -25,6 +30,20 @@ rewriting its rationale.
 | [0015](workspace/0015-acceptance.md) | Accepted | Gate publication on exact mutation, property, modified-coverage, original-test, security-review, specification-lock, and task-context-reset evidence. |
 | [0016](orchestration/0016-academic-paradigm-routing.md) | Accepted | Compose bounded academic agent paradigms through one host-owned execution and context-routing boundary. |
 | [0017](orchestration/0017-evidence-driven-routing.md) | Accepted | Learn routing from digest-bound, independently verified workflow evidence; keep assignment and endpoints host-owned. |
+
+## Reading paths
+
+- Workspace ownership starts with [ADR 0001](workspace/0001-modular-packaging-monolith.md)
+  and its executable rules in [ADR 0002](workspace/0002-executable-architecture-fitness.md).
+- Agent trust begins with [ADR 0003](orchestration/0003-agent-trust-and-evaluation.md),
+  then moves through the runtime in [ADR 0010](orchestration/0010-orchestration-runtime.md)
+  and routing in [ADR 0016](orchestration/0016-academic-paradigm-routing.md) and
+  [ADR 0017](orchestration/0017-evidence-driven-routing.md).
+- [ADR 0011](orchestration/0011-orchestration-execution-boundaries.md) is retained
+  for history. [ADR 0014](workspace/0014-task-worktree-boundary.md) supersedes its
+  execution boundary, while the durable publication boundary remains current.
+- Rust policy lives in [ADR 0004](platform/0004-measurement-gated-rust.md); its
+  dated measurements live in the [Rust measurement gate](../research/rust/measurement-gate.md).
 
 ## Record contract
 

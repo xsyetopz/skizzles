@@ -1,8 +1,10 @@
-# MCP Authoring With Bun And FastMCP
+# Authoring MCP servers with Bun and FastMCP
 
-Use this reference when creating or updating a repo-local MCP server for Codex.
+Build a repo-local stdio MCP server that Codex can start from any checkout or linked worktree. This reference is for maintainers using Bun, TypeScript, FastMCP, and Zod for project-specific tools.
 
-## Default Shape
+Before copying the template, choose a stable server name, list the tools and their mutation boundaries, and decide whether the server owns disposable local resources. The target repository must support a committed `.codex/mcp/<server-name>` package and its own lockfile.
+
+## Default shape
 
 - Put repo-specific MCPs under `.codex/mcp/<server-name>`.
 - Use Bun and TypeScript.
@@ -12,7 +14,7 @@ Use this reference when creating or updating a repo-local MCP server for Codex.
 - Keep tool outputs compact. Prefer short text or small structured objects over verbose logs.
 - Add a companion skill for nontrivial servers; MCP schemas are not enough procedural context.
 
-## Bootstrap
+## Bootstrap workflow
 
 Start from the bundled template. From the canonical source repository, use its
 repo-relative path:
@@ -26,7 +28,7 @@ bun install
 When using an installed skill instead of the canonical repository, resolve the
 same template from `$CODEX_HOME/skills/codex-project-tooling/assets/`.
 
-Then update:
+Then update these files:
 
 - `package.json` name and scripts if needed.
 - `src/start.ts` if dependency installation needs a different policy.
@@ -38,7 +40,7 @@ Register Codex against `src/start.ts`, not `src/index.ts`, when the MCP lives in
 
 After `bun install`, commit the generated `bun.lock` with the MCP project. The start wrapper can recover in a fresh worktree, but a committed lockfile keeps dependency resolution reproducible and avoids surprise lockfile churn during MCP startup.
 
-## FastMCP Server Skeleton
+## FastMCP server skeleton
 
 ```ts
 import { FastMCP } from "fastmcp";
@@ -60,16 +62,16 @@ server.addTool({
 server.start({ transportType: "stdio" });
 ```
 
-## Tool Design
+## Tool design
 
 - Tool names should be stable, lowercase, and action-oriented.
 - Descriptions should say what the tool does, not the entire workflow.
 - Schemas should reject ambiguous input where possible.
 - Prefer explicit enum parameters over free-form strings when the allowed values are known.
-- Return user-actionable errors. Do not leak secrets or large logs.
+- Return errors that tell the user what to do next. Do not leak secrets or large logs.
 - If a tool can mutate files or external state, make that obvious in the description and pair it with conservative approval config.
 
-## Validation
+## Verification
 
 Run the narrow checks first:
 
@@ -101,14 +103,12 @@ If the MCP is registered in Codex config, start a fresh trusted Codex thread and
 - Outputs are compact in the agent transcript.
 - Stack cleanup runs when the MCP process exits, if the server owns a stack.
 
-## Trust-boundary contract
+## Boundaries
 
-Hook and MCP composition may produce or consume the versioned Fourth Wall
-[context envelope](../../../fourth-wall/contracts/context-envelope.schema.json)
-and [handoff/review](../../../fourth-wall/contracts/handoff-review.schema.json),
-but the published schemas only define portable document shape. Repository
-packaging pins those schema bytes and executes incident fixtures through a
-strict evaluator; that evaluator still depends on trusted caller-supplied
-clock, version, digest, and effect facts. Neither layer intercepts native Codex
-handoffs or enforces host lifecycle. Keep raw secrets out of evidence; use
-references and SHA-256 digests.
+- Keep stdout reserved for MCP JSON-RPC and send diagnostics to stderr.
+- Keep tool results compact; return file references and summaries instead of large logs.
+- Make file or external-state mutation explicit in tool names, descriptions, and approval config.
+- Do not treat the start wrapper as a substitute for committing the generated `bun.lock`.
+- Pair workflow-oriented servers with a skill; tool schemas alone do not explain operational order or cleanup.
+
+Hook and MCP composition may produce or consume the versioned Fourth Wall [context envelope](../../../fourth-wall/contracts/context-envelope.schema.json) and [handoff/review](../../../fourth-wall/contracts/handoff-review.schema.json), but the published schemas define only the portable document shape. Repository packaging pins those schema bytes and executes incident fixtures through a strict evaluator. That evaluator still depends on trusted caller-supplied clock, version, digest, and effect facts. Neither layer intercepts native Codex handoffs or enforces host lifecycle. Use references and SHA-256 digests in evidence instead of raw secrets.

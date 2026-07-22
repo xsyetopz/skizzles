@@ -1,14 +1,26 @@
 # Multi-agent
 
-## Overview
+Use this guide when a root agent can divide work into independent, bounded
+tasks and synthesize the results. It covers the beta Responses API feature, its
+output items, and HTTP and WebSocket continuation. For a single agent with
+tool-heavy deterministic stages, use
+[Programmatic tool calling](tool-calling.md) instead. Start with
+[Using GPT-5.6](model-guidance.md) for model selection, and read
+[Safety](safety.md) before granting tools to every agent in the tree.
 
-Multi-agent lets a model spin up and coordinate subagents in parallel, synthesizing their work to provide a final response. This is especially effective for applications with complex tasks that benefit from parallel work delegation, such as codebase exploration, documentation, and implementation.
+## What Multi-agent does
+
+Multi-agent lets a model create and coordinate subagents in parallel, then
+synthesize their work into a final response. Use it for work that divides into
+independent tasks, such as codebase exploration, documentation, and
+implementation.
 
 Multi-agent is available as a beta feature with all GPT-5.6 models. Check the model page before enabling Multi-agent in your application.
 
 ## When to use Multi-agent
 
-Tasks can often be divided into independent sections of work that a single agent would complete sequentially, but multiple agents are able to tackle in parallel. Multi-agent enables a root agent to delegate to multiple subagents that complete work concurrently. This can provide multiple benefits:
+A root agent can delegate independent work that a single agent would otherwise
+complete sequentially. The subagents run concurrently:
 
 - **Parallel execution.** Independent research, analysis, or implementation tasks can proceed at the same time, which can lead to faster execution.
 - **Focused context.** Each subagent receives a bounded task and maintains its own context, which reduces interference in context between unrelated lines of work and improves performance.
@@ -117,7 +129,7 @@ async function reviewPullRequest(diff: string): Promise<string> {
 ```
 
 
-`max_concurrent_subagents` sets the maximum number of subagents that can be active simultaneously across the entire agent tree. It includes all descendants—children, grandchildren, and deeper subagents—but excludes the root agent.
+`max_concurrent_subagents` sets the maximum number of subagents that can be active simultaneously across the entire agent tree. It includes all descendants, children, grandchildren, and deeper subagents, but excludes the root agent.
 
 The API does not impose a fixed upper bound on this setting. The default is `3`, which is recommended for most workloads. Multi-agent runs also have no fixed limit on tree depth or the total number of subagents created during a run.
 
@@ -902,6 +914,10 @@ There are {max_concurrent_subagents + 1} available concurrency slots, meaning th
 
 ## Related guides
 
+- [Using GPT-5.6](model-guidance.md) for model selection and migration.
+- [Reasoning models](reasoning-models.md) for reasoning context and continuation.
+- [Programmatic tool calling](tool-calling.md) for bounded, code-directed tool stages.
+- [Safety](safety.md) for production safety controls.
 - [Function calling](https://developers.openai.com/api/docs/guides/function-calling)
 - [WebSocket mode](https://developers.openai.com/api/docs/guides/websocket-mode)
 - [Compaction](https://developers.openai.com/api/docs/guides/compaction)

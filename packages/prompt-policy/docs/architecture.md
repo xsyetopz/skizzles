@@ -1,11 +1,15 @@
-# Codex Prompt-Layer Architecture
+# Codex prompt-layer architecture
 
 ## Purpose and status
 
-This document describes the Codex instruction semantics that constrain the
-Skizzles prompt layer, the prompt-policy tooling implemented in this repository,
-and the separate opt-in activation lifecycle. It is maintainer
-documentation, not a record of any installed Codex configuration.
+Use this guide when reviewing a prompt-policy change, updating the pinned Codex
+baseline, or auditing installer activation. It covers the Codex instruction
+semantics that constrain the Skizzles prompt layer, the repository tooling, and
+the separate opt-in activation lifecycle. Start with the
+[package README](../README.md) for entrypoints and focused verification.
+
+This is maintainer documentation, not a record of any installed Codex
+configuration.
 
 The status labels below are intentional:
 
@@ -16,6 +20,19 @@ The status labels below are intentional:
 - **Supported installer activation behavior** describes the implemented,
   explicit host-facing boundary. Repository packaging and dry runs are not
   evidence that this boundary has been activated on any host.
+
+The main paths through this document are:
+
+- [Upstream instruction semantics](#verified-upstream-codex-semantics) explains
+  what each Codex configuration field changes.
+- [Repository architecture](#implemented-skizzles-repository-architecture)
+  maps canonical assets, source owners, and distribution boundaries.
+- [Commands and network boundary](#commands-and-network-boundary) separates
+  offline checks from the networked rebase operation.
+- [Maintainer workflows](#maintainer-workflows) covers patch updates, rebases,
+  and repository rollback.
+- [Installer activation](#supported-installer-activation-behavior) documents
+  the explicit host-writing boundary.
 
 ## Verified upstream Codex semantics
 

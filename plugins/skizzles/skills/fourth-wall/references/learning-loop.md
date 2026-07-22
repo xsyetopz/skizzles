@@ -1,8 +1,10 @@
-# Orchestration Learning Loop
+# Orchestration learning loop
 
-Use this loop when actual task behavior reveals a reusable caveat about routing, lifecycle, cost, context, coordination, or proof. Do not read the learning log during routine dispatch.
+Use this reference after stable task execution reveals a reusable routing, lifecycle, cost, context, coordination, or proof finding. It is for roots recording evidence and owners curating policy. Children report candidates to the root. Do not read the learning log during routine dispatch.
 
-## Candidate Test
+The output is one privacy-safe candidate with traceable evidence, or no entry when the observation is transient or too narrow.
+
+## Candidate test
 
 Record a candidate only when it is:
 
@@ -13,7 +15,7 @@ Record a candidate only when it is:
 
 Model outages, transient service load, one malformed prompt, and personal preference are not routing evidence by themselves.
 
-## Recording
+## Record a candidate
 
 After active work is stable, the root may append one compact entry to [../resources/learning-log.md](../resources/learning-log.md):
 
@@ -29,6 +31,6 @@ After active work is stable, the root may append one compact entry to [../resour
 
 Do not include secrets, customer data, large transcripts, or speculative policy prose. Children report candidates to the root; they do not edit global orchestration policy.
 
-## Promotion
+## Promotion boundary
 
 Changing `SKILL.md`, role resources, routing presets, or hooks is a separate curation action. Promote a candidate only after explicit owner review and either a reproducible authoritative explanation or corroboration from multiple independent tasks. Mark promoted or rejected entries in the log so old evidence is not repeatedly rediscovered.

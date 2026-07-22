@@ -1,6 +1,10 @@
 # Consuming repository manifest
 
-A consuming Git repository commits `.codex-container-lab.yaml`. Exactly one lifecycle mode is required.
+A consuming Git repository commits `.codex-container-lab.yaml`. Use this guide
+to choose the single required lifecycle mode and declare the environment
+capabilities that mode may read. See the [package README](../README.md) for the
+CLI workflow and the [safety model](safety.md) for bounds and threat-model
+limits.
 
 ## Compose mode
 

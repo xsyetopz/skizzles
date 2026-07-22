@@ -1,13 +1,33 @@
 # Reasoning models
 
-**Reasoning models** like [GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5) use internal reasoning tokens before producing a response. This helps the model plan, use tools effectively, inspect alternatives, recover from ambiguity, and solve harder multi-step tasks. Reasoning models work especially well for complex problem solving, coding, scientific reasoning, and multi-step agentic workflows. They're also the best models for [Codex CLI](https://github.com/openai/codex), our lightweight coding agent.
+Use this guide to configure reasoning effort, pro mode, context, and response
+continuation. Start with [Using GPT-5.6](model-guidance.md) if you are choosing
+or migrating models. For workflows that reuse a large prompt prefix, read
+[Prompt caching](prompt-caching.md); for tool loops, see
+[Programmatic tool calling](tool-calling.md); and for independent parallel work,
+see [Multi-agent](multi-agent.md). Apply [Safety](safety.md) before deploying the
+workflow.
 
-Start with `gpt-5.6` for most reasoning workloads. If you need the highest-intelligence API option for more challenging problems that can tolerate more latency, use <a href="/api/docs/models/gpt-5.6-sol"><code>gpt-5.6-sol</code></a> in the Responses API with `reasoning.mode` set to `pro`. For lower cost, consider [`gpt-5.6-terra`](https://developers.openai.com/api/docs/models/gpt-5.6-terra), or [`gpt-5.6-luna`](https://developers.openai.com/api/docs/models/gpt-5.6-luna) for the lowest cost and latency.
+**Reasoning models** like
+[GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5) use internal
+reasoning tokens before producing a response. This supports planning, tool use,
+alternative inspection, ambiguity recovery, and multi-step tasks. Use reasoning
+models for complex problem solving, coding, scientific reasoning, and
+multi-step agentic workflows. OpenAI recommends them for
+[Codex CLI](https://github.com/openai/codex).
 
-**Reasoning models work better with the [Responses
-  API](https://developers.openai.com/api/docs/guides/migrate-to-responses)**. While the Chat Completions API
-  is still supported, you'll get improved model intelligence and performance by
-  using Responses.
+Start with `gpt-5.6` for most reasoning workloads. For difficult problems that
+can tolerate more latency, use
+<a href="/api/docs/models/gpt-5.6-sol"><code>gpt-5.6-sol</code></a> in the
+Responses API with `reasoning.mode` set to `pro`. For lower cost, consider
+[`gpt-5.6-terra`](https://developers.openai.com/api/docs/models/gpt-5.6-terra),
+or [`gpt-5.6-luna`](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
+for the lowest cost and latency in the family.
+
+Use reasoning models with the
+[Responses API](https://developers.openai.com/api/docs/guides/migrate-to-responses).
+The Chat Completions API remains supported; OpenAI reports higher model
+intelligence and performance with Responses.
 
 ## Get started with reasoning
 
@@ -589,7 +609,8 @@ Consider these differences when prompting a reasoning model. Reasoning-capable G
 - Treat `reasoning.effort` as a tuning knob, not the primary way to recover quality.
 - For agentic or research-heavy workflows, define what counts as done and how the model should verify its work.
 
-For more information on best practices when using reasoning models, [refer to this guide](https://developers.openai.com/api/docs/guides/reasoning-best-practices).
+For more reasoning-model prompt guidance, read the
+[reasoning guide](https://developers.openai.com/api/docs/guides/reasoning-best-practices).
 
 ### Prompt examples
 

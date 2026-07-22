@@ -1,11 +1,13 @@
 # Workspace architecture
 
-Consequential architecture choices and their executable confirmation contracts are
-recorded in the [architecture decision log](decisions/README.md). Source provenance and
-Adopt/Adapt/Defer/Reject assessments for the cohesion campaign are maintained separately
-in the [research decision ledger](research/architecture-ledger.md).
+This document is the current map of package ownership, dependency direction,
+lifecycle boundaries, and generated plugin output. Read it before moving code,
+adding a package, or changing a distribution path. The
+[architecture decision log](decisions/README.md) explains why these boundaries
+exist, and the [architecture research ledger](research/architecture-ledger.md)
+records the source evidence behind the initial cohesion campaign.
 
-## Design
+## Package topology and dependency direction
 
 Skizzles uses a private Bun workspace with one package per executable or
 independently testable TypeScript domain. The repository root is orchestration,
@@ -190,7 +192,7 @@ trusted code, not a malicious-code sandbox: deliberate session re-detachment
 can escape POSIX group containment, and Windows cannot perform negative-PGID
 descendant detection.
 
-## Toolchain
+## Pinned toolchain
 
 - Bun: version pinned by `packageManager` and CI.
 - TypeScript: shared strict policy in `tsconfig.base.json`; packages own direct
@@ -202,7 +204,7 @@ descendant detection.
   directories for the mandatory CI/release `security:check`; no binary is vendored
   or installed persistently.
 
-## Packaging and hygiene
+## Plugin construction and release boundary
 
 The plugin builder constructs output through a same-filesystem destination transaction.
 Comparison staging, prompt checks, and runtime validation share one owned run workspace;

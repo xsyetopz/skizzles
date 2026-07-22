@@ -5,54 +5,68 @@ description: Apply a coding version of the scientific method when first-answer b
 
 # Counterfactual Engineering
 
-Compare materially different causal models or implementation approaches before committing to one. Favor evidence over first-answer momentum.
+Use this skill when more than one cause or implementation route fits the evidence and choosing the first plausible answer would be risky. It is for engineers investigating uncertain bugs, architecture choices, migrations, performance work, major refactors, or product alternatives.
+
+The output is a selected or synthesized result backed by comparable experiments. Skip this process only when a deterministic reproduction and local evidence isolate one mechanical correction.
+
+## Experiment contract
+
+Give every serious hypothesis the same success criteria and a complete causal loop. Record:
+
+- the proposed mechanism or implementation route
+- the evidence it explains
+- the observation that would falsify it
+- the smallest distinguishing experiment
+- the regression oracle used for every candidate
+
+Two renamed versions of the same approach are not competing hypotheses. Compare routes that differ in cause, boundary, architecture, or mechanism.
 
 ## Workflow
 
-1. **Observe:** Reproduce the current behavior and capture a stable failure or success oracle.
-2. **Question:** Define success criteria, constraints, shared validation, and what is out of scope.
-3. **Research:** Inspect local patterns, prior art, dependency capabilities, and existing abstractions.
-4. **Hypothesize:** State 2-3 genuinely different causal models or implementation routes. For bugs, record the evidence and falsification test for each cause rather than jumping directly to fixes.
-5. **Isolate:** Choose one isolated workspace per serious hypothesis using the backend guidance below. Start every experiment from the same committed checkpoint when results may be composed.
-6. **Experiment:** Give each hypothesis a complete reproduce-investigate-implement-validate loop. Keep experiments independent so one path does not anchor another.
-7. **Test:** Apply the same tests, checks, screenshots, benchmarks, or reproduction oracle to every hypothesis.
-8. **Select or synthesize:** Accept the strongest validated outcome, combine independently justified complementary results, or reject all. Apply selected changes sequentially and validate both each addition and the aggregate.
-9. **Report or commit:** Produce a clean final result and summarize the evidence, rejected paths, and remaining risks.
+1. **Observe:** reproduce the current behavior and capture a stable success or failure oracle.
+2. **Frame:** define success, constraints, shared validation, and excluded scope.
+3. **Research:** inspect local patterns, prior art, dependency capabilities, and existing abstractions.
+4. **Hypothesize:** state two or three materially different causal models or implementation routes.
+5. **Isolate:** assign one isolated workspace to each serious hypothesis. Start from the same committed checkpoint when results may later be composed.
+6. **Experiment:** run a complete reproduce, investigate, implement, and validate loop for each hypothesis.
+7. **Compare:** apply the same tests, screenshots, benchmarks, or reproduction oracle to every result.
+8. **Select or synthesize:** accept the strongest result, combine independently justified changes, or reject every candidate.
+9. **Integrate:** apply selected changes sequentially and validate each addition plus the aggregate.
+10. **Report or commit:** leave a clean result with the evidence, rejected paths, and remaining risks.
 
 ## Isolation backends
 
-Choose one backend per hypothesis unless a concrete constraint requires both:
+Choose one backend per hypothesis unless a concrete constraint requires both.
 
-- **Git worktree:** Use for host-native or repository-only work where Docker is irrelevant. Create `{REPO_ROOT}/.worktrees/<short-hypothesis-slug>` and name its branch from the hypothesis, such as `codex/cache-boundary`.
-- **Container lab:** Use when the repository has a reviewed `.codex-container-lab.yaml` and Linux, Docker, Compose services, databases, or environmental isolation materially improve the experiment. Follow the `codex-container-lab` skill, create one lab per hypothesis, and use its synchronization or Git patch workflow to lift out selected results. A lab's isolated Git workspace replaces routine worktree management for that hypothesis.
+### Git worktree
 
-Keep each experiment small enough to validate. Avoid leaving rejected worktrees or labs behind unless the user or local instructions require preservation.
+Use a worktree for host-native or repository-only experiments where Docker adds no useful isolation. Create `{REPO_ROOT}/.worktrees/<short-hypothesis-slug>` and name the branch for the hypothesis, such as `codex/cache-boundary`.
 
-Verify that isolation includes mutable dependencies, not only source files. Shared databases, caches, queues, host-bound volumes, fixed services, or reused credentials can contaminate hypotheses and invalidate comparisons.
+### Container lab
 
-## Bug investigations
+Use a container lab when the repository has a reviewed `.codex-container-lab.yaml` and Linux, Docker, Compose services, databases, or environmental isolation affect the result. Follow the `codex-container-lab` skill, create one lab per hypothesis, and use its synchronization or Git patch workflow to extract selected work. The lab's isolated Git workspace replaces a routine worktree for that hypothesis.
 
-Make triage produce a compact hypothesis set instead of only the most plausible explanation. Each serious hypothesis should include:
+Isolation must include mutable dependencies. Shared databases, caches, queues, host-bound volumes, fixed services, and reused credentials can contaminate results even when source trees are separate.
 
-- the proposed causal mechanism;
-- evidence it explains;
-- evidence that would falsify it;
-- the smallest experiment that distinguishes it;
-- the regression oracle a durable fix must satisfy.
+Keep experiments small enough to validate. Remove rejected worktrees or labs unless the user or repository instructions require preservation.
 
-Use independent workers when parallelism materially helps; otherwise one worker may explore multiple isolated workspaces. Give each worker complete ownership of its hypothesis loop. Let the root own selection and integration, then use QA and adversarial review on the integrated result instead of relying on repeated worker-review repair loops to discover alternate causes.
+## Investigation and ownership
 
-If review exposes a materially different causal model, reopen hypothesis exploration rather than repeatedly patching the same approach.
+Triage should return a compact hypothesis set, not only the most likely explanation. Use independent workers when parallel experiments save time or reduce anchoring. Otherwise, one worker may own several isolated experiments.
 
-## Synthesis standard
+Each worker owns its hypothesis from reproduction through evidence. The root selects and integrates the result, then uses QA and adversarial review on the integrated state. If review uncovers a materially different causal model, reopen hypothesis work instead of repeatedly patching the same route.
 
-Accept a hypothesis only when it satisfies the shared criteria better than the alternatives. Prefer outcomes that are correct, validated, maintainable, convention-aligned, reversible, and clean in Git history.
+## Selection boundaries
 
-Combine results only when each change has independent evidence or prevents a distinct demonstrated failure. Verify that one fix is not merely hiding the absence of another. After sequential integration, rerun the original reproduction and the complete shared validation because complementary patches can interact.
+Accept a result only when it satisfies the shared criteria better than its alternatives. Judge correctness, validation, maintainability, repository conventions, reversibility, and Git clarity.
 
-Do not multiply experiments for an obvious localized defect with a deterministic reproduction and one evidence-backed correction. Report instead of integrating when the evidence reveals a product, architecture, or risk tradeoff requiring user judgment.
+Combine changes only when each has independent evidence or prevents a separate demonstrated failure. Confirm that one patch is not hiding the absence of another. After integration, rerun the original reproduction and all shared validation because individually sound patches can interact.
 
-## Report format
+Stop for user or owner judgment when the evidence exposes a product, architecture, or risk tradeoff with several valid outcomes. Do not multiply experiments for a localized deterministic defect merely to satisfy the workflow.
+
+## Evidence report
+
+Use a comparison table:
 
 ```text
 | Hypothesis | Approach | Validation | Result | Reason |
@@ -69,4 +83,4 @@ Rejected experiments:
 Remaining risks:
 ```
 
-If no hypothesis is accepted, report what failed and the next question that would unblock a better experiment.
+If no hypothesis passes, report the failed observations and the next question or dependency needed for a useful experiment.

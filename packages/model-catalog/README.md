@@ -1,13 +1,14 @@
 # `@skizzles/model-catalog`
 
-Private Skizzles package for producing and validating the optional Luna V2
-model catalog, running isolated Codex catalog probes, storing catalog state
-atomically, and rendering the macOS LaunchAgent template.
+This private package produces and validates the optional Luna V2 model catalog,
+runs isolated Codex catalog probes, stores catalog state atomically, and renders
+the macOS LaunchAgent template. Use it only after independently verifying Luna
+with MultiAgentV2; ordinary Skizzles installation does not need this catalog.
 
 ## Supported entrypoints
 
-- Package export `@skizzles/model-catalog` exposes the stable overlay,
-  refresh, and LaunchAgent-rendering facade from `src/index.ts`.
+- Package export `@skizzles/model-catalog` exposes `applyLunaV2Overlay`,
+  `refreshCatalog`, and `renderLaunchAgent` from `src/index.ts`.
 - `bun run packages/model-catalog/src/index.ts` runs the same facade as a CLI
   with the `refresh`, `service`, and `render-launch-agent` commands; generated
   plugins expose the dependency-self-contained `runtime/model-catalog.ts` path.
@@ -30,3 +31,23 @@ immediately before that atomic rename leaves the previous output and status
 unchanged. Once output promotion succeeds, refresh finishes the matching bounded
 status document even if cancellation arrives afterward, so consumers never
 observe a cancellation-induced output/status half-commit.
+
+## Dependencies and verification
+
+The package depends on
+[`@skizzles/scratchspace`](../scratchspace/README.md) for isolated probe homes
+and cleanup. Refresh also needs an explicit Codex binary and Codex home. It does
+not select credentials, copy authentication into probe homes, restart
+app-server, or activate the rendered LaunchAgent.
+
+Run package checks from this directory:
+
+```sh
+bun run check
+bun run typecheck
+bun run test
+bun run build
+```
+
+Host wiring, rollback, and the exact `refresh` and `render-launch-agent`
+commands are documented in the [installation guide](docs/installation.md).

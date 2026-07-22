@@ -1,6 +1,6 @@
-# Fourth Wall Learning Candidates
+# Fourth Wall learning candidates
 
-Append only evidence-backed candidates from completed orchestration work. This is not normative policy; curate accepted findings into the skill deliberately.
+This log is for roots recording evidence-backed candidates after completed orchestration work. It is not normative policy. Policy owners review and curate accepted findings into the skill separately.
 
 ## 2026-07-13 - Complete-slice delegation
 - Status: promoted

@@ -1,7 +1,30 @@
-# Workspace policy
+# `@skizzles/workspace-governance`
 
-`@skizzles/workspace-governance` verifies the repository's Bun/TypeScript package
-contract. It checks package ownership, public-surface budgets, direct dependency
+This package verifies the repository's Bun/TypeScript ownership and dependency
+policy. Maintainers run it after package, export, import, build-layout, or
+repository-security changes. The workspace validator is read-only; the
+networked security gate downloads pinned tools only into a disposable run root.
+
+## Public surface and commands
+
+The package root exports `validateWorkspace` and `SKIZZLES_PACKAGE_NAMES`.
+`skizzles-workspace-policy` is the package-manager binary. Both validator
+entrypoints run the complete workspace policy and architectural fitness gate:
+
+```sh
+bun run workspace:check
+```
+
+Architectural fitness has no debt baseline or suppressions. The separate
+repository security gate is:
+
+```sh
+bun run security:check
+```
+
+## Workspace contract
+
+The validator checks package ownership, public-surface budgets, direct dependency
 closure and cycles, exported package subpaths, relative-import containment,
 production-to-test direction, source-module strongly connected components,
 static cross-package filesystem paths,
@@ -41,17 +64,6 @@ sandbox. A descendant that deliberately creates a new session or otherwise
 re-detaches can escape POSIX process-group containment. Windows has no
 negative-PGID detection here, so the gate kills and reaps the direct importer
 for observable lifecycle failures but cannot make the POSIX descendant checks.
-
-The package exports `validateWorkspace` for tests and exposes the
-`skizzles-workspace-policy` executable. It does not modify the workspace.
-The default validator and executable invocation always run the complete
-workspace policy and architectural fitness gate:
-
-```sh
-bun run workspace:check
-```
-
-Architectural fitness has no debt baseline or suppressions.
 
 Static filesystem reach-through is intentionally limited to literal
 `packages/<owner>/...` paths in production TypeScript. Dynamic paths cannot be
@@ -135,3 +147,23 @@ Git checkout. It is mandatory in CI/release acceptance but intentionally separat
 from `verify`, which does not acquire these security binaries. actionlint does not
 replace an actual GitHub Actions run, and Gitleaks is heuristic rather than proof
 that a tree contains no credential.
+
+## Dependencies and focused verification
+
+Runtime dependencies are
+[`@skizzles/scratchspace`](../scratchspace/README.md), TypeScript 7.0.2, and
+`yaml`. Security binaries are provenance-pinned external downloads, not package
+manifest dependencies or persistent cached tools.
+
+Run the package checks from this directory:
+
+```sh
+bun run check
+bun run typecheck
+bun run test
+bun run build
+```
+
+Run `bun run workspace:check` from the repository root to exercise the actual
+workspace entrypoint. `bun run security:check` additionally needs network
+access and a full Git checkout.

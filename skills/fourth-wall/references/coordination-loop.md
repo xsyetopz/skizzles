@@ -1,6 +1,10 @@
-# Native Coordination Loop
+# Native coordination loop
 
-## Tool Semantics
+Use this reference when a root or eligible depth-1 Worker is operating an existing task tree. It explains delivery, synchronization, review, and recovery after ownership has been assigned. Read [delegation-contract.md](delegation-contract.md) before the first consequential spawn.
+
+The goal is an event-driven loop with explicit ownership and inspectable evidence. Do not spend root turns polling work that a child already owns.
+
+## Tool semantics
 
 | Tool | Use | Important behavior |
 | --- | --- | --- |
@@ -11,13 +15,13 @@
 | `wait_agent` | Synchronize on activity | Waits for any mailbox update, user steering, or timeout. It is an event wait, not a status dump. |
 | `interrupt_agent` | Stop current work | Leaves the task available for later messages and follow-up work. Cannot interrupt self or root. |
 
-## Root Loop
+## Root workflow
 
 1. Inspect the task graph with `list_agents` only at meaningful coordination points.
 2. Compare active ownership and status with the overall outcome.
 3. Use `send_message` for information the target should receive without waking it.
 4. Use `followup_task` when completed work needs another concrete action from the same owner at its current capability. Spawn a fresh sibling when clean context, independence, changed ownership, or a recorded capability increase is required.
-5. Continue high-leverage root decisions and integration inspection instead of duplicating child work.
+5. Continue high-value root decisions and integration inspection instead of duplicating child work.
 6. Use `wait_agent` only when mailbox activity is the next useful synchronization point. Prefer one appropriately long bounded wait over repeated short waits, and do not poll merely to narrate progress.
 7. Verify returned evidence before accepting or routing the result.
 
@@ -25,11 +29,11 @@ The child that owns a long-running command also owns its terminal polling and re
 
 A delegating Worker follows the same event-driven loop: continue independent implementation, do not poll the Luna Worker repeatedly, and do not edit its assigned surface. The Luna Worker should send an intermediate message only for a material blocker or ownership collision; normal progress arrives in its compact final report.
 
-## Privileged Steps
+## Privileged steps
 
 Native approval requests are routed out-of-band to the configured reviewer; they do not bubble to the root orchestrator. Under the recommended setup, `approvals_reviewer = "auto_review"` lets subagents request necessary escalation without pausing for the user. Include the exact command or tool action and its reason, respect denials, and do not repeatedly retry an unchanged request. Message the root when a denial changes the plan or when the privileged action is itself an orchestration decision, such as serialized verification or coordinated Git integration.
 
-## Dependency Release
+## Dependency release
 
 When task B depends on task A:
 
@@ -37,7 +41,7 @@ When task B depends on task A:
 - When A's output is ready, send it to B while B is still running, or spawn B only after A stabilizes.
 - Do not let B guess an unstable shared interface.
 
-## Shared Workspace And Integration
+## Shared workspace and integration
 
 All tasks in the tree share the same checkout. Assign disjoint write ownership, tell implementation tasks not to revert unrelated edits, and resolve overlap before more changes land.
 
@@ -51,7 +55,7 @@ Treat project-wide build, analyze, format, and test commands as synchronization 
 
 The root retains Git mutations, resolves cross-owner decisions, inspects the returned evidence, and accepts or reroutes the result. This is especially important for Flutter, Xcode, Cargo, Gradle, Linux/Xvfb application proof, and package-wide formatters.
 
-## Review Loop
+## Review workflow
 
 1. Worker returns its completion claim and evidence.
 2. Root inspects the diff and selects the relevant proof obligations.
@@ -60,7 +64,7 @@ The root retains Git mutations, resolves cross-owner decisions, inspects the ret
 5. Re-review the corrected state when the risk warrants it.
 6. The root integrates and decides completion; the reviewer does not silently broaden scope, repair the code, duplicate validation without cause, or relax the owner outcome.
 
-## Recovery Loop
+## Recovery workflow
 
 When orchestration drifts:
 

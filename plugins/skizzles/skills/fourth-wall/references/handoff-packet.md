@@ -1,8 +1,10 @@
-# Context Renewal And Warm Handoff
+# Context renewal and warm handoff
 
-Use handoff when accumulated context is harming speed or clarity, when ownership changes, or when an agent can no longer continue reliably. Do not hand off merely to avoid summarizing ordinary progress.
+Use this reference when accumulated context is harming speed or clarity, ownership changes, or an agent can no longer continue reliably. It is for roots coordinating a sibling replacement and for outgoing owners preparing operational state. Do not hand off merely to avoid summarizing ordinary progress.
 
-## Compact Packet
+The packet must let a successor resume the same outcome without inheriting a transcript or guessing about ownership, routing, and acceptance state.
+
+## Compact packet
 
 Include only operational state:
 
@@ -34,7 +36,7 @@ Do not include motivational framing, a chronological transcript, stable base ins
 
 For a long root task, store this packet under `/tmp` and pass its path to children together with a compact slice-specific assignment or follow-up. Update it at ownership transfers, material routing changes, and acceptance checkpoints. Do not automate encrypted spawn-message rewriting or continuously append command output.
 
-## Worker Or Specialist Handoff
+## Worker or specialist handoff
 
 Use a parent-mediated sibling replacement so the root preserves the task graph and role boundary:
 
@@ -46,11 +48,11 @@ Use a parent-mediated sibling replacement so the root preserves the task graph a
 
 Prefer no-history forks. Quote the relevant completed decisions in the handoff packet or point to a durable artifact instead of relying on inherited execution history.
 
-## Reactivation Or Replacement
+## Reactivation or replacement
 
 Use `followup_task` when a completed child remains the right owner and its accumulated context reduces rediscovery; current native MultiAgentV2 preserves its original model and reasoning settings but cannot change them. Spawn a fresh sibling when the next action benefits from independent judgment, a clean context, changed ownership, or a recorded capability increase. Use the smallest useful positive fork plus the packet so the successor retains relevant knowledge without inheriting an unbounded transcript.
 
-## Root Handoff Limitation
+## Root handoff limitation
 
 MultiAgentV2 cannot promote a child into the top-level root or archive and replace the root atomically. If the root itself needs renewal:
 

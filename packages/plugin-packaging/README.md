@@ -1,14 +1,16 @@
 # `@skizzles/plugin-packaging`
 
-Private package for deterministic Skizzles plugin staging, validation, and
-generated-tree drift checks.
+This private package is the sole authority for deterministic Skizzles plugin
+staging, validation, and generated-tree drift checks. Maintainers use it to
+build or compare `plugins/skizzles/`; other packages provide canonical inputs
+but do not write the distribution tree.
 
-The package stages allowlisted workspace package files into stable plugin
-destinations, validates packaged prompt policy through
-`@skizzles/prompt-policy`, bundles Container Lab entrypoints, and rejects local
-state, unsafe paths, symlinks, and machine-specific content. The public
-entrypoint exports the staging/check/build APIs; `skizzles-plugin-builder`
-provides the repository CLI.
+It stages allowlisted workspace files at stable plugin destinations, validates
+packaged prompt policy through
+[`@skizzles/prompt-policy`](../prompt-policy/README.md), bundles Container Lab
+and other runtime entrypoints, and rejects local state, unsafe paths, symlinks,
+and machine-specific content. Never hand-edit generated plugin output; rebuild
+it from canonical package sources.
 
 ## Internal ownership
 
@@ -40,9 +42,11 @@ The manifest declares every workspace package whose canonical entrypoint is
 composed into the distribution. Internal implementation modules are not
 package exports.
 
-## Public package APIs
+## Public APIs and CLI
 
-The root `@skizzles/plugin-packaging` export remains the staging facade only.
+The root `@skizzles/plugin-packaging` export remains the staging facade only:
+`stagePlugin`, `buildPlugin`, `checkPlugin`, `compareTrees`, `packagePaths`, and
+`PackagingError`.
 Independent contract consumers use the intentional
 `@skizzles/plugin-packaging/agent-contract` subpath. Its runtime export budget is
 exactly `evaluateAgentContract` and `ContractRejection`; only the contract kind,
@@ -52,6 +56,18 @@ production boundary, preventing callers from bypassing exact-key, identity,
 chronology, and evidence checks.
 Schema walkers, filesystem readers, corpus composition, staging validators, and
 individual contract evaluators remain package-private.
+
+The package-manager binary is `skizzles-plugin-builder`, backed by `src/cli.ts`.
+Repository scripts provide the supported workflows:
+
+```sh
+bun run plugin:build
+bun run plugin:check
+```
+
+`plugin:build` stages canonical inputs and replaces the generated tree through
+the package's crash-safe destination transaction. `plugin:check` is the
+non-writing parity and validation path.
 
 The schema-byte digests in `src/agent-contract/contract.ts` are the plugin
 composition authority and must change atomically with a deliberate published
@@ -105,3 +121,24 @@ plus the installer CLI. The generated bundles are dependency-self-contained
 and intentionally omit package-internal module trees. Repository Biome policy
 must exclude only those generated bundle destinations; each canonical source
 package remains independently typechecked, tested, and formatted.
+
+## Dependencies and verification
+
+The package depends on the runtime owners listed in its manifest plus `yaml`.
+Those dependencies grant composition access only through intentional package
+exports or explicit staging declarations; they do not make private package
+internals public.
+
+For a focused package check, run from this directory:
+
+```sh
+bun run check
+bun run typecheck
+bun run test
+bun run build
+```
+
+After any canonical packaging-input change, return to the repository root and
+run `bun run plugin:check`. If generated output should change, record the
+pre-build drift, run `bun run plugin:build`, inspect the generated diff, and
+rerun `bun run plugin:check`.

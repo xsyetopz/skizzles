@@ -1,36 +1,44 @@
 # `@skizzles/command-routing`
 
-Private Skizzles package for the approval-neutral `PreToolUse` command-output
-hook. It recognizes a conservative shell subset and rewrites only supported,
-potentially noisy commands to the generated plugin supervisor path.
+This private package owns the approval-neutral `PreToolUse` hook that routes
+supported noisy shell commands through Skizzles command observation. Plugin
+packaging consumes it; application code should use it only to classify a script
+or compose the canonical hook.
 
-## Entrypoints and assets
+## Public surface and staged assets
 
 - `@skizzles/command-routing` exports the import-safe `isManagedScript`
   classifier.
-- `src/manage-command-output.ts` is the canonical executable source composed by
-  the plugin builder; the generated plugin exposes it at
-  `hooks/manage-command-output.ts`.
-- `@skizzles/command-routing/hooks.json` exports the canonical descriptor stored
-  at `assets/hooks.json`.
+- `@skizzles/command-routing/hooks.json` exports the canonical descriptor from
+  `assets/hooks.json`.
+- `src/manage-command-output.ts` is the canonical executable source. Generated
+  plugins stage it as `hooks/manage-command-output.ts`.
 
-The hook descriptor passes the launch-time `${PLUGIN_ROOT}` as an explicit
-`--plugin-root` argument. The hook validates that this is an absolute plugin
-root containing the staged supervisor, then emits its concrete path with
-POSIX-safe shell quoting. The replacement command therefore does not depend on
-`PLUGIN_ROOT` remaining present in the command shell. Missing, relative, or
-incomplete launch context fails closed without rewriting the original command.
-The plugin builder stages the separate command-observation package at
-`runtime/codex-command.ts`.
+Importing the package does not run the hook. The classifier recognizes a
+conservative shell subset and rewrites only supported commands that may produce
+large output.
 
-The source path is also the plugin builder's canonical staging contract.
-Its classifier, normalization, policy, and command contract are privately owned
-under `src/manage-command-output/`; generated hooks retain their existing path.
+## Routing limits
 
-## Development
+The descriptor passes launch-time `${PLUGIN_ROOT}` as an explicit
+`--plugin-root` argument. The hook requires an absolute plugin root containing
+the staged supervisor and emits its concrete path with POSIX-safe shell
+quoting. The replacement therefore does not depend on `PLUGIN_ROOT` remaining
+in the command shell.
+
+Missing, relative, or incomplete launch context leaves the original command
+unchanged. The plugin builder stages
+[`@skizzles/command-observation`](../command-observation/README.md) separately at
+`runtime/codex-command.ts`. Classifier, normalization, policy, and command
+contracts remain private under `src/manage-command-output/`.
+
+## Verify the package
+
+From this directory:
 
 ```sh
-bun run typecheck
-bun test
 bun run check
+bun run typecheck
+bun run test
+bun run build
 ```

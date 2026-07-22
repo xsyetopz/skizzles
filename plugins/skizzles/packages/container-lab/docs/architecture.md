@@ -1,4 +1,10 @@
-# Architecture
+# Container Lab architecture
+
+This guide is for maintainers changing Container Lab ownership, process,
+Compose, synchronization, or public-output boundaries. Start with the
+[package README](../README.md) for entrypoints and verification, the
+[manifest guide](manifest.md) for repository configuration, and the
+[safety model](safety.md) for operational limits.
 
 Container Lab is canonical Skizzles source at `packages/container-lab`. The root Skizzles workspace and `bun.lock` own its dependency graph. Stable plugins stage dependency-self-contained Bun bundles at `packages/container-lab/src/{cli,reaper-cli}.ts`; the public skill launcher resolves those same relative paths before any PATH activation.
 
@@ -36,7 +42,7 @@ The stable administrative response shapes are:
 - `health`: `{ok,dockerAvailable,labs}`
 - `lab create`: `{labId,state}`
 - `lab list`: `{labs:[{labId,name,state,updatedAt}]}`
-- `lab status`: `{labId,name,state,updatedAt,endpoints?,endpointCount?,findings?,findingCount?,error?,stack?}`; bounded arrays expose actionable entries while counts disclose omitted entries, and `stack.services` contains only `{service,state,health?,exitCode?}` summaries
+- `lab status`: `{labId,name,state,updatedAt,endpoints?,endpointCount?,findings?,findingCount?,error?,stack?}`; bounded arrays expose reported entries while counts disclose omitted entries, and `stack.services` contains only `{service,state,health?,exitCode?}` summaries
 - `lab destroy`: `{labId,destroyed}`; `lab destroy-all`: `{destroyed}`
 - `logs`: `{labId,service,transcript:{text,truncated,bytes,lines}}`
 - `sync preview`: `{labId,direction,token,expiresAt,changes,conflicts,changeCount,conflictCount,truncated}`; `sync apply`: `{labId,direction,applied}`

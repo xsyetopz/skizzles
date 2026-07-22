@@ -5,25 +5,36 @@ description: Pilot local iOS Simulators for UI/design/QA work on macOS, especial
 
 # Designer Runtime
 
-Use this skill for direct local iOS Simulator piloting from Designer or QA agents. It is macOS-only and prerequisite-gated: use it only when the host is macOS with Xcode command-line tools and an iOS Simulator runtime available. Keep it small and evidence-oriented: interact with the app, capture proof, report what changed or failed.
+Use this skill when a Designer or QA agent must pilot an existing local iOS Simulator and collect visual or interaction evidence. It covers native iOS and Flutter loops on macOS. It does not install host tools, change simulator configuration, or replace product-level design review.
 
-Before starting, confirm the required host tools are available. `xcrun` is required for simulator discovery and app launch; `idb` is required for hierarchy and interaction commands; and ImageMagick's `magick` is required for selector crops and manual crops. Flutter loops additionally require `flutter`. If a prerequisite is missing, stop with an actionable blocker rather than installing software or mutating host configuration.
+The expected result is a tested flow with absolute screenshot or log paths, or a precise prerequisite or product blocker.
 
-Prefer existing XcodeBuildMCP simulator tools when they are available for a native iOS app. Use Codex's background shell session support for long-running Flutter/dev-server processes. Use the bundled `designer-sim` script for ad-hoc `idb` interaction, screenshot capture, and crop evidence.
+## Prerequisites
 
-## Guardrails
+Run only on macOS with Xcode command-line tools and an iOS Simulator runtime already available. Confirm each tool needed by the planned flow:
 
-- Use one simulator per active loop and run commands sequentially.
-- Do not erase, delete, or shut down simulators.
+- `xcrun` for simulator discovery and application launch
+- `idb` for accessibility hierarchy and interaction commands
+- ImageMagick's `magick` for selector and manual crops
+- `flutter` for Flutter run and hot-reload loops
+
+If a required tool is missing, stop and report how it blocks the requested proof. Do not install software or mutate host configuration.
+
+Prefer existing XcodeBuildMCP simulator tools for native iOS applications when they are available. Use a background shell session for long-running Flutter or development-server processes. Use the bundled `designer-sim` script for direct `idb` interaction, screenshots, and crop evidence.
+
+## Runtime boundaries
+
+- Use one simulator for each active loop and execute interactions sequentially.
+- Do not erase, delete, shut down, or recreate simulators.
 - Do not kill Simulator, CoreSimulator, or CoreSimulator services.
-- Do not run project-wide build/analyze/test/format commands while parallel edits may still be active unless the parent asks for a verification sync point.
-- Keep long-running app processes in one background terminal session and poll that session for output instead of wrapping it in tmux.
-- Capture screenshots or logs for product blockers and include absolute paths in the result.
-- Prefer selector-based taps/crops when accessibility labels or identifiers are available; use coordinates only when the hierarchy is insufficient.
+- Avoid project-wide build, analyze, test, or format commands while parallel edits remain active unless the parent declares a verification sync point.
+- Keep the application process in one background terminal session. Poll that session instead of wrapping it in tmux.
+- Capture screenshots or logs for product blockers and report absolute paths.
+- Prefer selector-based taps and crops when accessibility labels or identifiers exist. Use coordinates only when the hierarchy cannot identify the target.
 
-## Scripts
+## Command surface
 
-The scripts live in this skill's `scripts/` directory. Run them by absolute path if they are not on `PATH`.
+The script lives in this skill's `scripts/` directory. Invoke it by absolute path when `designer-sim` is not on `PATH`.
 
 ```sh
 designer-sim devices
@@ -39,26 +50,26 @@ designer-sim terminate --device-id <UDID> --bundle-id com.example.app
 designer-sim open-url --device-id <UDID> --url myapp://debug
 ```
 
-## Flutter Loop
+## Flutter workflow
 
-1. Start the app in a background terminal with the shell tool's session mode, from the app workdir:
+1. From the application worktree, start Flutter in a background terminal session:
 
    ```sh
    flutter run -d <UDID>
    ```
 
-2. Poll the session output until Flutter reports the app is running or shows a concrete failure.
-3. Inspect state with `designer-sim hierarchy` or `designer-sim screenshot`.
-4. Make one interaction at a time with `designer-sim tap-on`, `tap`, `text`, or `swipe`.
-5. After code edits, send `r` to the same background session to hot reload, then poll for the reload result.
-6. Capture final proof with `designer-sim screenshot --out <absolute-path>`.
-7. Stop the app by sending `q` or Ctrl-C to the same background session when the loop is done.
+2. Poll the same session until Flutter reports that the application is running or returns a concrete failure.
+3. Inspect the current state with `designer-sim hierarchy` or `designer-sim screenshot`.
+4. Perform one interaction at a time with `designer-sim tap-on`, `tap`, `text`, or `swipe`.
+5. After code changes, send `r` to the existing session and poll for the hot-reload result.
+6. Capture final evidence with `designer-sim screenshot --out <absolute-path>`.
+7. Send `q` or Ctrl-C to the same session when the loop is complete.
 
-Do not use tmux for this workflow unless the user explicitly asks for it or the shell session tool is unavailable.
+Do not use tmux unless the user requests it or background shell sessions are unavailable.
 
 ## Selector JSON
 
-Selectors are small JSON objects. Common keys:
+Selectors are small JSON objects. Common keys are:
 
 ```json
 {"text":"Continue"}
@@ -68,17 +79,20 @@ Selectors are small JSON objects. Common keys:
 {"value":"Selected"}
 ```
 
-Matching is case-insensitive exact text by default. Add `"contains": true` for substring matching:
+Matching uses case-insensitive exact text by default. Add `"contains": true` for substring matching:
 
 ```json
 {"text":"continue", "contains": true}
 ```
 
-## Visual Proof
+## Evidence report
 
-Use screenshot paths under `/tmp/codex-designer-runtime/` or another absolute path. For final reports, include:
+Store screenshots under `/tmp/codex-designer-runtime/` or another absolute path. Report:
 
 - device UDID or simulator name
-- command or flow tested
-- screenshot path
-- observed blocker, if any
+- command or user flow tested
+- screenshot or log path
+- observed result
+- blocker and last successful step, when the flow did not complete
+
+The report should distinguish runtime proof from source inspection. A launch log alone does not prove a visual state when a screenshot and interaction were required.

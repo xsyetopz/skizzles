@@ -1,4 +1,4 @@
-# 0012: Add a source-transformation pipeline
+# ADR 0012: Add a source-transformation pipeline
 
 Status: Accepted
 

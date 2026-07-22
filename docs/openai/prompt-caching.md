@@ -1,10 +1,15 @@
 # Prompt caching
 
+Use this guide after choosing a model when repeated prompt prefixes affect cost
+or latency. It explains automatic and explicit caching, cache keys,
+breakpoints, retention, and usage metrics. For model and migration choices,
+begin with [Using GPT-5.6](model-guidance.md). Reasoning-heavy and tool-driven
+workflows also need [Reasoning models](reasoning-models.md) and
+[Programmatic tool calling](tool-calling.md).
+
 Model prompts often contain repetitive content, like system prompts and common instructions. OpenAI routes API requests to servers that recently processed the same prompt, making it faster and less expensive to reuse an exact prompt prefix than to process it from scratch. Prompt Caching works automatically for eligible requests, with no code changes required. It is enabled for all recent [models](https://developers.openai.com/api/docs/models), `gpt-4o` and newer.
 
 Cache writes have no additional fee on models before the GPT-5.6 family. For GPT-5.6 models and later model families, cache writes cost 1.25× the uncached input token rate. On these models, both implicit and explicit caching are more consistent and reliable. You can also use explicit cache breakpoints to control exactly which prompt prefixes OpenAI caches. OpenAI reports writes in `cache_write_tokens` and reads in `cached_tokens`, so you can measure the cost of writes against the savings from later cache hits.
-
-This guide describes how Prompt Caching works in detail, so that you can optimize your prompts for lower latency and cost.
 
 ## Structuring prompts
 
@@ -215,9 +220,9 @@ The following Chat Completions usage example shows both fields. In this response
 - **Messages:** The complete messages array, encompassing system, user, and assistant interactions.
 - **Images:** Images included in user messages, either as links or as base64-encoded data, as well as multiple images can be sent. Ensure the detail parameter is set identically, as it impacts image tokenization.
 - **Tool use:** Both the messages array and the list of available `tools` can be cached, contributing to the minimum 1024 token requirement.
-- **Structured outputs:** The structured output schema serves as a prefix to the system message and can be cached.
+- **Structured outputs:** The structured output schema is a prefix to the system message and can be cached.
 
-## Best practices
+## Caching guidance
 
 - Structure prompts with **static or repeated content at the beginning** and dynamic, user-specific content at the end.
 - Use the **[`prompt_cache_key`](https://developers.openai.com/api/docs/api-reference/responses/create#responses-create-prompt_cache_key) parameter** consistently across requests that share long, common prefixes to improve cache hit rates. On GPT-5.6 models and later model families, you must set this parameter to use the more reliable cache matching. Keep the total traffic for each key to approximately 15 requests per minute, and use more keys for higher-volume workloads.
@@ -246,3 +251,9 @@ The following Chat Completions usage example shows both fields. In this response
 5. **Do cached prompts contribute to TPM rate limits?**
 
    Yes, as caching does not affect rate limits.
+
+## Related guides
+
+- [Using GPT-5.6](model-guidance.md) covers model choice and migration.
+- [Reasoning models](reasoning-models.md) explains persisted reasoning and continuation.
+- [Programmatic tool calling](tool-calling.md) explains tool-driven continuations and how to preserve their output items.

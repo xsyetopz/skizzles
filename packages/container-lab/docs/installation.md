@@ -1,6 +1,13 @@
 # Installation and optional host wiring
 
-Container Lab is included in Skizzles. The canonical source package is `packages/container-lab`, the root Skizzles `bun.lock` is its only lockfile, and a stable plugin carries dependency-self-contained CLI and reaper bundles. There is no MCP execution server or registration.
+Use the bundled launcher unless the host owner explicitly wants reversible
+`PATH` or LaunchAgent wiring. Container Lab is included in Skizzles; there is no
+MCP execution server to register. Read the [package README](../README.md) for
+the runtime surface and the [safety model](safety.md) before host wiring.
+
+The canonical source package is `packages/container-lab`, the root Skizzles
+`bun.lock` is its only lockfile, and a stable plugin carries
+dependency-self-contained CLI and reaper bundles.
 
 ## Use the bundled launcher now
 
@@ -16,9 +23,9 @@ The launcher resolves `../../../packages/container-lab/src/cli.ts` from the skil
 
 Run `bun install --frozen-lockfile` from the Skizzles root before source development. A stable plugin does not need Bun/npm dependency installation for the bundled entrypoints.
 
-The managed-output hook recognizes the launcher’s outer `run --lab ... -- COMMAND...` invocation, including the supported `--owner`, `--state-root`, and `--runtime-root` globals before `run`. Keep the launcher and its pre-run globals literal and unquoted so the hook can classify them; do not match or wrap the inner container argv: `run` intentionally has no JSON footer, and the normal supervisor retains long attached output.
+The managed-output hook recognizes the launcher's outer `run --lab ... -- COMMAND...` invocation, including the supported `--owner`, `--state-root`, and `--runtime-root` globals before `run`. Keep the launcher and its pre-run globals literal and unquoted so the hook can classify them; do not match or wrap the inner container argv: `run` intentionally has no JSON footer, and the normal supervisor retains long attached output.
 
-## Optional host wiring — machine-local and reversible
+## Optional host wiring
 
 `codex-container-lab` and `codex-container-lab-reaper` PATH binaries are conveniences, not prerequisites. Host wiring is separate from skill/plugin installation: it is an explicit, reversible, machine-local operation. Record every created link and rendered LaunchAgent path so the wiring can be removed exactly. Do not alter broad Codex hooks/configuration, Docker state, or SQLite while setting it up.
 

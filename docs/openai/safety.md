@@ -1,5 +1,12 @@
 # Safety
 
+Use this guide as the production safety baseline for every API integration. It
+covers moderation, adversarial testing, human review, constrained inputs and
+outputs, user reporting, safety identifiers, and compromised keys. Pair it
+with [Using GPT-5.6](model-guidance.md) for model-specific safeguards,
+[Programmatic tool calling](tool-calling.md) for tool permissions, and
+[Multi-agent](multi-agent.md) when several agents share tools.
+
 ## Use the Moderation API
 
 OpenAI's [Moderation API](https://developers.openai.com/api/docs/guides/moderation) is free to use and can help reduce unsafe content in model outputs. You can also build a content-filtering system tailored to your use case.
@@ -46,7 +53,9 @@ If you notice any safety or security issues while developing with the API or any
 
 ## Implement safety identifiers
 
-Sending safety identifiers in requests can help OpenAI detect abuse and provide your team with more actionable feedback about policy violations in your application.
+Sending safety identifiers in requests can help OpenAI detect abuse and provide
+your team with more specific feedback about policy violations in your
+application.
 
 Safety identifiers can also help your team respond to abuse faster. They create a stable way to trace activity back to an individual end user and reduce the chance that one user's misuse disrupts access for your broader organization.
 
@@ -104,3 +113,9 @@ If you believe an API key has been exposed, misused, or otherwise compromised,
 revoke it promptly and replace it with a new key. Go to your [Security
 settings](https://platform.openai.com/settings/profile/security) to view all API
 keys and revoke any compromised keys.
+
+## Related guides
+
+- [Using GPT-5.6](model-guidance.md) includes model-specific safeguards and migration guidance.
+- [Programmatic tool calling](tool-calling.md) covers application-level approval and permission checks for tool calls.
+- [Multi-agent](multi-agent.md) covers delegation when agents share the request's tools.

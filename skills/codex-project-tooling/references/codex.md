@@ -1,8 +1,18 @@
-# Repo-Local `.codex` Reference
+# Repo-local `.codex` configuration
 
-Repo-local Codex configuration lets a project carry its own agent roles, hooks, skills, and local conventions. Use it for durable project behavior that should follow the repository across machines and worktrees.
+Use repo-local Codex configuration for hooks, roles, skills, and conventions that should travel with a repository. This reference is for maintainers deciding what belongs under `.codex`, how trust affects loading, and how Codex Desktop linked worktrees resolve project tooling.
 
-## Common Layout
+Before editing, inspect the current `.codex` tree, confirm the repository is trusted where privileged project behavior is required, and separate shared policy from personal `$CODEX_HOME` preferences.
+
+## Workflow
+
+1. Classify the requested behavior as shared project policy or user-local preference.
+2. Add only the required `.codex` files and use repo-relative paths between committed files.
+3. Document the trusted-project requirement for hooks, roles, config, or MCP servers.
+4. Check linked-worktree resolution when Desktop sessions are part of the workflow.
+5. Parse the configuration and exercise the changed surface in a fresh trusted thread.
+
+## Layout
 
 ```text
 .codex/
@@ -20,7 +30,7 @@ Repo-local Codex configuration lets a project carry its own agent roles, hooks, 
 
 Use only the pieces the project needs. Avoid committing local credentials, machine-specific paths, and experimental scratch files.
 
-## Project Config
+## Project config
 
 `.codex/config.toml` can define repo-local features, hooks, agents, permissions, MCP settings, and other normal Codex config. Prefer relative paths for files committed in the repo:
 
@@ -39,10 +49,9 @@ description = "Use for adversarial review of completed changes."
 config_file = ".codex/agents/reviewer.toml"
 ```
 
-Keep repo config focused on shared project behavior. Put personal preferences in
-the user-level `$CODEX_HOME/config.toml`, not in the repository.
+Keep repo config focused on shared project behavior. Put personal preferences in the user-level `$CODEX_HOME/config.toml`, not in the repository.
 
-## Trust Behavior
+## Trust boundary
 
 Project config, hooks, and agent roles are gated by trusted project layers. A repo generally must be trusted before its project `.codex/config.toml`, hooks, and role definitions affect sessions.
 
@@ -50,7 +59,7 @@ Skills are more discoverable than other project configuration: repo-local skill 
 
 When authoring project tooling, document whether the user must trust the project before the change works.
 
-## Desktop Linked Worktrees
+## Desktop linked worktrees
 
 Codex Desktop can spawn sessions in linked worktrees. In linked worktrees:
 
@@ -58,9 +67,9 @@ Codex Desktop can spawn sessions in linked worktrees. In linked worktrees:
 - Worktree-local checked-out `.codex/config.toml`, `.codex/agents`, and `.codex/skills` come from the worktree contents.
 - Hook declarations are special-cased to use the matching root checkout `.codex` hook declarations instead of divergent worktree hook declarations.
 
-Practical consequence: if a project relies on hooks, update and trust the root checkout behavior. If a project relies on roles or config, make sure the worktree branch contains the intended `.codex` files.
+If a project relies on hooks, update and trust the root checkout behavior. If it relies on roles or config, make sure the worktree branch contains the intended `.codex` files.
 
-## Committed Versus Local-Only
+## Commit boundary
 
 Commit when the behavior is durable and project-relevant:
 
@@ -76,7 +85,7 @@ Keep local-only when the behavior is personal or sensitive:
 - Temporary experiments.
 - User-specific model/provider choices unless the role intentionally locks them.
 
-## Validation Checklist
+## Verification
 
 - Parse TOML/JSON after edits.
 - Confirm referenced files exist and use relative paths when committed.

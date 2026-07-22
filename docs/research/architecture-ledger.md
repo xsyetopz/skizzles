@@ -1,14 +1,21 @@
-# Architectural-cohesion research decision ledger
+# Architecture research ledger
+
+Use this dated ledger to trace the external and local evidence behind the
+initial architecture-cohesion decisions. It records provenance, limitations,
+and the resulting Adopt, Adapt, Defer, or Reject classification. The
+[architecture decision log](../decisions/README.md) contains the governing
+decisions, while the [workspace architecture](../workspace-architecture.md)
+describes the current repository.
 
 - **Retrieval date:** 2026-07-18
 - **Scope:** sources named in the architectural-cohesion campaign request
 - **Decision vocabulary:** **Adopt** as a repository rule; **Adapt** after fitting it to
   Skizzles; **Defer** pending measured need; **Reject** for this architecture.
 
-This ledger records provenance and applicability, not endorsements. Catalog entries and
-project claims are leads until verified against primary sources, the current worktree,
-and local tests. GitHub repository evidence is pinned to the inspected `HEAD`; website
-pages without immutable versions include the retrieval date.
+Catalog entries and project claims are leads, not endorsements. Verify them
+against primary sources, the current worktree, and local tests before use.
+GitHub repository evidence is pinned to the inspected `HEAD`; website pages
+without immutable versions include the retrieval date.
 
 ## Decision matrix
 
