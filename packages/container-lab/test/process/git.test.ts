@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, it } from "bun:test";
 import { gitProcessEnvironment, runLocalGit } from "../../src/process/git.ts";
 
 it("Git process environment excludes ambient repository and credential controls", () => {

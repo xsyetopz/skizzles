@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, it } from "bun:test";
 import { resolve } from "node:path";
 import process from "node:process";
 

@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, it } from "bun:test";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   mkdir,

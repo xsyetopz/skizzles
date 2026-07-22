@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import { compareManifests, file } from "./support.ts";
 
 describe("three-way comparison", () => {

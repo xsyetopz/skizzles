@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 import type { SimpleCommand } from "../src/manage-command-output/contract.ts";
 import { simpleCommands } from "../src/manage-command-output/lexer.ts";
 import { normalizeCommand } from "../src/manage-command-output/normalize.ts";

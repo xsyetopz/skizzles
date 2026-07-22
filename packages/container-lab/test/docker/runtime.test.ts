@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, it } from "bun:test";
 import {
   composeInvocationEnvironment,
   composeUpEnvironment,

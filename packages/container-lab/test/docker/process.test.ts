@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { expect, it } from "bun:test";
 import { launchDockerRun, terminateDockerRun } from "../../src/docker.ts";
 import {
   commandResult,

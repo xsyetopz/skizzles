@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, it } from "bun:test";
 
 import { parse as parseYaml } from "yaml";
 import type { ComposeModel } from "../../src/compose/contract.ts";

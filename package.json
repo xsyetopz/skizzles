@@ -16,7 +16,7 @@
     "prompt:check": "bun run packages/prompt-layer/src/cli.ts check",
     "prompt:patch": "bun run packages/prompt-layer/src/cli.ts patch",
     "prompt:rebase": "bun run packages/prompt-layer/src/cli.ts rebase",
-    "biome:suppressions:check": "bun run scripts/check-biome-suppressions.ts",
+    "biome:suppressions:check": "bun run packages/workspace-policy/src/biome-suppressions.ts",
     "format": "bunx @biomejs/biome@2.5.4 format --config-path biome.jsonc --vcs-root . --write .",
     "format:check": "bunx @biomejs/biome@2.5.4 format --config-path biome.jsonc --vcs-root . .",
     "lint": "bunx @biomejs/biome@2.5.4 lint --config-path biome.jsonc --vcs-root . .",
