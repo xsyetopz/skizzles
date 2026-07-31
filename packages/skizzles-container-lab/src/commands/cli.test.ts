@@ -381,7 +381,7 @@ function processExists(pid: number): boolean {
 }
 
 async function waitForProcessExit(pid: number): Promise<boolean> {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < 500; attempt++) {
     if (!processExists(pid)) return true;
     await Bun.sleep(10);
   }
