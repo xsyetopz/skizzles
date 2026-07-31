@@ -280,7 +280,9 @@ describe("CLI process boundary", () => {
     expect(source).toContain("<key>EnvironmentVariables</key>");
     expect(source).toContain("<string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>");
     expect(source).not.toContain("/usr/bin/env");
-    expect((await runCommand("/usr/bin/plutil", ["-lint", path])).stdout.toString()).toContain("OK");
+    if (process.platform === "darwin") {
+      expect((await runCommand("/usr/bin/plutil", ["-lint", path])).stdout.toString()).toContain("OK");
+    }
   });
 });
 
