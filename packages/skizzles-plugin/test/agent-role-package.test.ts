@@ -28,11 +28,11 @@ describe("capability-bearing agent role generation", () => {
     expect(manifest.routes).toEqual({});
     expect(manifest.nativeRoleAliases).toEqual({ explorer: "triage" });
     expect(manifest.agents.map(({ agentType, model, reasoningEffort }) => ({ agentType, model, reasoningEffort }))).toEqual([
-      { agentType: "default", model: "gpt-5.6-luna", reasoningEffort: "high" },
-      { agentType: "triage", model: "gpt-5.6-terra", reasoningEffort: "medium" },
-      { agentType: "worker", model: "gpt-5.6-luna", reasoningEffort: "xhigh" },
-      { agentType: "designer", model: "gpt-5.6-sol", reasoningEffort: "medium" },
-      { agentType: "qa", model: "gpt-5.6-terra", reasoningEffort: "medium" },
+      { agentType: "default", model: "gpt-5.6-luna", reasoningEffort: "max" },
+      { agentType: "triage", model: "gpt-5.6-sol", reasoningEffort: "medium" },
+      { agentType: "worker", model: "gpt-5.6-luna", reasoningEffort: "max" },
+      { agentType: "designer", model: "gpt-5.6-luna", reasoningEffort: "max" },
+      { agentType: "qa", model: "gpt-5.6-luna", reasoningEffort: "max" },
       { agentType: "review", model: "gpt-5.6-sol", reasoningEffort: "high" },
       { agentType: "deployment", model: "gpt-5.6-sol", reasoningEffort: "xhigh" },
     ]);
@@ -40,7 +40,7 @@ describe("capability-bearing agent role generation", () => {
       "default.toml", "deployment.toml", "designer.toml", "manifest.json",
       "qa.toml", "review.toml", "triage.toml", "worker.toml",
     ]);
-    expect(files.get("worker.toml")).toContain('model = "gpt-5.6-luna"\nmodel_reasoning_effort = "xhigh"');
+    expect(files.get("worker.toml")).toContain('model = "gpt-5.6-luna"\nmodel_reasoning_effort = "max"');
   });
 
   test("rejects native aliases that target an unknown generated role", async () => {
@@ -80,7 +80,7 @@ describe("capability-bearing agent role generation", () => {
     expect(files.get("worker.toml")).toContain("Workers are leaves. Do not delegate");
     expect(files.get("designer.toml")).toContain("Validate through the real browser, simulator, or platform entrypoint");
     expect(files.get("qa.toml")).toContain("Do not modify implementation unless the assignment explicitly includes a fix");
-    expect(files.get("review.toml")).toContain("Do not modify implementation unless explicitly assigned");
+    expect(files.get("review.toml")).toContain("Do not modify code unless explicitly assigned");
     expect(files.get("deployment.toml")).toContain("without explicit authorization for that action and target");
     expect(files.get("triage.toml")).toContain("campaign-close learning");
     expect(files.get("worker.toml")).toContain("peer map");

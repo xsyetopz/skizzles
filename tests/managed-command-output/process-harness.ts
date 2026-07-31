@@ -64,6 +64,7 @@ export function invokeHook(
       ...(permissionMode === undefined ? {} : { permission_mode: permissionMode }),
       tool_input: { ...toolInput, [key]: command },
     }),
+    env: { PLUGIN_ROOT: packageRoot },
   });
 }
 

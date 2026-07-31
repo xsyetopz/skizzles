@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { isManagedCommand } from "./classify-command.ts";
 import { parseScriptCommands } from "./parse-script.ts";
 
@@ -73,9 +74,12 @@ function commandFrom(input: Record<string, unknown> | undefined):
  * Plugin hooks run with PLUGIN_ROOT set by Codex. Keeping the placeholder in
  * the rewritten command lets the eventual shell expand the staged plugin path
  * instead of baking a machine-specific directory into distributable output.
+ * Source-linked global hooks do not receive that variable, so they resolve the
+ * adjacent canonical runtime instead of requiring a copied machine-local fork.
  */
 function runner(): string {
-  return 'bun "${PLUGIN_ROOT}/runtime/codex-command.ts"';
+  if (process.env.PLUGIN_ROOT) return 'bun "${PLUGIN_ROOT}/runtime/codex-command.ts"';
+  return `bun ${shellSingleQuote(resolve(import.meta.dir, "../../runtime/codex-command.ts"))}`;
 }
 
 function shellSingleQuote(value: string): string {

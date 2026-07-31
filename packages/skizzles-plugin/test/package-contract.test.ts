@@ -62,15 +62,9 @@ describe("published plugin contracts", () => {
     expect(stagedFourthWall).toBe(canonicalFourthWall);
     expect(stagedFourthWall).toContain("fixed-role local engineering team");
     expect(stagedFourthWall).toContain("## Evidence-First Triage");
-    expect(stagedFourthWall).toContain("## Parallel Luna Implementation");
-    expect(stagedFourthWall).toContain("| `worker` | `gpt-5.6-luna` | xhigh |");
-    expect(stagedFourthWall).toContain("| `review` | `gpt-5.6-sol` | high |");
-    expect(stagedFourthWall).toContain(
-      "There are no capability variants or model-escalation ladder",
-    );
-    expect(stagedFourthWall).not.toContain(
-      "Read before the first subagent spawn or orchestration action",
-    );
+    expect(stagedFourthWall).toContain("## Parallel Worker Implementation");
+    expect(stagedFourthWall).toContain("| Worker | `worker` | Complete implementation, focused validation, and repair ownership |");
+    expect(stagedFourthWall).toContain("| Review | `review` | Independent adversarial");
     const stagedLearning = await readFile(
       join(staged, "skills/fourth-wall/references/learning-loop.md"),
       "utf8",
@@ -97,8 +91,7 @@ describe("published plugin contracts", () => {
     const stagedHandoff = await readFile(join(staged, handoffPath), "utf8");
     expect(stagedHandoff).toBe(canonicalHandoff);
     expect(stagedHandoff).toContain("# Context Renewal And Warm Handoff");
-    expect(stagedHandoff).toContain("manual handoff");
-    expect(stagedHandoff).not.toContain("<role>__<objective>");
+    expect(stagedHandoff).toContain("<role>__<objective>");
 
     const canonicalInstaller = await readFile(
       join(repoRoot, "skills/install-skizzles/SKILL.md"),

@@ -65,7 +65,7 @@ describe("managed command output hook", () => {
       permission_mode: bypassPermissionsMode,
       tool_name: "Bash",
       tool_input: { command, timeout: 120_000 },
-    }) });
+    }), env: { PLUGIN_ROOT: packageRoot } });
     const payload = JSON.parse(text(result.stdout));
     const rewritten = payload.hookSpecificOutput.updatedInput.command as string;
     expect(rewritten).toBe(rewrittenCommand(command));
