@@ -6945,13 +6945,13 @@ var require_public_api = __commonJS((exports) => {
 });
 
 // packages/skizzles-container-lab/src/commands/reaper.ts
-import { join as join7 } from "path";
+import { join as join8 } from "path";
 import { homedir as homedir2 } from "os";
 
 // packages/skizzles-container-lab/src/reaper/archive.ts
 import { Database } from "bun:sqlite";
 import { readdir as readdir4 } from "fs/promises";
-import { join as join6 } from "path";
+import { join as join7 } from "path";
 
 // node_modules/.bun/yaml@2.9.0/node_modules/yaml/dist/index.js
 var composer = require_composer();
@@ -7037,10 +7037,8 @@ async function runCommand(command, args, options = {}) {
       detached: ownsProcessGroup
     });
     const cap = options.maxOutputBytes ?? 4 * 1024 * 1024;
-    const stdout = [];
-    const stderr = [];
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
+    const stdout = captureState(options.stdoutCapture);
+    const stderr = captureState(options.stderrCapture);
     let timedOut = false;
     let cleanupStarted = false;
     let cleanupSignalSent = false;
@@ -7082,8 +7080,10 @@ async function runCommand(command, args, options = {}) {
       }
       const result = {
         code: timedOut ? 124 : closeCode ?? 1,
-        stdout: Buffer.concat(stdout),
-        stderr: Buffer.concat(stderr)
+        stdout: Buffer.concat(stdout.chunks),
+        stderr: Buffer.concat(stderr.chunks),
+        stdoutTruncated: stdout.truncated,
+        stderrTruncated: stderr.truncated
       };
       if (options.signal?.aborted)
         return reject(new Error(`${command} aborted`));
@@ -7111,23 +7111,15 @@ async function runCommand(command, args, options = {}) {
         }, 100);
       }
     };
-    const collect = (stream, chunks, chunk, current) => {
-      const remaining = cap - current;
-      if (remaining > 0)
-        chunks.push(chunk.subarray(0, remaining));
-      const next = current + chunk.byteLength;
-      if (options.rejectOnOutputLimit && next > cap && outputOverflow === undefined) {
+    const collect = (stream, state, chunk) => {
+      collectOutput(state, chunk, cap);
+      if (options.rejectOnOutputLimit && state.totalBytes > cap && outputOverflow === undefined) {
         outputOverflow = stream;
         terminate();
       }
-      return next;
     };
-    child.stdout.on("data", (chunk) => {
-      stdoutBytes = collect("stdout", stdout, chunk, stdoutBytes);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderrBytes = collect("stderr", stderr, chunk, stderrBytes);
-    });
+    child.stdout.on("data", (chunk) => collect("stdout", stdout, chunk));
+    child.stderr.on("data", (chunk) => collect("stderr", stderr, chunk));
     const abort = () => terminate();
     options.signal?.addEventListener("abort", abort, { once: true });
     if (options.signal?.aborted)
@@ -7154,6 +7146,46 @@ async function runCommand(command, args, options = {}) {
       settle();
     });
   });
+}
+function captureState(policy) {
+  return { chunks: [], bytes: 0, totalBytes: 0, truncated: false, policy: policy ?? "head" };
+}
+function collectOutput(state, chunk, cap) {
+  state.totalBytes += chunk.byteLength;
+  if (state.totalBytes > cap)
+    state.truncated = true;
+  if (cap <= 0)
+    return;
+  if (state.policy === "head") {
+    const remaining = cap - state.bytes;
+    if (remaining > 0) {
+      const retained = chunk.subarray(0, remaining);
+      state.chunks.push(retained);
+      state.bytes += retained.byteLength;
+    }
+    return;
+  }
+  if (chunk.byteLength >= cap) {
+    const retained = Buffer.from(chunk.subarray(chunk.byteLength - cap));
+    state.chunks = [retained];
+    state.bytes = retained.byteLength;
+    return;
+  }
+  let excess = state.bytes + chunk.byteLength - cap;
+  while (excess > 0 && state.chunks.length > 0) {
+    const first = state.chunks[0];
+    if (first.byteLength <= excess) {
+      state.chunks.shift();
+      state.bytes -= first.byteLength;
+      excess -= first.byteLength;
+    } else {
+      state.chunks[0] = first.subarray(excess);
+      state.bytes -= excess;
+      excess = 0;
+    }
+  }
+  state.chunks.push(chunk);
+  state.bytes += chunk.byteLength;
 }
 
 // packages/skizzles-container-lab/src/compose/docker-runner.ts
@@ -7559,17 +7591,14 @@ async function exactDirectoryChain(root, segments, label) {
 
 // packages/skizzles-container-lab/src/workspace/recovery.ts
 import { createHash as createHash3 } from "crypto";
-import { lstat as lstat6, readdir as readdir2, realpath as realpath4, stat } from "fs/promises";
-import { join as join3 } from "path";
+import { lstat as lstat5, readdir as readdir2, realpath as realpath3, stat } from "fs/promises";
+import { join as join4 } from "path";
 
 // packages/skizzles-container-lab/src/storage/state.ts
 import { createHash as createHash2 } from "crypto";
 import { homedir, tmpdir } from "os";
-import { basename, isAbsolute, join as join2, parse, posix, relative, resolve as resolve2, sep } from "path";
-import { lstat as lstat4, mkdir as mkdir3, readdir, realpath as realpath3, rm as rm3 } from "fs/promises";
-
-// packages/skizzles-container-lab/src/compose/config.ts
-var manifestName = ".codex-container-lab.yaml";
+import { basename as basename2, join as join3, resolve as resolve3 } from "path";
+import { mkdir as mkdir3, readdir, rm as rm3 } from "fs/promises";
 
 // packages/skizzles-container-lab/src/storage/files.ts
 import { createHash, randomUUID } from "crypto";
@@ -7658,8 +7687,13 @@ async function writeJsonAtomic(file, value) {
   await rename(temporary, file);
 }
 
-// packages/skizzles-container-lab/src/storage/state.ts
-var DEFAULT_LAB_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+// packages/skizzles-container-lab/src/storage/state-validation.ts
+import { isAbsolute, join as join2, parse, posix, relative, resolve as resolve2, sep } from "path";
+
+// packages/skizzles-container-lab/src/compose/config.ts
+var manifestName = ".codex-container-lab.yaml";
+
+// packages/skizzles-container-lab/src/storage/state-validation.ts
 var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
 var FINDING_SURFACES = new Set([
   "host-bind",
@@ -7673,120 +7707,6 @@ var FINDING_SURFACES = new Set([
   "fixed-port",
   "non-loopback-port"
 ]);
-function defaultStateRoot() {
-  return join2(homedir(), "Library", "Application Support", "OpenAI", "codex-container-lab");
-}
-function defaultRuntimeRoot() {
-  return join2(tmpdir(), "codex-container-lab");
-}
-function resolveRoots(options = {}) {
-  return {
-    stateRoot: resolve2(options.stateRoot ?? process.env.CODEX_CONTAINER_LAB_STATE_ROOT ?? defaultStateRoot()),
-    runtimeRoot: resolve2(options.runtimeRoot ?? process.env.CODEX_CONTAINER_LAB_RUNTIME_ROOT ?? defaultRuntimeRoot())
-  };
-}
-function resolveOwner(explicit, environment = process.env) {
-  const owner = explicit ?? environment.CODEX_THREAD_ID;
-  if (owner === undefined || owner.length === 0) {
-    throw new Error("owner is required: pass --owner THREAD_ID or set CODEX_THREAD_ID");
-  }
-  if (owner.includes("\x00"))
-    throw new Error("owner must not contain NUL");
-  if (Buffer.byteLength(owner, "utf8") > 4096)
-    throw new Error("owner must be at most 4096 UTF-8 bytes");
-  return owner;
-}
-function ownerKey(owner) {
-  return createHash2("sha256").update(owner).digest("hex");
-}
-function ownerDirectory(stateRoot, owner) {
-  return join2(stateRoot, "owners", ownerKey(owner));
-}
-function ownerLockPath(stateRoot, owner) {
-  return join2(stateRoot, ".locks", `owner-${ownerKey(owner)}`);
-}
-function reapedOwnerPath(stateRoot, owner) {
-  return join2(stateRoot, "reaped", `${ownerKey(owner)}.json`);
-}
-async function readReapedOwner(stateRoot, owner) {
-  let value;
-  try {
-    value = await readJson(reapedOwnerPath(stateRoot, owner));
-  } catch (error) {
-    if (error.code === "ENOENT")
-      return;
-    throw error;
-  }
-  if (!isRecord3(value) || value.version !== 1 || value.owner !== owner || value.ownerKey !== ownerKey(owner) || !isTimestamp(value.reapedAt)) {
-    throw new Error("invalid reaped owner manifest");
-  }
-  return value;
-}
-async function markOwnerReaped(stateRoot, owner) {
-  const existing = await readReapedOwner(stateRoot, owner);
-  if (existing)
-    return existing;
-  const manifest = {
-    version: 1,
-    owner,
-    ownerKey: ownerKey(owner),
-    reapedAt: new Date().toISOString()
-  };
-  await writeJsonAtomic(reapedOwnerPath(stateRoot, owner), manifest);
-  return manifest;
-}
-function labsDirectory(stateRoot, owner) {
-  return join2(ownerDirectory(stateRoot, owner), "labs");
-}
-function labManifestPath(stateRoot, owner, labId) {
-  safeStateName(labId, "lab id");
-  return join2(labsDirectory(stateRoot, owner), `${labId}.json`);
-}
-function expectedLabRuntimeRoot(roots, owner, labId) {
-  safeStateName(labId, "lab id");
-  return join2(resolve2(roots.runtimeRoot), ownerKey(owner), labId);
-}
-async function readOwnerManifest(path2) {
-  const value = await readJson(path2);
-  if (!isRecord3(value) || value.version !== 1 || typeof value.owner !== "string" || typeof value.ownerKey !== "string" || !isTimestamp(value.createdAt)) {
-    throw new Error(`invalid owner manifest: ${path2}`);
-  }
-  resolveOwner(value.owner, {});
-  if (value.ownerKey !== ownerKey(value.owner) || basename(resolve2(path2, "..")) !== value.ownerKey) {
-    throw new Error(`owner manifest hash mismatch: ${path2}`);
-  }
-  return value;
-}
-async function writeLab(roots, lab) {
-  assertLabMetadata(lab, roots, lab.owner, lab.id);
-  await writeJsonAtomic(labManifestPath(roots.stateRoot, lab.owner, lab.id), lab);
-}
-async function readLab(roots, owner, labId) {
-  const value = await readJson(labManifestPath(roots.stateRoot, owner, labId));
-  assertLabMetadata(value, roots, owner, labId);
-  return value;
-}
-async function listLabs(roots, owner) {
-  const directory = labsDirectory(roots.stateRoot, owner);
-  let names;
-  try {
-    names = await readdir(directory);
-  } catch (error) {
-    if (error.code === "ENOENT")
-      return [];
-    throw error;
-  }
-  const labs = [];
-  for (const name of names.sort()) {
-    if (!name.endsWith(".json"))
-      throw new Error(`unexpected lab state entry: ${name}`);
-    labs.push(await readLab(roots, owner, name.slice(0, -5)));
-  }
-  return labs;
-}
-async function removeLabState(stateRoot, owner, labId) {
-  await rm3(labManifestPath(stateRoot, owner, labId), { force: true });
-}
 function assertLabMetadata(value, roots, owner, labId) {
   try {
     safeStateName(labId, "lab id");
@@ -7830,6 +7750,12 @@ function assertLabMetadata(value, roots, owner, labId) {
     }
     if (value.error !== undefined && !isBoundedString(value.error, 4000))
       throw new Error("invalid error");
+    if (value.provisioningFailure !== undefined) {
+      validateProvisioningFailure(value.provisioningFailure);
+      if (value.state !== "provisioning" && value.state !== "failed") {
+        throw new Error("provisioning failure requires provisioning or failed state");
+      }
+    }
     if (value.runtime !== undefined)
       validatePersistedRuntime(value, value.runtime);
     if (value.state === "ready" && value.runtime === undefined)
@@ -7843,6 +7769,25 @@ function assertLabMetadata(value, roots, owner, labId) {
   } catch (error) {
     throw new Error(`invalid lab manifest: ${labId}: ${message(error)}`);
   }
+}
+function validateProvisioningFailure(value) {
+  if (!isRecord3(value) || value.phase !== "compose-up" || !isTimestamp(value.capturedAt) || !Array.isArray(value.services) || value.services.length > 16 || typeof value.serviceCount !== "number" || !Number.isInteger(value.serviceCount) || value.serviceCount < value.services.length || value.serviceCount > 1000) {
+    throw new Error("invalid provisioning failure diagnostic");
+  }
+  if (!value.services.every(isProvisioningService))
+    throw new Error("invalid provisioning failure services");
+  if (value.evidence !== undefined && !isProvisioningEvidence(value.evidence)) {
+    throw new Error("invalid provisioning failure evidence");
+  }
+}
+function isProvisioningService(value) {
+  return isRecord3(value) && typeof value.service === "string" && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value.service) && typeof value.state === "string" && isSafeDiagnosticText(value.state, 64) && (value.health === undefined || typeof value.health === "string" && isSafeDiagnosticText(value.health, 64)) && (value.exitCode === undefined || typeof value.exitCode === "number" && Number.isInteger(value.exitCode) && value.exitCode >= -1 && value.exitCode <= 255);
+}
+function isProvisioningEvidence(value) {
+  return isRecord3(value) && value.kind === "compose-up" && typeof value.available === "boolean" && typeof value.bytes === "number" && Number.isInteger(value.bytes) && value.bytes >= 0 && value.bytes <= 8 * 1024 && typeof value.lines === "number" && Number.isInteger(value.lines) && value.lines >= 0 && value.lines <= 500 && typeof value.truncated === "boolean";
+}
+function isSafeDiagnosticText(value, maximum) {
+  return value.length > 0 && value.length <= maximum && !/[\u0000-\u001f\u007f]/.test(value);
 }
 function validatePersistedRuntime(lab, runtime) {
   if (!isRecord3(runtime) || !isRecord3(runtime.config))
@@ -7947,8 +7892,125 @@ function isRecord3(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// packages/skizzles-container-lab/src/storage/state.ts
+var DEFAULT_LAB_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+function defaultStateRoot() {
+  return join3(homedir(), "Library", "Application Support", "OpenAI", "codex-container-lab");
+}
+function defaultRuntimeRoot() {
+  return join3(tmpdir(), "codex-container-lab");
+}
+function resolveRoots(options = {}) {
+  return {
+    stateRoot: resolve3(options.stateRoot ?? process.env.CODEX_CONTAINER_LAB_STATE_ROOT ?? defaultStateRoot()),
+    runtimeRoot: resolve3(options.runtimeRoot ?? process.env.CODEX_CONTAINER_LAB_RUNTIME_ROOT ?? defaultRuntimeRoot())
+  };
+}
+function resolveOwner(explicit, environment = process.env) {
+  const owner = explicit ?? environment.CODEX_THREAD_ID;
+  if (owner === undefined || owner.length === 0) {
+    throw new Error("owner is required: pass --owner THREAD_ID or set CODEX_THREAD_ID");
+  }
+  if (owner.includes("\x00"))
+    throw new Error("owner must not contain NUL");
+  if (Buffer.byteLength(owner, "utf8") > 4096)
+    throw new Error("owner must be at most 4096 UTF-8 bytes");
+  return owner;
+}
+function ownerKey(owner) {
+  return createHash2("sha256").update(owner).digest("hex");
+}
+function ownerDirectory(stateRoot, owner) {
+  return join3(stateRoot, "owners", ownerKey(owner));
+}
+function ownerLockPath(stateRoot, owner) {
+  return join3(stateRoot, ".locks", `owner-${ownerKey(owner)}`);
+}
+function reapedOwnerPath(stateRoot, owner) {
+  return join3(stateRoot, "reaped", `${ownerKey(owner)}.json`);
+}
+async function readReapedOwner(stateRoot, owner) {
+  let value;
+  try {
+    value = await readJson(reapedOwnerPath(stateRoot, owner));
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return;
+    throw error;
+  }
+  if (!isRecord3(value) || value.version !== 1 || value.owner !== owner || value.ownerKey !== ownerKey(owner) || !isTimestamp(value.reapedAt)) {
+    throw new Error("invalid reaped owner manifest");
+  }
+  return value;
+}
+async function markOwnerReaped(stateRoot, owner) {
+  const existing = await readReapedOwner(stateRoot, owner);
+  if (existing)
+    return existing;
+  const manifest = {
+    version: 1,
+    owner,
+    ownerKey: ownerKey(owner),
+    reapedAt: new Date().toISOString()
+  };
+  await writeJsonAtomic(reapedOwnerPath(stateRoot, owner), manifest);
+  return manifest;
+}
+function labsDirectory(stateRoot, owner) {
+  return join3(ownerDirectory(stateRoot, owner), "labs");
+}
+function labManifestPath(stateRoot, owner, labId) {
+  safeStateName(labId, "lab id");
+  return join3(labsDirectory(stateRoot, owner), `${labId}.json`);
+}
+function expectedLabRuntimeRoot(roots, owner, labId) {
+  safeStateName(labId, "lab id");
+  return join3(resolve3(roots.runtimeRoot), ownerKey(owner), labId);
+}
+async function readOwnerManifest(path2) {
+  const value = await readJson(path2);
+  if (!isRecord3(value) || value.version !== 1 || typeof value.owner !== "string" || typeof value.ownerKey !== "string" || !isTimestamp(value.createdAt)) {
+    throw new Error(`invalid owner manifest: ${path2}`);
+  }
+  resolveOwner(value.owner, {});
+  if (value.ownerKey !== ownerKey(value.owner) || basename2(resolve3(path2, "..")) !== value.ownerKey) {
+    throw new Error(`owner manifest hash mismatch: ${path2}`);
+  }
+  return value;
+}
+async function writeLab(roots, lab) {
+  assertLabMetadata(lab, roots, lab.owner, lab.id);
+  await writeJsonAtomic(labManifestPath(roots.stateRoot, lab.owner, lab.id), lab);
+}
+async function readLab(roots, owner, labId) {
+  const value = await readJson(labManifestPath(roots.stateRoot, owner, labId));
+  assertLabMetadata(value, roots, owner, labId);
+  return value;
+}
+async function listLabs(roots, owner) {
+  const directory = labsDirectory(roots.stateRoot, owner);
+  let names;
+  try {
+    names = await readdir(directory);
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return [];
+    throw error;
+  }
+  const labs = [];
+  for (const name of names.sort()) {
+    if (!name.endsWith(".json"))
+      throw new Error(`unexpected lab state entry: ${name}`);
+    labs.push(await readLab(roots, owner, name.slice(0, -5)));
+  }
+  return labs;
+}
+async function removeLabState(stateRoot, owner, labId) {
+  await rm3(labManifestPath(stateRoot, owner, labId), { force: true });
+}
+
 // packages/skizzles-container-lab/src/workspace/sync.ts
-import { chmod, copyFile, lstat as lstat5, mkdir as mkdir4, readlink as readlink2, rename as rename2, rm as rm4, symlink } from "fs/promises";
+import { chmod, copyFile, lstat as lstat4, mkdir as mkdir4, readlink as readlink2, rename as rename2, rm as rm4, symlink } from "fs/promises";
 import path2 from "path";
 
 // packages/skizzles-container-lab/src/workspace/git-manifest.ts
@@ -8008,7 +8070,7 @@ async function ensureStateDirectory(stateRoot, relative2) {
     if (error.code !== "EEXIST")
       throw error;
   });
-  const stat = await lstat5(directory);
+  const stat = await lstat4(directory);
   if (stat.isSymbolicLink() || !stat.isDirectory())
     throw new Error(`Unsafe synchronization state directory: ${relative2}`);
 }
@@ -8060,7 +8122,7 @@ async function readRequiredJson(file, message2) {
 
 // packages/skizzles-container-lab/src/workspace/recovery.ts
 async function recoverLabSync(roots, lab) {
-  if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join3(lab.runtimeRoot, "workspace")) {
+  if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join4(lab.runtimeRoot, "workspace")) {
     throw new Error("lab runtime containment is invalid");
   }
   try {
@@ -8071,7 +8133,7 @@ async function recoverLabSync(roots, lab) {
       return;
     throw error;
   }
-  const journalDirectory = join3(lab.runtimeRoot, "sync", lab.id, "journals");
+  const journalDirectory = join4(lab.runtimeRoot, "sync", lab.id, "journals");
   let journals;
   try {
     journals = await readdir2(journalDirectory);
@@ -8097,21 +8159,21 @@ async function assertSourceRepositoryIdentity(lab) {
     "--path-format=absolute",
     "--git-common-dir"
   ], { timeoutMs: 1e4 })).stdout.toString().trim();
-  const actual = createHash3("sha256").update(await realpath4(commonGit)).digest("hex").slice(0, 12);
+  const actual = createHash3("sha256").update(await realpath3(commonGit)).digest("hex").slice(0, 12);
   if (actual !== lab.repoHash) {
     throw new Error("lab source repository identity no longer matches durable state");
   }
 }
 
 // packages/skizzles-container-lab/src/reaper/cleanup-utils.ts
-import { lstat as lstat7, readdir as readdir3, rm as rm5 } from "fs/promises";
-import { join as join4 } from "path";
+import { lstat as lstat6, readdir as readdir3, rm as rm5 } from "fs/promises";
+import { join as join5 } from "path";
 async function boundedRemove(root, maxEntries) {
   let count = 0;
   async function scan(path3) {
     let info;
     try {
-      info = await lstat7(path3);
+      info = await lstat6(path3);
     } catch (error) {
       if (error.code === "ENOENT")
         return;
@@ -8123,16 +8185,19 @@ async function boundedRemove(root, maxEntries) {
     for (const name of await readdir3(path3)) {
       if (++count > maxEntries)
         throw new Error("cleanup path exceeds bounded entry limit");
-      await scan(join4(path3, name));
+      await scan(join5(path3, name));
     }
   }
   await scan(root);
   await rm5(root, { recursive: true, force: true });
 }
+async function removeVerifiedTree(root) {
+  await rm5(root, { recursive: true, force: true });
+}
 
 // packages/skizzles-container-lab/src/reaper/retention.ts
 import { mkdir as mkdir5 } from "fs/promises";
-import { join as join5, resolve as resolve3 } from "path";
+import { join as join6, resolve as resolve4 } from "path";
 function isExpiredActivity(value, clock, ttlMs) {
   const now = (clock ?? (() => new Date))();
   const nowMs = now instanceof Date ? now.getTime() : Number.NaN;
@@ -8150,8 +8215,8 @@ function isExpiredActivity(value, clock, ttlMs) {
 }
 async function cleanupExpiredLab(roots, snapshot, docker, database, options, owner, stateReader) {
   await ensureOwnerSafetyDirectories(roots, snapshot.ownerKey);
-  const activityLock = join5(ownerDirectory(roots.stateRoot, owner), ".locks", `activity-${snapshot.id}`);
-  const labLock = join5(ownerDirectory(roots.stateRoot, owner), ".locks", `lab-${snapshot.id}`);
+  const activityLock = join6(ownerDirectory(roots.stateRoot, owner), ".locks", `activity-${snapshot.id}`);
+  const labLock = join6(ownerDirectory(roots.stateRoot, owner), ".locks", `lab-${snapshot.id}`);
   let previous;
   let claimed;
   await withFileLock(activityLock, async () => {
@@ -8234,8 +8299,8 @@ async function cleanupExpiredLab(roots, snapshot, docker, database, options, own
   }, { attempts: 600, delayMs: 50 });
 }
 async function validateReaperLab(roots, owner, ownerKey2, lab) {
-  const expectedRuntime = resolve3(roots.runtimeRoot, ownerKey2, lab.id);
-  if (lab.owner !== owner || lab.ownerKey !== ownerKey2 || resolve3(lab.runtimeRoot) !== expectedRuntime || resolve3(lab.workspace) !== join5(expectedRuntime, "workspace")) {
+  const expectedRuntime = resolve4(roots.runtimeRoot, ownerKey2, lab.id);
+  if (lab.owner !== owner || lab.ownerKey !== ownerKey2 || resolve4(lab.runtimeRoot) !== expectedRuntime || resolve4(lab.workspace) !== join6(expectedRuntime, "workspace")) {
     throw new Error("lab ownership or runtime containment is invalid");
   }
   if (lab.modeKind === "dockerfile" && lab.managedImage !== internalImageTag(ownerKey2, lab.id)) {
@@ -8247,7 +8312,7 @@ async function validateReaperLab(roots, owner, ownerKey2, lab) {
   }
 }
 async function ensureGlobalLockDirectory(roots) {
-  const path3 = join5(roots.stateRoot, ".locks");
+  const path3 = join6(roots.stateRoot, ".locks");
   await mkdir5(path3, { recursive: true, mode: 448 });
   if (!await exactDirectoryChain(roots.stateRoot, [".locks"], "global lock directory")) {
     throw new Error("global lock directory disappeared");
@@ -8260,7 +8325,7 @@ async function ensureOwnerSafetyDirectories(roots, ownerKey2) {
   if (!await exactDirectoryChain(roots.stateRoot, ["owners", ownerKey2, "labs"], "owner labs directory")) {
     throw new Error("owner labs directory disappeared");
   }
-  const locks = join5(roots.stateRoot, "owners", ownerKey2, ".locks");
+  const locks = join6(roots.stateRoot, "owners", ownerKey2, ".locks");
   await mkdir5(locks, { recursive: true, mode: 448 });
   if (!await exactDirectoryChain(roots.stateRoot, ["owners", ownerKey2, ".locks"], "owner lock directory")) {
     throw new Error("owner lock directory disappeared");
@@ -8286,7 +8351,7 @@ async function reapArchivedOwners(options) {
     };
   }
   try {
-    const ownerRoot = join6(roots.stateRoot, "owners");
+    const ownerRoot = join7(roots.stateRoot, "owners");
     if (!await exactDirectoryChain(roots.stateRoot, ["owners"], "owner state root"))
       return result;
     await ensureGlobalLockDirectory(roots);
@@ -8313,7 +8378,7 @@ async function reapArchivedOwners(options) {
         if (!await exactDirectoryChain(roots.stateRoot, ["owners", entry.name], "owner state directory")) {
           throw new Error("owner state directory disappeared");
         }
-        owner = await readOwnerManifest(join6(ownerRoot, entry.name, "owner.json"));
+        owner = await readOwnerManifest(join7(ownerRoot, entry.name, "owner.json"));
         await ensureOwnerSafetyDirectories(roots, owner.ownerKey);
       } catch (error) {
         result.retainedOwners.push({ ownerKey: fallbackKey, reason: "invalid owner manifest" });
@@ -8390,7 +8455,7 @@ async function reapArchivedOwners(options) {
           if (!await exactDirectoryChain(roots.stateRoot, ["owners", owner.ownerKey], "owner state directory")) {
             throw new Error("owner state directory disappeared");
           }
-          const currentOwner = await readOwnerManifest(join6(ownerRoot, owner.ownerKey, "owner.json"));
+          const currentOwner = await readOwnerManifest(join7(ownerRoot, owner.ownerKey, "owner.json"));
           if (currentOwner.owner !== owner.owner || currentOwner.ownerKey !== owner.ownerKey || currentOwner.createdAt !== owner.createdAt) {
             throw new Error("owner state changed before archive cleanup");
           }
@@ -8425,10 +8490,10 @@ async function reapArchivedOwners(options) {
           }
           await markOwnerReaped(roots.stateRoot, owner.owner);
           if (await exactDirectoryChain(roots.stateRoot, ["owners", owner.ownerKey], "owner state directory")) {
-            await boundedRemove(join6(ownerRoot, owner.ownerKey), 1e5);
+            await removeVerifiedTree(join7(ownerRoot, owner.ownerKey));
           }
           if (await exactDirectoryChain(roots.runtimeRoot, [owner.ownerKey], "owner runtime directory")) {
-            await boundedRemove(join6(roots.runtimeRoot, owner.ownerKey), 1e5);
+            await removeVerifiedTree(join7(roots.runtimeRoot, owner.ownerKey));
           }
           result.archivedOwnersCleaned.push(owner.ownerKey);
         }, { attempts: 600, delayMs: 50 });
@@ -8474,7 +8539,7 @@ function queryThreadState(database, owner) {
   return "uncertain";
 }
 async function prepareExactLab(roots, snapshot, cleanup) {
-  const lock = join6(ownerDirectory(roots.stateRoot, snapshot.owner), ".locks", `lab-${snapshot.id}`);
+  const lock = join7(ownerDirectory(roots.stateRoot, snapshot.owner), ".locks", `lab-${snapshot.id}`);
   const claimed = await withFileLock(lock, async () => {
     const lab = await readLab(roots, snapshot.owner, snapshot.id);
     await validateReaperLab(roots, lab.owner, lab.ownerKey, lab);
@@ -8483,15 +8548,21 @@ async function prepareExactLab(roots, snapshot, cleanup) {
   await cleanup?.(claimed);
 }
 async function cleanupExactLab(roots, lab, docker, authorize) {
-  const labLock = join6(ownerDirectory(roots.stateRoot, lab.owner), ".locks", `lab-${lab.id}`);
-  const activityLock = join6(ownerDirectory(roots.stateRoot, lab.owner), ".locks", `activity-${lab.id}`);
+  const labLock = join7(ownerDirectory(roots.stateRoot, lab.owner), ".locks", `lab-${lab.id}`);
+  const activityLock = join7(ownerDirectory(roots.stateRoot, lab.owner), ".locks", `activity-${lab.id}`);
   await authorize();
   let previous;
   await withFileLock(labLock, async () => {
     const current = await readLab(roots, lab.owner, lab.id);
     await validateReaperLab(roots, current.owner, current.ownerKey, current);
-    previous = { state: current.state, updatedAt: current.updatedAt, error: current.error };
+    previous = {
+      state: current.state,
+      updatedAt: current.updatedAt,
+      error: current.error,
+      provisioningFailure: current.provisioningFailure
+    };
     current.state = "destroying";
+    current.provisioningFailure = undefined;
     current.updatedAt = new Date().toISOString();
     await writeLab(roots, current);
     lab = current;
@@ -8505,6 +8576,7 @@ async function cleanupExactLab(roots, lab, docker, authorize) {
         current.state = previous.state;
         current.updatedAt = previous.updatedAt;
         current.error = previous.error;
+        current.provisioningFailure = previous.provisioningFailure;
         await writeLab(roots, current);
       }
     }, { attempts: 600, delayMs: 50 });
@@ -8522,7 +8594,7 @@ async function cleanupExactLab(roots, lab, docker, authorize) {
     await exactDirectoryChain(roots.runtimeRoot, [lab.ownerKey, lab.id], "lab runtime directory");
     await cleanupLabLabels(lab, lab.modeKind === "dockerfile", docker);
     if (await exactDirectoryChain(roots.runtimeRoot, [lab.ownerKey, lab.id], "lab runtime directory")) {
-      await boundedRemove(lab.runtimeRoot, 1e5);
+      await removeVerifiedTree(lab.runtimeRoot);
     }
     if (!await exactDirectoryChain(roots.stateRoot, ["owners", lab.ownerKey], "owner state directory")) {
       throw new Error("owner state directory disappeared");
@@ -8537,13 +8609,19 @@ function boundedMessage(prefix, error) {
 }
 
 // packages/skizzles-container-lab/src/public/output.ts
-function redactPublicText(value, maxBytes = 2000, maxLines = 8) {
-  const redacted = value.replace(/\/(?:[^\s"'\\]|\\.)+/g, "[path]").replace(/\b[a-f0-9]{64}\b/gi, "[redacted]").replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[redacted]").replace(/\bcodex-container-lab:[A-Za-z0-9._-]+\b/g, "[redacted]").replace(/\bccl-[a-z0-9][a-z0-9-]*\b/gi, "[redacted]").replace(/io\.openai\.codex-container-lab\.owner=\S+/gi, "io.openai.codex-container-lab.owner=[redacted]").replace(/(?:ownerKey|runtimeRoot|stateRoot|composeArgs|managedImage)\s*[=:]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "[redacted]").split(`
+function redactPublicText(value, maxBytes = 2000, maxLines = 8, options = {}) {
+  const redacted = value.replace(/(["'])(?:[A-Za-z]:[\\/]|\\\\)(?:\\.|(?!\1)[^\\])*?\1/g, "[path]").replace(/\b[A-Za-z]:[\\/](?:[^\s"'\\]|\\.)+/g, "[path]").replace(/\\\\(?:[^\s"'\\]|\\.)+/g, "[path]").replace(/\/(?:[^\s"'\\]|\\.)+/g, "[path]").replace(/\b[a-f0-9]{64}\b/gi, "[redacted]").replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[redacted]").replace(/\bcodex-container-lab:[A-Za-z0-9._-]+\b/g, "[redacted]").replace(/\bccl-[a-z0-9][a-z0-9-]*\b/gi, "[redacted]").replace(/io\.openai\.codex-container-lab\.owner=\S+/gi, "io.openai.codex-container-lab.owner=[redacted]").replace(/(?:ownerKey|runtimeRoot|stateRoot|composeArgs|managedImage)\s*[=:]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "[redacted]").split(`
 `).slice(-maxLines).join(`
 `);
-  return truncateUtf8(redacted, maxBytes);
+  return truncateUtf8(redacted, maxBytes, options.byteCapture ?? "head");
 }
-function truncateUtf8(value, maxBytes) {
+function truncateUtf8(value, maxBytes, policy) {
+  if (policy === "tail") {
+    const bytes2 = Buffer.from(value);
+    if (bytes2.byteLength <= maxBytes)
+      return value;
+    return bytes2.subarray(bytes2.byteLength - maxBytes).toString("utf8").replace(/^\uFFFD/, "");
+  }
   let bytes = 0;
   let output = "";
   for (const character of value) {
@@ -8566,7 +8644,7 @@ async function reaperMain(args = process.argv.slice(2)) {
       return 0;
     }
     const result = await reapArchivedOwners({
-      dbPath: parsed.dbPath ?? join7(homedir2(), ".codex", "state_5.sqlite"),
+      dbPath: parsed.dbPath ?? join8(homedir2(), ".codex", "state_5.sqlite"),
       roots: resolveRoots({ stateRoot: parsed.stateRoot, runtimeRoot: parsed.runtimeRoot })
     });
     const output = reaperOutput(result);

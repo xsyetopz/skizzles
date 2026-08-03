@@ -10,7 +10,7 @@ import {
   listLabs, markOwnerReaped, ownerDirectory, ownerLockPath, readLab,
   readOwnerManifest, removeLabState, resolveRoots, writeLab, type Clock, type StateRoots,
 } from "../storage/state";
-import { boundedRemove } from "./cleanup-utils";
+import { removeVerifiedTree } from "./cleanup-utils";
 import {
   cleanupExpiredLab, ensureGlobalLockDirectory, ensureOwnerSafetyDirectories,
   isExpiredActivity, validateReaperLab,
@@ -178,10 +178,10 @@ export async function reapArchivedOwners(options: ReaperOptions): Promise<Reaper
           }
           await markOwnerReaped(roots.stateRoot, owner.owner);
           if (await exactDirectoryChain(roots.stateRoot, ["owners", owner.ownerKey], "owner state directory")) {
-            await boundedRemove(join(ownerRoot, owner.ownerKey), 100_000);
+            await removeVerifiedTree(join(ownerRoot, owner.ownerKey));
           }
           if (await exactDirectoryChain(roots.runtimeRoot, [owner.ownerKey], "owner runtime directory")) {
-            await boundedRemove(join(roots.runtimeRoot, owner.ownerKey), 100_000);
+            await removeVerifiedTree(join(roots.runtimeRoot, owner.ownerKey));
           }
           result.archivedOwnersCleaned.push(owner.ownerKey);
         }, { attempts: 600, delayMs: 50 });
@@ -258,12 +258,23 @@ async function cleanupExactLab(
   const labLock = join(ownerDirectory(roots.stateRoot, lab.owner), ".locks", `lab-${lab.id}`);
   const activityLock = join(ownerDirectory(roots.stateRoot, lab.owner), ".locks", `activity-${lab.id}`);
   await authorize();
-  let previous: { state: import("../storage/records").LabMetadata["state"]; updatedAt: string; error?: string } | undefined;
+  let previous: {
+    state: import("../storage/records").LabMetadata["state"];
+    updatedAt: string;
+    error?: string;
+    provisioningFailure?: import("../storage/records").LabMetadata["provisioningFailure"];
+  } | undefined;
   await withFileLock(labLock, async () => {
     const current = await readLab(roots, lab.owner, lab.id);
     await validateReaperLab(roots, current.owner, current.ownerKey, current);
-    previous = { state: current.state, updatedAt: current.updatedAt, error: current.error };
+    previous = {
+      state: current.state,
+      updatedAt: current.updatedAt,
+      error: current.error,
+      provisioningFailure: current.provisioningFailure,
+    };
     current.state = "destroying";
+    current.provisioningFailure = undefined;
     current.updatedAt = new Date().toISOString();
     await writeLab(roots, current);
     lab = current;
@@ -276,6 +287,7 @@ async function cleanupExactLab(
         current.state = previous.state;
         current.updatedAt = previous.updatedAt;
         current.error = previous.error;
+        current.provisioningFailure = previous.provisioningFailure;
         await writeLab(roots, current);
       }
     }, { attempts: 600, delayMs: 50 });
@@ -295,7 +307,7 @@ async function cleanupExactLab(
     await exactDirectoryChain(roots.runtimeRoot, [lab.ownerKey, lab.id], "lab runtime directory");
     await cleanupLabLabels(lab, lab.modeKind === "dockerfile", docker);
     if (await exactDirectoryChain(roots.runtimeRoot, [lab.ownerKey, lab.id], "lab runtime directory")) {
-      await boundedRemove(lab.runtimeRoot, 100_000);
+      await removeVerifiedTree(lab.runtimeRoot);
     }
     if (!await exactDirectoryChain(roots.stateRoot, ["owners", lab.ownerKey], "owner state directory")) {
       throw new Error("owner state directory disappeared");

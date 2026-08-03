@@ -21,3 +21,10 @@ export async function boundedRemove(root: string, maxEntries: number): Promise<v
   await scan(root);
   await rm(root, { recursive: true, force: true });
 }
+
+/** Remove a root whose exact, non-symlinked Container Lab path was just proved
+ * by the caller. Archive cleanup may contain very large build trees, so it
+ * must not retain a valid owner merely because a scan exceeded a soft bound. */
+export async function removeVerifiedTree(root: string): Promise<void> {
+  await rm(root, { recursive: true, force: true });
+}

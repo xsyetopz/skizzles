@@ -1,6 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import type { LabConfig } from "./config";
 import {
   composeCommandArgs,
@@ -8,20 +7,31 @@ import {
   generateOverrideCompose,
   inspectComposeModel,
   validateSecretEnvironmentModel,
-  type ComposeInspectionFinding,
-  type ComposeModel,
 } from "./definition";
 import type { CommandResult } from "../execution/process";
-import { redactPublicText } from "../public/output";
-import type { Endpoint, LabMetadata, PersistedLabRuntime } from "../storage/records";
+import type { Endpoint, LabMetadata } from "../storage/records";
 import {
   defaultDockerRunner,
-  scrubSecretEnvironment,
   secretComposeEnvironment,
   type DockerRunner,
 } from "./docker-runner";
+import { normalizedComposeModel } from "./compose-model";
+import { composeCommand } from "./compose-command";
+import {
+  captureComposeFailure,
+  DockerProvisioningFailure,
+  PROVISIONING_FAILURE_DIAGNOSTIC_FILE,
+} from "./diagnostics";
+import { stackLogs, stackStatus } from "./status";
+import type { LabRuntime } from "./runtime-model";
 
-export type LabRuntime = PersistedLabRuntime & { metadata: LabMetadata };
+export type { LabRuntime } from "./runtime-model";
+export { composeCommand } from "./compose-command";
+export {
+  DockerProvisioningFailure,
+  PROVISIONING_FAILURE_DIAGNOSTIC_FILE,
+} from "./diagnostics";
+export { stackLogs, stackStatus } from "./status";
 
 export async function prepareLabRuntime(
   metadata: LabMetadata,
@@ -37,7 +47,7 @@ export async function prepareLabRuntime(
   await writeFile(overrideFile, "{}\n", { mode: 0o600 });
   const composeArgs = composeCommandArgs(config, { projectName: metadata.composeProject, overrideFile, baseFile });
   const composeEnvironment = secretComposeEnvironment(config.secretEnvironment, environment);
-  const sourceModel = await normalizedModel(composeArgs, runner, composeEnvironment);
+  const sourceModel = await normalizedComposeModel(composeArgs, runner, composeEnvironment);
   validateSecretEnvironmentModel(sourceModel, config.secretEnvironment, composeEnvironment);
   const findings = inspectComposeModel(sourceModel);
   const override = generateOverrideCompose(config, sourceModel, {
@@ -47,52 +57,9 @@ export async function prepareLabRuntime(
     labId: metadata.id,
   });
   await writeFile(overrideFile, override, { mode: 0o600 });
-  const finalModel = await normalizedModel(composeArgs, runner, composeEnvironment);
+  const finalModel = await normalizedComposeModel(composeArgs, runner, composeEnvironment);
   validateSecretEnvironmentModel(finalModel, config.secretEnvironment, composeEnvironment);
   return { metadata, config, composeArgs, baseFile, overrideFile, findings };
-}
-
-async function normalizedModel(
-  composeArgs: string[],
-  runner: DockerRunner,
-  environment: NodeJS.ProcessEnv = process.env,
-): Promise<ComposeModel> {
-  let result: CommandResult;
-  try {
-    result = await runner.run([...composeArgs, "config", "--no-interpolate", "--format", "json"], {
-      timeoutMs: 30_000, maxOutputBytes: 16 * 1024 * 1024, allowFailure: true, env: environment,
-    });
-  } catch {
-    throw new Error("Docker Compose configuration failed; secret-bearing diagnostics redacted");
-  }
-  if (result.code === 0) {
-    try { return JSON.parse(result.stdout.toString()) as ComposeModel; } catch {}
-  }
-  let yaml: CommandResult;
-  try {
-    yaml = await runner.run([...composeArgs, "config", "--no-interpolate"], {
-      timeoutMs: 30_000, maxOutputBytes: 16 * 1024 * 1024, allowFailure: true, env: environment,
-    });
-  } catch {
-    throw new Error("Docker Compose configuration failed; secret-bearing diagnostics redacted");
-  }
-  if (yaml.code !== 0) throw new Error("Docker Compose configuration failed; secret-bearing diagnostics redacted");
-  return parseYaml(yaml.stdout.toString()) as ComposeModel;
-}
-
-export async function composeCommand(
-  runtime: LabRuntime,
-  args: string[],
-  options: { timeoutMs?: number; allowFailure?: boolean; signal?: AbortSignal } = {},
-  runner: DockerRunner = defaultDockerRunner,
-): Promise<CommandResult> {
-  return await runner.run([...runtime.composeArgs, ...args], {
-    timeoutMs: options.timeoutMs,
-    allowFailure: options.allowFailure,
-    maxOutputBytes: 4 * 1024 * 1024,
-    signal: options.signal,
-    env: scrubSecretEnvironment(runtime.config.secretEnvironment, process.env),
-  });
 }
 
 export async function provisionLabStack(
@@ -108,25 +75,21 @@ export async function provisionLabStack(
       signal,
       allowFailure: true,
       maxOutputBytes: 4 * 1024 * 1024,
+      stdoutCapture: "tail",
+      stderrCapture: "tail",
       env: secretComposeEnvironment(runtime.config.secretEnvironment, environment),
     });
   } catch {
-    throw new Error(signal?.aborted
+    const message = signal?.aborted
       ? "Docker Compose up aborted; secret-bearing diagnostics redacted"
-      : "Docker Compose up failed; secret-bearing diagnostics redacted");
+      : "Docker Compose up failed; secret-bearing diagnostics redacted";
+    throw new DockerProvisioningFailure(message, await captureComposeFailure(runtime, undefined, runner, environment));
   }
   if (provisioned.code !== 0) {
-    let diagnostic = `${provisioned.stdout.toString()}\n${provisioned.stderr.toString()}`;
-    for (const name of runtime.config.secretEnvironment) {
-      const value = environment[name];
-      if (value) diagnostic = diagnostic.split(value).join("[secret-value-redacted]");
-    }
-    await writeFile(
-      "/tmp/ccl-compose-failure-redacted.log",
-      redactPublicText(diagnostic),
-      { mode: 0o600 },
+    throw new DockerProvisioningFailure(
+      "Docker Compose up failed; secret-bearing diagnostics redacted",
+      await captureComposeFailure(runtime, provisioned, runner, environment),
     );
-    throw new Error("Docker Compose up failed; secret-bearing diagnostics redacted");
   }
   const compatibility = [
     `test -d ${shellQuote(runtime.config.runtime.workspace)}`,
@@ -156,77 +119,6 @@ export async function provisionLabStack(
   return endpoints;
 }
 
-export async function stackStatus(runtime: LabRuntime, runner: DockerRunner = defaultDockerRunner): Promise<unknown> {
-  const result = await composeCommand(runtime, ["ps", "--format", "json"], { allowFailure: true, timeoutMs: 20_000 }, runner);
-  if (result.code !== 0) return { available: false, error: compactError(result.stderr.toString()) };
-  const raw = result.stdout.toString().trim();
-  if (!raw) return { available: true, services: [] };
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    return { available: true, services: summarizeServices(Array.isArray(parsed) ? parsed : [parsed]) };
-  } catch {
-    try {
-      return { available: true, services: summarizeServices(raw.split("\n").filter(Boolean).map((line) => JSON.parse(line) as unknown)) };
-    } catch {
-      return { available: false, error: "Docker returned an invalid bounded status response" };
-    }
-  }
-}
-
-export async function stackLogs(
-  runtime: LabRuntime,
-  service: string,
-  tailLines: number,
-  runner: DockerRunner = defaultDockerRunner,
-): Promise<{ text: string; truncated: boolean }> {
-  if (tailLines < 1 || tailLines > 500) throw new Error("tail-lines must be 1..500");
-  const model = await normalizedModel(
-    runtime.composeArgs,
-    runner,
-    scrubSecretEnvironment(runtime.config.secretEnvironment, process.env),
-  );
-  if (!Object.hasOwn(model.services ?? {}, service)) throw new Error(`unknown Compose service: ${service}`);
-  const result = await composeCommand(runtime, ["logs", "--no-color", "--tail", String(tailLines), service], {
-    allowFailure: true, timeoutMs: 20_000,
-  }, runner);
-  return boundedLogTail(`${result.stdout}${result.stderr}`, tailLines, 8 * 1024);
-}
-
-function summarizeServices(values: unknown[]): Array<{
-  service: string;
-  state: string;
-  health?: string;
-  exitCode?: number;
-}> {
-  return values.slice(0, 16).flatMap((value) => {
-    if (!isRecord(value)) return [];
-    const service = typeof value.Service === "string" ? value.Service : typeof value.Name === "string" ? value.Name : undefined;
-    const state = typeof value.State === "string" ? value.State : undefined;
-    if (!service || !state) return [];
-    const summary: { service: string; state: string; health?: string; exitCode?: number } = {
-      service: service.slice(0, 128), state: state.slice(0, 64),
-    };
-    if (typeof value.Health === "string" && value.Health) summary.health = value.Health.slice(0, 64);
-    const exitCode = typeof value.ExitCode === "number" ? value.ExitCode : Number(value.ExitCode);
-    if (Number.isInteger(exitCode)) summary.exitCode = exitCode;
-    return [summary];
-  });
-}
-
-function boundedLogTail(value: string, maxLines: number, maxBytes: number): { text: string; truncated: boolean } {
-  const sanitized = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "�").trimEnd();
-  const lines = sanitized.split("\n");
-  let selected = lines.slice(-maxLines).join("\n");
-  let truncated = lines.length > maxLines;
-  let bytes = Buffer.from(selected);
-  if (bytes.byteLength > maxBytes) {
-    bytes = bytes.subarray(bytes.byteLength - maxBytes);
-    selected = bytes.toString("utf8").replace(/^�/, "");
-    truncated = true;
-  }
-  return { text: selected, truncated };
-}
-
 export function runtimeFromLab(metadata: LabMetadata): LabRuntime {
   if (!metadata.runtime) throw new Error(`lab runtime is unavailable: ${metadata.id}`);
   return { metadata, ...metadata.runtime };
@@ -234,12 +126,4 @@ export function runtimeFromLab(metadata: LabMetadata): LabRuntime {
 
 function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
-
-function compactError(value: string): string {
-  return redactPublicText(value.trim(), 2_000, 6);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

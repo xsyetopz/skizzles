@@ -1,6 +1,13 @@
 import { spawn } from "node:child_process";
 
-export type CommandResult = { code: number; stdout: Buffer; stderr: Buffer };
+export type OutputCapturePolicy = "head" | "tail";
+export type CommandResult = {
+  code: number;
+  stdout: Buffer;
+  stderr: Buffer;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
+};
 export type RunOptions = {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
@@ -8,7 +15,17 @@ export type RunOptions = {
   allowFailure?: boolean;
   maxOutputBytes?: number;
   rejectOnOutputLimit?: boolean;
+  stdoutCapture?: OutputCapturePolicy;
+  stderrCapture?: OutputCapturePolicy;
   signal?: AbortSignal;
+};
+
+type CaptureState = {
+  chunks: Buffer[];
+  bytes: number;
+  totalBytes: number;
+  truncated: boolean;
+  policy: OutputCapturePolicy;
 };
 
 export async function runCommand(command: string, args: string[], options: RunOptions = {}): Promise<CommandResult> {
@@ -23,10 +40,8 @@ export async function runCommand(command: string, args: string[], options: RunOp
       detached: ownsProcessGroup,
     });
     const cap = options.maxOutputBytes ?? 4 * 1024 * 1024;
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
+    const stdout = captureState(options.stdoutCapture);
+    const stderr = captureState(options.stderrCapture);
     let timedOut = false;
     let cleanupStarted = false;
     let cleanupSignalSent = false;
@@ -66,8 +81,10 @@ export async function runCommand(command: string, args: string[], options: RunOp
       }
       const result = {
         code: timedOut ? 124 : (closeCode ?? 1),
-        stdout: Buffer.concat(stdout),
-        stderr: Buffer.concat(stderr),
+        stdout: Buffer.concat(stdout.chunks),
+        stderr: Buffer.concat(stderr.chunks),
+        stdoutTruncated: stdout.truncated,
+        stderrTruncated: stderr.truncated,
       };
       if (options.signal?.aborted) return reject(new Error(`${command} aborted`));
       if (result.code !== 0 && !options.allowFailure) {
@@ -93,23 +110,15 @@ export async function runCommand(command: string, args: string[], options: RunOp
         }, 100);
       }
     };
-    const collect = (
-      stream: "stdout" | "stderr",
-      chunks: Buffer[],
-      chunk: Buffer,
-      current: number,
-    ): number => {
-      const remaining = cap - current;
-      if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
-      const next = current + chunk.byteLength;
-      if (options.rejectOnOutputLimit && next > cap && outputOverflow === undefined) {
+    const collect = (stream: "stdout" | "stderr", state: CaptureState, chunk: Buffer): void => {
+      collectOutput(state, chunk, cap);
+      if (options.rejectOnOutputLimit && state.totalBytes > cap && outputOverflow === undefined) {
         outputOverflow = stream;
         terminate();
       }
-      return next;
     };
-    child.stdout.on("data", (chunk: Buffer) => { stdoutBytes = collect("stdout", stdout, chunk, stdoutBytes); });
-    child.stderr.on("data", (chunk: Buffer) => { stderrBytes = collect("stderr", stderr, chunk, stderrBytes); });
+    child.stdout.on("data", (chunk: Buffer) => collect("stdout", stdout, chunk));
+    child.stderr.on("data", (chunk: Buffer) => collect("stderr", stderr, chunk));
     const abort = () => terminate();
     options.signal?.addEventListener("abort", abort, { once: true });
     if (options.signal?.aborted) abort();
@@ -129,4 +138,44 @@ export async function runCommand(command: string, args: string[], options: RunOp
       settle();
     });
   });
+}
+
+function captureState(policy: OutputCapturePolicy | undefined): CaptureState {
+  return { chunks: [], bytes: 0, totalBytes: 0, truncated: false, policy: policy ?? "head" };
+}
+
+function collectOutput(state: CaptureState, chunk: Buffer, cap: number): void {
+  state.totalBytes += chunk.byteLength;
+  if (state.totalBytes > cap) state.truncated = true;
+  if (cap <= 0) return;
+  if (state.policy === "head") {
+    const remaining = cap - state.bytes;
+    if (remaining > 0) {
+      const retained = chunk.subarray(0, remaining);
+      state.chunks.push(retained);
+      state.bytes += retained.byteLength;
+    }
+    return;
+  }
+  if (chunk.byteLength >= cap) {
+    const retained = Buffer.from(chunk.subarray(chunk.byteLength - cap));
+    state.chunks = [retained];
+    state.bytes = retained.byteLength;
+    return;
+  }
+  let excess = state.bytes + chunk.byteLength - cap;
+  while (excess > 0 && state.chunks.length > 0) {
+    const first = state.chunks[0]!;
+    if (first.byteLength <= excess) {
+      state.chunks.shift();
+      state.bytes -= first.byteLength;
+      excess -= first.byteLength;
+    } else {
+      state.chunks[0] = first.subarray(excess);
+      state.bytes -= excess;
+      excess = 0;
+    }
+  }
+  state.chunks.push(chunk);
+  state.bytes += chunk.byteLength;
 }

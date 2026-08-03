@@ -1,109 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
 import { readFileSync, writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, readdir, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { ContainerLabWorkflow } from "./workflow";
-import type { DockerRunner, DockerSpawnOptions } from "../compose/docker-runner";
-import type { CommandResult, RunOptions } from "../execution/process";
 import { runCommand } from "../execution/process";
 import { ensureOwner, labManifestPath, ownerKey, readLab, writeLab } from "../storage/state";
 import type { LabMetadata } from "../storage/records";
+import { AlternatesInspectingDocker, DestructiveDocker, InterruptingDocker, RecordingDocker, SecretDiagnosticDocker } from "./workflow-test-fixtures";
 
 const temporary: string[] = [];
 afterEach(async () => { await Promise.all(temporary.splice(0).map((path) => rm(path, { recursive: true, force: true }))); });
-
-class RecordingDocker implements DockerRunner {
-  calls: string[][] = [];
-  runCalls: Array<{ args: string[]; options?: RunOptions }> = [];
-  spawnCalls: Array<{ args: string[]; options?: DockerSpawnOptions }> = [];
-  child?: ChildProcessWithoutNullStreams;
-  model: unknown = { services: { dev: {} } };
-  async run(args: string[], options?: RunOptions): Promise<CommandResult> {
-    this.calls.push(args);
-    this.runCalls.push({ args, options });
-    if (args.includes("config")) return { code: 0, stdout: Buffer.from(JSON.stringify(this.model)), stderr: Buffer.alloc(0) };
-    return { code: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
-  }
-  spawn(args: string[], options?: DockerSpawnOptions): ChildProcessWithoutNullStreams {
-    this.calls.push(args);
-    this.spawnCalls.push({ args, options });
-    const child = new EventEmitter() as ChildProcessWithoutNullStreams;
-    Object.assign(child, { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), exitCode: null });
-    this.child = child;
-    return child;
-  }
-}
-
-class SecretDiagnosticDocker extends RecordingDocker {
-  constructor(private readonly sentinel: string) { super(); }
-  override async run(args: string[], options?: RunOptions): Promise<CommandResult> {
-    if (args.includes("config")) {
-      this.calls.push(args);
-      this.runCalls.push({ args, options });
-      return { code: 1, stdout: Buffer.alloc(0), stderr: Buffer.from(`secret diagnostic: ${this.sentinel}`) };
-    }
-    return await super.run(args, options);
-  }
-}
-
-class InterruptingDocker extends RecordingDocker {
-  constructor(private readonly controller: AbortController) { super(); }
-  override async run(args: string[], options?: RunOptions): Promise<CommandResult> {
-    if (args.includes("up")) {
-      this.calls.push(args);
-      this.controller.abort("SIGTERM");
-      throw new Error("docker compose up aborted");
-    }
-    return await super.run(args, options);
-  }
-}
-
-class DestructiveDocker extends RecordingDocker {
-  private listed = false;
-  override async run(args: string[], options?: RunOptions): Promise<CommandResult> {
-    this.calls.push(args);
-    if (args[0] === "ps" && args[1] === "-aq" && !this.listed) {
-      this.listed = true;
-      return { code: 0, stdout: Buffer.from("container-1\n"), stderr: Buffer.alloc(0) };
-    }
-    if (args[0] === "rm" && args[1] === "-f") {
-      Object.assign(this.child!, { exitCode: 137 });
-      this.child!.emit("close", 137);
-    }
-    return { code: 0, stdout: Buffer.alloc(0), stderr: Buffer.alloc(0) };
-  }
-}
-
-class AlternatesInspectingDocker extends RecordingDocker {
-  alternatesAtFirstCall?: string[];
-
-  constructor(
-    private readonly runtimeRoot: string,
-    private readonly owner: string,
-  ) {
-    super();
-  }
-
-  override async run(args: string[], options?: RunOptions): Promise<CommandResult> {
-    if (!this.alternatesAtFirstCall) {
-      const labs = await readdir(join(this.runtimeRoot, ownerKey(this.owner)));
-      const workspace = join(this.runtimeRoot, ownerKey(this.owner), labs[0]!, "workspace");
-      const commonGit = (await runCommand("git", [
-        "-C", workspace, "rev-parse", "--path-format=absolute", "--git-common-dir",
-      ])).stdout.toString().trim();
-      const info = join(commonGit, "objects", "info");
-      this.alternatesAtFirstCall = [];
-      for (const name of ["alternates", "http-alternates"]) {
-        if (await Bun.file(join(info, name)).exists()) this.alternatesAtFirstCall.push(name);
-      }
-    }
-    return await super.run(args, options);
-  }
-}
 
 describe("attached service lifecycle", () => {
   test("create provisions synchronously and returns only lab identity and terminal state", async () => {
@@ -240,6 +148,13 @@ describe("attached service lifecycle", () => {
     for (const call of docker.runCalls.filter((call) => !call.args.includes("config") && !call.args.includes("up"))) {
       expect(Object.hasOwn(call.options?.env ?? {}, "REGISTRY_TOKEN")).toBe(false);
     }
+  });
+
+  test("keeps legacy failed manifests readable without diagnostics", async () => {
+    const fixture = await durableFixture("thread-legacy-failed", "failed");
+    const service = new ContainerLabWorkflow(fixture.owner, fixture.roots, new RecordingDocker());
+    expect((await service.labStatus(fixture.lab.id) as { state: string }).state).toBe("failed");
+    await expect(service.diagnostic(fixture.lab.id)).rejects.toThrow("unavailable");
   });
 
   test("health scrubs the union of secret names from known labs", async () => {

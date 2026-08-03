@@ -90,9 +90,11 @@ After installing the complete plugin surface, choose:
   There are no implementation escalation variants:
   Terra supplies verified evidence and commands; Luna Workers own clear slices;
   Sol judges the result. Select the generated `agent_type` without separate
-  model overrides; use numbered or context-free forks so Codex applies it.
-  `fork_turns="all"` bypasses selected-role application. Eviction or reload
-  ends the continuity guarantee.
+  model overrides; use the smallest useful positive numbered `fork_turns` value
+  so Codex applies it. A larger positive number safely means “up to this many
+  turns,” not full-history mode; do not use context-free or full-history forks,
+  which bypass the selected-role handoff. Eviction or reload ends the
+  continuity guarantee.
 
 Preview the full developer setup:
 

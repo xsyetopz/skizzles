@@ -6950,7 +6950,7 @@ import { StringDecoder } from "string_decoder";
 // packages/skizzles-container-lab/src/lifecycle/workflow.ts
 import { createHash as createHash4 } from "crypto";
 import { mkdir as mkdir6, realpath as realpath6 } from "fs/promises";
-import { join as join5 } from "path";
+import { join as join8 } from "path";
 
 // packages/skizzles-container-lab/src/compose/config.ts
 import { readFile, realpath, stat } from "fs/promises";
@@ -7587,10 +7587,8 @@ async function runCommand(command, args, options = {}) {
       detached: ownsProcessGroup
     });
     const cap = options.maxOutputBytes ?? 4 * 1024 * 1024;
-    const stdout = [];
-    const stderr = [];
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
+    const stdout = captureState(options.stdoutCapture);
+    const stderr = captureState(options.stderrCapture);
     let timedOut = false;
     let cleanupStarted = false;
     let cleanupSignalSent = false;
@@ -7632,8 +7630,10 @@ async function runCommand(command, args, options = {}) {
       }
       const result = {
         code: timedOut ? 124 : closeCode ?? 1,
-        stdout: Buffer.concat(stdout),
-        stderr: Buffer.concat(stderr)
+        stdout: Buffer.concat(stdout.chunks),
+        stderr: Buffer.concat(stderr.chunks),
+        stdoutTruncated: stdout.truncated,
+        stderrTruncated: stderr.truncated
       };
       if (options.signal?.aborted)
         return reject(new Error(`${command} aborted`));
@@ -7661,23 +7661,15 @@ async function runCommand(command, args, options = {}) {
         }, 100);
       }
     };
-    const collect = (stream, chunks, chunk, current) => {
-      const remaining = cap - current;
-      if (remaining > 0)
-        chunks.push(chunk.subarray(0, remaining));
-      const next = current + chunk.byteLength;
-      if (options.rejectOnOutputLimit && next > cap && outputOverflow === undefined) {
+    const collect = (stream, state, chunk) => {
+      collectOutput(state, chunk, cap);
+      if (options.rejectOnOutputLimit && state.totalBytes > cap && outputOverflow === undefined) {
         outputOverflow = stream;
         terminate();
       }
-      return next;
     };
-    child.stdout.on("data", (chunk) => {
-      stdoutBytes = collect("stdout", stdout, chunk, stdoutBytes);
-    });
-    child.stderr.on("data", (chunk) => {
-      stderrBytes = collect("stderr", stderr, chunk, stderrBytes);
-    });
+    child.stdout.on("data", (chunk) => collect("stdout", stdout, chunk));
+    child.stderr.on("data", (chunk) => collect("stderr", stderr, chunk));
     const abort = () => terminate();
     options.signal?.addEventListener("abort", abort, { once: true });
     if (options.signal?.aborted)
@@ -7704,6 +7696,46 @@ async function runCommand(command, args, options = {}) {
       settle();
     });
   });
+}
+function captureState(policy) {
+  return { chunks: [], bytes: 0, totalBytes: 0, truncated: false, policy: policy ?? "head" };
+}
+function collectOutput(state, chunk, cap) {
+  state.totalBytes += chunk.byteLength;
+  if (state.totalBytes > cap)
+    state.truncated = true;
+  if (cap <= 0)
+    return;
+  if (state.policy === "head") {
+    const remaining = cap - state.bytes;
+    if (remaining > 0) {
+      const retained = chunk.subarray(0, remaining);
+      state.chunks.push(retained);
+      state.bytes += retained.byteLength;
+    }
+    return;
+  }
+  if (chunk.byteLength >= cap) {
+    const retained = Buffer.from(chunk.subarray(chunk.byteLength - cap));
+    state.chunks = [retained];
+    state.bytes = retained.byteLength;
+    return;
+  }
+  let excess = state.bytes + chunk.byteLength - cap;
+  while (excess > 0 && state.chunks.length > 0) {
+    const first = state.chunks[0];
+    if (first.byteLength <= excess) {
+      state.chunks.shift();
+      state.bytes -= first.byteLength;
+      excess -= first.byteLength;
+    } else {
+      state.chunks[0] = first.subarray(excess);
+      state.bytes -= excess;
+      excess = 0;
+    }
+  }
+  state.chunks.push(chunk);
+  state.bytes += chunk.byteLength;
 }
 
 // packages/skizzles-container-lab/src/compose/docker-runner.ts
@@ -7895,56 +7927,11 @@ function isRecord3(value) {
 }
 
 // packages/skizzles-container-lab/src/compose/runtime.ts
-import { mkdir, writeFile } from "fs/promises";
-import { join } from "path";
+import { mkdir, writeFile as writeFile2 } from "fs/promises";
+import { join as join2 } from "path";
 
-// packages/skizzles-container-lab/src/public/output.ts
-function redactPublicText(value, maxBytes = 2000, maxLines = 8) {
-  const redacted = value.replace(/\/(?:[^\s"'\\]|\\.)+/g, "[path]").replace(/\b[a-f0-9]{64}\b/gi, "[redacted]").replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[redacted]").replace(/\bcodex-container-lab:[A-Za-z0-9._-]+\b/g, "[redacted]").replace(/\bccl-[a-z0-9][a-z0-9-]*\b/gi, "[redacted]").replace(/io\.openai\.codex-container-lab\.owner=\S+/gi, "io.openai.codex-container-lab.owner=[redacted]").replace(/(?:ownerKey|runtimeRoot|stateRoot|composeArgs|managedImage)\s*[=:]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "[redacted]").split(`
-`).slice(-maxLines).join(`
-`);
-  return truncateUtf8(redacted, maxBytes);
-}
-function truncateUtf8(value, maxBytes) {
-  let bytes = 0;
-  let output = "";
-  for (const character of value) {
-    const size = Buffer.byteLength(character);
-    if (bytes + size > maxBytes)
-      return `${output}\u2026`;
-    output += character;
-    bytes += size;
-  }
-  return output;
-}
-
-// packages/skizzles-container-lab/src/compose/runtime.ts
-async function prepareLabRuntime(metadata, config, runner = defaultDockerRunner, environment = process.env) {
-  await mkdir(metadata.runtimeRoot, { recursive: true, mode: 448 });
-  const base = generateBaseCompose(config);
-  const baseFile = base === undefined ? undefined : join(metadata.runtimeRoot, "base.compose.yaml");
-  if (baseFile && base !== undefined)
-    await writeFile(baseFile, base, { mode: 384 });
-  const overrideFile = join(metadata.runtimeRoot, "override.compose.yaml");
-  await writeFile(overrideFile, `{}
-`, { mode: 384 });
-  const composeArgs = composeCommandArgs(config, { projectName: metadata.composeProject, overrideFile, baseFile });
-  const composeEnvironment = secretComposeEnvironment(config.secretEnvironment, environment);
-  const sourceModel = await normalizedModel(composeArgs, runner, composeEnvironment);
-  validateSecretEnvironmentModel(sourceModel, config.secretEnvironment, composeEnvironment);
-  const findings = inspectComposeModel(sourceModel);
-  const override = generateOverrideCompose(config, sourceModel, {
-    workspaceHostPath: metadata.workspace,
-    owner: metadata.owner,
-    ownerKey: metadata.ownerKey,
-    labId: metadata.id
-  });
-  await writeFile(overrideFile, override, { mode: 384 });
-  const finalModel = await normalizedModel(composeArgs, runner, composeEnvironment);
-  validateSecretEnvironmentModel(finalModel, config.secretEnvironment, composeEnvironment);
-  return { metadata, config, composeArgs, baseFile, overrideFile, findings };
-}
-async function normalizedModel(composeArgs, runner, environment = process.env) {
+// packages/skizzles-container-lab/src/compose/compose-model.ts
+async function normalizedComposeModel(composeArgs, runner, environment = process.env) {
   let result;
   try {
     result = await runner.run([...composeArgs, "config", "--no-interpolate", "--format", "json"], {
@@ -7976,14 +7963,419 @@ async function normalizedModel(composeArgs, runner, environment = process.env) {
     throw new Error("Docker Compose configuration failed; secret-bearing diagnostics redacted");
   return $parse(yaml.stdout.toString());
 }
+
+// packages/skizzles-container-lab/src/compose/compose-command.ts
 async function composeCommand(runtime, args, options = {}, runner = defaultDockerRunner) {
   return await runner.run([...runtime.composeArgs, ...args], {
     timeoutMs: options.timeoutMs,
     allowFailure: options.allowFailure,
     maxOutputBytes: 4 * 1024 * 1024,
     signal: options.signal,
-    env: scrubSecretEnvironment(runtime.config.secretEnvironment, process.env)
+    env: scrubSecretEnvironment(runtime.config.secretEnvironment, options.environment ?? process.env)
   });
+}
+
+// packages/skizzles-container-lab/src/compose/diagnostics.ts
+import { randomUUID } from "crypto";
+import { lstat, rename, rm, writeFile } from "fs/promises";
+import { join } from "path";
+
+// packages/skizzles-container-lab/src/public/output.ts
+function redactPublicText(value, maxBytes = 2000, maxLines = 8, options = {}) {
+  const redacted = value.replace(/(["'])(?:[A-Za-z]:[\\/]|\\\\)(?:\\.|(?!\1)[^\\])*?\1/g, "[path]").replace(/\b[A-Za-z]:[\\/](?:[^\s"'\\]|\\.)+/g, "[path]").replace(/\\\\(?:[^\s"'\\]|\\.)+/g, "[path]").replace(/\/(?:[^\s"'\\]|\\.)+/g, "[path]").replace(/\b[a-f0-9]{64}\b/gi, "[redacted]").replace(/\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b/gi, "[redacted]").replace(/\bcodex-container-lab:[A-Za-z0-9._-]+\b/g, "[redacted]").replace(/\bccl-[a-z0-9][a-z0-9-]*\b/gi, "[redacted]").replace(/io\.openai\.codex-container-lab\.owner=\S+/gi, "io.openai.codex-container-lab.owner=[redacted]").replace(/(?:ownerKey|runtimeRoot|stateRoot|composeArgs|managedImage)\s*[=:]\s*(?:"[^"]*"|'[^']*'|\S+)/gi, "[redacted]").split(`
+`).slice(-maxLines).join(`
+`);
+  return truncateUtf8(redacted, maxBytes, options.byteCapture ?? "head");
+}
+function truncateUtf8(value, maxBytes, policy) {
+  if (policy === "tail") {
+    const bytes2 = Buffer.from(value);
+    if (bytes2.byteLength <= maxBytes)
+      return value;
+    return bytes2.subarray(bytes2.byteLength - maxBytes).toString("utf8").replace(/^\uFFFD/, "");
+  }
+  let bytes = 0;
+  let output = "";
+  for (const character of value) {
+    const size = Buffer.byteLength(character);
+    if (bytes + size > maxBytes)
+      return `${output}\u2026`;
+    output += character;
+    bytes += size;
+  }
+  return output;
+}
+
+// packages/skizzles-container-lab/src/compose/status.ts
+async function stackStatus(runtime, runner = defaultDockerRunner, options = {}) {
+  const status = await listStackServiceSummaries(runtime, runner, options.environment, options.all === true);
+  if (!status.available)
+    return { available: false, error: status.error };
+  return {
+    available: true,
+    ...options.all ? { serviceCount: status.serviceCount } : {},
+    services: status.services.slice(0, 16)
+  };
+}
+async function listStackServiceSummaries(runtime, runner, environment, all = true) {
+  let result;
+  try {
+    result = await composeCommand(runtime, ["ps", ...all ? ["--all"] : [], "--format", "json"], {
+      allowFailure: true,
+      timeoutMs: 20000,
+      environment
+    }, runner);
+  } catch {
+    return { available: false, services: [], serviceCount: 0, error: "Docker returned an unavailable status response" };
+  }
+  if (result.code !== 0) {
+    return { available: false, services: [], serviceCount: 0, error: compactError(result.stderr.toString()) };
+  }
+  const raw = result.stdout.toString().trim();
+  if (!raw)
+    return { available: true, services: [], serviceCount: 0 };
+  const values = parseStatusValues(raw, 1000);
+  if (!values) {
+    return { available: false, services: [], serviceCount: 0, error: "Docker returned an invalid bounded status response" };
+  }
+  return {
+    available: true,
+    services: summarizeServices(values, 1000),
+    serviceCount: values.length
+  };
+}
+async function stackLogs(runtime, service, tailLines, runner = defaultDockerRunner) {
+  if (tailLines < 1 || tailLines > 500)
+    throw new Error("tail-lines must be 1..500");
+  const model = await normalizedComposeModel(runtime.composeArgs, runner, scrubSecretEnvironment(runtime.config.secretEnvironment, process.env));
+  if (!Object.hasOwn(model.services ?? {}, service))
+    throw new Error(`unknown Compose service: ${service}`);
+  const result = await composeCommand(runtime, ["logs", "--no-color", "--tail", String(tailLines), service], {
+    allowFailure: true,
+    timeoutMs: 20000
+  }, runner);
+  return boundedLogTail(`${result.stdout}${result.stderr}`, tailLines, 8 * 1024);
+}
+function parseStatusValues(raw, maximum) {
+  try {
+    const parsed = JSON.parse(raw);
+    return (Array.isArray(parsed) ? parsed : [parsed]).slice(0, maximum);
+  } catch {
+    try {
+      return raw.split(`
+`).filter(Boolean).slice(0, maximum).map((line) => JSON.parse(line));
+    } catch {
+      return;
+    }
+  }
+}
+function summarizeServices(values, maximum = 16) {
+  return values.slice(0, maximum).flatMap((value) => {
+    if (!isRecord4(value))
+      return [];
+    const rawService = typeof value.Service === "string" ? value.Service : typeof value.Name === "string" ? value.Name : undefined;
+    const rawState = typeof value.State === "string" ? value.State : undefined;
+    if (!rawService || !rawState)
+      return [];
+    const service = rawService.slice(0, 128);
+    const state = sanitizeDiagnosticField(rawState, 64);
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(service) || !state)
+      return [];
+    const summary = { service, state };
+    if (typeof value.Health === "string" && value.Health) {
+      const health = sanitizeDiagnosticField(value.Health, 64);
+      if (health)
+        summary.health = health;
+    }
+    const exitCode = typeof value.ExitCode === "number" ? value.ExitCode : typeof value.ExitCode === "string" && value.ExitCode.trim() !== "" ? Number(value.ExitCode) : undefined;
+    if (exitCode !== undefined && Number.isInteger(exitCode) && exitCode >= -1 && exitCode <= 255) {
+      summary.exitCode = exitCode;
+    }
+    return [summary];
+  });
+}
+function sanitizeDiagnosticField(value, maximum) {
+  return value.replace(/[\u0000-\u001f\u007f]/g, "\uFFFD").slice(0, maximum);
+}
+function boundedLogTail(value, maxLines, maxBytes) {
+  const sanitized = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "\uFFFD").trimEnd();
+  const lines = sanitized.split(`
+`);
+  let selected = lines.slice(-maxLines).join(`
+`);
+  let truncated = lines.length > maxLines;
+  let bytes = Buffer.from(selected);
+  if (bytes.byteLength > maxBytes) {
+    bytes = bytes.subarray(bytes.byteLength - maxBytes);
+    selected = bytes.toString("utf8").replace(/^\uFFFD/, "");
+    truncated = true;
+  }
+  return { text: selected, truncated };
+}
+function compactError(value) {
+  return redactPublicText(value.trim(), 2000, 6);
+}
+function isRecord4(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// packages/skizzles-container-lab/src/compose/diagnostics.ts
+var PROVISIONING_FAILURE_DIAGNOSTIC_FILE = "provisioning-failure.compose-up.log";
+
+class DockerProvisioningFailure extends Error {
+  diagnostic;
+  constructor(message, diagnostic) {
+    super(message);
+    this.diagnostic = diagnostic;
+    this.name = "DockerProvisioningFailure";
+  }
+}
+async function captureComposeFailure(runtime, provisioned, runner, environment) {
+  const capturedAt = new Date().toISOString();
+  let services = [];
+  let serviceCount = 0;
+  let candidates = [];
+  let allServices = [];
+  try {
+    const status = await listStackServiceSummaries(runtime, runner, environment, true);
+    if (status.available) {
+      allServices = status.services;
+      services = allServices.slice(0, 16);
+      serviceCount = status.serviceCount;
+      candidates = selectFailedDiagnosticServices(runtime, allServices);
+    }
+  } catch {}
+  const raw = provisioned === undefined ? "" : [provisioned.stdout.toString(), provisioned.stderr.toString()].filter((part) => part.length > 0).join(`
+`);
+  const secretValues = declaredSecretValues(runtime, environment);
+  const lifecycleBytes = candidates.length > 0 ? 2048 - 1 : 8 * 1024;
+  const lifecycleLines = candidates.length > 0 ? 125 : 500;
+  const lifecycle = buildDiagnosticSegment("compose-up", raw, runtime, secretValues, lifecycleLines, lifecycleBytes, provisioned?.stdoutTruncated === true || provisioned?.stderrTruncated === true);
+  const serviceBytes = divideDiagnosticBudget(6 * 1024 - Math.max(0, candidates.length - 1), candidates.length);
+  const serviceLines = divideDiagnosticBudget(375, candidates.length);
+  const segments = [lifecycle];
+  for (const [index, service] of candidates.entries()) {
+    const captured = await captureFailedServiceLogs(runtime, service, Math.max(1, (serviceLines[index] ?? 1) - 1), Math.max(1, serviceBytes[index] ?? 1), runner, environment);
+    segments.push(buildDiagnosticSegment(`service:${service}`, captured.raw, runtime, secretValues, serviceLines[index] ?? 1, serviceBytes[index] ?? 1, captured.truncated));
+  }
+  const aggregate = joinDiagnosticSegments(segments);
+  let transcript = aggregate.text;
+  let transcriptTruncated = segments.some((segment) => segment.truncated);
+  const privacyFailure = segments.some((segment) => segment.privacyFailure) || aggregateContainsSecret(transcript, aggregate.bodyRanges, secretValues);
+  const aggregateBounds = Buffer.byteLength(transcript) > 8 * 1024 || transcript.split(`
+`).length > 500;
+  if (privacyFailure || aggregateBounds) {
+    transcript = "";
+    transcriptTruncated ||= aggregateBounds;
+  }
+  const evidence = {
+    kind: "compose-up",
+    available: false,
+    bytes: 0,
+    lines: 0,
+    truncated: transcriptTruncated
+  };
+  try {
+    await writeFailureTranscript(runtime.metadata.runtimeRoot, transcript);
+    evidence.available = true;
+    evidence.bytes = Buffer.byteLength(transcript);
+    evidence.lines = transcript ? transcript.split(`
+`).length : 0;
+  } catch {}
+  return {
+    phase: "compose-up",
+    capturedAt,
+    services,
+    serviceCount,
+    evidence
+  };
+}
+function selectFailedDiagnosticServices(runtime, services) {
+  const candidates = [...new Set([
+    runtime.config.mode.commandService,
+    ...runtime.config.ports.map((port) => port.service)
+  ])];
+  return candidates.filter((candidate) => services.some((summary) => {
+    if (summary.service !== candidate)
+      return false;
+    const failedExit = summary.state.toLowerCase() === "exited" && summary.exitCode !== undefined && summary.exitCode !== 0;
+    return failedExit || summary.health?.toLowerCase() === "unhealthy";
+  })).slice(0, 4);
+}
+function divideDiagnosticBudget(total, count) {
+  if (count <= 0)
+    return [];
+  const base = Math.floor(total / count);
+  const remainder = total - base * count;
+  return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
+}
+async function captureFailedServiceLogs(runtime, service, tailLines, segmentBytes, runner, environment) {
+  const headerBytes = Buffer.byteLength(`--- service:${service} ---`);
+  const bodyBytes = Math.max(0, segmentBytes - headerBytes - 1);
+  const streamBytes = Math.floor(Math.max(0, bodyBytes - 1) / 2);
+  let result;
+  try {
+    result = await runner.run([...runtime.composeArgs, "logs", "--no-color", "--no-log-prefix", "--tail", String(tailLines), service], {
+      allowFailure: true,
+      timeoutMs: 20000,
+      maxOutputBytes: streamBytes,
+      stdoutCapture: "tail",
+      stderrCapture: "tail",
+      env: scrubSecretEnvironment(runtime.config.secretEnvironment, environment)
+    });
+  } catch {
+    return { raw: "", truncated: true };
+  }
+  return {
+    raw: [result.stdout.toString(), result.stderr.toString()].filter((part) => part.length > 0).join(`
+`),
+    truncated: result.code !== 0 || result.stdoutTruncated === true || result.stderrTruncated === true
+  };
+}
+function buildDiagnosticSegment(label, raw, runtime, secretValues, maxLines, maxBytes, upstreamTruncated) {
+  const header = `--- ${label} ---`;
+  const body = boundedDiagnosticTail(redactComposeFailure(raw, runtime, secretValues), Math.max(0, maxLines - 1), Math.max(0, maxBytes - Buffer.byteLength(header) - 1));
+  const privacyFailure = bodyContainsSecret(body.text, header, secretValues);
+  const text = body.text ? `${header}
+${body.text}` : header;
+  return {
+    text: privacyFailure ? "" : text,
+    truncated: upstreamTruncated || body.truncated,
+    privacyFailure,
+    bodyStart: body.text ? header.length + 1 : undefined,
+    bodyEnd: body.text ? text.length : undefined
+  };
+}
+function joinDiagnosticSegments(segments) {
+  let text = "";
+  const bodyRanges = [];
+  for (const segment of segments) {
+    if (!segment.text)
+      continue;
+    const separator = text ? `
+` : "";
+    const offset = text.length + separator.length;
+    text += `${separator}${segment.text}`;
+    if (segment.bodyStart !== undefined && segment.bodyEnd !== undefined && segment.bodyStart < segment.bodyEnd) {
+      bodyRanges.push({
+        start: offset + segment.bodyStart,
+        end: Math.min(offset + segment.bodyEnd, text.length)
+      });
+    }
+  }
+  return { text, bodyRanges };
+}
+function aggregateContainsSecret(text, bodyRanges, secretValues) {
+  return secretValues.some((secret) => {
+    if (!secret)
+      return false;
+    let start = text.indexOf(secret);
+    while (start >= 0) {
+      const end = start + secret.length;
+      if (bodyRanges.some((range) => start < range.end && end > range.start))
+        return true;
+      start = text.indexOf(secret, start + 1);
+    }
+    return false;
+  });
+}
+function bodyContainsSecret(body, header, secretValues) {
+  if (!body)
+    return false;
+  const framed = `${header}
+${body}`;
+  const bodyStart = header.length + 1;
+  return secretValues.some((secret) => {
+    let start = framed.indexOf(secret);
+    while (start >= 0) {
+      if (start + secret.length > bodyStart)
+        return true;
+      start = framed.indexOf(secret, start + 1);
+    }
+    return false;
+  });
+}
+async function writeFailureTranscript(runtimeRoot, text) {
+  const root = await lstat(runtimeRoot);
+  if (!root.isDirectory() || root.isSymbolicLink()) {
+    throw new Error("invalid lab runtime root");
+  }
+  const destination = join(runtimeRoot, PROVISIONING_FAILURE_DIAGNOSTIC_FILE);
+  const temporary = `${destination}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, text, { mode: 384, flag: "wx" });
+    await rename(temporary, destination);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+function redactComposeFailure(value, runtime, secretValues) {
+  let diagnostic = value;
+  for (const secret of secretValues) {
+    diagnostic = diagnostic.split(secret).join("[secret-value-redacted]");
+  }
+  const metadata = [
+    runtime.metadata.owner,
+    runtime.metadata.ownerKey,
+    runtime.metadata.id,
+    runtime.metadata.composeProject,
+    runtime.metadata.sourceRoot,
+    runtime.metadata.manifestPath,
+    runtime.metadata.runtimeRoot,
+    runtime.metadata.workspace,
+    ...runtime.composeArgs
+  ];
+  for (const value2 of metadata) {
+    if (value2)
+      diagnostic = diagnostic.split(value2).join("[redacted]");
+  }
+  diagnostic = diagnostic.replace(/\b[0-9a-f]{12,64}\b/gi, "[redacted]");
+  return redactPublicText(diagnostic, 8 * 1024, 500, { byteCapture: "tail" });
+}
+function declaredSecretValues(runtime, environment) {
+  return [...new Set(runtime.config.secretEnvironment.map((name) => environment[name]).filter((secret) => typeof secret === "string" && secret.length > 0))].sort((left, right) => right.length - left.length);
+}
+function boundedDiagnosticTail(value, maxLines, maxBytes) {
+  const sanitized = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "\uFFFD").trimEnd();
+  const lines = sanitized.split(`
+`);
+  let selected = lines.slice(-maxLines).join(`
+`);
+  let truncated = lines.length > maxLines;
+  let bytes = Buffer.from(selected);
+  if (bytes.byteLength > maxBytes) {
+    bytes = bytes.subarray(bytes.byteLength - maxBytes);
+    selected = bytes.toString("utf8").replace(/^\uFFFD/, "");
+    truncated = true;
+  }
+  return { text: selected, truncated };
+}
+
+// packages/skizzles-container-lab/src/compose/runtime.ts
+async function prepareLabRuntime(metadata, config, runner = defaultDockerRunner, environment = process.env) {
+  await mkdir(metadata.runtimeRoot, { recursive: true, mode: 448 });
+  const base = generateBaseCompose(config);
+  const baseFile = base === undefined ? undefined : join2(metadata.runtimeRoot, "base.compose.yaml");
+  if (baseFile && base !== undefined)
+    await writeFile2(baseFile, base, { mode: 384 });
+  const overrideFile = join2(metadata.runtimeRoot, "override.compose.yaml");
+  await writeFile2(overrideFile, `{}
+`, { mode: 384 });
+  const composeArgs = composeCommandArgs(config, { projectName: metadata.composeProject, overrideFile, baseFile });
+  const composeEnvironment = secretComposeEnvironment(config.secretEnvironment, environment);
+  const sourceModel = await normalizedComposeModel(composeArgs, runner, composeEnvironment);
+  validateSecretEnvironmentModel(sourceModel, config.secretEnvironment, composeEnvironment);
+  const findings = inspectComposeModel(sourceModel);
+  const override = generateOverrideCompose(config, sourceModel, {
+    workspaceHostPath: metadata.workspace,
+    owner: metadata.owner,
+    ownerKey: metadata.ownerKey,
+    labId: metadata.id
+  });
+  await writeFile2(overrideFile, override, { mode: 384 });
+  const finalModel = await normalizedComposeModel(composeArgs, runner, composeEnvironment);
+  validateSecretEnvironmentModel(finalModel, config.secretEnvironment, composeEnvironment);
+  return { metadata, config, composeArgs, baseFile, overrideFile, findings };
 }
 async function provisionLabStack(runtime, signal, runner = defaultDockerRunner, environment = process.env) {
   let provisioned;
@@ -7993,21 +8385,16 @@ async function provisionLabStack(runtime, signal, runner = defaultDockerRunner, 
       signal,
       allowFailure: true,
       maxOutputBytes: 4 * 1024 * 1024,
+      stdoutCapture: "tail",
+      stderrCapture: "tail",
       env: secretComposeEnvironment(runtime.config.secretEnvironment, environment)
     });
   } catch {
-    throw new Error(signal?.aborted ? "Docker Compose up aborted; secret-bearing diagnostics redacted" : "Docker Compose up failed; secret-bearing diagnostics redacted");
+    const message = signal?.aborted ? "Docker Compose up aborted; secret-bearing diagnostics redacted" : "Docker Compose up failed; secret-bearing diagnostics redacted";
+    throw new DockerProvisioningFailure(message, await captureComposeFailure(runtime, undefined, runner, environment));
   }
   if (provisioned.code !== 0) {
-    let diagnostic = `${provisioned.stdout.toString()}
-${provisioned.stderr.toString()}`;
-    for (const name of runtime.config.secretEnvironment) {
-      const value = environment[name];
-      if (value)
-        diagnostic = diagnostic.split(value).join("[secret-value-redacted]");
-    }
-    await writeFile("/tmp/ccl-compose-failure-redacted.log", redactPublicText(diagnostic), { mode: 384 });
-    throw new Error("Docker Compose up failed; secret-bearing diagnostics redacted");
+    throw new DockerProvisioningFailure("Docker Compose up failed; secret-bearing diagnostics redacted", await captureComposeFailure(runtime, provisioned, runner, environment));
   }
   const compatibility = [
     `test -d ${shellQuote(runtime.config.runtime.workspace)}`,
@@ -8040,72 +8427,6 @@ ${provisioned.stderr.toString()}`;
   }
   return endpoints;
 }
-async function stackStatus(runtime, runner = defaultDockerRunner) {
-  const result = await composeCommand(runtime, ["ps", "--format", "json"], { allowFailure: true, timeoutMs: 20000 }, runner);
-  if (result.code !== 0)
-    return { available: false, error: compactError(result.stderr.toString()) };
-  const raw = result.stdout.toString().trim();
-  if (!raw)
-    return { available: true, services: [] };
-  try {
-    const parsed = JSON.parse(raw);
-    return { available: true, services: summarizeServices(Array.isArray(parsed) ? parsed : [parsed]) };
-  } catch {
-    try {
-      return { available: true, services: summarizeServices(raw.split(`
-`).filter(Boolean).map((line) => JSON.parse(line))) };
-    } catch {
-      return { available: false, error: "Docker returned an invalid bounded status response" };
-    }
-  }
-}
-async function stackLogs(runtime, service, tailLines, runner = defaultDockerRunner) {
-  if (tailLines < 1 || tailLines > 500)
-    throw new Error("tail-lines must be 1..500");
-  const model = await normalizedModel(runtime.composeArgs, runner, scrubSecretEnvironment(runtime.config.secretEnvironment, process.env));
-  if (!Object.hasOwn(model.services ?? {}, service))
-    throw new Error(`unknown Compose service: ${service}`);
-  const result = await composeCommand(runtime, ["logs", "--no-color", "--tail", String(tailLines), service], {
-    allowFailure: true,
-    timeoutMs: 20000
-  }, runner);
-  return boundedLogTail(`${result.stdout}${result.stderr}`, tailLines, 8 * 1024);
-}
-function summarizeServices(values) {
-  return values.slice(0, 16).flatMap((value) => {
-    if (!isRecord4(value))
-      return [];
-    const service = typeof value.Service === "string" ? value.Service : typeof value.Name === "string" ? value.Name : undefined;
-    const state = typeof value.State === "string" ? value.State : undefined;
-    if (!service || !state)
-      return [];
-    const summary = {
-      service: service.slice(0, 128),
-      state: state.slice(0, 64)
-    };
-    if (typeof value.Health === "string" && value.Health)
-      summary.health = value.Health.slice(0, 64);
-    const exitCode = typeof value.ExitCode === "number" ? value.ExitCode : Number(value.ExitCode);
-    if (Number.isInteger(exitCode))
-      summary.exitCode = exitCode;
-    return [summary];
-  });
-}
-function boundedLogTail(value, maxLines, maxBytes) {
-  const sanitized = value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "\uFFFD").trimEnd();
-  const lines = sanitized.split(`
-`);
-  let selected = lines.slice(-maxLines).join(`
-`);
-  let truncated = lines.length > maxLines;
-  let bytes = Buffer.from(selected);
-  if (bytes.byteLength > maxBytes) {
-    bytes = bytes.subarray(bytes.byteLength - maxBytes);
-    selected = bytes.toString("utf8").replace(/^\uFFFD/, "");
-    truncated = true;
-  }
-  return { text: selected, truncated };
-}
 function runtimeFromLab(metadata) {
   if (!metadata.runtime)
     throw new Error(`lab runtime is unavailable: ${metadata.id}`);
@@ -8114,17 +8435,11 @@ function runtimeFromLab(metadata) {
 function shellQuote(value) {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
-function compactError(value) {
-  return redactPublicText(value.trim(), 2000, 6);
-}
-function isRecord4(value) {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 // packages/skizzles-container-lab/src/storage/files.ts
-import { createHash, randomUUID } from "crypto";
+import { createHash, randomUUID as randomUUID2 } from "crypto";
 import { createReadStream } from "fs";
-import { lstat, mkdir as mkdir2, readFile as readFile2, readlink, realpath as realpath2, rename, rm, writeFile as writeFile2 } from "fs/promises";
+import { lstat as lstat2, mkdir as mkdir2, readFile as readFile2, readlink, realpath as realpath2, rename as rename2, rm as rm2, writeFile as writeFile3 } from "fs/promises";
 import path from "path";
 var MAX_SYNC_FILE_BYTES = 64 * 1024 * 1024;
 function safeRelativePath(value) {
@@ -8145,7 +8460,7 @@ function safeStateName(value, label = "identifier") {
 }
 async function canonicalRoot(root) {
   const resolved = await realpath2(root);
-  const stat2 = await lstat(resolved);
+  const stat2 = await lstat2(resolved);
   if (!stat2.isDirectory())
     throw new Error(`Synchronization root is not a directory: ${root}`);
   return resolved;
@@ -8158,7 +8473,7 @@ async function guardedPath(root, relative2, createParents = false) {
   for (const part of parts.slice(0, -1)) {
     parent = path.join(parent, part);
     try {
-      const stat2 = await lstat(parent);
+      const stat2 = await lstat2(parent);
       if (stat2.isSymbolicLink() || !stat2.isDirectory()) {
         throw new Error(`Unsafe synchronization parent for ${relative2}`);
       }
@@ -8178,7 +8493,7 @@ async function guardedPath(root, relative2, createParents = false) {
 }
 async function describeSyncFile(root, relative2) {
   const absolute = await guardedPath(root, relative2);
-  const stat2 = await lstat(absolute);
+  const stat2 = await lstat2(absolute);
   const mode = stat2.mode & 511;
   if (stat2.isSymbolicLink()) {
     const target = await readlink(absolute);
@@ -8202,17 +8517,17 @@ async function readJson(file) {
 }
 async function writeJsonAtomic(file, value) {
   await mkdir2(path.dirname(file), { recursive: true, mode: 448 });
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile2(temporary, `${JSON.stringify(value)}
+  const temporary = `${file}.${randomUUID2()}.tmp`;
+  await writeFile3(temporary, `${JSON.stringify(value)}
 `, { mode: 384 });
-  await rename(temporary, file);
+  await rename2(temporary, file);
 }
 async function removeIfPresent(file, options = {}) {
-  await rm(file, { force: true, recursive: options.recursive ?? false });
+  await rm2(file, { force: true, recursive: options.recursive ?? false });
 }
 
 // packages/skizzles-container-lab/src/storage/locks.ts
-import { link, lstat as lstat2, mkdir as mkdir3, open, readFile as readFile3, rm as rm2, writeFile as writeFile3 } from "fs/promises";
+import { link, lstat as lstat3, mkdir as mkdir3, open, readFile as readFile3, rm as rm3, writeFile as writeFile4 } from "fs/promises";
 import { dirname } from "path";
 async function withFileLock(path2, operation, options = {}) {
   const attempts = options.attempts ?? 100;
@@ -8225,7 +8540,7 @@ async function withFileLock(path2, operation, options = {}) {
     const candidate = `${path2}.candidate-${process.pid}-${crypto.randomUUID()}`;
     let acquired = false;
     try {
-      await writeFile3(candidate, JSON.stringify({
+      await writeFile4(candidate, JSON.stringify({
         pid: process.pid,
         createdAt: new Date().toISOString()
       }), { mode: 384, flag: "wx" });
@@ -8237,7 +8552,7 @@ async function withFileLock(path2, operation, options = {}) {
           throw error;
       }
       if (acquired) {
-        const candidateInfo = await lstat2(candidate, { bigint: true });
+        const candidateInfo = await lstat3(candidate, { bigint: true });
         const candidateIdentity = identity2(candidateInfo);
         try {
           return await operation();
@@ -8246,7 +8561,7 @@ async function withFileLock(path2, operation, options = {}) {
         }
       }
     } finally {
-      await rm2(candidate, { force: true });
+      await rm3(candidate, { force: true });
     }
     await removeConfirmedStaleLock(path2, staleMs, options.processProbe ?? probeProcess);
     if (attempt + 1 < attempts) {
@@ -8303,14 +8618,14 @@ async function removeConfirmedStaleLock(path2, staleMs, processProbe) {
 async function reclaimSameLock(path2, inspected, staleMs, processProbe) {
   const candidate = `${path2}.reclaim-candidate-${process.pid}-${crypto.randomUUID()}`;
   try {
-    await writeFile3(candidate, JSON.stringify({
+    await writeFile4(candidate, JSON.stringify({
       pid: process.pid,
       createdAt: new Date().toISOString()
     }), { mode: 384, flag: "wx" });
-    const candidateIdentity = identity2(await lstat2(candidate, { bigint: true }));
+    const candidateIdentity = identity2(await lstat3(candidate, { bigint: true }));
     await claimAndRemoveLock(path2, inspected, candidate, candidateIdentity, staleMs, processProbe);
   } finally {
-    await rm2(candidate, { force: true });
+    await rm3(candidate, { force: true });
   }
 }
 async function claimAndRemoveLock(path2, inspected, claimSource, claimIdentity, staleMs, processProbe) {
@@ -8335,7 +8650,7 @@ async function claimAndRemoveLock(path2, inspected, claimSource, claimIdentity, 
       return;
     if (!await hasIdentity(claimPath, claimIdentity) || !await hasIdentity(path2, inspected))
       return;
-    await rm2(path2, { recursive: true, force: true });
+    await rm3(path2, { recursive: true, force: true });
   } finally {
     if (claimed)
       await removeIfSamePath(claimPath, claimIdentity);
@@ -8384,7 +8699,7 @@ async function removeConfirmedOrphanClaim(claimPath, staleMs, processProbe) {
 async function hasIdentity(path2, expected) {
   let current;
   try {
-    current = await lstat2(path2, { bigint: true });
+    current = await lstat3(path2, { bigint: true });
   } catch (error) {
     if (error.code === "ENOENT")
       return false;
@@ -8396,7 +8711,7 @@ async function hasIdentity(path2, expected) {
 async function removeIfSamePath(path2, inspected) {
   if (!await hasIdentity(path2, inspected))
     return;
-  await rm2(path2, { recursive: true, force: true });
+  await rm3(path2, { recursive: true, force: true });
 }
 function identity2(info) {
   if (info.dev < 0n || info.ino <= 0n)
@@ -8411,13 +8726,13 @@ function isRecord5(value) {
 }
 
 // packages/skizzles-container-lab/src/storage/safe-path.ts
-import { lstat as lstat3, realpath as realpath3 } from "fs/promises";
-import { join as join2, resolve as resolve2 } from "path";
+import { lstat as lstat4, realpath as realpath3 } from "fs/promises";
+import { join as join3, resolve as resolve2 } from "path";
 async function exactDirectoryChain(root, segments, label) {
   let current = resolve2(root);
   let info;
   try {
-    info = await lstat3(current);
+    info = await lstat4(current);
   } catch (error) {
     if (error.code === "ENOENT")
       return false;
@@ -8428,10 +8743,10 @@ async function exactDirectoryChain(root, segments, label) {
   }
   let expected = await realpath3(current);
   for (const segment of segments) {
-    current = join2(current, segment);
-    expected = join2(expected, segment);
+    current = join3(current, segment);
+    expected = join3(expected, segment);
     try {
-      info = await lstat3(current);
+      info = await lstat4(current);
     } catch (error) {
       if (error.code === "ENOENT")
         return false;
@@ -8465,6 +8780,20 @@ function compactLabStatus(lab, stack) {
     ...endpoints.length ? { endpoints, endpointCount: lab.endpoints.length } : {},
     ...findings.length ? { findings, findingCount: lab.findings.length } : {},
     ...lab.error ? { error: redactPublicText(lab.error, 2000, 6) } : {},
+    ...lab.state === "failed" && lab.provisioningFailure ? {
+      provisioningFailure: {
+        phase: lab.provisioningFailure.phase,
+        capturedAt: lab.provisioningFailure.capturedAt,
+        services: lab.provisioningFailure.services.slice(0, 16).map((service) => ({
+          service: service.service.slice(0, 128),
+          state: service.state.slice(0, 64),
+          ...service.health ? { health: service.health.slice(0, 64) } : {},
+          ...service.exitCode === undefined ? {} : { exitCode: service.exitCode }
+        })),
+        serviceCount: lab.provisioningFailure.serviceCount,
+        ...lab.provisioningFailure.evidence ? { evidence: { ...lab.provisioningFailure.evidence } } : {}
+      }
+    } : {},
     ...stack ? { stack } : {}
   };
 }
@@ -8472,9 +8801,12 @@ function compactLabStatus(lab, stack) {
 // packages/skizzles-container-lab/src/storage/state.ts
 import { createHash as createHash2 } from "crypto";
 import { homedir, tmpdir } from "os";
-import { basename, isAbsolute as isAbsolute2, join as join3, parse, posix as posix2, relative as relative2, resolve as resolve3, sep } from "path";
-import { lstat as lstat4, mkdir as mkdir4, readdir, realpath as realpath4, rm as rm3 } from "fs/promises";
-var DEFAULT_LAB_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+import { basename as basename2, join as join5, resolve as resolve4 } from "path";
+import { mkdir as mkdir4, readdir, rm as rm4 } from "fs/promises";
+
+// packages/skizzles-container-lab/src/storage/state-validation.ts
+import { isAbsolute as isAbsolute2, join as join4, parse, posix as posix2, relative as relative2, resolve as resolve3, sep } from "path";
+import { lstat as lstat5, realpath as realpath4 } from "fs/promises";
 var LAB_STATES = new Set(["provisioning", "ready", "failed", "destroying"]);
 var FINDING_SURFACES = new Set([
   "host-bind",
@@ -8488,172 +8820,6 @@ var FINDING_SURFACES = new Set([
   "fixed-port",
   "non-loopback-port"
 ]);
-function defaultStateRoot() {
-  return join3(homedir(), "Library", "Application Support", "OpenAI", "codex-container-lab");
-}
-function defaultRuntimeRoot() {
-  return join3(tmpdir(), "codex-container-lab");
-}
-function resolveRoots(options = {}) {
-  return {
-    stateRoot: resolve3(options.stateRoot ?? process.env.CODEX_CONTAINER_LAB_STATE_ROOT ?? defaultStateRoot()),
-    runtimeRoot: resolve3(options.runtimeRoot ?? process.env.CODEX_CONTAINER_LAB_RUNTIME_ROOT ?? defaultRuntimeRoot())
-  };
-}
-function resolveOwner(explicit, environment = process.env) {
-  const owner = explicit ?? environment.CODEX_THREAD_ID;
-  if (owner === undefined || owner.length === 0) {
-    throw new Error("owner is required: pass --owner THREAD_ID or set CODEX_THREAD_ID");
-  }
-  if (owner.includes("\x00"))
-    throw new Error("owner must not contain NUL");
-  if (Buffer.byteLength(owner, "utf8") > 4096)
-    throw new Error("owner must be at most 4096 UTF-8 bytes");
-  return owner;
-}
-function ownerKey(owner) {
-  return createHash2("sha256").update(owner).digest("hex");
-}
-function ownerDirectory(stateRoot, owner) {
-  return join3(stateRoot, "owners", ownerKey(owner));
-}
-function ownerRuntimeDirectory(runtimeRoot, owner) {
-  return join3(runtimeRoot, ownerKey(owner));
-}
-function ownerManifestPath(stateRoot, owner) {
-  return join3(ownerDirectory(stateRoot, owner), "owner.json");
-}
-function ownerLockPath(stateRoot, owner) {
-  return join3(stateRoot, ".locks", `owner-${ownerKey(owner)}`);
-}
-function reapedOwnerPath(stateRoot, owner) {
-  return join3(stateRoot, "reaped", `${ownerKey(owner)}.json`);
-}
-async function readReapedOwner(stateRoot, owner) {
-  let value;
-  try {
-    value = await readJson(reapedOwnerPath(stateRoot, owner));
-  } catch (error) {
-    if (error.code === "ENOENT")
-      return;
-    throw error;
-  }
-  if (!isRecord6(value) || value.version !== 1 || value.owner !== owner || value.ownerKey !== ownerKey(owner) || !isTimestamp(value.reapedAt)) {
-    throw new Error("invalid reaped owner manifest");
-  }
-  return value;
-}
-function labsDirectory(stateRoot, owner) {
-  return join3(ownerDirectory(stateRoot, owner), "labs");
-}
-function labManifestPath(stateRoot, owner, labId) {
-  safeStateName(labId, "lab id");
-  return join3(labsDirectory(stateRoot, owner), `${labId}.json`);
-}
-function expectedLabRuntimeRoot(roots, owner, labId) {
-  safeStateName(labId, "lab id");
-  return join3(resolve3(roots.runtimeRoot), ownerKey(owner), labId);
-}
-async function ensureOwner(stateRoot, owner) {
-  resolveOwner(owner, {});
-  const directory = ownerDirectory(stateRoot, owner);
-  await mkdir4(join3(directory, "labs"), { recursive: true, mode: 448 });
-  const path2 = ownerManifestPath(stateRoot, owner);
-  try {
-    const existing = await readOwnerManifest(path2);
-    if (existing.owner !== owner || existing.ownerKey !== ownerKey(owner)) {
-      throw new Error("owner hash collision or mismatched owner manifest");
-    }
-    return existing;
-  } catch (error) {
-    if (error.code !== "ENOENT")
-      throw error;
-  }
-  const manifest = {
-    version: 1,
-    owner,
-    ownerKey: ownerKey(owner),
-    createdAt: new Date().toISOString()
-  };
-  await writeJsonAtomic(path2, manifest);
-  return manifest;
-}
-async function readOwnerManifest(path2) {
-  const value = await readJson(path2);
-  if (!isRecord6(value) || value.version !== 1 || typeof value.owner !== "string" || typeof value.ownerKey !== "string" || !isTimestamp(value.createdAt)) {
-    throw new Error(`invalid owner manifest: ${path2}`);
-  }
-  resolveOwner(value.owner, {});
-  if (value.ownerKey !== ownerKey(value.owner) || basename(resolve3(path2, "..")) !== value.ownerKey) {
-    throw new Error(`owner manifest hash mismatch: ${path2}`);
-  }
-  return value;
-}
-async function writeLab(roots, lab) {
-  assertLabMetadata(lab, roots, lab.owner, lab.id);
-  await writeJsonAtomic(labManifestPath(roots.stateRoot, lab.owner, lab.id), lab);
-}
-async function refreshLabActivity(roots, owner, labId, clock = () => new Date) {
-  const lab = await readLab(roots, owner, labId);
-  const now = clock();
-  if (!(now instanceof Date) || !Number.isFinite(now.getTime()))
-    throw new Error("clock returned an invalid date");
-  const timestamp = now.toISOString();
-  lab.lastActivityAt = timestamp;
-  lab.updatedAt = timestamp;
-  await writeLab(roots, lab);
-  return lab;
-}
-async function readLab(roots, owner, labId) {
-  const value = await readJson(labManifestPath(roots.stateRoot, owner, labId));
-  assertLabMetadata(value, roots, owner, labId);
-  return value;
-}
-async function listLabs(roots, owner) {
-  const directory = labsDirectory(roots.stateRoot, owner);
-  let names;
-  try {
-    names = await readdir(directory);
-  } catch (error) {
-    if (error.code === "ENOENT")
-      return [];
-    throw error;
-  }
-  const labs = [];
-  for (const name of names.sort()) {
-    if (!name.endsWith(".json"))
-      throw new Error(`unexpected lab state entry: ${name}`);
-    labs.push(await readLab(roots, owner, name.slice(0, -5)));
-  }
-  return labs;
-}
-async function removeLabState(stateRoot, owner, labId) {
-  await rm3(labManifestPath(stateRoot, owner, labId), { force: true });
-}
-async function assertReadyLabFilesystem(roots, lab) {
-  if (lab.state !== "ready" || !lab.runtime)
-    throw new Error(`lab is not ready: ${lab.state}`);
-  const configuredRuntime = await realDirectory(roots.runtimeRoot, "configured runtime root");
-  const ownerRuntime = await realDirectory(join3(roots.runtimeRoot, lab.ownerKey), "owner runtime root");
-  const runtime = await realDirectory(lab.runtimeRoot, "lab runtime root");
-  const workspace = await realDirectory(lab.workspace, "lab workspace");
-  if (ownerRuntime !== join3(configuredRuntime, lab.ownerKey) || runtime !== join3(ownerRuntime, lab.id) || workspace !== join3(runtime, "workspace")) {
-    throw new Error("runtime or workspace resolved outside the configured runtime root");
-  }
-  const source = await realDirectory(lab.sourceRoot, "lab source root");
-  await realFileInside(source, lab.manifestPath, "lab manifest");
-  await realFileInside(runtime, lab.runtime.overrideFile, "Compose override");
-  if (lab.runtime.baseFile)
-    await realFileInside(runtime, lab.runtime.baseFile, "internal Compose base");
-  const mode = lab.runtime.config.mode;
-  if (mode.kind === "compose") {
-    for (const path2 of mode.files)
-      await realFileInside(source, path2, "project Compose file");
-  } else if (mode.kind === "dockerfile") {
-    await realFileInside(source, mode.dockerfile, "project Dockerfile");
-    await realDirectoryInside(source, mode.context, "Dockerfile context");
-  }
-}
 function assertLabMetadata(value, roots, owner, labId) {
   try {
     safeStateName(labId, "lab id");
@@ -8672,11 +8838,11 @@ function assertLabMetadata(value, roots, owner, labId) {
     const expectedRuntime = expectedLabRuntimeRoot(roots, owner, labId);
     if (!isNormalizedAbsolute(value.runtimeRoot) || value.runtimeRoot !== expectedRuntime)
       throw new Error("invalid runtime root");
-    if (value.workspace !== join3(expectedRuntime, "workspace"))
+    if (value.workspace !== join4(expectedRuntime, "workspace"))
       throw new Error("invalid workspace root");
     if (!isNormalizedAbsolute(value.sourceRoot) || value.sourceRoot === parse(value.sourceRoot).root)
       throw new Error("invalid source root");
-    if (value.manifestPath !== join3(value.sourceRoot, manifestName))
+    if (value.manifestPath !== join4(value.sourceRoot, manifestName))
       throw new Error("invalid source manifest relationship");
     if (typeof value.commandService !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(value.commandService)) {
       throw new Error("invalid command service");
@@ -8697,6 +8863,12 @@ function assertLabMetadata(value, roots, owner, labId) {
     }
     if (value.error !== undefined && !isBoundedString(value.error, 4000))
       throw new Error("invalid error");
+    if (value.provisioningFailure !== undefined) {
+      validateProvisioningFailure(value.provisioningFailure);
+      if (value.state !== "provisioning" && value.state !== "failed") {
+        throw new Error("provisioning failure requires provisioning or failed state");
+      }
+    }
     if (value.runtime !== undefined)
       validatePersistedRuntime(value, value.runtime);
     if (value.state === "ready" && value.runtime === undefined)
@@ -8710,6 +8882,25 @@ function assertLabMetadata(value, roots, owner, labId) {
   } catch (error) {
     throw new Error(`invalid lab manifest: ${labId}: ${message(error)}`);
   }
+}
+function validateProvisioningFailure(value) {
+  if (!isRecord6(value) || value.phase !== "compose-up" || !isTimestamp(value.capturedAt) || !Array.isArray(value.services) || value.services.length > 16 || typeof value.serviceCount !== "number" || !Number.isInteger(value.serviceCount) || value.serviceCount < value.services.length || value.serviceCount > 1000) {
+    throw new Error("invalid provisioning failure diagnostic");
+  }
+  if (!value.services.every(isProvisioningService))
+    throw new Error("invalid provisioning failure services");
+  if (value.evidence !== undefined && !isProvisioningEvidence(value.evidence)) {
+    throw new Error("invalid provisioning failure evidence");
+  }
+}
+function isProvisioningService(value) {
+  return isRecord6(value) && typeof value.service === "string" && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value.service) && typeof value.state === "string" && isSafeDiagnosticText(value.state, 64) && (value.health === undefined || typeof value.health === "string" && isSafeDiagnosticText(value.health, 64)) && (value.exitCode === undefined || typeof value.exitCode === "number" && Number.isInteger(value.exitCode) && value.exitCode >= -1 && value.exitCode <= 255);
+}
+function isProvisioningEvidence(value) {
+  return isRecord6(value) && value.kind === "compose-up" && typeof value.available === "boolean" && typeof value.bytes === "number" && Number.isInteger(value.bytes) && value.bytes >= 0 && value.bytes <= 8 * 1024 && typeof value.lines === "number" && Number.isInteger(value.lines) && value.lines >= 0 && value.lines <= 500 && typeof value.truncated === "boolean";
+}
+function isSafeDiagnosticText(value, maximum) {
+  return value.length > 0 && value.length <= maximum && !/[\u0000-\u001f\u007f]/.test(value);
 }
 function validatePersistedRuntime(lab, runtime) {
   if (!isRecord6(runtime) || !isRecord6(runtime.config))
@@ -8751,8 +8942,8 @@ function validatePersistedRuntime(lab, runtime) {
     throw new Error("secret environment metadata mismatch");
   }
   const runtimeRoot = lab.runtimeRoot;
-  const expectedOverride = join3(runtimeRoot, "override.compose.yaml");
-  const expectedBase = mode.kind === "compose" ? undefined : join3(runtimeRoot, "base.compose.yaml");
+  const expectedOverride = join4(runtimeRoot, "override.compose.yaml");
+  const expectedBase = mode.kind === "compose" ? undefined : join4(runtimeRoot, "base.compose.yaml");
   if (runtime.overrideFile !== expectedOverride || runtime.baseFile !== expectedBase || !Array.isArray(runtime.findings) || !runtime.findings.every(isFinding) || JSON.stringify(runtime.findings) !== JSON.stringify(lab.findings))
     throw new Error("invalid runtime files or findings");
   const expectedArgs = composeCommandArgs(config, {
@@ -8796,13 +8987,13 @@ function isFinding(value) {
   return isRecord6(value) && (value.service === undefined || isBoundedString(value.service, 128)) && typeof value.surface === "string" && FINDING_SURFACES.has(value.surface) && isBoundedString(value.detail, 1024);
 }
 async function realDirectory(path2, label) {
-  const info = await lstat4(path2);
+  const info = await lstat5(path2);
   if (!info.isDirectory() || info.isSymbolicLink())
     throw new Error(`${label} is not a real directory`);
   return await realpath4(path2);
 }
 async function realFileInside(root, path2, label) {
-  const info = await lstat4(path2);
+  const info = await lstat5(path2);
   if (!info.isFile() || info.isSymbolicLink())
     throw new Error(`${label} is not a real file`);
   assertCanonicalInside(root, await realpath4(path2), label, false);
@@ -8836,18 +9027,187 @@ function isRecord6(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+// packages/skizzles-container-lab/src/storage/state.ts
+var DEFAULT_LAB_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+function defaultStateRoot() {
+  return join5(homedir(), "Library", "Application Support", "OpenAI", "codex-container-lab");
+}
+function defaultRuntimeRoot() {
+  return join5(tmpdir(), "codex-container-lab");
+}
+function resolveRoots(options = {}) {
+  return {
+    stateRoot: resolve4(options.stateRoot ?? process.env.CODEX_CONTAINER_LAB_STATE_ROOT ?? defaultStateRoot()),
+    runtimeRoot: resolve4(options.runtimeRoot ?? process.env.CODEX_CONTAINER_LAB_RUNTIME_ROOT ?? defaultRuntimeRoot())
+  };
+}
+function resolveOwner(explicit, environment = process.env) {
+  const owner = explicit ?? environment.CODEX_THREAD_ID;
+  if (owner === undefined || owner.length === 0) {
+    throw new Error("owner is required: pass --owner THREAD_ID or set CODEX_THREAD_ID");
+  }
+  if (owner.includes("\x00"))
+    throw new Error("owner must not contain NUL");
+  if (Buffer.byteLength(owner, "utf8") > 4096)
+    throw new Error("owner must be at most 4096 UTF-8 bytes");
+  return owner;
+}
+function ownerKey(owner) {
+  return createHash2("sha256").update(owner).digest("hex");
+}
+function ownerDirectory(stateRoot, owner) {
+  return join5(stateRoot, "owners", ownerKey(owner));
+}
+function ownerRuntimeDirectory(runtimeRoot, owner) {
+  return join5(runtimeRoot, ownerKey(owner));
+}
+function ownerManifestPath(stateRoot, owner) {
+  return join5(ownerDirectory(stateRoot, owner), "owner.json");
+}
+function ownerLockPath(stateRoot, owner) {
+  return join5(stateRoot, ".locks", `owner-${ownerKey(owner)}`);
+}
+function reapedOwnerPath(stateRoot, owner) {
+  return join5(stateRoot, "reaped", `${ownerKey(owner)}.json`);
+}
+async function readReapedOwner(stateRoot, owner) {
+  let value;
+  try {
+    value = await readJson(reapedOwnerPath(stateRoot, owner));
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return;
+    throw error;
+  }
+  if (!isRecord6(value) || value.version !== 1 || value.owner !== owner || value.ownerKey !== ownerKey(owner) || !isTimestamp(value.reapedAt)) {
+    throw new Error("invalid reaped owner manifest");
+  }
+  return value;
+}
+function labsDirectory(stateRoot, owner) {
+  return join5(ownerDirectory(stateRoot, owner), "labs");
+}
+function labManifestPath(stateRoot, owner, labId) {
+  safeStateName(labId, "lab id");
+  return join5(labsDirectory(stateRoot, owner), `${labId}.json`);
+}
+function expectedLabRuntimeRoot(roots, owner, labId) {
+  safeStateName(labId, "lab id");
+  return join5(resolve4(roots.runtimeRoot), ownerKey(owner), labId);
+}
+async function ensureOwner(stateRoot, owner) {
+  resolveOwner(owner, {});
+  const directory = ownerDirectory(stateRoot, owner);
+  await mkdir4(join5(directory, "labs"), { recursive: true, mode: 448 });
+  const path2 = ownerManifestPath(stateRoot, owner);
+  try {
+    const existing = await readOwnerManifest(path2);
+    if (existing.owner !== owner || existing.ownerKey !== ownerKey(owner)) {
+      throw new Error("owner hash collision or mismatched owner manifest");
+    }
+    return existing;
+  } catch (error) {
+    if (error.code !== "ENOENT")
+      throw error;
+  }
+  const manifest = {
+    version: 1,
+    owner,
+    ownerKey: ownerKey(owner),
+    createdAt: new Date().toISOString()
+  };
+  await writeJsonAtomic(path2, manifest);
+  return manifest;
+}
+async function readOwnerManifest(path2) {
+  const value = await readJson(path2);
+  if (!isRecord6(value) || value.version !== 1 || typeof value.owner !== "string" || typeof value.ownerKey !== "string" || !isTimestamp(value.createdAt)) {
+    throw new Error(`invalid owner manifest: ${path2}`);
+  }
+  resolveOwner(value.owner, {});
+  if (value.ownerKey !== ownerKey(value.owner) || basename2(resolve4(path2, "..")) !== value.ownerKey) {
+    throw new Error(`owner manifest hash mismatch: ${path2}`);
+  }
+  return value;
+}
+async function writeLab(roots, lab) {
+  assertLabMetadata(lab, roots, lab.owner, lab.id);
+  await writeJsonAtomic(labManifestPath(roots.stateRoot, lab.owner, lab.id), lab);
+}
+async function refreshLabActivity(roots, owner, labId, clock = () => new Date) {
+  const lab = await readLab(roots, owner, labId);
+  const now = clock();
+  if (!(now instanceof Date) || !Number.isFinite(now.getTime()))
+    throw new Error("clock returned an invalid date");
+  const timestamp = now.toISOString();
+  lab.lastActivityAt = timestamp;
+  lab.updatedAt = timestamp;
+  await writeLab(roots, lab);
+  return lab;
+}
+async function readLab(roots, owner, labId) {
+  const value = await readJson(labManifestPath(roots.stateRoot, owner, labId));
+  assertLabMetadata(value, roots, owner, labId);
+  return value;
+}
+async function listLabs(roots, owner) {
+  const directory = labsDirectory(roots.stateRoot, owner);
+  let names;
+  try {
+    names = await readdir(directory);
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return [];
+    throw error;
+  }
+  const labs = [];
+  for (const name of names.sort()) {
+    if (!name.endsWith(".json"))
+      throw new Error(`unexpected lab state entry: ${name}`);
+    labs.push(await readLab(roots, owner, name.slice(0, -5)));
+  }
+  return labs;
+}
+async function removeLabState(stateRoot, owner, labId) {
+  await rm4(labManifestPath(stateRoot, owner, labId), { force: true });
+}
+async function assertReadyLabFilesystem(roots, lab) {
+  if (lab.state !== "ready" || !lab.runtime)
+    throw new Error(`lab is not ready: ${lab.state}`);
+  const configuredRuntime = await realDirectory(roots.runtimeRoot, "configured runtime root");
+  const ownerRuntime = await realDirectory(join5(roots.runtimeRoot, lab.ownerKey), "owner runtime root");
+  const runtime = await realDirectory(lab.runtimeRoot, "lab runtime root");
+  const workspace = await realDirectory(lab.workspace, "lab workspace");
+  if (ownerRuntime !== join5(configuredRuntime, lab.ownerKey) || runtime !== join5(ownerRuntime, lab.id) || workspace !== join5(runtime, "workspace")) {
+    throw new Error("runtime or workspace resolved outside the configured runtime root");
+  }
+  const source = await realDirectory(lab.sourceRoot, "lab source root");
+  await realFileInside(source, lab.manifestPath, "lab manifest");
+  await realFileInside(runtime, lab.runtime.overrideFile, "Compose override");
+  if (lab.runtime.baseFile)
+    await realFileInside(runtime, lab.runtime.baseFile, "internal Compose base");
+  const mode = lab.runtime.config.mode;
+  if (mode.kind === "compose") {
+    for (const path2 of mode.files)
+      await realFileInside(source, path2, "project Compose file");
+  } else if (mode.kind === "dockerfile") {
+    await realFileInside(source, mode.dockerfile, "project Dockerfile");
+    await realDirectoryInside(source, mode.context, "Dockerfile context");
+  }
+}
+
 // packages/skizzles-container-lab/src/workspace/recovery.ts
 import { createHash as createHash3 } from "crypto";
-import { lstat as lstat7, readdir as readdir2, realpath as realpath5, stat as stat2 } from "fs/promises";
-import { join as join4 } from "path";
+import { lstat as lstat8, readdir as readdir2, realpath as realpath5, stat as stat2 } from "fs/promises";
+import { join as join6 } from "path";
 
 // packages/skizzles-container-lab/src/workspace/sync.ts
-import { randomBytes, randomUUID as randomUUID2 } from "crypto";
-import { chmod, copyFile, lstat as lstat6, mkdir as mkdir5, readlink as readlink2, rename as rename2, rm as rm4, symlink } from "fs/promises";
+import { randomBytes, randomUUID as randomUUID3 } from "crypto";
+import { chmod, copyFile, lstat as lstat7, mkdir as mkdir5, readlink as readlink2, rename as rename3, rm as rm5, symlink } from "fs/promises";
 import path2 from "path";
 
 // packages/skizzles-container-lab/src/workspace/git-manifest.ts
-import { lstat as lstat5 } from "fs/promises";
+import { lstat as lstat6 } from "fs/promises";
 var MAX_SYNC_FILES = 20000;
 var MAX_SYNC_TOTAL_BYTES = 512 * 1024 * 1024;
 async function eligibleGitPaths(root) {
@@ -8865,7 +9225,7 @@ async function buildGitManifest(root) {
   let totalBytes = 0;
   for (const relative3 of await eligibleGitPaths(canonical)) {
     try {
-      const stat2 = await lstat5(await guardedPath(canonical, relative3));
+      const stat2 = await lstat6(await guardedPath(canonical, relative3));
       if (!stat2.isFile() && !stat2.isSymbolicLink())
         continue;
       const file = await describeSyncFile(canonical, relative3);
@@ -9018,10 +9378,10 @@ async function applySync(options) {
   if (idle === false)
     throw new Error("Synchronization apply requires an idle lab");
   const claimed = path2.join(state.used, `${options.token}.json`);
-  await rename2(previewPath, claimed).catch(() => {
+  await rename3(previewPath, claimed).catch(() => {
     throw new Error("Unknown or already-used synchronization preview token");
   });
-  const journalId = randomUUID2();
+  const journalId = randomUUID3();
   const backupDir = path2.join(state.backups, journalId);
   const journalPath = path2.join(state.journals, `${journalId}.json`);
   await mkdir5(backupDir, { recursive: true });
@@ -9034,7 +9394,7 @@ async function applySync(options) {
   try {
     backups = await backupTargets(targetRoot, preview.changes, preview.expectedTargets, targetBackups);
   } catch (error) {
-    await rm4(backupDir, { recursive: true, force: true });
+    await rm5(backupDir, { recursive: true, force: true });
     throw error;
   }
   const journal = {
@@ -9067,14 +9427,14 @@ async function applySync(options) {
     journal.state = "applied";
     await writeJsonAtomic(journalPath, journal);
     await writeJsonAtomic(state.baseline, journal.newBaseline);
-    await rm4(journalPath, { force: true });
-    await rm4(backupDir, { recursive: true, force: true });
+    await rm5(journalPath, { force: true });
+    await rm5(backupDir, { recursive: true, force: true });
     return { applied: preview.changes.length };
   } catch (error) {
     try {
       await rollbackJournalSafely(targetRoot, journal);
-      await rm4(journalPath, { force: true });
-      await rm4(backupDir, { recursive: true, force: true });
+      await rm5(journalPath, { force: true });
+      await rm5(backupDir, { recursive: true, force: true });
     } catch (rollbackError) {
       throw new Error(`Synchronization apply failed and recovery state was retained: ${rollbackError instanceof Error ? rollbackError.message : rollbackError}`, { cause: error });
     }
@@ -9101,8 +9461,8 @@ async function recoverSyncTransactions(options) {
       await writeJsonAtomic(state.baseline, journal.newBaseline);
     else
       await rollbackJournalSafely(targetRoot, journal);
-    await rm4(journalPath, { force: true });
-    await rm4(path2.join(state.backups, path2.basename(name, ".json")), { recursive: true, force: true });
+    await rm5(journalPath, { force: true });
+    await rm5(path2.join(state.backups, path2.basename(name, ".json")), { recursive: true, force: true });
     recovered++;
   }
   return recovered;
@@ -9130,7 +9490,7 @@ async function ensureStateDirectory(stateRoot, relative3) {
     if (error.code !== "EEXIST")
       throw error;
   });
-  const stat2 = await lstat6(directory);
+  const stat2 = await lstat7(directory);
   if (stat2.isSymbolicLink() || !stat2.isDirectory())
     throw new Error(`Unsafe synchronization state directory: ${relative3}`);
 }
@@ -9172,7 +9532,7 @@ async function backupTargets(targetRoot, changes, expected, backupDir) {
     await assertExpectedEntry(targetRoot, change.path, expected[change.path] ?? null, "target");
     const target = await guardedPath(targetRoot, change.path);
     try {
-      const stat2 = await lstat6(target);
+      const stat2 = await lstat7(target);
       const backup = path2.join(backupDir, String(index));
       if (stat2.isSymbolicLink()) {
         await symlink(await readlink2(target), backup);
@@ -9199,7 +9559,7 @@ async function stageSources(sourceRoot, changes, stagedRoot) {
       throw new Error(`Synchronization preview is missing file details for ${change.path}`);
     const source = await guardedPath(sourceRoot, change.path);
     const target = await guardedPath(stagedRoot, change.path, true);
-    const stat2 = await lstat6(source);
+    const stat2 = await lstat7(source);
     if (change.file.kind === "symlink" && stat2.isSymbolicLink()) {
       const link2 = await readlink2(source);
       const bytes = Buffer.from(link2);
@@ -9219,11 +9579,11 @@ async function stageSources(sourceRoot, changes, stagedRoot) {
 }
 async function applyChange(sourceRoot, targetRoot, change) {
   const target = await guardedPath(targetRoot, change.path, true);
-  await rm4(target, { force: true, recursive: false });
+  await rm5(target, { force: true, recursive: false });
   if (change.action === "delete")
     return;
   const source = await guardedPath(sourceRoot, change.path);
-  const stat2 = await lstat6(source);
+  const stat2 = await lstat7(source);
   if (change.file?.kind === "symlink" && stat2.isSymbolicLink()) {
     await symlink(await readlink2(source), target);
   } else if (change.file?.kind === "file" && stat2.isFile()) {
@@ -9247,7 +9607,7 @@ async function assertExpectedEntry(root, relative3, expected, side) {
 async function restoreBackups(targetRoot, backups) {
   for (const record of backups) {
     const target = await guardedPath(targetRoot, record.path, true);
-    await rm4(target, { force: true, recursive: false });
+    await rm5(target, { force: true, recursive: false });
     if (!record.existed)
       continue;
     if (!record.backup)
@@ -9292,7 +9652,7 @@ async function readRequiredJson(file, message2) {
 
 // packages/skizzles-container-lab/src/workspace/recovery.ts
 async function recoverLabSync(roots, lab) {
-  if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join4(lab.runtimeRoot, "workspace")) {
+  if (lab.runtimeRoot !== expectedLabRuntimeRoot(roots, lab.owner, lab.id) || lab.workspace !== join6(lab.runtimeRoot, "workspace")) {
     throw new Error("lab runtime containment is invalid");
   }
   try {
@@ -9303,7 +9663,7 @@ async function recoverLabSync(roots, lab) {
       return;
     throw error;
   }
-  const journalDirectory = join4(lab.runtimeRoot, "sync", lab.id, "journals");
+  const journalDirectory = join6(lab.runtimeRoot, "sync", lab.id, "journals");
   let journals;
   try {
     journals = await readdir2(journalDirectory);
@@ -9344,7 +9704,7 @@ async function assertCloneHasNoAlternates(workspace, signal) {
   ], { timeoutMs: 1e4, signal })).stdout.toString().trim();
   for (const name of ["alternates", "http-alternates"]) {
     try {
-      await lstat7(join4(commonGit, "objects", "info", name));
+      await lstat8(join6(commonGit, "objects", "info", name));
     } catch (error) {
       if (error.code === "ENOENT")
         continue;
@@ -9641,9 +10001,9 @@ function signalExitCode(signal) {
 function onceClosed(child) {
   if (child.exitCode !== null)
     return Promise.resolve(child.exitCode);
-  return new Promise((resolve4, reject) => {
+  return new Promise((resolve5, reject) => {
     child.once("error", reject);
-    child.once("close", (code) => resolve4(code ?? 1));
+    child.once("close", (code) => resolve5(code ?? 1));
   });
 }
 
@@ -9682,6 +10042,61 @@ function resolveProvisioningEnvironment(names, environment) {
     resolved[name] = environment[name];
   }
   return resolved;
+}
+
+// packages/skizzles-container-lab/src/lifecycle/diagnostic.ts
+import { lstat as lstat9, readFile as readFile5 } from "fs/promises";
+import { join as join7 } from "path";
+async function readProvisioningDiagnostic(roots, owner, id) {
+  const lab = await readLab(roots, owner, id);
+  if (lab.state !== "failed")
+    throw new Error(`lab is not failed: ${lab.state}`);
+  const failure2 = lab.provisioningFailure;
+  if (!failure2?.evidence?.available)
+    throw new Error("terminal provisioning diagnostic is unavailable");
+  if (!await exactDirectoryChain(roots.runtimeRoot, [lab.ownerKey, lab.id], "lab runtime directory")) {
+    throw new Error("terminal provisioning diagnostic is unavailable");
+  }
+  const path3 = join7(lab.runtimeRoot, PROVISIONING_FAILURE_DIAGNOSTIC_FILE);
+  const metadata = await lstat9(path3).catch((error) => {
+    if (error.code === "ENOENT")
+      return;
+    throw error;
+  });
+  if (!metadata || metadata.isSymbolicLink() || !metadata.isFile() || (metadata.mode & 511) !== 384) {
+    throw new Error("terminal provisioning diagnostic is unavailable");
+  }
+  const stored = await readFile5(path3, "utf8");
+  if (Buffer.byteLength(stored) > 8 * 1024)
+    throw new Error("terminal provisioning diagnostic is unavailable");
+  const text = redactPublicText(stored.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "\uFFFD"), 8 * 1024, 500);
+  const lines = text ? text.split(`
+`).length : 0;
+  if (lines > 500)
+    throw new Error("terminal provisioning diagnostic is unavailable");
+  return {
+    labId: id,
+    diagnostic: {
+      phase: failure2.phase,
+      capturedAt: failure2.capturedAt,
+      services: failure2.services,
+      serviceCount: failure2.serviceCount,
+      evidence: failure2.evidence,
+      transcript: { text, truncated: failure2.evidence.truncated, bytes: Buffer.byteLength(text), lines }
+    }
+  };
+}
+
+// packages/skizzles-container-lab/src/lifecycle/runtime-health.ts
+async function readyRuntimeProblem(roots, lab) {
+  try {
+    await assertReadyLabFilesystem(roots, lab);
+    return;
+  } catch (error) {
+    if (error.code === "ENOENT")
+      return "runtime or workspace is missing";
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 // packages/skizzles-container-lab/src/lifecycle/workflow.ts
@@ -9731,7 +10146,7 @@ class ContainerLabWorkflow {
       const repoHash = createHash4("sha256").update(await realpath6(commonGit)).digest("hex").slice(0, 12);
       const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 8);
       const id = `${requested}-${suffix}`;
-      const runtimeRoot = join5(ownerRuntimeDirectory(this.roots.runtimeRoot, this.owner), id);
+      const runtimeRoot = join8(ownerRuntimeDirectory(this.roots.runtimeRoot, this.owner), id);
       const createdAt = activityNow(this.clock).toISOString();
       const lab = {
         version: 1,
@@ -9744,8 +10159,8 @@ class ContainerLabWorkflow {
         state: "provisioning",
         sourceRoot,
         runtimeRoot,
-        workspace: join5(runtimeRoot, "workspace"),
-        manifestPath: join5(sourceRoot, ".codex-container-lab.yaml"),
+        workspace: join8(runtimeRoot, "workspace"),
+        manifestPath: join8(sourceRoot, ".codex-container-lab.yaml"),
         commandService: "pending",
         createdAt,
         updatedAt: createdAt,
@@ -9775,6 +10190,10 @@ class ContainerLabWorkflow {
       await this.refreshActivity(id);
       return status;
     });
+  }
+  async diagnostic(id) {
+    await this.reconcileOwner();
+    return await readProvisioningDiagnostic(this.roots, this.owner, id);
   }
   async run(id, argv, cwd = ".", environment = {}, timeoutSeconds = 1800, output, signal) {
     return await runAttachedCommand({
@@ -9855,6 +10274,7 @@ class ContainerLabWorkflow {
       }
       await this.assertDestroyFilesystem(lab);
       lab.state = "destroying";
+      lab.provisioningFailure = undefined;
       lab.updatedAt = new Date().toISOString();
       await writeLab(this.roots, lab);
       claimed = lab;
@@ -9908,6 +10328,7 @@ class ContainerLabWorkflow {
     let dockerMaterializationStarted = false;
     let provisioningEnvironment;
     let secretEnvironmentNames = [];
+    let provisioningFailure;
     let failure2;
     try {
       await this.assertProvisioning(id, signal);
@@ -9977,6 +10398,14 @@ class ContainerLabWorkflow {
       await this.assertProvisioning(id, signal);
     } catch (error) {
       failure2 = error;
+      if (error instanceof DockerProvisioningFailure) {
+        provisioningFailure = error.diagnostic;
+        await this.updateProvisioning(id, (current) => {
+          current.provisioningFailure = provisioningFailure;
+        }).catch(() => {
+          return;
+        });
+      }
       if (runtime)
         await destroyLabStack(runtime, this.docker).catch(() => {
           return;
@@ -10000,6 +10429,7 @@ class ContainerLabWorkflow {
       current = { ...current, ...lab };
       current.state = failure2 ? "failed" : "ready";
       current.error = failure2 ? compactProvisioningError(failure2) : undefined;
+      current.provisioningFailure = failure2 ? provisioningFailure : undefined;
       current.updatedAt = new Date().toISOString();
       await writeLab(this.roots, current);
     }, { attempts: 600, delayMs: 50 });
@@ -10068,23 +10498,13 @@ class ContainerLabWorkflow {
     return ownerLockPath(this.roots.stateRoot, this.owner);
   }
   labLock(id) {
-    return join5(ownerDirectory(this.roots.stateRoot, this.owner), ".locks", `lab-${id}`);
+    return join8(ownerDirectory(this.roots.stateRoot, this.owner), ".locks", `lab-${id}`);
   }
   activityLock(id) {
-    return join5(ownerDirectory(this.roots.stateRoot, this.owner), ".locks", `activity-${id}`);
+    return join8(ownerDirectory(this.roots.stateRoot, this.owner), ".locks", `activity-${id}`);
   }
   async refreshActivity(id) {
     await refreshLockedLabActivity(this.roots, this.owner, id, this.labLock(id), this.clock);
-  }
-}
-async function readyRuntimeProblem(roots, lab) {
-  try {
-    await assertReadyLabFilesystem(roots, lab);
-    return;
-  } catch (error) {
-    if (error.code === "ENOENT")
-      return "runtime or workspace is missing";
-    return error instanceof Error ? error.message : String(error);
   }
 }
 
@@ -10179,6 +10599,10 @@ async function dispatch(service, args, signal) {
     if (verb === "status") {
       const flags = parseFlags(rest, new Set(["--lab"]));
       return await service.labStatus(flags.required("--lab"));
+    }
+    if (verb === "diagnostic") {
+      const flags = parseFlags(rest, new Set(["--lab"]));
+      return await service.diagnostic(flags.required("--lab"));
     }
     if (verb === "destroy") {
       const flags = parseFlags(rest, new Set(["--lab"]));
@@ -10291,7 +10715,7 @@ function helpText() {
     "codex-container-lab [--owner THREAD_ID] [--state-root PATH] [--runtime-root PATH] COMMAND",
     "health",
     "lab create [--name NAME] [--source PATH]",
-    "lab list | lab status --lab ID | lab destroy --lab ID | lab destroy-all",
+    "lab list | lab status --lab ID | lab diagnostic --lab ID | lab destroy --lab ID | lab destroy-all",
     "run --lab ID [--cwd REPO_RELATIVE_PATH] [--env KEY=VALUE] [--timeout-seconds N] -- COMMAND...",
     "  --cwd is relative to the repository workspace root (default: .); never pass /workspace or another absolute container path",
     "  example: run --lab ID --cwd packages/api -- bun test",

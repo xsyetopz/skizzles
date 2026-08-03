@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { mkdir, realpath, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { loadLabConfig } from "../compose/config";
 import { internalImageTag } from "../compose/definition";
 import { cleanupLabLabels, destroyLabStack } from "../compose/cleanup";
 import { defaultDockerRunner, dockerAvailable, type DockerRunner } from "../compose/docker-runner";
 import {
+  DockerProvisioningFailure,
   prepareLabRuntime,
   provisionLabStack,
   runtimeFromLab,
@@ -19,9 +20,6 @@ import { runCommand } from "../execution/process";
 import { compactLabStatus } from "../public/projection";
 import {
   ensureOwner,
-  assertReadyLabFilesystem,
-  expectedLabRuntimeRoot,
-  labManifestPath,
   listLabs,
   ownerDirectory,
   ownerLockPath,
@@ -39,13 +37,13 @@ import {
   recoverLabSync,
 } from "../workspace/recovery";
 import { applySync, initializeSyncBaseline, previewSync, publicSyncPreview, recoverSyncTransactions, type SyncDirection } from "../workspace/sync";
-import type { LabMetadata } from "../storage/records";
+import type { LabMetadata, ProvisioningFailureDiagnostic } from "../storage/records";
 import { runAttachedCommand, type ActivityHeartbeatScheduler, type RunOutput } from "./attached-workflow";
 import { activityNow, refreshLabActivityState, refreshLockedLabActivity, withActivityLock } from "./activity";
 import { compactProvisioningError, resolveProvisioningEnvironment } from "./provisioning-policy";
-
+import { readProvisioningDiagnostic } from "./diagnostic";
+import { readyRuntimeProblem } from "./runtime-health";
 export type { RunOutput } from "./attached-workflow";
-
 export class ContainerLabWorkflow {
   readonly owner: string;
   readonly roots: StateRoots;
@@ -61,7 +59,6 @@ export class ContainerLabWorkflow {
     this.owner = owner;
     this.roots = roots;
   }
-
   async health(signal?: AbortSignal): Promise<{ ok: true; dockerAvailable: boolean; labs: number }> {
     await this.reconcileOwner();
     const labs = await listLabs(this.roots, this.owner);
@@ -72,7 +69,6 @@ export class ContainerLabWorkflow {
       labs: labs.length,
     };
   }
-
   async createLab(name = "lab", source = process.cwd(), signal?: AbortSignal): Promise<{ labId: string; state: LabMetadata["state"] }> {
     const requested = name.trim().toLowerCase();
     if (!/^[a-z0-9][a-z0-9-]{0,31}$/.test(requested)) {
@@ -121,13 +117,11 @@ export class ContainerLabWorkflow {
       return { labId: final.id, state: final.state };
     });
   }
-
   async listLabs(): Promise<{ labs: Array<{ labId: string; name: string; state: LabMetadata["state"]; updatedAt: string }> }> {
     await this.reconcileOwner();
     const labs = await listLabs(this.roots, this.owner);
     return { labs: labs.map((lab) => ({ labId: lab.id, name: lab.name, state: lab.state, updatedAt: lab.updatedAt })) };
   }
-
   async labStatus(id: string): Promise<unknown> {
     await this.reconcileOwner();
     return await withActivityLock(this.activityLock(id), async () => {
@@ -139,7 +133,10 @@ export class ContainerLabWorkflow {
       return status;
     });
   }
-
+  async diagnostic(id: string): Promise<unknown> {
+    await this.reconcileOwner();
+    return await readProvisioningDiagnostic(this.roots, this.owner, id);
+  }
   async run(
     id: string,
     argv: string[],
@@ -221,6 +218,7 @@ export class ContainerLabWorkflow {
       }
       await this.assertDestroyFilesystem(lab);
       lab.state = "destroying";
+      lab.provisioningFailure = undefined;
       lab.updatedAt = new Date().toISOString();
       await writeLab(this.roots, lab);
       claimed = lab;
@@ -267,6 +265,7 @@ export class ContainerLabWorkflow {
     let dockerMaterializationStarted = false;
     let provisioningEnvironment: NodeJS.ProcessEnv | undefined;
     let secretEnvironmentNames: string[] = [];
+    let provisioningFailure: ProvisioningFailureDiagnostic | undefined;
     let failure: unknown;
     try {
         await this.assertProvisioning(id, signal);
@@ -334,6 +333,14 @@ export class ContainerLabWorkflow {
         await this.assertProvisioning(id, signal);
       } catch (error) {
         failure = error;
+        if (error instanceof DockerProvisioningFailure) {
+          provisioningFailure = error.diagnostic;
+          // Make the structured summary durable while the stack still exists;
+          // cleanup and the final failed-state transition are separate steps.
+          await this.updateProvisioning(id, (current) => {
+            current.provisioningFailure = provisioningFailure;
+          }).catch(() => undefined);
+        }
         if (runtime) await destroyLabStack(runtime, this.docker).catch(() => undefined);
         else if (dockerMaterializationStarted) await cleanupLabLabels(
           lab,
@@ -353,6 +360,7 @@ export class ContainerLabWorkflow {
       current = { ...current, ...lab };
       current.state = failure ? "failed" : "ready";
       current.error = failure ? compactProvisioningError(failure) : undefined;
+      current.provisioningFailure = failure ? provisioningFailure : undefined;
       current.updatedAt = new Date().toISOString();
       await writeLab(this.roots, current);
     }, { attempts: 600, delayMs: 50 });
@@ -436,14 +444,4 @@ export class ContainerLabWorkflow {
     await refreshLockedLabActivity(this.roots, this.owner, id, this.labLock(id), this.clock);
   }
 
-}
-
-async function readyRuntimeProblem(roots: StateRoots, lab: LabMetadata): Promise<string | undefined> {
-  try {
-    await assertReadyLabFilesystem(roots, lab);
-    return undefined;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "runtime or workspace is missing";
-    return error instanceof Error ? error.message : String(error);
-  }
 }
