@@ -123,6 +123,24 @@ the same choices after explicit authorization:
 just configure-apply /absolute/target/codex-home aggressive skizzles
 ```
 
+For a one-command checkout-local full-suite install, use the composed
+installer. It transfers the generated plugin harness and reconciles the
+selected Codex settings without installing duplicate direct skills. All roots,
+the Codex binary, transfer mode, and policy choices remain explicit:
+
+```sh
+just local-suite-preview /absolute/target/home /absolute/target/codex-home aggressive skizzles link
+just local-suite-apply /absolute/target/home /absolute/target/codex-home aggressive skizzles link
+```
+
+The preview is write-free. An existing healthy receipt-owned suite is a noop;
+missing targets are installed. Receipt-owned configuration values that differ
+from the selected profile are replaced while their original `before` values
+remain the restoration baseline. Foreign or unreceipted plugin/marketplace
+targets, and receipt-managed plugin drift, fail closed. If a harness transfer
+fails after configuration succeeds, keep the receipt and follow the reported
+`unconfigure` recovery path rather than deleting it by hand.
+
 The lifecycle uses Codex’s own atomic config editor; it preserves comments and
 unrelated settings and records only the keys it owns for drift-safe restoration.
 It never edits `AGENTS.md`, approvals, permissions, goals, model defaults, or

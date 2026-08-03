@@ -13,6 +13,7 @@ describe("installer CLI target gates", () => {
     ["uninstall", "--surface", "harness"],
     ["configure"],
     ["unconfigure"],
+    ["local-suite"],
     ["doctor"],
   ]) {
     test(`requires explicit roots for ${invocation.join(" ")}`, () => {

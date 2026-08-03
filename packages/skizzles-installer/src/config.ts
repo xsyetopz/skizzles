@@ -1,6 +1,15 @@
 export { desiredConfigEdits } from "./configuration/edit-policy";
-export { configReceiptPath } from "./configuration/receipt";
-export { configureCodex, unconfigureCodex } from "./configuration/orchestration";
+export {
+  configReceiptPath,
+  configReconcilePendingPath,
+  readPendingConfigReconciliation,
+} from "./configuration/receipt";
+export {
+  configureCodex,
+  ensureCodexConfigured,
+  reconcileCodex,
+  unconfigureCodex,
+} from "./configuration/orchestration";
 
 export type { ConfigRpc } from "./configuration/codex-app-server";
 export type {
@@ -10,5 +19,11 @@ export type {
   JsonValue,
   OrchestrationMode,
 } from "./configuration/edit-policy";
-export type { ConfigureOptions, UnconfigureOptions } from "./configuration/orchestration";
+export type {
+  ConfigApplyStatus,
+  ConfigureOptions,
+  EnsureConfigResult,
+  UnconfigureOptions,
+} from "./configuration/orchestration";
 export type { ConfigReceipt, OwnedConfigValue } from "./configuration/receipt";
+export type { ConfigReconcileChange, PendingConfigReconciliation } from "./configuration/receipt";

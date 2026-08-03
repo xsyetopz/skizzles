@@ -96,6 +96,66 @@ harness-install-apply home transfer="link":
     cd {{ quote(justfile_directory()) }}
     bun run packages/skizzles-installer/src/cli.ts install --source-root {{ quote(justfile_directory()) }} --home {{ quote(home) }} --surface harness --transfer {{ quote(transfer) }}
 
+# Preview the complete checkout-local harness and Codex configuration lifecycle.
+local-suite-preview home codex_home orchestration instructions transfer="link" codex_binary=env("CODEX_BIN", "codex"):
+    #!/bin/sh
+    set -eu
+    case {{ quote(home) }} in
+        /*) ;;
+        *) echo "home must be an absolute path" >&2; exit 2 ;;
+    esac
+    case {{ quote(codex_home) }} in
+        /*) ;;
+        *) echo "codex_home must be an absolute path" >&2; exit 2 ;;
+    esac
+    case {{ quote(transfer) }} in
+        link|copy) ;;
+        *) echo "transfer must be link or copy" >&2; exit 2 ;;
+    esac
+    case {{ quote(orchestration) }} in
+        aggressive|passive) ;;
+        *) echo "orchestration must be aggressive or passive" >&2; exit 2 ;;
+    esac
+    case {{ quote(instructions) }} in
+        native|skizzles) ;;
+        *) echo "instructions must be native or skizzles" >&2; exit 2 ;;
+    esac
+    codex_bin="$(command -v {{ quote(codex_binary) }})" || { echo "Codex binary not found: {{ quote(codex_binary) }}" >&2; exit 2; }
+    codex_bin="$(realpath "$codex_bin")" || { echo "Codex binary could not be resolved: {{ quote(codex_binary) }}" >&2; exit 2; }
+    [ -x "$codex_bin" ] || { echo "Codex binary is not executable: $codex_bin" >&2; exit 2; }
+    cd {{ quote(justfile_directory()) }}
+    bun run packages/skizzles-installer/src/cli.ts local-suite --source-root {{ quote(justfile_directory()) }} --home {{ quote(home) }} --codex-home {{ quote(codex_home) }} --codex-binary "$codex_bin" --transfer {{ quote(transfer) }} --orchestration {{ quote(orchestration) }} --instructions {{ quote(instructions) }} --dry-run
+
+# Apply the complete checkout-local harness and Codex configuration lifecycle.
+local-suite-apply home codex_home orchestration instructions transfer="link" codex_binary=env("CODEX_BIN", "codex"):
+    #!/bin/sh
+    set -eu
+    case {{ quote(home) }} in
+        /*) ;;
+        *) echo "home must be an absolute path" >&2; exit 2 ;;
+    esac
+    case {{ quote(codex_home) }} in
+        /*) ;;
+        *) echo "codex_home must be an absolute path" >&2; exit 2 ;;
+    esac
+    case {{ quote(transfer) }} in
+        link|copy) ;;
+        *) echo "transfer must be link or copy" >&2; exit 2 ;;
+    esac
+    case {{ quote(orchestration) }} in
+        aggressive|passive) ;;
+        *) echo "orchestration must be aggressive or passive" >&2; exit 2 ;;
+    esac
+    case {{ quote(instructions) }} in
+        native|skizzles) ;;
+        *) echo "instructions must be native or skizzles" >&2; exit 2 ;;
+    esac
+    codex_bin="$(command -v {{ quote(codex_binary) }})" || { echo "Codex binary not found: {{ quote(codex_binary) }}" >&2; exit 2; }
+    codex_bin="$(realpath "$codex_bin")" || { echo "Codex binary could not be resolved: {{ quote(codex_binary) }}" >&2; exit 2; }
+    [ -x "$codex_bin" ] || { echo "Codex binary is not executable: $codex_bin" >&2; exit 2; }
+    cd {{ quote(justfile_directory()) }}
+    bun run packages/skizzles-installer/src/cli.ts local-suite --source-root {{ quote(justfile_directory()) }} --home {{ quote(home) }} --codex-home {{ quote(codex_home) }} --codex-binary "$codex_bin" --transfer {{ quote(transfer) }} --orchestration {{ quote(orchestration) }} --instructions {{ quote(instructions) }}
+
 # Inspect installation state for explicit harness and Codex homes.
 install-doctor home codex_home:
     #!/bin/sh

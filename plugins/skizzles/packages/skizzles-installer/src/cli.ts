@@ -10,9 +10,10 @@ import {
   type InstructionMode,
   type OrchestrationMode,
 } from "./config";
+import { installLocalSuite } from "./local-suite";
 
 type Parsed = {
-  command: "install" | "uninstall" | "doctor" | "configure" | "unconfigure";
+  command: "install" | "uninstall" | "doctor" | "configure" | "unconfigure" | "local-suite";
   surface: "skills" | "harness" | undefined;
   codexHome: string | undefined;
   codexBinary: string | undefined;
@@ -22,17 +23,18 @@ type Parsed = {
   sourceRoot: string;
   sourceRootProvided: boolean;
   transfer: Transfer;
+  transferProvided: boolean;
   dryRun: boolean;
 };
 
 function usage(): never {
-  console.error("usage: bun packages/skizzles-installer/src/cli.ts <install|uninstall> --surface <skills|harness> [--codex-home PATH] [--home PATH] [--source-root PATH] [--transfer link|copy] [--dry-run] | configure --codex-home PATH --codex-binary PATH --orchestration <aggressive|passive> [--instructions <native|skizzles>] [--source-root PATH] [--dry-run] | unconfigure --codex-home PATH --codex-binary PATH [--dry-run] | doctor --home PATH --codex-home PATH");
+  console.error("usage: bun packages/skizzles-installer/src/cli.ts <install|uninstall> --surface <skills|harness> [--codex-home PATH] [--home PATH] [--source-root PATH] [--transfer link|copy] [--dry-run] | configure --codex-home PATH --codex-binary PATH --orchestration <aggressive|passive> [--instructions <native|skizzles>] [--source-root PATH] [--dry-run] | unconfigure --codex-home PATH --codex-binary PATH [--dry-run] | local-suite --source-root PATH --home PATH --codex-home PATH --codex-binary PATH --transfer <link|copy> --orchestration <aggressive|passive> --instructions <native|skizzles> [--dry-run] | doctor --home PATH --codex-home PATH");
   process.exit(2);
 }
 
 function parse(argv: string[]): Parsed {
   const command = argv.shift();
-  if (!["install", "uninstall", "doctor", "configure", "unconfigure"].includes(command ?? "")) usage();
+  if (!["install", "uninstall", "doctor", "configure", "unconfigure", "local-suite"].includes(command ?? "")) usage();
   let codexHome: string | undefined;
   let codexBinary: string | undefined;
   let orchestration: OrchestrationMode | undefined;
@@ -41,6 +43,7 @@ function parse(argv: string[]): Parsed {
   let sourceRoot = resolve(import.meta.dir, "../../..");
   let sourceRootProvided = false;
   let transfer: Transfer = "link";
+  let transferProvided = false;
   let surface: "skills" | "harness" | undefined;
   let dryRun = false;
   while (argv.length > 0) {
@@ -67,6 +70,7 @@ function parse(argv: string[]): Parsed {
       const mode = argv.shift();
       if (mode !== "link" && mode !== "copy") usage();
       transfer = mode;
+      transferProvided = true;
     } else if (flag === "--surface") {
       const value = argv.shift();
       if (value !== "skills" && value !== "harness") usage();
@@ -87,6 +91,17 @@ function parse(argv: string[]): Parsed {
     ) usage();
   } else if (command === "unconfigure") {
     if (!codexHome || !codexBinary || orchestration || instructions || surface || home) usage();
+  } else if (command === "local-suite") {
+    if (
+      surface ||
+      !home ||
+      !codexHome ||
+      !codexBinary ||
+      !orchestration ||
+      !instructions ||
+      !sourceRootProvided ||
+      !transferProvided
+    ) usage();
   } else if (instructions || !surface || (surface === "skills" && !codexHome) || (surface === "harness" && !home)) usage();
   return {
     command: command as Parsed["command"],
@@ -99,6 +114,7 @@ function parse(argv: string[]): Parsed {
     sourceRoot,
     sourceRootProvided,
     transfer,
+    transferProvided,
     dryRun,
   };
 }
@@ -135,6 +151,20 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       configPath: receipt.configPath,
       keys: receipt.values.map(({ keyPath }) => keyPath),
     }));
+    return;
+  }
+  if (parsed.command === "local-suite") {
+    const result = await installLocalSuite({
+      sourceRoot: parsed.sourceRoot,
+      home: parsed.home!,
+      codexHome: parsed.codexHome!,
+      codexBinary: parsed.codexBinary!,
+      transfer: parsed.transfer,
+      orchestration: parsed.orchestration!,
+      instructions: parsed.instructions!,
+      dryRun: parsed.dryRun,
+    });
+    console.log(JSON.stringify(result));
     return;
   }
   if (parsed.surface === "skills") {

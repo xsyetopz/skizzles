@@ -63,6 +63,29 @@ bun run packages/skizzles-installer/src/cli.ts uninstall --surface harness --hom
 
 The custom harness surface is for isolated development and test fixtures, not a second stable plugin installer. Install, update, or uninstall a stable versioned plugin through the official Codex plugin/marketplace flow instead. The installer fails closed on foreign targets. Skills receipts live below `CODEX_HOME/.skizzles/`; harness receipts live below `HOME/.skizzles/`. Uninstall verifies receipt-listed links or copied content and restores the exact marketplace state it owned. Do not bypass conflicts by deleting or overwriting paths for the user.
 
+For a convenient complete checkout-local setup, use the installer’s composed
+`local-suite` command. It is still a development harness, not a replacement
+for the official marketplace flow, and it requires explicit roots, binary,
+transfer mode, and policy choices:
+
+```sh
+bun run packages/skizzles-installer/src/cli.ts local-suite \
+  --source-root /absolute/path/to/skizzles \
+  --home /absolute/target/home \
+  --codex-home /absolute/target/codex-home \
+  --codex-binary /absolute/path/to/codex \
+  --transfer link --orchestration aggressive --instructions skizzles --dry-run
+```
+
+The command inspects both receipts before writing. A healthy receipt-owned
+harness is a noop; absent targets are installed. Receipt-owned configuration
+values that differ from the selected profile are replaced, while their
+original `before` values remain the restoration baseline. Changing profiles
+restores keys no longer selected. Foreign or unreceipted plugin/marketplace
+targets and receipt-managed plugin drift are hard conflicts. If configuration
+commits but the harness transfer fails, keep the receipt and use the reported
+`unconfigure` recovery path; never delete receipts or overwrite foreign paths.
+
 ## Complete the Codex configuration
 
 Only run this lifecycle after the complete plugin surface—and therefore its packaged hook—has been installed. It is independent from skill/plugin file transfer so a user can change machine policy without reinstalling content.
@@ -116,7 +139,7 @@ bun run packages/skizzles-installer/src/cli.ts unconfigure \
   --codex-binary /absolute/path/to/codex --dry-run
 ```
 
-Repeat restoration without `--dry-run` only after previewing it. The lifecycle launches that Codex binary's app-server against the selected home and uses native `config/read` plus atomic `config/batchWrite` with version-conflict detection. Its receipt lives at `CODEX_HOME/.skizzles/config-receipt.json`; restoration fails closed if an owned value drifted. It never edits `AGENTS.md`, `developer_instructions`, approvals, permissions, goals, model defaults, MCP registrations, or unrelated feature flags. With `--instructions skizzles`, it additionally owns `model_instructions_file` and the generated Skizzles roles listed by the manifest. To restore configuration shape cleanly, the receipt owns the entire `agents` table when it was initially absent, an entire named-role table when that role was initially absent, or only `description` and `config_file` leaves when preserving an existing customized role. Later edits inside a structurally owned table are treated as drift and block restoration. Do not manually delete the receipt to bypass a conflict.
+Repeat restoration without `--dry-run` only after previewing it. The lifecycle launches that Codex binary's app-server against the selected home and uses native `config/read` plus atomic `config/batchWrite` with version-conflict detection. Its receipt lives at `CODEX_HOME/.skizzles/config-receipt.json`; restoration fails closed if an owned value drifted. It never edits `AGENTS.md`, `developer_instructions`, approvals, permissions, goals, model defaults, MCP registrations, or unrelated feature flags. With `--instructions skizzles`, it additionally owns `model_instructions_file` and the generated Skizzles role `description` and `config_file` leaves listed by the manifest. When the `agents` table or role was initially absent, empty receipt-owned parents are cleaned up on restoration, while later user-created roles and nickname fields remain untouched. Do not manually delete the receipt to bypass a conflict.
 
 Configuration upgrades are an explicit restore-and-reapply lifecycle because `configure` refuses to overwrite an active receipt. Preview `unconfigure` with the absolute Codex binary recorded in the receipt, run it only when the owned values are drift-free, preview the new `configure`, then apply it. Do not delete or rewrite the receipt by hand; that discards the exact restoration boundary Skizzles uses to preserve unrelated config.
 

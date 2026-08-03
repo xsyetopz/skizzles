@@ -41,6 +41,24 @@ export interface HarnessOptions {
   dryRun?: boolean;
 }
 
+export type HarnessApplyStatus = "install" | "noop";
+export type HarnessConflictStatus = "foreign-conflict" | "drift-conflict";
+
+export interface HarnessInspection {
+  status: "install" | "noop" | HarnessConflictStatus;
+  pluginTarget: string;
+  marketplacePath: string;
+  receiptPath: string;
+  receipt?: HarnessReceipt;
+  reason?: string;
+}
+
+export interface EnsureHarnessResult {
+  receipt: HarnessReceipt;
+  status: HarnessApplyStatus;
+  inspection: HarnessInspection;
+}
+
 export function harnessReceiptPath(home: string): string {
   return join(resolve(home), ".skizzles", "harness-receipt.json");
 }
@@ -70,6 +88,75 @@ function readReceipt(home: string): HarnessReceipt {
   return receipt as HarnessReceipt;
 }
 
+/** Inspect checkout-harness ownership without changing any target. */
+export function inspectHarness(options: HarnessOptions): HarnessInspection {
+  const home = resolve(options.home);
+  const sourceRoot = resolve(options.sourceRoot);
+  const pluginSource = join(sourceRoot, "plugins", "skizzles");
+  const pluginTarget = join(home, "plugins", "skizzles");
+  const marketplacePath = join(home, ".agents", "plugins", "marketplace.json");
+  const receiptPath = harnessReceiptPath(home);
+  assertManagedParentsAreReal(home, ["plugins", ".agents", ".agents/plugins", ".skizzles"]);
+  if (!existsSync(join(pluginSource, ".codex-plugin", "plugin.json"))) {
+    throw new Error(`generated plugin is missing: ${pluginSource}`);
+  }
+  if (!pathEntryExists(receiptPath)) {
+    if (pathEntryExists(pluginTarget)) {
+      return { status: "foreign-conflict", pluginTarget, marketplacePath, receiptPath, reason: "plugin target exists without a Skizzles receipt" };
+    }
+    if (pathEntryExists(marketplacePath)) {
+      return { status: "foreign-conflict", pluginTarget, marketplacePath, receiptPath, reason: "marketplace exists without a Skizzles receipt" };
+    }
+    return { status: "install", pluginTarget, marketplacePath, receiptPath };
+  }
+
+  let receipt: HarnessReceipt;
+  try {
+    receipt = readReceipt(home);
+  } catch (error) {
+    return {
+      status: "drift-conflict",
+      pluginTarget,
+      marketplacePath,
+      receiptPath,
+      reason: error instanceof Error ? error.message : "invalid Skizzles harness receipt",
+    };
+  }
+  if (
+    resolve(receipt.pluginTarget) !== pluginTarget ||
+    resolve(receipt.marketplacePath) !== marketplacePath ||
+    resolve(receipt.sourceRoot) !== sourceRoot ||
+    receipt.transfer !== options.transfer
+  ) {
+    return { status: "drift-conflict", pluginTarget, marketplacePath, receiptPath, receipt, reason: "receipt targets or transfer differ" };
+  }
+  if (!pathEntryExists(pluginTarget) || !pathEntryExists(marketplacePath)) {
+    return { status: "drift-conflict", pluginTarget, marketplacePath, receiptPath, receipt, reason: "receipt-owned target is missing" };
+  }
+  const pluginHealthy = receipt.transfer === "link"
+    ? lstatSync(pluginTarget).isSymbolicLink() && resolve(dirname(pluginTarget), readlinkSync(pluginTarget)) === resolve(pluginSource)
+    : sameTree(pluginSource, pluginTarget);
+  if (!pluginHealthy) {
+    return { status: "drift-conflict", pluginTarget, marketplacePath, receiptPath, receipt, reason: "receipt-owned plugin drifted" };
+  }
+  if (readFileSync(marketplacePath, "utf8") !== receipt.marketplaceAfter) {
+    return { status: "drift-conflict", pluginTarget, marketplacePath, receiptPath, receipt, reason: "receipt-owned marketplace drifted" };
+  }
+  return { status: "noop", pluginTarget, marketplacePath, receiptPath, receipt };
+}
+
+export function ensureHarness(options: HarnessOptions): EnsureHarnessResult {
+  const inspection = inspectHarness(options);
+  if (inspection.status === "foreign-conflict" || inspection.status === "drift-conflict") {
+    throw new Error(`harness ${inspection.status}: ${inspection.reason ?? "target is not receipt-owned"}`);
+  }
+  if (inspection.status === "noop") {
+    return { receipt: inspection.receipt!, status: "noop", inspection };
+  }
+  const receipt = installHarness(options);
+  return { receipt, status: "install", inspection };
+}
+
 export function installHarness(options: HarnessOptions): HarnessReceipt {
   const home = resolve(options.home);
   const sourceRoot = resolve(options.sourceRoot);
@@ -95,17 +182,31 @@ export function installHarness(options: HarnessOptions): HarnessReceipt {
   };
   if (options.dryRun) return receipt;
 
+  let pluginCreated = false;
+  let marketplaceCreated = false;
+  let receiptCreated = false;
   try {
     mkdirSync(dirname(pluginTarget), { recursive: true });
     if (options.transfer === "link") symlinkSync(pluginSource, pluginTarget, "dir");
     else copyDirectoryExclusive(pluginSource, pluginTarget);
+    pluginCreated = true;
     mkdirSync(dirname(marketplacePath), { recursive: true });
     writeFileSync(marketplacePath, marketplaceAfter, { flag: "wx" });
+    marketplaceCreated = true;
     mkdirSync(dirname(receiptPath), { recursive: true });
     writeFileSync(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" });
+    receiptCreated = true;
   } catch (error) {
-    rmSync(pluginTarget, { recursive: true, force: true });
-    rmSync(marketplacePath, { force: true });
+    if (receiptCreated) rmSync(receiptPath, { force: true });
+    if (marketplaceCreated) rmSync(marketplacePath, { force: true });
+    if (pluginCreated) {
+      try {
+        const ownedPlugin = options.transfer === "link"
+          ? lstatSync(pluginTarget).isSymbolicLink() && resolve(dirname(pluginTarget), readlinkSync(pluginTarget)) === resolve(pluginSource)
+          : sameTree(pluginSource, pluginTarget);
+        if (ownedPlugin) rmSync(pluginTarget, { recursive: true, force: true });
+      } catch {}
+    }
     throw error;
   }
   return receipt;

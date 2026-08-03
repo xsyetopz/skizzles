@@ -123,14 +123,18 @@ describe("Codex configuration lifecycle", () => {
       { keyPath: "features.hooks", value: true, mergeStrategy: "replace" },
       { keyPath: "model_instructions_file", value: "/skizzles/assets/root.md", mergeStrategy: "replace" },
     ]);
-    expect(edits.slice(2)).toEqual([{
-      keyPath: "agents",
-      value: Object.fromEntries(Object.entries(agents).map(([agentType, agent]) => [agentType, {
-        description: agent.description,
-        config_file: agent.configFile,
-      }])),
-      mergeStrategy: "replace",
-    }]);
+    expect(edits.slice(2)).toEqual(Object.entries(agents).flatMap(([agentType, agent]) => [
+      {
+        keyPath: `agents.${agentType}.description`,
+        value: agent.description,
+        mergeStrategy: "replace",
+      },
+      {
+        keyPath: `agents.${agentType}.config_file`,
+        value: agent.configFile,
+        mergeStrategy: "replace",
+      },
+    ]));
   });
 
   test("generated roles bind one capability while templates remain model agnostic", () => {

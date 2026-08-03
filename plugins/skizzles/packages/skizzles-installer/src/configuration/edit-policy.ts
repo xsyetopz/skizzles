@@ -113,7 +113,16 @@ export function desiredConfigEdits(
     ) as JsonValue;
     const existingAgents = valueAt(currentConfig, "agents");
     if (!existingAgents.present) {
-      edits.push({ keyPath: "agents", value: configuredRoles, mergeStrategy: "replace" });
+      // Own generated role leaves independently.  This keeps a later
+      // user-created role or nickname field outside the receipt boundary
+      // instead of treating the entire absent table or role as ours.
+      for (const [role, agent] of Object.entries(configuredRoles as { [key: string]: JsonValue })) {
+        const roleConfig = agent as { description: JsonValue; config_file: JsonValue };
+        edits.push(
+          { keyPath: `agents.${role}.description`, value: roleConfig.description, mergeStrategy: "replace" },
+          { keyPath: `agents.${role}.config_file`, value: roleConfig.config_file, mergeStrategy: "replace" },
+        );
+      }
     } else {
       for (const [role, agent] of Object.entries(instructionAssets.agents)) {
         const roleConfig = {
