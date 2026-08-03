@@ -54,7 +54,24 @@ Spawn tasks in parallel only when all are true:
 
 Prefer dependency order over maximum concurrency. Contracts, schemas, and shared interfaces usually stabilize before broad implementation fan-out.
 
-For a large, well-planned implementation, prefer 2-6 parallel Workers with disjoint complete slices over one exhausted Worker or a review-role implementation substitute. The installed limit of 14 active children is a ceiling, not a target.
+For a large, well-planned implementation, prefer 2-6 parallel Workers with disjoint complete slices over one exhausted Worker or a review-role implementation substitute. The installed limit of 6 active children per root session is a ceiling, not a target or a global memory budget. Count active roots and projects before choosing fan-out, and use fewer slots when the host is already busy.
+
+## Resource And Memory Contract
+
+Keep CGC graph queries available for ordinary repository discovery. New CGC
+indexing and persistent directory watching remain explicit-authority operations;
+do not start or multiply them across Workers without authorization.
+
+Repository-wide tests, typechecks, builds, recursive analysis, indexing, and
+broad lint or LSP runs are heavyweight operations. The root schedules at most
+one heavyweight operation per root campaign at a time. Other Workers wait or
+run focused checks rather than duplicate broad validation. This is a dispatch
+contract, not a global semaphore, so independent root sessions remain outside
+Skizzles' custody.
+
+When abnormal memory pressure is observed or suspected, stop launching new
+work and capture bounded process and memory evidence for the owner. Never
+arbitrarily terminate CGC, Redis, or unrelated processes.
 
 ## Blockers
 

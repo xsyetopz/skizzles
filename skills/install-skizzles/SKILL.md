@@ -70,7 +70,7 @@ Only run this lifecycle after the complete plugin surface—and therefore its pa
 Ask the user to choose an orchestration mode:
 
 - `passive` writes only `features.hooks = true`. It does not write any MultiAgentV2 setting or hint, so Codex retains its model-specific native defaults.
-- `aggressive` also enables MultiAgentV2, sets `max_concurrent_threads_per_session = 14`, and adds concise pointers to the Fourth Wall skill advertised in the active inventory. Fourteen is a ceiling for bounded parallel ownership, not a target. Use this only when the user wants autonomous quality-and-speed delegation.
+- `aggressive` also enables MultiAgentV2, sets `max_concurrent_threads_per_session = 6`, and adds concise pointers to the Fourth Wall skill advertised in the active inventory. Six is a per-root-session ceiling for bounded parallel ownership, not a target or a global memory budget. Schedule at most one heavyweight operation per root campaign; keep CGC graph queries available, while new indexing and persistent watchers still require explicit authorization. If abnormal memory pressure appears, stop launching new work and capture bounded evidence; do not arbitrarily terminate CGC or Redis. Use this only when the user wants autonomous quality-and-speed delegation.
 
 Also ask whether Codex should keep its native model instructions or use the Skizzles split:
 

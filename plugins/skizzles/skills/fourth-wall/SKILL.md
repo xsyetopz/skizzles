@@ -29,15 +29,33 @@ When implementation becomes difficult, improve diagnosis, clarify the contract, 
 
 ## Graph And Capacity
 
-The installed aggressive profile permits at most 14 concurrent subagent threads per root session. This is breathing room, not a target.
+The installed aggressive profile permits at most 6 concurrent subagent threads per root session. This is breathing room, not a target or a global memory budget.
 
 - Normally use 2-6 concurrent Workers for a substantial decomposable campaign.
+- When multiple root sessions or projects are active, count that existing fan-out before choosing a Worker count; use fewer than six when the host is already busy.
 - Use up to two independent Triage agents when competing hypotheses or disjoint domains benefit from independent evidence.
 - Normally retain one persistent Designer, QA owner, Reviewer per slice or campaign, and Deployment owner.
-- Seven or more simultaneously active children requires unusually clear disjoint ownership. Do not fill available slots speculatively.
 - All children are leaves. Further decomposition proposals return to the root; grandchildren are forbidden.
 
 Stay single-agent when coordination costs more than the work. Prefer one complete ownership slice over command errands. The root keeps the overall objective, decomposition, cross-slice decisions, Git integration, evidence acceptance, and completion decision; it must not retain duplicate implementation and validation loops merely because delegation is active.
+
+## Resource And Memory Safety
+
+CGC graph queries remain available during ordinary repository discovery. Do not
+disable or avoid CGC because an earlier incident is unattributed. New CGC
+indexing and persistent directory watching remain explicit-authority operations;
+never start or multiply them across Workers without that authorization.
+
+Treat repository-wide tests, typechecks, builds, recursive analysis, indexing,
+and broad lint or LSP runs as heavyweight operations. Schedule at most one
+heavyweight operation per root campaign at a time. Other Workers wait or run a
+focused check instead of duplicating a broad validation. This is a dispatch
+contract, not a global semaphore: independent root sessions remain outside
+Skizzles' custody.
+
+If abnormal memory pressure is observed or suspected, stop launching new work
+and capture bounded process and memory evidence for the owner. Do not
+arbitrarily terminate CGC, Redis, or unrelated processes.
 
 ## Dispatch Contract
 

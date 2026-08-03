@@ -136,7 +136,7 @@ export function desiredConfigEdits(
       { keyPath: "features.multi_agent_v2.enabled", value: true, mergeStrategy: "replace" },
       {
         keyPath: "features.multi_agent_v2.max_concurrent_threads_per_session",
-        value: 14,
+        value: 6,
         mergeStrategy: "replace",
       },
       {

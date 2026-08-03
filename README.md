@@ -79,9 +79,14 @@ After installing the complete plugin surface, choose:
 
 - **Passive orchestration** — enables packaged hooks; leaves Codex’s native
   MultiAgentV2 defaults completely alone.
-- **Aggressive orchestration** — also enables MultiAgentV2; keeps fourteen task
-  slots available for bounded parallel teams; adds identifier-neutral pointers
-  to the Fourth Wall skill advertised in the active inventory.
+- **Aggressive orchestration** — also enables MultiAgentV2; keeps up to six task
+  slots available per root session for bounded parallel teams; adds
+  identifier-neutral pointers to the Fourth Wall skill advertised in the active
+  inventory. Six is a ceiling, not a target: schedule at most one heavyweight
+  operation per root campaign, keep CGC graph queries available, and retain
+  explicit authorization for new CGC indexing or persistent watchers. If
+  abnormal memory pressure appears, stop launching new work and capture bounded
+  evidence rather than arbitrarily terminating CGC or Redis.
 - **Native instructions** (the default) — leaves Codex's model instructions
   untouched.
 - **Skizzles instructions** — installs a developer-facing root prompt and seven

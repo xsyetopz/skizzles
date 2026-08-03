@@ -74,6 +74,19 @@ describe("published plugin contracts", () => {
     expect(stagedFourthWall).toContain("fixed-role local engineering team");
     expect(stagedFourthWall).toContain("## Evidence-First Triage");
     expect(stagedFourthWall).toContain("## Parallel Worker Implementation");
+    const normalizedFourthWall = stagedFourthWall.replace(/\s+/g, " ");
+    expect(normalizedFourthWall).toContain(
+      "at most 6 concurrent subagent threads per root session",
+    );
+    expect(normalizedFourthWall).toContain("CGC graph queries remain available");
+    expect(normalizedFourthWall).toContain(
+      "at most one heavyweight operation per root campaign at a time",
+    );
+    expect(normalizedFourthWall).toContain("explicit-authority operations");
+    expect(normalizedFourthWall).toContain("stop launching new work");
+    expect(normalizedFourthWall).toContain(
+      "Do not arbitrarily terminate CGC, Redis, or unrelated processes",
+    );
     expect(stagedFourthWall).toContain("| Worker | `worker` | Complete implementation, focused validation, and repair ownership |");
     expect(stagedFourthWall).toContain("| Review | `review` | Independent adversarial");
     const stagedLearning = await readFile(
@@ -120,6 +133,17 @@ describe("published plugin contracts", () => {
     expect(stagedInstaller).toContain(
       "Plugin and direct-skill copies are alternatives",
     );
+    expect(stagedInstaller).toContain(
+      "max_concurrent_threads_per_session = 6",
+    );
+    expect(stagedInstaller).toContain(
+      "at most one heavyweight operation per root campaign",
+    );
+    expect(stagedInstaller).toContain("keep CGC graph queries available");
+    expect(stagedInstaller).toContain(
+      "explicit authorization. If abnormal memory pressure appears, stop launching new work",
+    );
+    expect(stagedInstaller).toContain("do not arbitrarily terminate CGC or Redis");
     expect(stagedInstaller).toContain("known broken, token-wasting host");
     expect(stagedInstaller).toContain("`0.146.0-alpha.3` or newer");
     expect(stagedInstaller).toContain("bounded `--version` probe");

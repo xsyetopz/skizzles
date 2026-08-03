@@ -172,7 +172,7 @@ describe("Codex configuration lifecycle", () => {
     expect(hints.every((hint) => !hint.includes("$skizzles:fourth-wall"))).toBe(true);
     expect(hints.every((hint) => !hint.includes("$fourth-wall"))).toBe(true);
     expect(hints.every((hint) => hint.length < 180)).toBe(true);
-    expect(edits[2]?.value).toBe(14);
+    expect(edits[2]?.value).toBe(6);
   });
 
   test("configures and restores only receipt-owned keys", async () => {
