@@ -12,7 +12,7 @@ export const runner = join(packageRoot, "runtime/codex-command.ts");
 export const defaultPermissionMode = "default";
 export const bypassPermissionsMode = "bypassPermissions";
 
-const runnerCommand = 'bun "${PLUGIN_ROOT}/runtime/codex-command.ts"';
+const runnerCommand = `bun ${shellSingleQuote(runner)}`;
 
 export function createTestDirectories() {
   const directories: string[] = [];

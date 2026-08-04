@@ -31,7 +31,7 @@ describe("managed command output hook", () => {
     }
   });
 
-  test("rewrites through a portable PLUGIN_ROOT runner with a visible, shell-safe JSON encoding", () => {
+  test("rewrites through the installed runner with a visible, shell-safe JSON encoding", () => {
     const cmd = "flutter test --name \"it's literal\"";
     const result = invokeHook(cmd, { key: "cmd", toolInput: { workdir: "/tmp" } });
     const payload = JSON.parse(text(result.stdout));
@@ -40,20 +40,27 @@ describe("managed command output hook", () => {
     expect(rewritten).toBe(rewrittenCommand(cmd));
     expect(rewritten).toContain("flutter test");
     expect(payload.hookSpecificOutput.updatedInput.workdir).toBe("/tmp");
-    expect(rewritten).not.toContain("/Users/");
+    expect(rewritten).toContain(packageRoot);
+    expect(rewritten).not.toContain("${PLUGIN_ROOT}");
   });
 
-  test("the placeholder resolves without expanding the encoded script in the outer shell", () => {
+  test("the rewritten command runs after the hook-only PLUGIN_ROOT variable is removed", () => {
     const root = temporaryDirectory();
-    const script = "printf '%s\\n' 'literal $HOME `uname`'";
-    const command = rewrittenCommand(script);
+    const script = "bun test --help";
+    const hookResult = invokeHook(script);
+    const payload = JSON.parse(text(hookResult.stdout));
+    const command = payload.hookSpecificOutput.updatedInput.command as string;
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      CODEX_COMMAND_OUTPUT_DIR: root,
+    };
+    delete env.PLUGIN_ROOT;
     const result = Bun.spawnSync(["/bin/sh", "-c", command], {
       stdout: "pipe",
       stderr: "pipe",
-      env: { ...process.env, PLUGIN_ROOT: packageRoot, CODEX_COMMAND_OUTPUT_DIR: root },
+      env,
     });
     expect(result.exitCode).toBe(0);
-    expect(text(result.stdout)).toContain("literal $HOME `uname`");
     const path = artifactPath(text(result.stdout));
     expect(JSON.parse(readFileSync(join(path, "status.json"), "utf8")).command).toBe(script);
   });

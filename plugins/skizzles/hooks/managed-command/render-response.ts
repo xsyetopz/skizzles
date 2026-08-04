@@ -71,14 +71,18 @@ function commandFrom(input: Record<string, unknown> | undefined):
 }
 
 /**
- * Plugin hooks run with PLUGIN_ROOT set by Codex. Keeping the placeholder in
- * the rewritten command lets the eventual shell expand the staged plugin path
- * instead of baking a machine-specific directory into distributable output.
- * Source-linked global hooks do not receive that variable, so they resolve the
- * adjacent canonical runtime instead of requiring a copied machine-local fork.
+ * Plugin hooks run with PLUGIN_ROOT set by Codex, but the rewritten tool runs
+ * after the hook exits and does not inherit that hook-only variable. Resolve
+ * the installed runner while the value is available and quote it for the
+ * eventual shell. This path exists only in the runtime hook response, not in
+ * distributable output. Source-linked global hooks resolve the adjacent
+ * canonical runtime instead of requiring a copied machine-local fork.
  */
 function runner(): string {
-  if (process.env.PLUGIN_ROOT) return 'bun "${PLUGIN_ROOT}/runtime/codex-command.ts"';
+  if (process.env.PLUGIN_ROOT) {
+    const installedRunner = resolve(process.env.PLUGIN_ROOT, "runtime/codex-command.ts");
+    return `bun ${shellSingleQuote(installedRunner)}`;
+  }
   return `bun ${shellSingleQuote(resolve(import.meta.dir, "../../runtime/codex-command.ts"))}`;
 }
 
