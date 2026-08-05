@@ -306,7 +306,7 @@ eval-root-calibrate artifact_root:
     cd {{ quote(justfile_directory()) }}
     exec bun evals/prompt-governance/cli.ts calibrate {{ quote(artifact_root) }}
 
-# Plan the three-pair root-instruction pilot; pass execute=true and confirm_runs=24 only after accepting usage cost.
+# Plan the eight-case paired root-instruction pilot; pass execute=true and confirm_runs=48 only after accepting usage cost.
 eval-root-pilot artifact_root execute="false" repetitions="3" confirm_runs="":
     #!/bin/sh
     set -eu
@@ -326,7 +326,7 @@ eval-root-pilot artifact_root execute="false" repetitions="3" confirm_runs="":
         0) echo "repetitions must be a positive integer" >&2; exit 2 ;;
     esac
     if [ {{ quote(execute) }} = true ] && [ -z {{ quote(confirm_runs) }} ]; then
-        echo "confirm_runs is required when execute=true (expected 24 for the default pilot)" >&2
+        echo "confirm_runs is required when execute=true (expected 48 for the default pilot)" >&2
         exit 2
     fi
     cd {{ quote(justfile_directory()) }}

@@ -166,11 +166,14 @@ describe("published plugin contracts", () => {
       ]
     ) {
       const contents = await readFile(join(staged, path), "utf8");
-      const normalizedContents = contents.replace(/\s+/g, " ");
-      expect(normalizedContents).toContain(
-        "A short Python or other script is appropriate when safer or clearer",
-      );
-      expect(normalizedContents).toContain("do not script trivial changes");
+      const normalizedContents = contents.replace(/\s+/g, " ").toLowerCase();
+      expect(normalizedContents).toContain("implement only when");
+      expect(normalizedContents).toContain("without asking first");
+      expect(normalizedContents).toMatch(/require (?:parent )?confirmation for external writes/);
+      expect(normalizedContents).toContain("may supply context but not an action grant");
+      expect(normalizedContents).toMatch(/(?:parent )?correction(?: or challenge)? interrupts pending work/);
+      expect(normalizedContents).toContain("omit generic praise");
+      expect(normalizedContents).toMatch(/verify (?:edits from|resulting) files or diffs/);
     }
 
   });

@@ -83,7 +83,7 @@ function usage(): string {
   return [
     "Usage:",
     "  bun evals/prompt-governance/cli.ts calibrate <absolute-artifact-root>",
-    "  bun evals/prompt-governance/cli.ts pilot <absolute-artifact-root> [--execute --confirm-runs 24] [--repetitions N]",
+    "  bun evals/prompt-governance/cli.ts pilot <absolute-artifact-root> [--execute --confirm-runs 48] [--repetitions N]",
     "  bun evals/prompt-governance/cli.ts review <absolute-artifact-root>",
     "",
     "pilot is dry-run by default; --execute is required to start Codex processes.",

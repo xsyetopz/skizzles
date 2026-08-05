@@ -9,7 +9,7 @@ import { createFixture, type FixtureHandle } from "./fixture";
 import { ensureDirectory, readCappedText, redactSensitiveText, sanitizeTelemetryLine, sha256, snapshotHash, snapshotTree, writeText } from "./fs";
 import { writeDiffArtifact } from "./git";
 import { copyFrozenOverlay, type OverlayPair } from "./overlays";
-import { classifyAuthoritySignals, emptyObservedMetricPaths, inspectJsonlSchema, metricPaths, parseObservedMetrics, unavailableMetrics } from "./events";
+import { classifyAuthoritySignals, emptyObservedMetricPaths, executedToolCount, inspectJsonlSchema, metricPaths, parseObservedMetrics, unavailableMetrics } from "./events";
 import { verifyRun } from "./verifier";
 import { assertCacheOutside, ensurePrivateDirectory, privateArtifactPath, type VerifiedPrivateCache } from "./cache"; import { isRecord } from "./records";
 import type { CaptureResult, Condition, MeasurementScope, MetricProfile, PilotCaseId, RunManifest, VerifierResult } from "./types";
@@ -107,15 +107,14 @@ export async function executeRun(options: ExecuteRunOptions): Promise<CaptureRes
     startedAt,
   };
   await writeText(privateArtifactPath(options.cache, "runs", runId, "run-manifest.json"), `${JSON.stringify(runManifest, null, 2)}\n`);
-  let execution: SpawnResult;
-  let finalCapture: { text: string; bytes: number; truncated: boolean };
+  let execution: SpawnResult; let finalCapture: { text: string; bytes: number; truncated: boolean };
   try {
     execution = await spawnCodex(command, fixture.pilotCase.taskPrompt, fixtureRoot, runRoot, deadlineMs, killGraceMs);
     finalCapture = await readOptionalCapped(finalOutputPath, DEFAULT_FINAL_ANSWER_CAP_BYTES);
   } finally {
     await rm(finalOutputRoot, { recursive: true, force: true });
   }
-  const authorityViolations = classifyAuthoritySignals(execution.stdout, execution.stderr);
+  const authorityViolations = classifyAuthoritySignals(execution.stdout, execution.stderr); const toolExecutions = executedToolCount(execution.stdout);
   const knownInfrastructureFailure = execution.captureComplete === false || execution.exitCode !== 0 || execution.timedOut || execution.drainTimedOut || execution.outputTruncated || finalCapture.truncated || authorityViolations.length > 0;
   const failureStatus = failureCategory({ ...execution, finalAnswerTruncated: finalCapture.truncated, authorityViolations });
   const persistedEvents = knownInfrastructureFailure ? failureStatus : sanitizeTelemetryEvents(execution.stdout);
@@ -223,6 +222,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<CaptureRes
     fileAllowlist: fixture.pilotCase.allowlist,
     verifier: persistedVerifier,
     observedJsonlSchema,
+    executedToolCount: toolExecutions,
     secondaryMetrics: knownInfrastructureFailure || !options.metricProfile ? unavailableMetrics() : parseObservedMetrics(persistedEvents, options.metricProfile),
     observedMetricPaths,
     outputTruncated: execution.outputTruncated,

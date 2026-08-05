@@ -4,7 +4,11 @@ export type PilotCaseId =
   | "bounded-fix"
   | "evidence-gated-hardening"
   | "material-ambiguity"
-  | "read-only-diagnosis";
+  | "read-only-diagnosis"
+  | "quoted-transcript-report"
+  | "sarcastic-non-directive"
+  | "delegation-challenge"
+  | "repository-owner-discovery";
 
 export interface PilotCase {
   readonly id: PilotCaseId;
@@ -12,6 +16,7 @@ export interface PilotCase {
   readonly taskPrompt: string;
   readonly allowlist: readonly string[];
   readonly expectedNoWrite: boolean;
+  readonly expectedToolActivity: "none" | "required" | "allowed";
   readonly fixtureFiles: Readonly<Record<string, string>>;
   readonly verifier: string;
 }
@@ -220,6 +225,7 @@ export interface CaptureResult {
   readonly fileAllowlist: readonly string[];
   readonly verifier: VerifierResult;
   readonly observedJsonlSchema: ObservedJsonlSchema;
+  readonly executedToolCount: number;
   readonly secondaryMetrics: SecondaryMetrics;
   readonly observedMetricPaths: ObservedMetricPaths;
   readonly metricProfileId?: string;
@@ -330,6 +336,7 @@ export interface PersistedCaptureEvidence {
   readonly unsafePathCount: number;
   readonly observedJsonlSchemaFingerprint: string;
   readonly observedJsonlLineCount: number;
+  readonly executedToolCount: number;
   readonly secondaryMetrics: SecondaryMetrics;
   readonly observedMetricPathCount: number;
   readonly outputTruncated: boolean;

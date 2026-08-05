@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getPilotCase } from "./cases";
+import { getPilotCase, listPilotCases } from "./cases";
 import { canonicalFixtureSnapshotHash, createFixture } from "./fixture";
 import { canonicalBlindRubric, createBlindReviewBundle, renderBlindReviewContent } from "./blind";
 import { buildCodexCommand } from "./command";
@@ -332,7 +332,7 @@ export function schedule(repetitions: number): ScheduleEntry[] {
   let sequence = 0;
   for (let repetition = 1; repetition <= repetitions; repetition += 1) {
     const conditions: readonly Condition[] = repetition % 2 === 1 ? ["baseline", "candidate"] : ["candidate", "baseline"];
-    for (const caseId of ["bounded-fix", "evidence-gated-hardening", "material-ambiguity", "read-only-diagnosis"] as const) {
+    for (const { id: caseId } of listPilotCases()) {
       for (const condition of conditions) {
         result.push({ sequence: sequence++, runId: randomUUID(), caseId, repetition, condition });
       }
@@ -443,4 +443,4 @@ async function validateReviewedPlan(plan: Record<string, any>, options: PilotOpt
   if (JSON.stringify(plan.overlayHashes) !== JSON.stringify(overlayHashes) || plan.codexVersion !== codexVersion) throw new Error("pilot plan reviewed overlay or binary changed");
 }
 async function preparePrivateSchedule(entries: readonly ScheduleEntry[], path: string): Promise<PrivateScheduleEntry[]> { try { const existing = JSON.parse(await readFile(path, "utf8")) as PrivateScheduleEntry[]; if (existing.length !== entries.length || existing.some((entry, index) => entry.runId !== entries[index]?.runId || entry.sequence !== entries[index]?.sequence || entry.caseId !== entries[index]?.caseId || entry.repetition !== entries[index]?.repetition || entry.condition !== entries[index]?.condition || !entry.blindId)) throw new Error("private schedule mapping changed"); return existing; } catch (error) { if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error; const mapping = entries.map((entry) => ({ ...entry, blindId: randomUUID() })); await writeAtomicText(path, `${JSON.stringify(mapping, null, 2)}\n`); return mapping; } }
-function fixtureHashes(): Readonly<Record<PilotCaseId, string>> { const entries: Record<PilotCaseId, string> = {} as Record<PilotCaseId, string>; for (const caseId of ["bounded-fix", "evidence-gated-hardening", "material-ambiguity", "read-only-diagnosis"] as const) entries[caseId] = canonicalFixtureSnapshotHash(getPilotCase(caseId)); return entries; }
+function fixtureHashes(): Readonly<Record<PilotCaseId, string>> { const entries: Record<PilotCaseId, string> = {} as Record<PilotCaseId, string>; for (const { id: caseId } of listPilotCases()) entries[caseId] = canonicalFixtureSnapshotHash(getPilotCase(caseId)); return entries; }

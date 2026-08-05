@@ -61,6 +61,11 @@ These proposals do not authorize a repository-wide framework replacement. Each c
 
 Skills, instructions, exec rules, hooks, and the command supervisor have different responsibilities. None replaces Codex’s filesystem and network sandbox or grants new host authority. See the [Skizzles security model](security-model.md).
 
+Prompt behavior uses a fixed effect ceiling and an installed-Codex behavioral
+gate. It does not infer write authority from quoted, rhetorical, sarcastic, or
+assistant-authored text. See [prompt governance](prompt-governance.md) for the
+runtime test contract and research provenance.
+
 ## Provenance
 
 This intent consolidates the maintainer’s review of [robertmsale/skizzles#1](https://github.com/robertmsale/skizzles/pull/1) and the canonical contracts linked above. The repository sources and tests, not the review conversation, define current behavior.

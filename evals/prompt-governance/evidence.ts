@@ -70,6 +70,7 @@ export function projectCaptureEvidence(capture: CaptureResult): PersistedCapture
     unsafePathCount: capture.verifier.unsafePaths.length,
     observedJsonlSchemaFingerprint: capture.observedJsonlSchema.schemaFingerprint,
     observedJsonlLineCount: capture.observedJsonlSchema.lineCount,
+    executedToolCount: capture.executedToolCount,
     secondaryMetrics: capture.secondaryMetrics,
     observedMetricPathCount: Object.values(capture.observedMetricPaths).reduce((sum, paths) => sum + paths.length, 0),
     outputTruncated: capture.outputTruncated,

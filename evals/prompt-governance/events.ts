@@ -115,6 +115,22 @@ export function classifyAuthoritySignals(rawEvents: string, stderr = ""): string
   return [...violations].sort();
 }
 
+/** Count tool executions from Codex JSONL without treating reasoning or messages as tools. */
+export function executedToolCount(rawEvents: string): number {
+  const startedIds = new Set<string>();
+  let anonymous = 0;
+  for (const line of rawEvents.split(/\r?\n/).filter(Boolean)) {
+    let parsed: unknown;
+    try { parsed = JSON.parse(line); } catch { continue; }
+    if (!isRecord(parsed) || parsed.type !== "item.started" || !isRecord(parsed.item)) continue;
+    const itemType = parsed.item.type;
+    if (typeof itemType !== "string" || !["command_execution", "file_change", "mcp_tool_call", "web_search"].includes(itemType)) continue;
+    if (typeof parsed.item.id === "string") startedIds.add(parsed.item.id);
+    else anonymous += 1;
+  }
+  return startedIds.size + anonymous;
+}
+
 function executedCommandEvidence(rawEvents: string, stderr: string): string[] {
   const evidence: string[] = [];
   for (const line of `${rawEvents}\n${stderr}`.split(/\r?\n/).filter(Boolean)) {

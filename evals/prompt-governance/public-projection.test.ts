@@ -128,6 +128,7 @@ function captureForSentinel(cacheRoot: string, sentinel: string): CaptureResult 
       eventPathPairs: [],
       schemaFingerprint: "schema",
     },
+    executedToolCount: 0,
     secondaryMetrics: {
       toolLoops: 1,
       tokens: 1,
